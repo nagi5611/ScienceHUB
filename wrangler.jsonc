@@ -1,0 +1,32 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "sciencehub",
+	"compatibility_date": "2026-07-06",
+	"pages_build_output_dir": "./public",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "sciencehub-db",
+			"database_id": "1cce62b0-51f4-4619-9207-6a808557984c",
+			"preview_database_id": "sciencehub-db",
+			"migrations_dir": "migrations"
+		},
+		{
+			"binding": "sciencehub_db",
+			"database_name": "sciencehub-db",
+			"database_id": "1cce62b0-51f4-4619-9207-6a808557984c",
+			"remote": true
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "FILES",
+			"bucket_name": "sciencehub-files"
+		},
+		{
+			"bucket_name": "sciencehub-files",
+			"binding": "sciencehub_files",
+			"remote": true
+		}
+	]
+}

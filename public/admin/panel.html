@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理者パネル — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body class="admin-body">
+  <header class="admin-header">
+    <div class="admin-header-inner">
+      <div>
+        <a href="/" class="admin-back">← ScienceHUB</a>
+        <h1>管理者パネル</h1>
+        <p id="admin-user-label" class="admin-user-label">読み込み中…</p>
+      </div>
+      <button type="button" class="btn btn-outline" id="logout-btn">ログアウト</button>
+    </div>
+  </header>
+
+  <main class="admin-main container">
+    <div class="admin-grid">
+      <section class="admin-panel">
+        <header class="admin-panel-header">
+          <h2>ユーザー登録</h2>
+        </header>
+        <form id="create-user-form" class="admin-form admin-form-compact">
+          <label class="field">
+            <span>ユーザー名</span>
+            <input type="text" name="username" required minlength="2" maxlength="32">
+          </label>
+          <label class="field">
+            <span>表示名</span>
+            <input type="text" name="display_name" required>
+          </label>
+          <label class="field">
+            <span>メール</span>
+            <input type="email" name="email" required>
+          </label>
+          <label class="field">
+            <span>パスワード</span>
+            <input type="password" name="password" required minlength="8">
+          </label>
+          <label class="field">
+            <span>ロール</span>
+            <select name="role_slug" id="create-user-role" required></select>
+          </label>
+          <p id="create-user-error" class="form-error" hidden></p>
+          <p id="create-user-success" class="form-success" hidden></p>
+          <button type="submit" class="btn btn-primary btn-block">ユーザーを登録</button>
+        </form>
+      </section>
+
+      <section class="admin-panel">
+        <header class="admin-panel-header">
+          <h2>ロール追加</h2>
+        </header>
+        <form id="create-role-form" class="admin-form admin-form-compact">
+          <label class="field">
+            <span>ロール名</span>
+            <input type="text" name="display_name" required placeholder="例: 研究室リーダー">
+          </label>
+          <label class="field">
+            <span>識別子（slug）</span>
+            <input type="text" name="slug" pattern="[a-z0-9_-]+" placeholder="空欄で自動生成">
+          </label>
+          <label class="field field-checkbox">
+            <input type="checkbox" name="is_admin" id="role-is-admin">
+            <span>管理者権限を付与</span>
+          </label>
+          <p id="create-role-error" class="form-error" hidden></p>
+          <p id="create-role-success" class="form-success" hidden></p>
+          <button type="submit" class="btn btn-primary btn-block">ロールを追加</button>
+        </form>
+      </section>
+    </div>
+
+    <section class="admin-panel admin-panel-wide">
+      <header class="admin-panel-header">
+        <h2>ユーザー一覧</h2>
+        <button type="button" class="btn btn-ghost" id="refresh-users">更新</button>
+      </header>
+      <div class="table-wrap">
+        <table class="admin-table" id="users-table">
+          <thead>
+            <tr>
+              <th>ユーザー名</th>
+              <th>表示名</th>
+              <th>メール</th>
+              <th>ロール</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody">
+            <tr><td colspan="5" class="table-empty">読み込み中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="admin-panel admin-panel-wide">
+      <header class="admin-panel-header">
+        <h2>ロール一覧</h2>
+      </header>
+      <div class="role-list" id="roles-list">読み込み中…</div>
+    </section>
+  </main>
+
+  <script src="/js/admin-panel.js" type="module"></script>
+</body>
+</html>

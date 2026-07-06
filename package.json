@@ -1,0 +1,24 @@
+{
+  "name": "sciencehub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "科学研究向けファイル共有・プロジェクト管理 HUB（Cloudflare Pages + D1 + R2）",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev public",
+    "build": "npm run types && npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "predeploy": "npm run build && npm run db:migrate:remote",
+    "deploy": "wrangler pages deploy public",
+    "db:create": "wrangler d1 create sciencehub-db",
+    "db:migrate:local": "wrangler d1 migrations apply sciencehub-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply sciencehub-db --remote",
+    "r2:create": "wrangler r2 bucket create sciencehub-files",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250701.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.24.4"
+  }
+}

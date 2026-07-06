@@ -1,0 +1,175 @@
+/**
+ * セッション・認証ヘルパー
+ */
+
+import type { Env, SessionUser, UserRow } from "./types";
+import {
+  SESSION_TTL_MS,
+  createId,
+  getSessionIdFromCookie,
+  now,
+} from "./types";
+
+/** ログインセッションを作成する */
+export async function createSession(
+  db: D1Database,
+  userId: string
+): Promise<string> {
+  const sessionId = createId("sess");
+  const createdAt = now();
+  const expiresAt = createdAt + SESSION_TTL_MS;
+
+  await db
+    .prepare(
+      "INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
+    )
+    .bind(sessionId, userId, expiresAt, createdAt)
+    .run();
+
+  return sessionId;
+}
+
+/** セッションを削除する */
+export async function deleteSession(
+  db: D1Database,
+  sessionId: string
+): Promise<void> {
+  await db.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
+}
+
+/** 期限切れセッションを削除する */
+export async function purgeExpiredSessions(db: D1Database): Promise<void> {
+  await db
+    .prepare("DELETE FROM sessions WHERE expires_at <= ?")
+    .bind(now())
+    .run();
+}
+
+/** リクエストからログインユーザーを取得する */
+export async function getSessionUser(
+  request: Request,
+  env: Env
+): Promise<SessionUser | null> {
+  const sessionId = getSessionIdFromCookie(request);
+  if (!sessionId) {
+    return null;
+  }
+
+  await purgeExpiredSessions(env.DB);
+
+  const row = await env.DB.prepare(
+    `SELECT u.id, u.username, u.email, u.display_name, u.role_slug, r.is_admin
+     FROM sessions s
+     JOIN users u ON u.id = s.user_id
+     JOIN roles r ON r.slug = u.role_slug
+     WHERE s.id = ? AND s.expires_at > ?`
+  )
+    .bind(sessionId, now())
+    .first<{
+      id: string;
+      username: string;
+      email: string;
+      display_name: string;
+      role_slug: string;
+      is_admin: number;
+    }>();
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    display_name: row.display_name,
+    role_slug: row.role_slug,
+    is_admin: row.is_admin === 1,
+  };
+}
+
+/** 管理者権限を要求する */
+export async function requireAdmin(
+  request: Request,
+  env: Env
+): Promise<SessionUser | Response> {
+  const user = await getSessionUser(request, env);
+  if (!user) {
+    return Response.json({ error: "ログインが必要です" }, { status: 401 });
+  }
+  if (!user.is_admin) {
+    return Response.json({ error: "管理者権限が必要です" }, { status: 403 });
+  }
+  return user;
+}
+
+/** 公開用ユーザー情報に変換する */
+export function toPublicUser(user: UserRow) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    display_name: user.display_name,
+    role_slug: user.role_slug,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
+}
+
+/** ユーザー名の重複を確認する */
+export async function usernameExists(
+  db: D1Database,
+  username: string,
+  excludeId?: string
+): Promise<boolean> {
+  const row = excludeId
+    ? await db
+        .prepare("SELECT id FROM users WHERE username = ? AND id != ?")
+        .bind(username, excludeId)
+        .first()
+    : await db
+        .prepare("SELECT id FROM users WHERE username = ?")
+        .bind(username)
+        .first();
+  return row !== null;
+}
+
+/** メールの重複を確認する */
+export async function emailExists(
+  db: D1Database,
+  email: string,
+  excludeId?: string
+): Promise<boolean> {
+  const row = excludeId
+    ? await db
+        .prepare("SELECT id FROM users WHERE email = ? AND id != ?")
+        .bind(email, excludeId)
+        .first()
+    : await db
+        .prepare("SELECT id FROM users WHERE email = ?")
+        .bind(email)
+        .first();
+  return row !== null;
+}
+
+/** ロール slug の存在確認 */
+export async function roleExists(
+  db: D1Database,
+  slug: string
+): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT slug FROM roles WHERE slug = ?")
+    .bind(slug)
+    .first();
+  return row !== null;
+}
+
+/** slug を正規化する */
+export function normalizeSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 32);
+}
