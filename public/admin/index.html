@@ -3,36 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="0;url=/admin/login.html">
   <title>管理者ログイン — ScienceHUB</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/css/admin.css">
+  <script>location.replace("/admin/login.html");</script>
 </head>
-<body class="admin-body">
-  <main class="admin-auth">
-    <div class="admin-auth-card">
-      <a href="/" class="admin-back">← ScienceHUB</a>
-      <h1>管理者ログイン</h1>
-      <p class="admin-auth-lead">ユーザー管理・ロール管理パネルにアクセスします。</p>
-
-      <form id="login-form" class="admin-form" novalidate>
-        <label class="field">
-          <span>ユーザー名</span>
-          <input type="text" name="username" autocomplete="username" required>
-        </label>
-        <label class="field">
-          <span>パスワード</span>
-          <input type="password" name="password" autocomplete="current-password" required>
-        </label>
-        <p id="login-error" class="form-error" hidden></p>
-        <button type="submit" class="btn btn-primary btn-lg btn-block" id="login-submit">
-          ログイン
-        </button>
-      </form>
-    </div>
-  </main>
-  <script src="/js/admin.js" type="module"></script>
+<body>
+  <p><a href="/admin/login.html">管理者ログインへ移動</a></p>
 </body>
 </html>

@@ -2,7 +2,7 @@
  * パスワードハッシュ（PBKDF2-SHA256）
  */
 
-const ITERATIONS = 600_000;
+const ITERATIONS = 10_000;
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = "";

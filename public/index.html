@@ -3,193 +3,271 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="ScienceHUB — 学校・研究機関向けの科学研究プラットフォーム。ファイル共有、プロジェクト管理、スケジュール管理、3Dプリント連携。">
-  <title>ScienceHUB — 研究のための共有 HUB</title>
+  <title>ScienceHUB — ダッシュボード</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/hub-icons.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
 </head>
-<body>
-  <a class="skip-link" href="#main">メインコンテンツへ</a>
-
-  <header class="site-header">
-    <div class="container header-inner">
-      <a href="/" class="logo" aria-label="ScienceHUB ホーム">
-        <span class="logo-mark" aria-hidden="true">
+<body class="hub-dashboard">
+  <header class="hub-header">
+    <div class="hub-header-inner">
+      <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+        <span class="hub-logo" aria-hidden="true">
           <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/>
             <ellipse cx="16" cy="16" rx="6" ry="14" stroke="currentColor" stroke-width="1.5"/>
             <path d="M2 16h28M6 10h20M6 22h20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </span>
-        <span class="logo-text">Science<strong>HUB</strong></span>
+        <span class="hub-brand-text">ScienceHUB</span>
       </a>
-      <nav class="nav" aria-label="メインナビゲーション">
-        <a href="#features">機能</a>
-        <a href="#integrations">連携</a>
-        <a href="#status">ステータス</a>
-      </nav>
-      <div class="header-actions">
-        <button type="button" class="btn btn-ghost" id="theme-toggle" aria-label="テーマ切替">
-          <span class="theme-icon theme-icon-light" aria-hidden="true">☀</span>
-          <span class="theme-icon theme-icon-dark" aria-hidden="true">☾</span>
+      <div class="hub-account-menu" id="account-menu">
+        <button
+          type="button"
+          class="hub-account-toggle"
+          id="account-menu-toggle"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-label="アカウントメニュー"
+        >
+          <span class="hub-account-avatar hub-account-avatar--initials" id="account-avatar" aria-hidden="true">?</span>
+          <span class="hub-account-label" id="account-label">アカウント</span>
+          <span class="hub-account-caret" aria-hidden="true">▾</span>
         </button>
-        <a href="#get-started" class="btn btn-primary">はじめる</a>
+        <div class="hub-account-dropdown" id="account-dropdown" role="menu">
+          <button type="button" class="hub-account-dropdown-item" id="account-menu-profile" role="menuitem">
+            プロフィール
+          </button>
+          <button type="button" class="hub-account-dropdown-item" id="account-menu-notify" role="menuitem">
+            通知設定
+          </button>
+          <hr class="hub-account-dropdown-divider">
+          <button type="button" class="hub-account-dropdown-item hub-account-dropdown-item--danger" id="account-menu-logout" role="menuitem">
+            ログアウト
+          </button>
+        </div>
       </div>
     </div>
   </header>
 
-  <main id="main">
-    <section class="hero">
-      <div class="container hero-grid">
-        <div class="hero-content">
-          <p class="eyebrow">Cloudflare Pages · D1 · R2</p>
-          <h1>研究を、ひとつの HUB に。</h1>
-          <p class="hero-lead">
-            ファイル共有、プロジェクト管理、スケジュール管理を、
-            学校や研究機関のチームがすぐ使える形でまとめます。
-            シミュレーション成果物の保管から 3D プリント連携まで、研究フローを途切れさせません。
-          </p>
-          <div class="hero-actions">
-            <a href="#get-started" class="btn btn-primary btn-lg">プロジェクトを作成</a>
-            <a href="https://3dprint.mmh-virtual.jp" class="btn btn-outline btn-lg" target="_blank" rel="noopener noreferrer">
-              3D Print へ
-              <span class="btn-external" aria-hidden="true">↗</span>
-            </a>
+  <main class="hub-main">
+    <!-- 上段: 左（お知らせ＋本日のタスク）/ 右（スケジュール） -->
+    <section class="hub-top-row" aria-label="概要">
+      <div class="hub-left-col">
+        <!-- お知らせ -->
+        <article class="hub-panel hub-announcements">
+          <h2 class="hub-panel-title">お知らせ</h2>
+          <ul class="hub-announcement-list" id="announcement-list"></ul>
+        </article>
+
+        <!-- 本日のタスク（お知らせの下） -->
+        <article class="hub-panel hub-tasks">
+          <h2 class="hub-panel-title">本日のタスク</h2>
+          <div class="hub-tasks-viewport" id="tasks-viewport">
+            <ul class="hub-task-list" id="task-list"></ul>
           </div>
-          <dl class="hero-stats" aria-label="プラットフォーム概要">
-            <div>
-              <dt>ストレージ</dt>
-              <dd>R2</dd>
+          <div class="hub-tasks-dots" id="tasks-dots" role="tablist" aria-label="タスクページ"></div>
+        </article>
+      </div>
+
+      <!-- スケジュール（3dprinterman モバイル版カレンダー UI） -->
+      <article class="hub-panel hub-schedule">
+        <div class="hub-schedule-header">
+          <h2 class="hub-panel-title">スケジュール</h2>
+          <div class="hub-schedule-scope" role="group" aria-label="表示範囲">
+            <button type="button" class="hub-schedule-scope-btn is-active" data-schedule-scope="mine" aria-pressed="true">自分のグループの予定</button>
+            <button type="button" class="hub-schedule-scope-btn" data-schedule-scope="all" aria-pressed="false">全グループの予定</button>
+          </div>
+        </div>
+        <section class="hub-calendar-card" id="calendar-section">
+          <div class="calendar-sticky-header">
+            <div class="calendar-toolbar">
+              <div class="calendar-header-mobile">
+                <button class="calendar-nav-btn" id="prev-month-mobile" type="button" aria-label="前月">‹</button>
+                <button class="calendar-mobile-month" id="calendar-month-label-mobile" type="button">
+                  <span id="calendar-month-label-mobile-text"></span>
+                  <span class="calendar-mobile-month-caret" aria-hidden="true">▾</span>
+                </button>
+                <div class="calendar-mobile-actions">
+                  <div class="calendar-today-group">
+                    <span class="calendar-today-label">今日：</span>
+                    <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="今月へ">
+                      <span class="calendar-today-icon" aria-hidden="true"></span>
+                      <span id="today-day-num"></span>
+                    </button>
+                  </div>
+                  <button class="calendar-nav-btn" id="next-month-mobile" type="button" aria-label="翌月">›</button>
+                </div>
+              </div>
+              <div class="calendar-month-chips" id="calendar-month-chips" role="tablist" aria-label="月を選択"></div>
             </div>
-            <div>
-              <dt>データベース</dt>
-              <dd>D1</dd>
-            </div>
-            <div>
-              <dt>ホスティング</dt>
-              <dd>Pages</dd>
-            </div>
-          </dl>
-        </div>
-        <div class="hero-visual" aria-hidden="true">
-          <div class="orbit-card orbit-card-1">
-            <span class="orbit-label">共有フォルダ</span>
-            <span class="orbit-value">シミュレーション</span>
+            <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
           </div>
-          <div class="orbit-card orbit-card-2">
-            <span class="orbit-label">スケジュール</span>
-            <span class="orbit-value">実験予定</span>
+          <div class="calendar-grid-wrap">
+            <div class="calendar-grid" id="calendar-grid"></div>
           </div>
-          <div class="orbit-card orbit-card-3">
-            <span class="orbit-label">3D Print</span>
-            <span class="orbit-value">mmh-virtual.jp</span>
-          </div>
-          <div class="hub-core">
-            <span>HUB</span>
-          </div>
-        </div>
-      </div>
+        </section>
+      </article>
     </section>
 
-    <section id="features" class="section features">
-      <div class="container">
-        <header class="section-header">
-          <h2>研究に必要な機能を、わかりやすく</h2>
-          <p>複雑な設定は後回し。まず使える UI を優先して設計しています。</p>
-        </header>
-        <div class="feature-grid">
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">📁</div>
-            <h3>ファイル共有</h3>
-            <p>R2 にデータを保存し、プロジェクト単位でメンバーと安全に共有。大容量のシミュレーション結果も扱えます。</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">🗂</div>
-            <h3>プロジェクト管理</h3>
-            <p>ディレクトリ階層で研究テーマを整理。チームごとの作業スペースを D1 で一元管理します。</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">📅</div>
-            <h3>スケジュール管理</h3>
-            <p>実験・解析・発表の予定をプロジェクトに紐づけ。研究の見通しをチーム全員で共有します。</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">🖨</div>
-            <h3>3D プリント連携</h3>
-            <p><a href="https://3dprint.mmh-virtual.jp" target="_blank" rel="noopener noreferrer">3dprint.mmh-virtual.jp</a> と連携し、設計データから造形までの流れをつなぎます。</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section id="integrations" class="section integrations">
-      <div class="container">
-        <div class="integration-panel">
-          <div class="integration-copy">
-            <h2>低コストで運用できる構成</h2>
-            <p>
-              Cloudflare の Pages・D1・R2 を中心に構築。
-              Workers は将来の API 拡張用に用意しつつ、まずは Pages Functions で必要十分な機能を提供します。
-            </p>
-            <ul class="stack-list">
-              <li><strong>Pages</strong> — フロントエンドと API</li>
-              <li><strong>D1</strong> — ユーザー・ディレクトリ管理</li>
-              <li><strong>R2</strong> — ファイルストレージ</li>
-              <li><strong>Workers</strong> — 将来拡張（現在は未使用）</li>
-            </ul>
-          </div>
-          <div class="integration-diagram" aria-hidden="true">
-            <div class="diagram-node diagram-node-center">ScienceHUB</div>
-            <div class="diagram-node diagram-node-top">Pages</div>
-            <div class="diagram-node diagram-node-left">D1</div>
-            <div class="diagram-node diagram-node-right">R2</div>
-            <div class="diagram-node diagram-node-bottom">3D Print</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="status" class="section status-section">
-      <div class="container">
-        <header class="section-header">
-          <h2>システムステータス</h2>
-          <p>バックエンド接続の状態をリアルタイムで確認できます。</p>
-        </header>
-        <div class="status-panel" id="status-panel" role="status" aria-live="polite">
-          <div class="status-loading">接続を確認しています…</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="get-started" class="section cta">
-      <div class="container cta-inner">
-        <h2>研究 HUB を、あなたのチームに</h2>
-        <p>セットアップが完了したら、プロジェクトの作成から始めましょう。</p>
-        <div class="cta-actions">
-          <button type="button" class="btn btn-primary btn-lg" disabled title="認証機能は今後実装予定">
-            サインイン（準備中）
-          </button>
-        </div>
-        <p class="cta-note">
-          非商用の研究目的での利用は LICENSE に従い可能です。
-        </p>
-      </div>
-    </section>
+    <!-- 下段: グループ別アプリ -->
+    <section class="hub-groups" id="groups-section" aria-label="プロジェクトグループ"></section>
   </main>
 
-  <footer class="site-footer">
-    <div class="container footer-inner">
-      <p>© 2026 ScienceHUB · MMH Virtual</p>
-      <p>
-        <a href="mailto:developer@mmh-virtual.jp">お問い合わせ</a>
-        ·
-        <a href="https://3dprint.mmh-virtual.jp" target="_blank" rel="noopener noreferrer">3D Print</a>
-      </p>
-    </div>
-  </footer>
+  <!-- プロフィール / 通知設定モーダル -->
+  <div class="hub-profile-modal" id="profile-modal" aria-hidden="true" role="dialog" aria-labelledby="profile-modal-title">
+    <div class="hub-profile-modal-backdrop" id="profile-modal-backdrop"></div>
+    <div class="hub-profile-modal-dialog">
+      <header class="hub-profile-modal-header">
+        <h2 class="hub-profile-modal-title" id="profile-modal-title">アカウント設定</h2>
+        <button type="button" class="hub-profile-modal-close" id="profile-modal-close" aria-label="閉じる">×</button>
+      </header>
+      <div class="hub-profile-tabs" role="tablist">
+        <button type="button" class="hub-profile-tab is-active" data-profile-tab="profile" role="tab" aria-selected="true">プロフィール</button>
+        <button type="button" class="hub-profile-tab" data-profile-tab="notify" role="tab" aria-selected="false">通知設定</button>
+      </div>
+      <div class="hub-profile-modal-body">
+        <div id="profile-alert"></div>
 
-  <script src="/js/main.js" type="module"></script>
+        <section class="hub-profile-panel is-active" id="profile-panel-profile" role="tabpanel">
+          <form id="profile-form" class="hub-profile-form">
+            <div class="hub-profile-icon-row">
+              <div class="hub-profile-icon-wrap">
+                <div class="hub-profile-icon-preview" id="profile-icon-preview" hidden></div>
+                <span class="hub-profile-icon-initials" id="profile-icon-initials">?</span>
+              </div>
+              <div class="hub-profile-icon-actions">
+                <label class="hub-profile-icon-btn">
+                  アイコンを変更
+                  <input type="file" id="profile-icon-input" accept="image/*" hidden>
+                </label>
+                <p class="hub-profile-icon-hint">最大 512×512 px に自動リサイズして PNG で保存されます</p>
+              </div>
+            </div>
+
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">ユーザー名</span>
+              <span class="hub-profile-readonly" id="profile-username"></span>
+            </label>
+
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">表示名</span>
+              <input type="text" class="hub-profile-input" id="profile-display-name" maxlength="64" required>
+            </label>
+
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">メールアドレス</span>
+              <input type="email" class="hub-profile-input" id="profile-email" required>
+            </label>
+
+            <div class="hub-profile-actions">
+              <button type="submit" class="hub-profile-save" id="profile-save-btn">保存</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="hub-profile-panel" id="profile-panel-notify" role="tabpanel">
+          <form id="notify-form" class="hub-profile-form">
+            <p class="hub-profile-notify-desc">通知の受け取り設定です（端末内に保存されます）。</p>
+            <label class="hub-profile-check">
+              <input type="checkbox" id="notify-email" checked>
+              <span>メールでお知らせを受け取る</span>
+            </label>
+            <label class="hub-profile-check">
+              <input type="checkbox" id="notify-tasks" checked>
+              <span>本日のタスク更新を通知する</span>
+            </label>
+            <div class="hub-profile-actions">
+              <button type="submit" class="hub-profile-save">保存</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- 予定追加モーダル -->
+  <div class="hub-profile-modal" id="schedule-modal" aria-hidden="true" role="dialog" aria-labelledby="schedule-modal-title">
+    <div class="hub-profile-modal-backdrop" id="schedule-modal-backdrop"></div>
+    <div class="hub-profile-modal-dialog hub-schedule-modal-dialog">
+      <header class="hub-schedule-modal-header">
+        <div class="hub-schedule-modal-heading">
+          <p class="hub-schedule-modal-kicker">新しい予定</p>
+          <h2 class="hub-schedule-modal-title" id="schedule-modal-title">予定を追加</h2>
+          <p class="hub-schedule-modal-date" id="schedule-modal-date-label"></p>
+        </div>
+        <button type="button" class="hub-profile-modal-close" id="schedule-modal-close" aria-label="閉じる">×</button>
+      </header>
+      <div class="hub-profile-modal-body hub-schedule-modal-body">
+        <div id="schedule-modal-alert"></div>
+        <form id="schedule-form" class="hub-schedule-form">
+          <input type="hidden" id="schedule-event-date" name="event_date">
+
+          <section class="hub-schedule-form-section">
+            <h3 class="hub-schedule-form-section-title">基本情報</h3>
+            <label class="hub-schedule-field">
+              <span class="hub-schedule-label">グループ</span>
+              <div class="hub-schedule-select-wrap">
+                <span class="hub-schedule-group-dot" id="schedule-group-dot" aria-hidden="true"></span>
+                <select id="schedule-event-group" name="group_id" class="hub-schedule-select" required></select>
+              </div>
+            </label>
+            <label class="hub-schedule-field">
+              <span class="hub-schedule-label">タイトル</span>
+              <input type="text" id="schedule-event-title" name="title" class="hub-schedule-input" required maxlength="120" placeholder="例: 週次ミーティング">
+            </label>
+          </section>
+
+          <section class="hub-schedule-form-section">
+            <h3 class="hub-schedule-form-section-title">日時</h3>
+            <label class="hub-schedule-all-day">
+              <input type="checkbox" id="schedule-all-day" name="is_all_day" checked>
+              <span class="hub-schedule-switch" aria-hidden="true"></span>
+              <span class="hub-schedule-all-day-text">終日</span>
+            </label>
+            <div class="hub-schedule-time-row" id="schedule-time-row" hidden>
+              <label class="hub-schedule-field hub-schedule-field--time">
+                <span class="hub-schedule-label">開始</span>
+                <input type="time" id="schedule-start-time" name="start_time" class="hub-schedule-input" value="09:00">
+              </label>
+              <span class="hub-schedule-time-sep" aria-hidden="true">〜</span>
+              <label class="hub-schedule-field hub-schedule-field--time">
+                <span class="hub-schedule-label">終了</span>
+                <input type="time" id="schedule-end-time" name="end_time" class="hub-schedule-input" value="10:00">
+              </label>
+            </div>
+          </section>
+
+          <section class="hub-schedule-form-section">
+            <h3 class="hub-schedule-form-section-title">説明</h3>
+            <label class="hub-schedule-field">
+              <span class="hub-schedule-label">説明書き <span class="hub-schedule-label-optional">任意</span></span>
+              <textarea id="schedule-event-description" name="description" class="hub-schedule-textarea" rows="4" maxlength="2000" placeholder="場所、持ち物、参加メンバーなど"></textarea>
+              <span class="hub-schedule-char-count"><span id="schedule-desc-count">0</span> / 2000</span>
+            </label>
+          </section>
+
+          <aside class="hub-schedule-gcal-note" id="schedule-gcal-note" hidden>
+            <span class="hub-schedule-gcal-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <p id="schedule-gcal-note-text"></p>
+          </aside>
+
+          <div class="hub-profile-actions hub-schedule-actions">
+            <button type="button" class="hub-profile-cancel" id="schedule-modal-cancel">キャンセル</button>
+            <button type="submit" class="hub-profile-save" id="schedule-modal-save">予定を追加</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/dashboard.js" type="module"></script>
 </body>
 </html>

@@ -9,6 +9,11 @@ import {
   getSessionIdFromCookie,
   now,
 } from "./types";
+import { getDb } from "./db";
+import { getUserRoles, userHasAdminRole } from "./roles";
+import type { PublicRole } from "./roles";
+import { resolveUserAvatarUrl } from "./user-icons";
+import { getUserGroupMemberships, type UserGroupMembership } from "./groups";
 
 /** ログインセッションを作成する */
 export async function createSession(
@@ -55,15 +60,16 @@ export async function getSessionUser(
     return null;
   }
 
-  await purgeExpiredSessions(env.DB);
+  const db = getDb(env);
+  await purgeExpiredSessions(db);
 
-  const row = await env.DB.prepare(
-    `SELECT u.id, u.username, u.email, u.display_name, u.role_slug, r.is_admin
-     FROM sessions s
-     JOIN users u ON u.id = s.user_id
-     JOIN roles r ON r.slug = u.role_slug
-     WHERE s.id = ? AND s.expires_at > ?`
-  )
+  const row = await db
+    .prepare(
+      `SELECT u.id, u.username, u.email, u.display_name, u.role_slug, u.avatar_url, u.updated_at
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.id = ? AND s.expires_at > ?`
+    )
     .bind(sessionId, now())
     .first<{
       id: string;
@@ -71,12 +77,21 @@ export async function getSessionUser(
       email: string;
       display_name: string;
       role_slug: string;
-      is_admin: number;
+      avatar_url: string | null;
+      updated_at: number;
     }>();
 
   if (!row) {
     return null;
   }
+
+  const roles = await getUserRoles(db, row.id);
+  const isAdmin = await userHasAdminRole(db, row.id);
+  const avatar_url = await resolveUserAvatarUrl(env, {
+    username: row.username,
+    avatar_url: row.avatar_url,
+    updated_at: row.updated_at,
+  });
 
   return {
     id: row.id,
@@ -84,8 +99,27 @@ export async function getSessionUser(
     email: row.email,
     display_name: row.display_name,
     role_slug: row.role_slug,
-    is_admin: row.is_admin === 1,
+    avatar_url,
+    roles: roles.map((role) => ({
+      slug: role.slug,
+      display_name: role.display_name,
+      color: role.color,
+      is_admin: role.is_admin,
+    })),
+    is_admin: isAdmin,
   };
+}
+
+/** ログイン済みユーザーを要求する */
+export async function requireUser(
+  request: Request,
+  env: Env
+): Promise<SessionUser | Response> {
+  const user = await getSessionUser(request, env);
+  if (!user) {
+    return Response.json({ error: "ログインが必要です" }, { status: 401 });
+  }
+  return user;
 }
 
 /** 管理者権限を要求する */
@@ -104,13 +138,29 @@ export async function requireAdmin(
 }
 
 /** 公開用ユーザー情報に変換する */
-export function toPublicUser(user: UserRow) {
+export async function toPublicUser(
+  db: D1Database,
+  user: UserRow,
+  roles?: PublicRole[],
+  env?: Env
+) {
+  const userRoles = roles ?? (await getUserRoles(db, user.id));
+  const avatar_url = env
+    ? await resolveUserAvatarUrl(env, user)
+    : user.avatar_url;
+  const groups: UserGroupMembership[] = env
+    ? await getUserGroupMemberships(db, user.id)
+    : [];
+
   return {
     id: user.id,
     username: user.username,
     email: user.email,
     display_name: user.display_name,
     role_slug: user.role_slug,
+    avatar_url,
+    groups,
+    roles: userRoles,
     created_at: user.created_at,
     updated_at: user.updated_at,
   };

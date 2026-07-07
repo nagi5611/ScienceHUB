@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>シフト管理 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/shift-management.css">
+</head>
+<body class="shift-app">
+  <header class="shift-app-header">
+    <a href="/" class="shift-app-back">← ダッシュボード</a>
+    <h1 class="shift-app-title">シフト管理</h1>
+  </header>
+
+  <main class="shift-app-main" id="app-main" hidden>
+    <div class="shift-app-toolbar">
+      <div class="shift-app-tabs" role="tablist" aria-label="カレンダー種別">
+        <button type="button" class="shift-app-tab is-active" data-shift-view="mine" role="tab" aria-selected="true">
+          予定カレンダー
+        </button>
+        <button type="button" class="shift-app-tab" data-shift-view="others" role="tab" aria-selected="false">
+          他のカレンダー
+        </button>
+      </div>
+      <p class="shift-app-hint" id="shift-hint">
+        日付をクリックまたはドラッグして出勤可能日を設定できます。出勤可能な日を再度操作すると解除されます。
+      </p>
+      <div class="shift-app-others-filter" id="others-filter" hidden>
+        <label class="shift-app-field">
+          <span class="shift-app-label">メンバー</span>
+          <select id="others-member-select" class="shift-app-select"></select>
+        </label>
+      </div>
+    </div>
+
+    <section class="shift-calendar-card" id="calendar-section" aria-label="シフトカレンダー">
+      <div class="calendar-sticky-header">
+        <div class="calendar-toolbar">
+          <div class="calendar-header-mobile">
+            <button class="calendar-nav-btn" id="prev-month" type="button" aria-label="前月">‹</button>
+            <button class="calendar-mobile-month" id="calendar-month-label" type="button">
+              <span id="calendar-month-label-text"></span>
+              <span class="calendar-mobile-month-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="calendar-mobile-actions">
+              <div class="calendar-today-group">
+                <span class="calendar-today-label">今日：</span>
+                <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="今月へ">
+                  <span class="calendar-today-icon" aria-hidden="true"></span>
+                  <span id="today-day-num"></span>
+                </button>
+              </div>
+              <button class="calendar-nav-btn" id="next-month" type="button" aria-label="翌月">›</button>
+            </div>
+          </div>
+          <div class="calendar-month-chips" id="calendar-month-chips" role="tablist" aria-label="月を選択"></div>
+        </div>
+        <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
+      </div>
+      <div class="calendar-grid-wrap">
+        <div class="calendar-grid" id="calendar-grid"></div>
+      </div>
+    </section>
+
+    <aside class="shift-legend" aria-label="凡例">
+      <span class="shift-legend-item">
+        <span class="shift-legend-swatch shift-legend-swatch--available"></span>
+        出勤可能
+      </span>
+      <span class="shift-legend-item" id="legend-others" hidden>
+        <span class="shift-legend-swatch shift-legend-swatch--others"></span>
+        選択メンバーの出勤可能日
+      </span>
+    </aside>
+  </main>
+
+  <div class="shift-app-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="shift-app-btn shift-app-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <div class="shift-toast" id="shift-toast" hidden role="status"></div>
+
+  <script src="/apps/shift-management/app.js" type="module"></script>
+</body>
+</html>

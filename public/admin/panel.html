@@ -3,112 +3,695 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>管理者パネル — ScienceHUB</title>
+  <title>管理 — ScienceHUB</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/hub-icons.css">
   <link rel="stylesheet" href="/css/admin.css">
 </head>
-<body class="admin-body">
-  <header class="admin-header">
-    <div class="admin-header-inner">
-      <div>
-        <a href="/" class="admin-back">← ScienceHUB</a>
-        <h1>管理者パネル</h1>
-        <p id="admin-user-label" class="admin-user-label">読み込み中…</p>
+<body class="cf-admin">
+  <div class="cf-shell">
+    <aside class="cf-sidebar">
+      <div class="cf-sidebar-brand">
+        <a href="/">ScienceHUB</a>
+        <span class="cf-badge">Admin</span>
       </div>
-      <button type="button" class="btn btn-outline" id="logout-btn">ログアウト</button>
-    </div>
-  </header>
 
-  <main class="admin-main container">
-    <div class="admin-grid">
-      <section class="admin-panel">
-        <header class="admin-panel-header">
-          <h2>ユーザー登録</h2>
+      <nav class="cf-nav" aria-label="管理メニュー">
+        <p class="cf-nav-label">メンバー管理</p>
+        <button type="button" class="cf-nav-item is-active" data-view="members">
+          <span class="cf-nav-icon" data-icon="users" aria-hidden="true"></span>
+          メンバー
+        </button>
+        <button type="button" class="cf-nav-item" data-view="roles">
+          <span class="cf-nav-icon" data-icon="shield" aria-hidden="true"></span>
+          ロール
+        </button>
+        <button type="button" class="cf-nav-item" data-view="groups">
+          <span class="cf-nav-icon" data-icon="folder" aria-hidden="true"></span>
+          グループ
+        </button>
+        <button type="button" class="cf-nav-item" data-view="apps">
+          <span class="cf-nav-icon" data-icon="app" aria-hidden="true"></span>
+          アプリ
+        </button>
+        <p class="cf-nav-label">コンテンツ</p>
+        <button type="button" class="cf-nav-item" data-view="announcements">
+          <span class="cf-nav-icon" data-icon="bell" aria-hidden="true"></span>
+          お知らせ
+        </button>
+      </nav>
+
+      <div class="cf-sidebar-footer">
+        <p id="admin-user-label" class="cf-user-label">読み込み中…</p>
+        <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" id="logout-btn">ログアウト</button>
+      </div>
+    </aside>
+
+    <main class="cf-main">
+      <!-- メンバー画面 -->
+      <section class="cf-view is-active" id="view-members">
+        <header class="cf-page-header">
+          <div>
+            <h1>メンバー</h1>
+            <p>ユーザーの管理、ロールの割り当て、新規登録を行います。</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-primary" id="open-create-user">ユーザーを追加</button>
         </header>
-        <form id="create-user-form" class="admin-form admin-form-compact">
-          <label class="field">
-            <span>ユーザー名</span>
-            <input type="text" name="username" required minlength="2" maxlength="32">
+
+        <div class="cf-toolbar">
+          <label class="cf-search">
+            <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+            <input type="search" id="member-search" placeholder="ユーザー名で検索" autocomplete="off">
           </label>
-          <label class="field">
-            <span>表示名</span>
-            <input type="text" name="display_name" required>
-          </label>
-          <label class="field">
-            <span>メール</span>
-            <input type="email" name="email" required>
-          </label>
-          <label class="field">
-            <span>パスワード</span>
-            <input type="password" name="password" required minlength="8">
-          </label>
-          <label class="field">
-            <span>ロール</span>
-            <select name="role_slug" id="create-user-role" required></select>
-          </label>
-          <p id="create-user-error" class="form-error" hidden></p>
-          <p id="create-user-success" class="form-success" hidden></p>
-          <button type="submit" class="btn btn-primary btn-block">ユーザーを登録</button>
-        </form>
+        </div>
+
+        <div class="cf-table-wrap">
+          <table class="cf-table">
+            <thead>
+              <tr>
+                <th>名前</th>
+                <th>メール</th>
+                <th>登録日</th>
+                <th>ロール</th>
+                <th>グループ</th>
+                <th aria-label="操作"></th>
+              </tr>
+            </thead>
+            <tbody id="members-tbody">
+              <tr><td colspan="6" class="cf-empty">読み込み中…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
-      <section class="admin-panel">
-        <header class="admin-panel-header">
-          <h2>ロール追加</h2>
+      <!-- ロール画面 -->
+      <section class="cf-view" id="view-roles">
+        <header class="cf-page-header">
+          <div>
+            <h1>ロール</h1>
+            <p>メンバーをグループ化し、権限を割り当てます。ユーザーに複数のロールを付与できます。</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-primary" id="open-create-role">ロールを作成</button>
         </header>
-        <form id="create-role-form" class="admin-form admin-form-compact">
-          <label class="field">
-            <span>ロール名</span>
-            <input type="text" name="display_name" required placeholder="例: 研究室リーダー">
+
+        <div class="cf-toolbar">
+          <label class="cf-search">
+            <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+            <input type="search" id="role-search" placeholder="ロールを検索" autocomplete="off">
           </label>
-          <label class="field">
-            <span>識別子（slug）</span>
-            <input type="text" name="slug" pattern="[a-z0-9_-]+" placeholder="空欄で自動生成">
-          </label>
-          <label class="field field-checkbox">
-            <input type="checkbox" name="is_admin" id="role-is-admin">
-            <span>管理者権限を付与</span>
-          </label>
-          <p id="create-role-error" class="form-error" hidden></p>
-          <p id="create-role-success" class="form-success" hidden></p>
-          <button type="submit" class="btn btn-primary btn-block">ロールを追加</button>
-        </form>
+        </div>
+
+        <div class="cf-role-list-header">
+          <span>ロール — <span id="role-count">0</span></span>
+          <span>メンバー</span>
+        </div>
+        <div class="cf-role-list" id="roles-list">
+          <p class="cf-empty">読み込み中…</p>
+        </div>
       </section>
-    </div>
 
-    <section class="admin-panel admin-panel-wide">
-      <header class="admin-panel-header">
-        <h2>ユーザー一覧</h2>
-        <button type="button" class="btn btn-ghost" id="refresh-users">更新</button>
+      <!-- グループ画面 -->
+      <section class="cf-view" id="view-groups">
+        <header class="cf-page-header">
+          <div>
+            <h1>グループ</h1>
+            <p>チームやプロジェクト単位のグループと、グループ内ロール（マネージャー・チームリーダーなど）を管理します。</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-primary" id="open-create-group">グループを作成</button>
+        </header>
+
+        <div class="cf-toolbar">
+          <label class="cf-search">
+            <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+            <input type="search" id="group-search" placeholder="グループを検索" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="cf-group-list" id="groups-list">
+          <p class="cf-empty">読み込み中…</p>
+        </div>
+      </section>
+
+      <!-- アプリ画面 -->
+      <section class="cf-view" id="view-apps">
+        <header class="cf-page-header">
+          <div>
+            <h1>アプリ</h1>
+            <p>グループごとに表示するアプリと、グループ内ロールによるアクセス制限を管理します。</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-primary" id="open-create-app">アプリを作成</button>
+        </header>
+
+        <div class="cf-toolbar">
+          <label class="cf-search">
+            <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+            <input type="search" id="app-search" placeholder="アプリを検索" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="cf-app-list" id="apps-list">
+          <p class="cf-empty">読み込み中…</p>
+        </div>
+      </section>
+
+      <!-- お知らせ画面 -->
+      <section class="cf-view" id="view-announcements">
+        <header class="cf-page-header">
+          <div>
+            <h1>お知らせ</h1>
+            <p>ダッシュボードに表示するお知らせを管理します。</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-primary" id="open-create-announcement">お知らせを追加</button>
+        </header>
+
+        <div class="cf-toolbar">
+          <label class="cf-search">
+            <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+            <input type="search" id="announcement-search" placeholder="お知らせを検索" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="cf-table-wrap">
+          <table class="cf-table cf-table-announcements">
+            <thead>
+              <tr>
+                <th>日付</th>
+                <th>内容</th>
+                <th>状態</th>
+                <th aria-label="操作"></th>
+              </tr>
+            </thead>
+            <tbody id="announcements-tbody">
+              <tr><td colspan="4" class="cf-empty">読み込み中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ロール編集ポップオーバー（メンバー用） -->
+  <dialog class="cf-dialog" id="role-editor-dialog">
+    <form method="dialog" class="cf-dialog-inner" id="role-editor-form">
+      <header class="cf-dialog-header">
+        <h2 id="role-editor-title">ロールを編集</h2>
+        <button type="button" class="cf-icon-btn" id="close-role-editor" aria-label="閉じる">✕</button>
       </header>
-      <div class="table-wrap">
-        <table class="admin-table" id="users-table">
-          <thead>
-            <tr>
-              <th>ユーザー名</th>
-              <th>表示名</th>
-              <th>メール</th>
-              <th>ロール</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="users-tbody">
-            <tr><td colspan="5" class="table-empty">読み込み中…</td></tr>
-          </tbody>
-        </table>
+      <p class="cf-dialog-lead" id="role-editor-subtitle"></p>
+      <div class="cf-role-checklist" id="role-checklist"></div>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" id="cancel-role-editor">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ユーザー編集モーダル -->
+  <dialog class="cf-dialog" id="edit-user-dialog">
+    <form class="cf-dialog-inner" id="edit-user-form">
+      <input type="hidden" name="user_id" id="edit-user-id">
+      <header class="cf-dialog-header">
+        <h2>ユーザーを編集</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="edit-user-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field">
+          <span>ユーザー名</span>
+          <input type="text" name="username" id="edit-user-username" required minlength="2" maxlength="32" pattern="[a-zA-Z0-9_-]+">
+        </label>
+        <label class="cf-field">
+          <span>表示名</span>
+          <input type="text" name="display_name" id="edit-user-display-name" required>
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>メール</span>
+          <input type="email" name="email" id="edit-user-email" required>
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>新しいパスワード</span>
+          <input type="password" name="password" id="edit-user-password" minlength="8" placeholder="変更しない場合は空欄">
+        </label>
       </div>
-    </section>
+      <p id="edit-user-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="edit-user-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
 
-    <section class="admin-panel admin-panel-wide">
-      <header class="admin-panel-header">
-        <h2>ロール一覧</h2>
+  <!-- ユーザー作成モーダル -->
+  <dialog class="cf-dialog" id="create-user-dialog">
+    <form class="cf-dialog-inner" id="create-user-form">
+      <header class="cf-dialog-header">
+        <h2>ユーザーを追加</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="create-user-dialog" aria-label="閉じる">✕</button>
       </header>
-      <div class="role-list" id="roles-list">読み込み中…</div>
-    </section>
-  </main>
+      <div class="cf-form-grid">
+        <label class="cf-field">
+          <span>ユーザー名</span>
+          <input type="text" name="username" required minlength="2" maxlength="32">
+        </label>
+        <label class="cf-field">
+          <span>表示名</span>
+          <input type="text" name="display_name" required>
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>メール</span>
+          <input type="email" name="email" required>
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>パスワード</span>
+          <input type="password" name="password" required minlength="8">
+        </label>
+        <fieldset class="cf-field cf-field-full">
+          <legend>ロール（複数選択可）</legend>
+          <div class="cf-role-checklist" id="create-user-roles"></div>
+        </fieldset>
+      </div>
+      <p id="create-user-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="create-user-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">登録</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ロール作成モーダル -->
+  <dialog class="cf-dialog" id="create-role-dialog">
+    <form class="cf-dialog-inner" id="create-role-form">
+      <header class="cf-dialog-header">
+        <h2>ロールを作成</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="create-role-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field cf-field-full">
+          <span>ロール名</span>
+          <input type="text" name="display_name" required placeholder="例: シミュレーションチーム">
+        </label>
+        <label class="cf-field">
+          <span>識別子（slug）</span>
+          <input type="text" name="slug" pattern="[a-z0-9_-]*" placeholder="空欄で自動生成">
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" name="color" value="#F38020">
+        </label>
+        <label class="cf-field cf-field-checkbox cf-field-full">
+          <input type="checkbox" name="is_admin" id="create-role-admin">
+          <span>管理者権限を付与</span>
+        </label>
+      </div>
+      <p id="create-role-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="create-role-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">作成</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ロール編集モーダル -->
+  <dialog class="cf-dialog" id="edit-role-dialog">
+    <form class="cf-dialog-inner" id="edit-role-form">
+      <input type="hidden" name="slug" id="edit-role-slug">
+      <header class="cf-dialog-header">
+        <h2>ロールを編集</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="edit-role-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field cf-field-full">
+          <span>ロール名</span>
+          <input type="text" name="display_name" id="edit-role-name" required>
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" name="color" id="edit-role-color">
+        </label>
+        <label class="cf-field cf-field-checkbox cf-field-full">
+          <input type="checkbox" name="is_admin" id="edit-role-admin">
+          <span>管理者権限を付与</span>
+        </label>
+      </div>
+      <p id="edit-role-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost" id="delete-role-btn">ロールを削除</button>
+        <div class="cf-dialog-footer-right">
+          <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="edit-role-dialog">キャンセル</button>
+          <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- グループ作成モーダル -->
+  <dialog class="cf-dialog" id="create-group-dialog">
+    <form class="cf-dialog-inner" id="create-group-form">
+      <header class="cf-dialog-header">
+        <h2>グループを作成</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="create-group-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field cf-field-full">
+          <span>グループ名</span>
+          <input type="text" name="display_name" required placeholder="例: GroupA">
+        </label>
+        <label class="cf-field">
+          <span>識別子（slug）</span>
+          <input type="text" name="slug" pattern="[a-z0-9_-]*" placeholder="空欄で自動生成">
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" name="color" value="#F38020">
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>説明（任意）</span>
+          <input type="text" name="description" placeholder="グループの説明">
+        </label>
+      </div>
+      <p id="create-group-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="create-group-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">作成</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- グループ編集モーダル -->
+  <dialog class="cf-dialog" id="edit-group-dialog">
+    <form class="cf-dialog-inner" id="edit-group-form">
+      <input type="hidden" id="edit-group-id">
+      <header class="cf-dialog-header">
+        <h2>グループを編集</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="edit-group-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field cf-field-full">
+          <span>グループ名</span>
+          <input type="text" id="edit-group-name" required>
+        </label>
+        <label class="cf-field">
+          <span>識別子（slug）</span>
+          <input type="text" id="edit-group-slug" pattern="[a-z0-9_-]+" required>
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" id="edit-group-color">
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>説明（任意）</span>
+          <input type="text" id="edit-group-description">
+        </label>
+      </div>
+      <p id="edit-group-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost" id="delete-group-btn">グループを削除</button>
+        <div class="cf-dialog-footer-right">
+          <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="edit-group-dialog">キャンセル</button>
+          <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- グループロール作成モーダル -->
+  <dialog class="cf-dialog" id="create-group-role-dialog">
+    <form class="cf-dialog-inner" id="create-group-role-form">
+      <input type="hidden" id="create-group-role-group-id">
+      <header class="cf-dialog-header">
+        <h2>グループロールを作成</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="create-group-role-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <p class="cf-dialog-lead" id="create-group-role-subtitle"></p>
+      <div class="cf-form-grid">
+        <label class="cf-field cf-field-full">
+          <span>ロール名</span>
+          <input type="text" name="display_name" required placeholder="例: マネージャー">
+        </label>
+        <label class="cf-field">
+          <span>識別子（slug）</span>
+          <input type="text" name="slug" pattern="[a-z0-9_-]*" placeholder="空欄で自動生成">
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" name="color" value="#2C7CB0">
+        </label>
+      </div>
+      <p id="create-group-role-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="create-group-role-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">作成</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- グループロール編集モーダル -->
+  <dialog class="cf-dialog" id="edit-group-role-dialog">
+    <form class="cf-dialog-inner" id="edit-group-role-form">
+      <input type="hidden" id="edit-group-role-group-id">
+      <input type="hidden" id="edit-group-role-id">
+      <header class="cf-dialog-header">
+        <h2>グループロールを編集</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="edit-group-role-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field cf-field-full">
+          <span>ロール名</span>
+          <input type="text" id="edit-group-role-name" required>
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" id="edit-group-role-color">
+        </label>
+      </div>
+      <p id="edit-group-role-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost" id="delete-group-role-btn">ロールを削除</button>
+        <div class="cf-dialog-footer-right">
+          <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="edit-group-role-dialog">キャンセル</button>
+          <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- グループメンバー編集（D&D） -->
+  <dialog class="cf-dialog cf-dialog-xl" id="group-edit-members-dialog">
+    <form class="cf-dialog-inner" id="group-edit-members-form">
+      <input type="hidden" id="group-edit-members-group-id">
+      <header class="cf-dialog-header">
+        <h2>メンバーを編集</h2>
+        <button type="button" class="cf-icon-btn" id="close-group-edit-members" aria-label="閉じる">✕</button>
+      </header>
+      <p class="cf-dialog-lead" id="group-edit-members-subtitle"></p>
+      <div class="cf-group-edit-toolbar">
+        <label class="cf-search cf-group-edit-search">
+          <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+          <input type="search" id="group-edit-members-search" placeholder="無所属ユーザーを検索" autocomplete="off">
+        </label>
+      </div>
+      <div class="cf-group-edit-board">
+        <aside class="cf-group-edit-pool-wrap">
+          <p class="cf-group-edit-pool-label">無所属</p>
+          <div class="cf-group-edit-pool" id="group-edit-members-pool" data-drop-zone="pool"></div>
+        </aside>
+        <div class="cf-group-edit-roles" id="group-edit-members-roles"></div>
+      </div>
+      <p id="group-edit-members-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" id="cancel-group-edit-members">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ユーザーのグループ割り当て -->
+  <dialog class="cf-dialog cf-dialog-wide" id="group-membership-dialog">
+    <form method="dialog" class="cf-dialog-inner" id="group-membership-form">
+      <header class="cf-dialog-header">
+        <h2>グループを割り当て</h2>
+        <button type="button" class="cf-icon-btn" id="close-group-membership" aria-label="閉じる">✕</button>
+      </header>
+      <p class="cf-dialog-lead" id="group-membership-subtitle"></p>
+      <div class="cf-group-membership-list" id="group-membership-list"></div>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" id="cancel-group-membership">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- アプリ作成 -->
+  <dialog class="cf-dialog" id="create-app-dialog">
+    <form class="cf-dialog-inner" id="create-app-form">
+      <header class="cf-dialog-header">
+        <h2>アプリを作成</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="create-app-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <label class="cf-field cf-field-full">
+        <span>アプリ名</span>
+        <input type="text" name="display_name" required placeholder="画像編集アプリ">
+      </label>
+      <label class="cf-field cf-field-full">
+        <span>識別子（slug）</span>
+        <input type="text" name="slug" placeholder="image-editor">
+      </label>
+      <label class="cf-field cf-field-full">
+        <span>URL パス</span>
+        <input type="text" name="href" required placeholder="/apps/image-editor/">
+      </label>
+      <label class="cf-field cf-field-full">
+        <span>説明</span>
+        <input type="text" name="description" placeholder="任意">
+      </label>
+      <div class="cf-field-row">
+        <label class="cf-field">
+          <span>アイコン（省略可）</span>
+          <input type="text" name="icon_emoji" placeholder="slug で自動" maxlength="4">
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" name="color" value="#F38020">
+        </label>
+      </div>
+      <p id="create-app-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="create-app-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">作成</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- アプリ編集 -->
+  <dialog class="cf-dialog" id="edit-app-dialog">
+    <form class="cf-dialog-inner" id="edit-app-form">
+      <input type="hidden" id="edit-app-id">
+      <header class="cf-dialog-header">
+        <h2>アプリを編集</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="edit-app-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <label class="cf-field cf-field-full">
+        <span>アプリ名</span>
+        <input type="text" id="edit-app-name" required>
+      </label>
+      <label class="cf-field cf-field-full">
+        <span>識別子（slug）</span>
+        <input type="text" id="edit-app-slug" required>
+      </label>
+      <label class="cf-field cf-field-full">
+        <span>URL パス</span>
+        <input type="text" id="edit-app-href" required>
+      </label>
+      <label class="cf-field cf-field-full">
+        <span>説明</span>
+        <input type="text" id="edit-app-description">
+      </label>
+      <div class="cf-field-row">
+        <label class="cf-field">
+          <span>アイコン（省略可）</span>
+          <input type="text" id="edit-app-icon" placeholder="slug で自動" maxlength="4">
+        </label>
+        <label class="cf-field">
+          <span>色</span>
+          <input type="color" id="edit-app-color">
+        </label>
+      </div>
+      <p id="edit-app-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost" id="delete-app-btn">アプリを削除</button>
+        <div class="cf-dialog-footer-right">
+          <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="edit-app-dialog">キャンセル</button>
+          <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- アプリアクセス設定 -->
+  <dialog class="cf-dialog cf-dialog-wide" id="app-access-dialog">
+    <form class="cf-dialog-inner" id="app-access-form">
+      <input type="hidden" id="app-access-app-id">
+      <header class="cf-dialog-header">
+        <h2>アクセス設定</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="app-access-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <p class="cf-dialog-lead" id="app-access-subtitle"></p>
+      <div class="cf-app-access-list" id="app-access-list"></div>
+      <p id="app-access-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="app-access-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- お知らせ作成 -->
+  <dialog class="cf-dialog" id="create-announcement-dialog">
+    <form class="cf-dialog-inner" id="create-announcement-form">
+      <header class="cf-dialog-header">
+        <h2>お知らせを追加</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="create-announcement-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field">
+          <span>掲載日</span>
+          <input type="date" id="create-announcement-date" required>
+        </label>
+        <label class="cf-field">
+          <span>表示順（大きいほど上）</span>
+          <input type="number" id="create-announcement-position" value="0" min="0" step="1">
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>内容</span>
+          <textarea id="create-announcement-body" rows="4" required maxlength="500" placeholder="お知らせ本文"></textarea>
+        </label>
+        <label class="cf-field-checkbox cf-field-full">
+          <input type="checkbox" id="create-announcement-published" checked>
+          <span>ダッシュボードに公開する</span>
+        </label>
+      </div>
+      <p id="create-announcement-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="create-announcement-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">追加</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- お知らせ編集 -->
+  <dialog class="cf-dialog" id="edit-announcement-dialog">
+    <form class="cf-dialog-inner" id="edit-announcement-form">
+      <input type="hidden" id="edit-announcement-id">
+      <header class="cf-dialog-header">
+        <h2>お知らせを編集</h2>
+        <button type="button" class="cf-icon-btn" data-close-dialog="edit-announcement-dialog" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cf-form-grid">
+        <label class="cf-field">
+          <span>掲載日</span>
+          <input type="date" id="edit-announcement-date" required>
+        </label>
+        <label class="cf-field">
+          <span>表示順（大きいほど上）</span>
+          <input type="number" id="edit-announcement-position" min="0" step="1">
+        </label>
+        <label class="cf-field cf-field-full">
+          <span>内容</span>
+          <textarea id="edit-announcement-body" rows="4" required maxlength="500"></textarea>
+        </label>
+        <label class="cf-field-checkbox cf-field-full">
+          <input type="checkbox" id="edit-announcement-published">
+          <span>ダッシュボードに公開する</span>
+        </label>
+      </div>
+      <p id="edit-announcement-error" class="cf-form-error" hidden></p>
+      <footer class="cf-dialog-footer">
+        <button type="button" class="cf-btn cf-btn-ghost" data-close-dialog="edit-announcement-dialog">キャンセル</button>
+        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
 
   <script src="/js/admin-panel.js" type="module"></script>
 </body>

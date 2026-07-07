@@ -5,12 +5,30 @@
 export interface Env {
   DB: D1Database;
   FILES: R2Bucket;
+  sciencehub_db?: D1Database;
+  sciencehub_files?: R2Bucket;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  /** Google Calendar 連携用リフレッシュトークン（calendar スコープ） */
+  GOOGLE_CALENDAR_REFRESH_TOKEN?: string;
+  /** 全グループ共通カレンダー ID（「自然科学部」） */
+  GOOGLE_CALENDAR_ALL_GROUPS_ID?: string;
+  /** @deprecated GOOGLE_CALENDAR_ALL_GROUPS_ID を使用 */
+  HUB_ALL_GROUPS_CALENDAR_ID?: string;
+  MICROSOFT_CLIENT_ID?: string;
+  MICROSOFT_CLIENT_SECRET?: string;
+  MICROSOFT_TENANT_ID?: string;
+  OAUTH_REDIRECT_BASE?: string;
+  ADMIN_BASIC_USER?: string;
+  ADMIN_BASIC_PASSWORD?: string;
 }
 
 export interface RoleRow {
   slug: string;
   display_name: string;
   is_admin: number;
+  color?: string;
+  position?: number;
   created_at: number;
 }
 
@@ -32,10 +50,14 @@ export interface SessionUser {
   email: string;
   display_name: string;
   role_slug: string;
+  avatar_url: string | null;
+  roles: Array<{ slug: string; display_name: string; color: string; is_admin: boolean }>;
   is_admin: boolean;
 }
 
 export const SESSION_COOKIE = "sciencehub_session";
+export const OAUTH_STATE_COOKIE = "sciencehub_oauth_state";
+export const OAUTH_STATE_TTL_SEC = 600;
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 /** JSON エラーレスポンスを返す */
@@ -58,13 +80,35 @@ export function getSessionIdFromCookie(request: Request): string | null {
 }
 
 /** セッションクッキーをセットする */
-export function setSessionCookie(sessionId: string, maxAgeSec: number): string {
-  return `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}`;
+export function setSessionCookie(
+  sessionId: string,
+  maxAgeSec: number,
+  secure = false
+): string {
+  const secureFlag = secure ? "; Secure" : "";
+  return `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secureFlag}`;
 }
 
 /** セッションクッキーを削除する */
-export function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function clearSessionCookie(secure = false): string {
+  const secureFlag = secure ? "; Secure" : "";
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`;
+}
+
+/** OAuth state Cookie をセットする */
+export function setOAuthStateCookie(
+  value: string,
+  maxAgeSec: number,
+  secure = false
+): string {
+  const secureFlag = secure ? "; Secure" : "";
+  return `${OAUTH_STATE_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secureFlag}`;
+}
+
+/** OAuth state Cookie を削除する */
+export function clearOAuthStateCookie(secure = false): string {
+  const secureFlag = secure ? "; Secure" : "";
+  return `${OAUTH_STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`;
 }
 
 /** 現在時刻（ミリ秒） */

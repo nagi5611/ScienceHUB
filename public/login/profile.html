@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>プロフィール設定 | ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/login.css">
+</head>
+<body class="login-page-body">
+  <header class="site-header login-page-header">
+    <div class="header-inner login-header-inner">
+      <a href="/" class="site-title">Science<span>HUB</span></a>
+    </div>
+  </header>
+
+  <main class="login-page-main">
+    <div class="login-page-layout">
+      <section class="login-hero">
+        <div class="login-hero-accent" aria-hidden="true"></div>
+        <div class="login-hero-layers" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </div>
+        <div class="login-hero-inner">
+          <p class="login-hero-school">MMH Virtual</p>
+          <p class="login-hero-club">科学研究プラットフォーム</p>
+          <h2 class="login-hero-title">Science<span>HUB</span></h2>
+          <p class="login-hero-lead">
+            あと少しで登録完了です。ダッシュボードに表示する名前を決めてください。
+          </p>
+          <p class="login-hero-note" id="profile-provider-note">外部アカウントでサインアップ中です。</p>
+        </div>
+      </section>
+
+      <div class="login-page-form-col">
+        <div class="auth-page-wrap">
+          <div class="auth-card auth-profile-card">
+            <div id="profile-alert"></div>
+
+            <h1 class="auth-profile-title">表示名を設定</h1>
+            <p class="auth-profile-lead" id="profile-account-note">アカウント情報を読み込み中…</p>
+
+            <form id="profile-form" class="auth-form">
+              <div class="form-group">
+                <label for="profile-display-name">表示名</label>
+                <input type="text" id="profile-display-name" name="display_name" autocomplete="name" required maxlength="64" placeholder="ダッシュボードに表示される名前">
+              </div>
+              <p class="hint signup-hint">ゲストとして登録されます。管理者が後からロールを変更できます。</p>
+              <button type="submit" class="auth-submit-btn" id="profile-submit-btn">サインアップを完了</button>
+            </form>
+
+            <p class="auth-profile-footer">
+              <a href="/login/">別のアカウントでログイン</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/oauth-profile.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>画像編集アプリ — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/image-editor.css">
+</head>
+<body class="img-app">
+  <header class="img-app-header">
+    <a href="/" class="img-app-back">← ダッシュボード</a>
+    <h1 class="img-app-title">画像編集アプリ</h1>
+    <span class="img-app-badge">サンプル</span>
+  </header>
+
+  <main class="img-app-main" id="app-main" hidden>
+    <aside class="img-app-sidebar">
+      <label class="img-app-field">
+        <span>画像を選択</span>
+        <input type="file" id="file-input" accept="image/*">
+      </label>
+
+      <label class="img-app-field">
+        <span>明るさ <output id="brightness-value">100</output>%</span>
+        <input type="range" id="brightness" min="20" max="200" value="100">
+      </label>
+
+      <label class="img-app-check">
+        <input type="checkbox" id="grayscale">
+        <span>グレースケール</span>
+      </label>
+
+      <div class="img-app-actions">
+        <button type="button" class="img-app-btn" id="rotate-btn">90° 回転</button>
+        <button type="button" class="img-app-btn" id="reset-btn">リセット</button>
+        <button type="button" class="img-app-btn img-app-btn--primary" id="download-btn" disabled>ダウンロード</button>
+      </div>
+
+      <p class="img-app-hint">ブラウザ内で完結するサンプルエディタです。画像はサーバーに送信されません。</p>
+    </aside>
+
+    <section class="img-app-canvas-wrap" aria-label="プレビュー">
+      <canvas id="canvas"></canvas>
+      <p class="img-app-placeholder" id="placeholder">画像を選択してください</p>
+    </section>
+  </main>
+
+  <div class="img-app-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="img-app-btn img-app-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <script src="/apps/image-editor/app.js" type="module"></script>
+</body>
+</html>

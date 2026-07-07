@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理者ログイン — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body class="cf-admin-login">
+  <main class="cf-admin-login-wrap">
+    <div class="cf-admin-login-card">
+      <div class="cf-admin-login-brand">
+        <a href="/">ScienceHUB</a>
+        <span class="cf-badge">Admin</span>
+      </div>
+      <h1>管理者ログイン</h1>
+      <p class="cf-admin-login-lead">管理パネルにアクセスするには認証が必要です。</p>
+
+      <div id="admin-login-alert" class="cf-admin-login-alert" hidden></div>
+
+      <form id="admin-login-form" class="cf-admin-login-form">
+        <label class="cf-field">
+          <span>ユーザー名</span>
+          <input type="text" id="admin-username" name="username" autocomplete="username" required>
+        </label>
+        <label class="cf-field">
+          <span>パスワード</span>
+          <input type="password" id="admin-password" name="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit" class="cf-btn cf-btn-primary cf-admin-login-submit" id="admin-login-submit">
+          ログイン
+        </button>
+      </form>
+
+      <p class="cf-admin-login-footer">
+        <a href="/">サイトトップへ戻る</a>
+      </p>
+    </div>
+  </main>
+  <script src="/js/admin-login.js" type="module"></script>
+</body>
+</html>

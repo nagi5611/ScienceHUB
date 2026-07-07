@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UVcreator — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/uv-creator.css">
+</head>
+<body class="uv-app">
+  <header class="uv-header">
+    <a href="/" class="uv-back">← ダッシュボード</a>
+    <h1 class="uv-title">UVcreator</h1>
+    <span class="uv-badge">撮影画像の補正・結合</span>
+  </header>
+
+  <main class="uv-main" id="app-main" hidden>
+    <nav class="uv-tabs" role="tablist" aria-label="機能切替">
+      <button type="button" class="uv-tab is-active" data-tab="tidy" role="tab" aria-selected="true">台形補正</button>
+      <button type="button" class="uv-tab" data-tab="combine" role="tab" aria-selected="false">画像結合</button>
+    </nav>
+
+    <!-- 台形補正（Algo Zoo Tidy 相当） -->
+    <section class="uv-panel is-active" id="panel-tidy" role="tabpanel" aria-labelledby="tab-tidy">
+      <p class="uv-hint" style="margin-top:0">撮影した台形画像の四隅を合わせて矩形に補正します。補正した画像は結合リストに追加し、別の画像を続けて補正できます。</p>
+
+      <article class="uv-card uv-queue-card" id="tidy-queue-card">
+        <div class="uv-queue-header">
+          <h2 class="uv-section-title uv-queue-title">結合リスト <span class="uv-queue-count" id="tidy-queue-count">0</span> 枚</h2>
+          <button type="button" class="uv-btn uv-btn--sm" id="tidy-goto-combine">結合タブを開く</button>
+        </div>
+        <ul class="uv-img-list is-empty uv-img-list--compact" id="tidy-queue-list" aria-label="結合待ち画像"></ul>
+        <p class="uv-hint uv-queue-hint">台形補正後に「結合リストへ追加」するとここに表示されます。並び替え・削除もできます。</p>
+      </article>
+
+      <div class="uv-grid-2">
+        <article class="uv-card uv-tidy-drop-zone" id="tidy-drop-zone">
+          <h2 class="uv-section-title">元画像</h2>
+          <label class="uv-field">
+            <span>画像をアップロード（JPG / PNG）またはドラッグ＆ドロップ</span>
+            <input type="file" id="tidy-load" accept=".jpg,.jpeg,.png,image/jpeg,image/png">
+          </label>
+          <div class="uv-canvas-wrap" id="tidy-input-wrap">
+            <canvas id="tidy-input-canvas"></canvas>
+            <p class="uv-placeholder" id="tidy-input-placeholder">画像を選択するか、ここにドロップ</p>
+          </div>
+          <div class="uv-actions">
+            <button type="button" class="uv-btn" id="tidy-ccw">↶ 左回転</button>
+            <button type="button" class="uv-btn" id="tidy-cw">右回転 ↷</button>
+          </div>
+        </article>
+
+        <article class="uv-card">
+          <h2 class="uv-section-title">変換後の画像</h2>
+          <div class="uv-canvas-wrap">
+            <canvas id="tidy-output-canvas"></canvas>
+            <p class="uv-placeholder" id="tidy-output-placeholder">四隅のマーカーを調整するとプレビューが更新されます</p>
+          </div>
+          <div class="uv-filename-row">
+            <label class="uv-field" style="flex:1;margin:0">
+              <span>保存時のファイル名</span>
+              <input type="text" id="tidy-filename" placeholder="corrected_image">
+            </label>
+            <span class="uv-filename-suffix">.jpg</span>
+          </div>
+          <div class="uv-actions">
+            <button type="button" class="uv-btn uv-btn--primary" id="tidy-save" disabled>保存</button>
+            <button type="button" class="uv-btn" id="tidy-add-combine" disabled>結合リストへ追加</button>
+          </div>
+          <p class="uv-add-feedback" id="tidy-add-feedback" hidden role="status"></p>
+        </article>
+      </div>
+    </section>
+
+    <!-- 画像結合（フォトコンバイン相当） -->
+    <section class="uv-panel" id="panel-combine" role="tabpanel" aria-labelledby="tab-combine" hidden>
+      <p class="uv-hint" style="margin-top:0">複数画像をレイアウトパターンで結合します。ドラッグで並び替え、パディング・境界・背景色を設定できます。</p>
+
+      <article class="uv-card">
+        <h2 class="uv-section-title">入力</h2>
+        <div class="uv-combine-toolbar">
+          <button type="button" class="uv-btn uv-btn--primary" id="combine-add">画像追加</button>
+          <button type="button" class="uv-btn" id="combine-clear">全削除</button>
+          <input type="file" id="combine-file-input" accept="image/*" multiple hidden>
+        </div>
+        <ul class="uv-img-list is-empty" id="combine-img-list"></ul>
+        <p class="uv-hint">ドラッグ＆ドロップで画像を追加・並び替えできます。</p>
+      </article>
+
+      <article class="uv-card">
+        <h2 class="uv-section-title">出力設定</h2>
+        <div class="uv-settings-grid">
+          <label class="uv-field">
+            <span>レイアウト</span>
+            <select id="combine-pattern">
+              <option value="row">横一列</option>
+              <option value="col">縦一列</option>
+              <option value="grid">自動グリッド</option>
+              <option value="cols-2">2列</option>
+              <option value="cols-3">3列</option>
+              <option value="cols-4">4列</option>
+            </select>
+          </label>
+          <label class="uv-field">
+            <span>解像度</span>
+            <select id="combine-resolution">
+              <option value="original">オリジナル</option>
+              <option value="long-1200">長辺 1200px</option>
+              <option value="long-2000">長辺 2000px</option>
+            </select>
+          </label>
+          <label class="uv-field">
+            <span>パディング (px)</span>
+            <input type="number" id="combine-padding" min="0" max="200" value="0">
+          </label>
+          <label class="uv-field">
+            <span>境界 (px)</span>
+            <input type="number" id="combine-gap" min="0" max="100" value="0">
+          </label>
+          <label class="uv-field uv-bg-field">
+            <span>背景色 (RGBA)</span>
+            <div class="uv-rgba-controls">
+              <input type="color" id="combine-bg-picker" value="#ffffff" title="色">
+              <input type="range" id="combine-bg-alpha" min="0" max="100" value="100" title="不透明度">
+              <output id="combine-bg-alpha-value" for="combine-bg-alpha">100%</output>
+            </div>
+            <input type="text" id="combine-bg" class="uv-rgba-input" value="rgba(255, 255, 255, 1)" spellcheck="false" placeholder="rgba(255, 255, 255, 1)">
+          </label>
+        </div>
+      </article>
+
+      <article class="uv-card">
+        <h2 class="uv-section-title">プレビュー・保存</h2>
+        <div class="uv-canvas-wrap uv-preview-wrap" id="combine-preview-wrap">
+          <canvas id="combine-preview-canvas"></canvas>
+          <p class="uv-placeholder" id="combine-preview-placeholder">画像を追加するとプレビューが表示されます</p>
+        </div>
+        <p class="uv-preview-meta" id="combine-preview-meta"></p>
+        <div class="uv-filename-row">
+          <label class="uv-field" style="flex:1;margin:0">
+            <span>保存時のファイル名</span>
+            <input type="text" id="combine-filename" placeholder="combined_image">
+          </label>
+          <span class="uv-filename-suffix">.png</span>
+        </div>
+        <div class="uv-actions">
+          <button type="button" class="uv-btn uv-btn--primary" id="combine-save" disabled>保存</button>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <div class="uv-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="uv-btn uv-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <script src="/apps/uvcreator/lib/glfx.js"></script>
+  <script src="/apps/uvcreator/app.js" type="module"></script>
+</body>
+</html>

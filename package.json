@@ -14,7 +14,8 @@
     "db:migrate:local": "wrangler d1 migrations apply sciencehub-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply sciencehub-db --remote",
     "r2:create": "wrangler r2 bucket create sciencehub-files",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "admin:set-password": "node scripts/set-remote-admin-password.mjs admin"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250701.0",

@@ -1,4 +1,4 @@
-const ITERATIONS = 600000;
+const ITERATIONS = 10000;
 const password = process.argv[2] ?? "mmh@2048@5431";
 const salt = crypto.getRandomValues(new Uint8Array(16));
 const enc = new TextEncoder();

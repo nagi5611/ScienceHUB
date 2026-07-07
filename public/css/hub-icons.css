@@ -1,0 +1,33 @@
+/* ScienceHUB — 共通ストロークアイコン */
+
+.hub-icon {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.hub-icon--sm {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.hub-icon--md {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.hub-icon--lg {
+  width: 2rem;
+  height: 2rem;
+}
+
+.cf-count-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.cf-count-with-icon .hub-icon {
+  opacity: 0.7;
+}
