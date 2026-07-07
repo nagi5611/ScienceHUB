@@ -296,8 +296,15 @@
           <input type="text" name="slug" pattern="[a-z0-9_-]*" placeholder="空欄で自動生成">
         </label>
         <label class="cf-field">
+          <span>重み</span>
+          <input type="number" name="weight" value="1" step="1" required>
+        </label>
+        <label class="cf-field">
           <span>色</span>
-          <input type="color" name="color" value="#F38020">
+          <div class="cf-color-field" data-color-field data-default="#F38020">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" name="color" class="cf-color-hex" value="#F38020" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
         <label class="cf-field cf-field-checkbox cf-field-full">
           <input type="checkbox" name="is_admin" id="create-role-admin">
@@ -326,8 +333,15 @@
           <input type="text" name="display_name" id="edit-role-name" required>
         </label>
         <label class="cf-field">
+          <span>重み</span>
+          <input type="number" id="edit-role-weight" value="1" step="1" required>
+        </label>
+        <label class="cf-field">
           <span>色</span>
-          <input type="color" name="color" id="edit-role-color">
+          <div class="cf-color-field" data-color-field data-default="#F38020">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" name="color" id="edit-role-color" class="cf-color-hex" value="#F38020" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
         <label class="cf-field cf-field-checkbox cf-field-full">
           <input type="checkbox" name="is_admin" id="edit-role-admin">
@@ -363,7 +377,10 @@
         </label>
         <label class="cf-field">
           <span>色</span>
-          <input type="color" name="color" value="#F38020">
+          <div class="cf-color-field" data-color-field data-default="#F38020">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" name="color" class="cf-color-hex" value="#F38020" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
         <label class="cf-field cf-field-full">
           <span>説明（任意）</span>
@@ -397,7 +414,10 @@
         </label>
         <label class="cf-field">
           <span>色</span>
-          <input type="color" id="edit-group-color">
+          <div class="cf-color-field" data-color-field data-default="#F38020">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" id="edit-group-color" class="cf-color-hex" value="#F38020" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
         <label class="cf-field cf-field-full">
           <span>説明（任意）</span>
@@ -429,13 +449,24 @@
           <span>ロール名</span>
           <input type="text" name="display_name" required placeholder="例: マネージャー">
         </label>
+        <div class="cf-role-presets" data-role-presets-form="create-group-role-form">
+          <span class="cf-role-presets-label">よく使うロール</span>
+          <div class="cf-role-presets-list"></div>
+        </div>
         <label class="cf-field">
           <span>識別子（slug）</span>
           <input type="text" name="slug" pattern="[a-z0-9_-]*" placeholder="空欄で自動生成">
         </label>
         <label class="cf-field">
+          <span>重み</span>
+          <input type="number" name="weight" value="1" step="1" required>
+        </label>
+        <label class="cf-field">
           <span>色</span>
-          <input type="color" name="color" value="#2C7CB0">
+          <div class="cf-color-field" data-color-field data-default="#2C7CB0">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" name="color" class="cf-color-hex" value="#2C7CB0" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
       </div>
       <p id="create-group-role-error" class="cf-form-error" hidden></p>
@@ -460,9 +491,20 @@
           <span>ロール名</span>
           <input type="text" id="edit-group-role-name" required>
         </label>
-        <label class="cf-field">
+        <div class="cf-role-presets" data-role-presets-form="edit-group-role-form">
+          <span class="cf-role-presets-label">よく使うロール</span>
+          <div class="cf-role-presets-list"></div>
+        </div>
+        <label class="cf-field cf-field-full">
+          <span>重み</span>
+          <input type="number" id="edit-group-role-weight" value="1" step="1" required>
+        </label>
+        <label class="cf-field cf-field-full">
           <span>色</span>
-          <input type="color" id="edit-group-role-color">
+          <div class="cf-color-field" data-color-field data-default="#2C7CB0">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" id="edit-group-role-color" class="cf-color-hex" value="#2C7CB0" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
       </div>
       <p id="edit-group-role-error" class="cf-form-error" hidden></p>
@@ -523,7 +565,7 @@
   </dialog>
 
   <!-- アプリ作成 -->
-  <dialog class="cf-dialog" id="create-app-dialog">
+  <dialog class="cf-dialog cf-dialog-wide" id="create-app-dialog">
     <form class="cf-dialog-inner" id="create-app-form">
       <header class="cf-dialog-header">
         <h2>アプリを作成</h2>
@@ -552,7 +594,10 @@
         </label>
         <label class="cf-field">
           <span>色</span>
-          <input type="color" name="color" value="#F38020">
+          <div class="cf-color-field" data-color-field data-default="#F38020">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" name="color" class="cf-color-hex" value="#F38020" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
       </div>
       <p id="create-app-error" class="cf-form-error" hidden></p>
@@ -564,7 +609,7 @@
   </dialog>
 
   <!-- アプリ編集 -->
-  <dialog class="cf-dialog" id="edit-app-dialog">
+  <dialog class="cf-dialog cf-dialog-wide" id="edit-app-dialog">
     <form class="cf-dialog-inner" id="edit-app-form">
       <input type="hidden" id="edit-app-id">
       <header class="cf-dialog-header">
@@ -594,7 +639,10 @@
         </label>
         <label class="cf-field">
           <span>色</span>
-          <input type="color" id="edit-app-color">
+          <div class="cf-color-field" data-color-field data-default="#F38020">
+            <span class="cf-color-swatch" aria-hidden="true"></span>
+            <input type="text" id="edit-app-color" class="cf-color-hex" value="#F38020" placeholder="#RRGGBB" spellcheck="false" autocomplete="off" maxlength="7">
+          </div>
         </label>
       </div>
       <p id="edit-app-error" class="cf-form-error" hidden></p>
@@ -609,7 +657,7 @@
   </dialog>
 
   <!-- アプリアクセス設定 -->
-  <dialog class="cf-dialog cf-dialog-wide" id="app-access-dialog">
+  <dialog class="cf-dialog cf-dialog-xl" id="app-access-dialog">
     <form class="cf-dialog-inner" id="app-access-form">
       <input type="hidden" id="app-access-app-id">
       <header class="cf-dialog-header">

@@ -7,7 +7,8 @@ import { getDb } from "./db";
 import type { Env, UserRow } from "./types";
 import { jsonError, now } from "./types";
 import { userIconPublicUrl } from "./user-icons";
-import { validateDisplayName } from "./users";
+import { validateDisplayName, validatePassword } from "./users";
+import { hashPassword, verifyPassword } from "./password";
 
 export function validateEmail(email: string): string | null {
   const value = email.trim();
@@ -26,6 +27,61 @@ export function validateEmail(email: string): string | null {
 export interface ProfileUpdateInput {
   display_name?: string;
   email?: string;
+}
+
+export interface PasswordChangeInput {
+  current_password: string;
+  new_password: string;
+}
+
+/** ログインパスワードを変更する */
+export async function changeUserPassword(
+  env: Env,
+  userId: string,
+  input: PasswordChangeInput
+): Promise<{ ok: true } | Response> {
+  const db = getDb(env);
+  const user = await db
+    .prepare("SELECT password_hash FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ password_hash: string }>();
+
+  if (!user) {
+    return jsonError("ユーザーが見つかりません", 404);
+  }
+
+  if (!user.password_hash) {
+    return jsonError("パスワードが設定されていないアカウントです", 400);
+  }
+
+  const currentPassword = input.current_password ?? "";
+  const newPassword = input.new_password ?? "";
+
+  if (!currentPassword) {
+    return jsonError("現在のパスワードを入力してください", 400);
+  }
+
+  const valid = await verifyPassword(currentPassword, user.password_hash);
+  if (!valid) {
+    return jsonError("現在のパスワードが正しくありません", 401);
+  }
+
+  const passwordError = validatePassword(newPassword);
+  if (passwordError) {
+    return jsonError(passwordError, 400);
+  }
+
+  if (currentPassword === newPassword) {
+    return jsonError("新しいパスワードは現在のパスワードと異なる必要があります", 400);
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await db
+    .prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?")
+    .bind(passwordHash, now(), userId)
+    .run();
+
+  return { ok: true };
 }
 
 /** プロフィールを更新する */

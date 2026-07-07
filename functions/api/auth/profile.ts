@@ -45,21 +45,24 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const db = getDb(context.env);
   const row = await db
     .prepare(
-      "SELECT avatar_url, updated_at FROM users WHERE id = ?"
+      "SELECT avatar_url, updated_at, password_hash FROM users WHERE id = ?"
     )
     .bind(session.id)
-    .first<{ avatar_url: string | null; updated_at: number }>();
+    .first<{ avatar_url: string | null; updated_at: number; password_hash: string }>();
 
   return Response.json({
-    user: await buildPublicUser(
-      context.env,
-      {
-        ...session,
-        avatar_url: row?.avatar_url ?? session.avatar_url,
-        updated_at: row?.updated_at ?? 0,
-      },
-      { roles: session.roles, is_admin: session.is_admin }
-    ),
+    user: {
+      ...(await buildPublicUser(
+        context.env,
+        {
+          ...session,
+          avatar_url: row?.avatar_url ?? session.avatar_url,
+          updated_at: row?.updated_at ?? 0,
+        },
+        { roles: session.roles, is_admin: session.is_admin }
+      )),
+      has_password: Boolean(row?.password_hash),
+    },
   });
 };
 

@@ -18,6 +18,9 @@ import {
   renderAnnouncements,
 } from "./admin-announcements.js";
 import { hydrateIconElements, iconHtml } from "./hub-icons.js";
+import { initColorFields, readColorValue, setColorInput } from "./color-input.js";
+import { bindDialogBackdropClose } from "./dialog.js";
+import { parseRoleWeightInput } from "./role-weight.js";
 
 let roles = [];
 let users = [];
@@ -186,7 +189,7 @@ function renderRoles(filter = "") {
           <div class="cf-role-shield">${iconHtml("shield", "hub-icon hub-icon--sm")}</div>
           <div>
             <div class="cf-role-row-name">${escapeHtml(role.display_name)}${role.is_admin ? ' <span class="cf-badge">Admin</span>' : ""}</div>
-            <div class="cf-role-row-slug">${escapeHtml(role.slug)}</div>
+            <div class="cf-role-row-slug">${escapeHtml(role.slug)} · 重み ${role.weight ?? 1}</div>
           </div>
         </div>
         <div class="cf-role-count cf-count-with-icon">${iconHtml("user", "hub-icon hub-icon--sm")} ${role.member_count ?? 0}</div>
@@ -316,7 +319,8 @@ function openEditRole(slug) {
 
   document.getElementById("edit-role-slug").value = role.slug;
   document.getElementById("edit-role-name").value = role.display_name;
-  document.getElementById("edit-role-color").value = role.color;
+  setColorInput(document.getElementById("edit-role-color"), role.color);
+  document.getElementById("edit-role-weight").value = role.weight ?? 1;
   document.getElementById("edit-role-admin").checked = role.is_admin;
   document.getElementById("edit-role-error").hidden = true;
   document.getElementById("edit-role-dialog")?.showModal();
@@ -455,18 +459,34 @@ function bindEvents() {
     const errorEl = document.getElementById("create-role-error");
     const formData = new FormData(form);
 
+    const color = readColorValue(form.querySelector('[name="color"]'));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+    const weight = parseRoleWeightInput(formData.get("weight"));
+    if (weight === null) {
+      errorEl.textContent = "重みは整数で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+
     try {
       await api("/api/admin/roles", {
         method: "POST",
         body: JSON.stringify({
           display_name: String(formData.get("display_name") ?? "").trim(),
           slug: String(formData.get("slug") ?? "").trim(),
-          color: String(formData.get("color") ?? "#F38020"),
+          color,
+          weight,
           is_admin: formData.get("is_admin") === "on",
         }),
       });
       form.reset();
-      form.querySelector('[name="color"]').value = "#F38020";
+      setColorInput(form.querySelector('[name="color"]'), "#F38020");
+      const weightInput = form.querySelector('[name="weight"]');
+      if (weightInput) weightInput.value = "1";
       document.getElementById("create-role-dialog")?.close();
       await loadRoles();
     } catch (err) {
@@ -479,13 +499,26 @@ function bindEvents() {
     e.preventDefault();
     const errorEl = document.getElementById("edit-role-error");
     const slug = document.getElementById("edit-role-slug").value;
+    const color = readColorValue(document.getElementById("edit-role-color"));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+    const weight = parseRoleWeightInput(document.getElementById("edit-role-weight").value);
+    if (weight === null) {
+      errorEl.textContent = "重みは整数で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
 
     try {
       await api(`/api/admin/roles/${encodeURIComponent(slug)}`, {
         method: "PATCH",
         body: JSON.stringify({
           display_name: document.getElementById("edit-role-name").value.trim(),
-          color: document.getElementById("edit-role-color").value,
+          color,
+          weight,
           is_admin: document.getElementById("edit-role-admin").checked,
         }),
       });
@@ -525,6 +558,8 @@ function bindEvents() {
 
 async function init() {
   hydrateIconElements();
+  initColorFields();
+  bindDialogBackdropClose();
   const authed = await initAdminLabel();
   if (!authed) return;
 

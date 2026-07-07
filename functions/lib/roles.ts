@@ -11,6 +11,7 @@ export interface PublicRole {
   color: string;
   is_admin: boolean;
   position: number;
+  weight: number;
   member_count?: number;
 }
 
@@ -18,7 +19,7 @@ export interface PublicRole {
 export async function listRolesWithCounts(db: D1Database): Promise<PublicRole[]> {
   const result = await db
     .prepare(
-      `SELECT r.slug, r.display_name, r.color, r.is_admin, r.position, r.created_at,
+      `SELECT r.slug, r.display_name, r.color, r.is_admin, r.position, r.weight, r.created_at,
               COUNT(ur.user_id) AS member_count
        FROM roles r
        LEFT JOIN user_roles ur ON ur.role_slug = r.slug
@@ -38,6 +39,7 @@ export function toPublicRole(role: RoleRow & { member_count?: number }): PublicR
     color: role.color ?? "#F38020",
     is_admin: role.is_admin === 1,
     position: role.position ?? 0,
+    weight: role.weight ?? 1,
     member_count: role.member_count,
   };
 }
@@ -68,7 +70,7 @@ export async function getUserRoles(
 ): Promise<PublicRole[]> {
   const result = await db
     .prepare(
-      `SELECT r.slug, r.display_name, r.color, r.is_admin, r.position, r.created_at
+      `SELECT r.slug, r.display_name, r.color, r.is_admin, r.position, r.weight, r.created_at
        FROM user_roles ur
        JOIN roles r ON r.slug = ur.role_slug
        WHERE ur.user_id = ?

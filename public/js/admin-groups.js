@@ -4,6 +4,8 @@
 
 import { avatarHtml, bindAvatarFallback } from "./user-avatar.js";
 import { iconHtml } from "./hub-icons.js";
+import { readColorValue, setColorInput } from "./color-input.js";
+import { parseRoleWeightInput } from "./role-weight.js";
 
 let groups = [];
 let editingGroupMembershipUserId = null;
@@ -15,6 +17,49 @@ let groupEditState = {
   byRole: new Map(),
   usersById: new Map(),
 };
+
+/** グループロール作成時のよく使うプリセット */
+const GROUP_ROLE_PRESETS = [
+  { display_name: "先生", slug: "teacher", color: "#2C7CB0", weight: 10 },
+  { display_name: "生徒", slug: "student", color: "#059669", weight: 5 },
+  { display_name: "ゲスト", slug: "guest", color: "#6B7280", weight: 1 },
+];
+
+/** よく使うロールプリセットボタンを初期化 */
+function bindGroupRolePresets() {
+  document.querySelectorAll(".cf-role-presets[data-role-presets-form]").forEach((container) => {
+    const form = document.getElementById(container.dataset.rolePresetsForm);
+    if (!form || container.dataset.presetsBound === "1") return;
+    container.dataset.presetsBound = "1";
+
+    const list = container.querySelector(".cf-role-presets-list");
+    if (!list) return;
+
+    list.innerHTML = GROUP_ROLE_PRESETS.map(
+      (preset) =>
+        `<button type="button" class="cf-role-preset" style="--preset-color:${preset.color}" data-preset-display="${preset.display_name}" data-preset-slug="${preset.slug}" data-preset-color="${preset.color}" data-preset-weight="${preset.weight}">${preset.display_name}</button>`
+    ).join("");
+
+    list.addEventListener("click", (event) => {
+      const button = event.target.closest(".cf-role-preset");
+      if (!button) return;
+
+      const nameInput =
+        form.querySelector('[name="display_name"]') ?? form.querySelector("#edit-group-role-name");
+      const slugInput = form.querySelector('[name="slug"]');
+      const colorInput =
+        form.querySelector('[name="color"]') ?? form.querySelector("#edit-group-role-color");
+      const weightInput =
+        form.querySelector('[name="weight"]') ?? form.querySelector("#edit-group-role-weight");
+
+      if (nameInput) nameInput.value = button.dataset.presetDisplay ?? "";
+      if (slugInput) slugInput.value = button.dataset.presetSlug ?? "";
+      if (colorInput) setColorInput(colorInput, button.dataset.presetColor ?? "");
+      if (weightInput) weightInput.value = button.dataset.presetWeight ?? "1";
+      nameInput?.focus();
+    });
+  });
+}
 
 /** グループ一覧を返す */
 export function getGroups() {
@@ -92,7 +137,7 @@ export function renderGroups(filter = "", escapeHtml) {
               <div class="cf-group-role-info">
                 <span class="cf-group-role-dot"></span>
                 <span class="cf-group-role-name">${escapeHtml(role.display_name)}</span>
-                <span class="cf-group-role-slug">${escapeHtml(role.slug)}</span>
+                <span class="cf-group-role-slug">${escapeHtml(role.slug)} · 重み ${role.weight ?? 1}</span>
               </div>
               <span class="cf-group-role-count cf-count-with-icon">${iconHtml("user", "hub-icon hub-icon--sm")} ${role.member_count ?? 0}</span>
               <button type="button" class="cf-icon-btn" data-edit-group-role="${escapeHtml(group.id)}:${escapeHtml(role.id)}" title="編集">${iconHtml("edit", "hub-icon hub-icon--sm")}</button>
@@ -225,6 +270,13 @@ export function bindGroupEvents({
     const errorEl = document.getElementById("create-group-error");
     const formData = new FormData(form);
 
+    const color = readColorValue(form.querySelector('[name="color"]'));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+
     try {
       await api("/api/admin/groups", {
         method: "POST",
@@ -232,11 +284,11 @@ export function bindGroupEvents({
           display_name: String(formData.get("display_name") ?? "").trim(),
           slug: String(formData.get("slug") ?? "").trim(),
           description: String(formData.get("description") ?? "").trim(),
-          color: String(formData.get("color") ?? "#F38020"),
+          color,
         }),
       });
       form.reset();
-      form.querySelector('[name="color"]').value = "#F38020";
+      setColorInput(form.querySelector('[name="color"]'), "#F38020");
       document.getElementById("create-group-dialog")?.close();
       await loadGroups(api);
       renderGroups(document.getElementById("group-search")?.value ?? "", escapeHtml);
@@ -250,6 +302,12 @@ export function bindGroupEvents({
     e.preventDefault();
     const groupId = document.getElementById("edit-group-id").value;
     const errorEl = document.getElementById("edit-group-error");
+    const color = readColorValue(document.getElementById("edit-group-color"));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
 
     try {
       await api(`/api/admin/groups/${encodeURIComponent(groupId)}`, {
@@ -257,7 +315,7 @@ export function bindGroupEvents({
         body: JSON.stringify({
           display_name: document.getElementById("edit-group-name").value.trim(),
           slug: document.getElementById("edit-group-slug").value.trim(),
-          color: document.getElementById("edit-group-color").value,
+          color,
           description: document.getElementById("edit-group-description").value.trim() || null,
         }),
       });
@@ -296,17 +354,33 @@ export function bindGroupEvents({
     const errorEl = document.getElementById("create-group-role-error");
     const formData = new FormData(form);
 
+    const color = readColorValue(form.querySelector('[name="color"]'));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+    const weight = parseRoleWeightInput(formData.get("weight"));
+    if (weight === null) {
+      errorEl.textContent = "重みは整数で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+
     try {
       await api(`/api/admin/groups/${encodeURIComponent(groupId)}/roles`, {
         method: "POST",
         body: JSON.stringify({
           display_name: String(formData.get("display_name") ?? "").trim(),
           slug: String(formData.get("slug") ?? "").trim(),
-          color: String(formData.get("color") ?? "#2C7CB0"),
+          color,
+          weight,
         }),
       });
       form.reset();
-      form.querySelector('[name="color"]').value = "#2C7CB0";
+      setColorInput(form.querySelector('[name="color"]'), "#2C7CB0");
+      const weightInput = form.querySelector('[name="weight"]');
+      if (weightInput) weightInput.value = "1";
       document.getElementById("create-group-role-dialog")?.close();
       await loadGroups(api);
       renderGroups(document.getElementById("group-search")?.value ?? "", escapeHtml);
@@ -321,6 +395,18 @@ export function bindGroupEvents({
     const groupId = document.getElementById("edit-group-role-group-id").value;
     const roleId = document.getElementById("edit-group-role-id").value;
     const errorEl = document.getElementById("edit-group-role-error");
+    const color = readColorValue(document.getElementById("edit-group-role-color"));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+    const weight = parseRoleWeightInput(document.getElementById("edit-group-role-weight").value);
+    if (weight === null) {
+      errorEl.textContent = "重みは整数で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
 
     try {
       await api(
@@ -329,7 +415,8 @@ export function bindGroupEvents({
           method: "PATCH",
           body: JSON.stringify({
             display_name: document.getElementById("edit-group-role-name").value.trim(),
-            color: document.getElementById("edit-group-role-color").value,
+            color,
+            weight,
           }),
         }
       );
@@ -417,6 +504,7 @@ export function bindGroupEvents({
     document.getElementById("group-edit-members-dialog")?.close();
   });
 
+  bindGroupRolePresets();
   bindGroupEditDnD();
 }
 
@@ -427,7 +515,7 @@ function openGroupEditor(groupId, escapeHtml) {
   document.getElementById("edit-group-id").value = group.id;
   document.getElementById("edit-group-name").value = group.display_name;
   document.getElementById("edit-group-slug").value = group.slug;
-  document.getElementById("edit-group-color").value = group.color;
+  setColorInput(document.getElementById("edit-group-color"), group.color);
   document.getElementById("edit-group-description").value = group.description ?? "";
   document.getElementById("edit-group-error").hidden = true;
   document.getElementById("edit-group-dialog")?.showModal();
@@ -452,7 +540,8 @@ function openEditGroupRoleDialog(groupId, roleId, escapeHtml) {
   document.getElementById("edit-group-role-group-id").value = groupId;
   document.getElementById("edit-group-role-id").value = roleId;
   document.getElementById("edit-group-role-name").value = role.display_name;
-  document.getElementById("edit-group-role-color").value = role.color;
+  document.getElementById("edit-group-role-weight").value = role.weight ?? 1;
+  setColorInput(document.getElementById("edit-group-role-color"), role.color);
   document.getElementById("edit-group-role-error").hidden = true;
   document.getElementById("edit-group-role-dialog")?.showModal();
 }

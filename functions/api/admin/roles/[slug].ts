@@ -6,6 +6,7 @@ import type { Env } from "../../../lib/types";
 import { jsonError } from "../../../lib/types";
 import { getDb } from "../../../lib/db";
 import { toPublicRole } from "../../../lib/roles";
+import { parseRoleWeight } from "../../../lib/roleWeight";
 import type { RoleRow } from "../../../lib/types";
 
 interface UpdateRoleBody {
@@ -13,6 +14,7 @@ interface UpdateRoleBody {
   is_admin?: boolean;
   color?: string;
   position?: number;
+  weight?: number;
 }
 
 /** ロールを更新する */
@@ -70,6 +72,15 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
     values.push(body.position);
   }
 
+  if (body.weight !== undefined) {
+    const weight = parseRoleWeight(body.weight);
+    if (weight === null) {
+      return jsonError("重みは整数で指定してください", 400);
+    }
+    updates.push("weight = ?");
+    values.push(weight);
+  }
+
   if (updates.length === 0) {
     return jsonError("更新する項目がありません", 400);
   }
@@ -83,7 +94,7 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
 
   const role = await db
     .prepare(
-      "SELECT slug, display_name, is_admin, color, position, created_at FROM roles WHERE slug = ?"
+      "SELECT slug, display_name, is_admin, color, position, weight, created_at FROM roles WHERE slug = ?"
     )
     .bind(slug)
     .first<RoleRow>();

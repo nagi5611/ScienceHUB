@@ -23,7 +23,14 @@
         </span>
         <span class="hub-brand-text">ScienceHUB</span>
       </a>
-      <div class="hub-account-menu" id="account-menu">
+      <div class="hub-header-actions">
+        <a
+          href="/status/"
+          class="hub-header-status"
+          target="_blank"
+          rel="noopener noreferrer"
+        >ステータス</a>
+        <div class="hub-account-menu" id="account-menu">
         <button
           type="button"
           class="hub-account-toggle"
@@ -43,11 +50,15 @@
           <button type="button" class="hub-account-dropdown-item" id="account-menu-notify" role="menuitem">
             通知設定
           </button>
+          <button type="button" class="hub-account-dropdown-item" id="account-menu-password" role="menuitem" hidden>
+            パスワードを変更
+          </button>
           <hr class="hub-account-dropdown-divider">
           <button type="button" class="hub-account-dropdown-item hub-account-dropdown-item--danger" id="account-menu-logout" role="menuitem">
             ログアウト
           </button>
         </div>
+      </div>
       </div>
     </div>
   </header>
@@ -126,6 +137,7 @@
       </header>
       <div class="hub-profile-tabs" role="tablist">
         <button type="button" class="hub-profile-tab is-active" data-profile-tab="profile" role="tab" aria-selected="true">プロフィール</button>
+        <button type="button" class="hub-profile-tab" data-profile-tab="password" role="tab" aria-selected="false" id="profile-tab-password" hidden>パスワード</button>
         <button type="button" class="hub-profile-tab" data-profile-tab="notify" role="tab" aria-selected="false">通知設定</button>
       </div>
       <div class="hub-profile-modal-body">
@@ -164,6 +176,27 @@
 
             <div class="hub-profile-actions">
               <button type="submit" class="hub-profile-save" id="profile-save-btn">保存</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="hub-profile-panel" id="profile-panel-password" role="tabpanel">
+          <form id="password-form" class="hub-profile-form">
+            <p class="hub-profile-notify-desc">ログインに使うパスワードを変更します。</p>
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">現在のパスワード</span>
+              <input type="password" class="hub-profile-input" id="password-current" autocomplete="current-password" required>
+            </label>
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">新しいパスワード</span>
+              <input type="password" class="hub-profile-input" id="password-new" autocomplete="new-password" required minlength="8">
+            </label>
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">新しいパスワード（確認）</span>
+              <input type="password" class="hub-profile-input" id="password-confirm" autocomplete="new-password" required minlength="8">
+            </label>
+            <div class="hub-profile-actions">
+              <button type="submit" class="hub-profile-save" id="password-save-btn">変更する</button>
             </div>
           </form>
         </section>

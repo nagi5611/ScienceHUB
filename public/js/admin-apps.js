@@ -3,6 +3,11 @@
  */
 
 import { appIconHtml } from "./hub-icons.js";
+import { readColorValue, setColorInput } from "./color-input.js";
+import {
+  expandRoleIdsByWeight,
+  getPresetRoleIds,
+} from "./role-weight.js";
 
 let apps = [];
 
@@ -83,6 +88,13 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
     const errorEl = document.getElementById("create-app-error");
     const formData = new FormData(form);
 
+    const color = readColorValue(form.querySelector('[name="color"]'));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
+
     try {
       await api("/api/admin/apps", {
         method: "POST",
@@ -92,11 +104,11 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
           description: String(formData.get("description") ?? "").trim(),
           href: String(formData.get("href") ?? "").trim(),
           icon_emoji: String(formData.get("icon_emoji") ?? "").trim(),
-          color: String(formData.get("color") ?? "#F38020"),
+          color,
         }),
       });
       form.reset();
-      form.querySelector('[name="color"]').value = "#F38020";
+      setColorInput(form.querySelector('[name="color"]'), "#F38020");
       document.getElementById("create-app-dialog")?.close();
       await loadApps(api);
       renderApps(document.getElementById("app-search")?.value ?? "", escapeHtml);
@@ -110,6 +122,12 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
     e.preventDefault();
     const appId = document.getElementById("edit-app-id").value;
     const errorEl = document.getElementById("edit-app-error");
+    const color = readColorValue(document.getElementById("edit-app-color"));
+    if (!color) {
+      errorEl.textContent = "色は #RRGGBB 形式で入力してください";
+      errorEl.hidden = false;
+      return;
+    }
 
     try {
       await api(`/api/admin/apps/${encodeURIComponent(appId)}`, {
@@ -120,7 +138,7 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
           description: document.getElementById("edit-app-description").value.trim() || null,
           href: document.getElementById("edit-app-href").value.trim(),
           icon_emoji: document.getElementById("edit-app-icon").value.trim() || null,
-          color: document.getElementById("edit-app-color").value,
+          color,
         }),
       });
       document.getElementById("edit-app-dialog")?.close();
@@ -157,9 +175,10 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
     const rules = groups.map((group) => {
       const enabled = document.getElementById(`app-access-group-${group.id}`)?.checked ?? false;
       const roleIds = group.roles
-        .filter((role) =>
-          document.getElementById(`app-access-role-${group.id}-${role.id}`)?.checked
-        )
+        .filter((role) => {
+          const checkbox = document.getElementById(`app-access-role-${group.id}-${role.id}`);
+          return checkbox?.dataset.explicit === "1";
+        })
         .map((role) => role.id);
 
       return {
@@ -192,9 +211,46 @@ function openAppEditor(appId) {
   document.getElementById("edit-app-description").value = app.description ?? "";
   document.getElementById("edit-app-href").value = app.href;
   document.getElementById("edit-app-icon").value = app.icon_emoji ?? "";
-  document.getElementById("edit-app-color").value = app.color;
+  setColorInput(document.getElementById("edit-app-color"), app.color);
   document.getElementById("edit-app-error").hidden = true;
   document.getElementById("edit-app-dialog")?.showModal();
+}
+
+/** グループのアクセスチップ表示を重み展開に同期 */
+function syncGroupAccessChips(group) {
+  const roles = [...group.roles];
+  const explicitIds = roles
+    .filter((role) => {
+      const checkbox = document.getElementById(`app-access-role-${group.id}-${role.id}`);
+      return checkbox?.dataset.explicit === "1";
+    })
+    .map((role) => role.id);
+  const expanded = expandRoleIdsByWeight(explicitIds, roles);
+
+  for (const role of roles) {
+    const checkbox = document.getElementById(`app-access-role-${group.id}-${role.id}`);
+    if (!checkbox) continue;
+
+    const isExplicit = checkbox.dataset.explicit === "1";
+    const isImplied = expanded.has(role.id) && !isExplicit;
+    checkbox.checked = expanded.has(role.id);
+    checkbox.closest(".cf-app-access-chip")?.classList.toggle("is-implied", isImplied);
+  }
+}
+
+/** グループのアクセスをプリセットで初期選択 */
+function applyPresetGroupAccess(group) {
+  for (const role of group.roles) {
+    const checkbox = document.getElementById(`app-access-role-${group.id}-${role.id}`);
+    if (checkbox) delete checkbox.dataset.explicit;
+  }
+
+  for (const roleId of getPresetRoleIds(group.roles)) {
+    const checkbox = document.getElementById(`app-access-role-${group.id}-${roleId}`);
+    if (checkbox) checkbox.dataset.explicit = "1";
+  }
+
+  syncGroupAccessChips(group);
 }
 
 /** アクセス設定ダイアログを開く */
@@ -227,44 +283,102 @@ async function openAppAccessEditor(appId, groups, escapeHtml, api) {
       .map((group) => {
         const rule = ruleByGroup.get(group.id);
         const enabled = rule?.enabled ?? false;
-        const selectedRoles = new Set(rule?.group_role_ids ?? []);
+        const hadRule = Boolean(rule);
+        const explicitRoleIds = rule?.group_role_ids ?? [];
+        const sortedRoles = [...group.roles].sort(
+          (a, b) => (b.weight ?? 1) - (a.weight ?? 1) || a.display_name.localeCompare(b.display_name, "ja")
+        );
 
         const rolesHtml =
           group.roles.length === 0
             ? `<p class="cf-app-access-no-roles">グループロール未作成（有効化後は全員アクセス可）</p>`
-            : `<div class="cf-app-access-roles">
-                <p class="cf-app-access-roles-hint">未選択 = グループ内の全ロールがアクセス可</p>
-                ${group.roles
+            : `<div class="cf-app-access-roles${enabled ? "" : " is-disabled"}">
+                <p class="cf-app-access-roles-hint">未選択 = 全ロール可。選択した重みより大きいロールも自動的にアクセス可（同じ重みは含まない）</p>
+                <div class="cf-app-access-chips" data-group-id="${escapeHtml(group.id)}">
+                ${sortedRoles
                   .map(
                     (role) => `
-                  <label class="cf-app-access-role-check">
-                    <input type="checkbox" id="app-access-role-${escapeHtml(group.id)}-${escapeHtml(role.id)}"${selectedRoles.has(role.id) ? " checked" : ""}${enabled ? "" : " disabled"}>
-                    <span>${escapeHtml(role.display_name)}</span>
+                  <label class="cf-app-access-chip">
+                    <input type="checkbox" id="app-access-role-${escapeHtml(group.id)}-${escapeHtml(role.id)}" data-role-weight="${role.weight ?? 1}"${enabled ? "" : " disabled"}>
+                    <span class="cf-app-access-chip-body" style="--role-color:${escapeHtml(role.color)}">
+                      <span class="cf-app-access-chip-dot" aria-hidden="true"></span>
+                      <span class="cf-app-access-chip-label">${escapeHtml(role.display_name)} <span class="cf-app-access-chip-weight">${role.weight ?? 1}</span></span>
+                    </span>
                   </label>`
                   )
                   .join("")}
+                </div>
               </div>`;
 
         return `
-        <section class="cf-app-access-group" style="--group-color:${escapeHtml(group.color)}">
-          <label class="cf-app-access-group-toggle">
-            <input type="checkbox" id="app-access-group-${escapeHtml(group.id)}" data-group-toggle="${escapeHtml(group.id)}"${enabled ? " checked" : ""}>
-            <span class="cf-app-access-group-name">${escapeHtml(group.display_name)}</span>
-          </label>
+        <section class="cf-app-access-group${enabled ? " is-enabled" : ""}" data-group-id="${escapeHtml(group.id)}" data-had-rule="${hadRule ? "1" : "0"}" style="--group-color:${escapeHtml(group.color)}">
+          <div class="cf-app-access-group-head">
+            <div class="cf-app-access-group-info">
+              <span class="cf-app-access-group-dot" aria-hidden="true"></span>
+              <span class="cf-app-access-group-name">${escapeHtml(group.display_name)}</span>
+            </div>
+            <label class="cf-toggle cf-app-access-toggle">
+              <input type="checkbox" id="app-access-group-${escapeHtml(group.id)}" data-group-toggle="${escapeHtml(group.id)}"${enabled ? " checked" : ""}>
+              <span class="cf-toggle-track" aria-hidden="true"></span>
+              <span class="cf-toggle-label">アクセス許可</span>
+            </label>
+          </div>
           ${rolesHtml}
         </section>`;
       })
       .join("");
 
+    for (const group of groups) {
+      const rule = ruleByGroup.get(group.id);
+      for (const roleId of rule?.group_role_ids ?? []) {
+        const checkbox = document.getElementById(`app-access-role-${group.id}-${roleId}`);
+        if (checkbox) checkbox.dataset.explicit = "1";
+      }
+      syncGroupAccessChips(group);
+    }
+
     list.querySelectorAll("[data-group-toggle]").forEach((checkbox) => {
       checkbox.addEventListener("change", () => {
         const groupId = checkbox.dataset.groupToggle;
+        const group = groups.find((item) => item.id === groupId);
+        const section = checkbox.closest(".cf-app-access-group");
+        section?.classList.toggle("is-enabled", checkbox.checked);
+        section
+          ?.querySelector(".cf-app-access-roles")
+          ?.classList.toggle("is-disabled", !checkbox.checked);
+
         list
           .querySelectorAll(`[id^="app-access-role-${groupId}-"]`)
           .forEach((roleBox) => {
             roleBox.disabled = !checkbox.checked;
-            if (!checkbox.checked) roleBox.checked = false;
+            if (!checkbox.checked) {
+              roleBox.checked = false;
+              delete roleBox.dataset.explicit;
+              roleBox.closest(".cf-app-access-chip")?.classList.remove("is-implied");
+            }
           });
+
+        if (checkbox.checked && group && section?.dataset.hadRule !== "1") {
+          applyPresetGroupAccess(group);
+        }
+      });
+    });
+
+    list.querySelectorAll(".cf-app-access-chips").forEach((chips) => {
+      const groupId = chips.dataset.groupId;
+      const group = groups.find((item) => item.id === groupId);
+      if (!group) return;
+
+      chips.addEventListener("change", (event) => {
+        const checkbox = event.target;
+        if (!(checkbox instanceof HTMLInputElement) || checkbox.type !== "checkbox") return;
+
+        if (checkbox.checked) {
+          checkbox.dataset.explicit = "1";
+        } else {
+          delete checkbox.dataset.explicit;
+        }
+        syncGroupAccessChips(group);
       });
     });
   }

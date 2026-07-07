@@ -658,6 +658,65 @@ body.cf-admin {
   grid-column: 1 / -1;
 }
 
+.cf-role-presets {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: -0.2rem;
+}
+
+.cf-role-presets-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--cf-muted);
+}
+
+.cf-role-presets-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cf-role-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--preset-color, var(--cf-orange)) 30%, var(--cf-border));
+  background: color-mix(in srgb, var(--preset-color, var(--cf-orange)) 8%, #fff);
+  color: var(--cf-text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.1s;
+}
+
+.cf-role-preset::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--preset-color, var(--cf-orange));
+  flex-shrink: 0;
+}
+
+.cf-role-preset:hover {
+  border-color: color-mix(in srgb, var(--preset-color, var(--cf-orange)) 50%, var(--cf-border));
+  background: color-mix(in srgb, var(--preset-color, var(--cf-orange)) 14%, #fff);
+}
+
+.cf-role-preset:active {
+  transform: scale(0.97);
+}
+
+.cf-role-preset:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--preset-color, var(--cf-orange)) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .cf-field span,
 .cf-field legend {
   font-size: 0.78rem;
@@ -674,6 +733,7 @@ body.cf-admin {
 .cf-field input[type="password"],
 .cf-field input[type="date"],
 .cf-field input[type="number"],
+.cf-field input.cf-color-hex,
 .cf-field textarea {
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--cf-border);
@@ -699,6 +759,44 @@ body.cf-admin {
   border: 1px solid var(--cf-border);
   border-radius: var(--cf-radius);
   cursor: pointer;
+}
+
+.cf-color-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cf-color-swatch {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius);
+  background: var(--cf-border);
+}
+
+.cf-color-swatch.is-invalid {
+  background: repeating-linear-gradient(
+    45deg,
+    #fecaca,
+    #fecaca 4px,
+    #fff 4px,
+    #fff 8px
+  );
+}
+
+.cf-color-hex {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cf-color-hex.is-invalid {
+  border-color: var(--cf-danger);
 }
 
 .cf-field-checkbox {
@@ -1116,6 +1214,10 @@ body.cf-admin-login {
 .cf-select-block {
   display: block;
   width: 100%;
+}
+
+.cf-dialog.cf-dialog-wide {
+  max-width: min(100% - 2rem, 34rem);
 }
 
 .cf-dialog-wide .cf-dialog-inner {
@@ -1540,21 +1642,129 @@ body.cf-admin-login {
   gap: 0.85rem;
   max-height: min(60vh, 26rem);
   overflow-y: auto;
+  padding: 0 1.25rem;
 }
 
 .cf-app-access-group {
   border: 1px solid var(--cf-border);
-  border-radius: var(--cf-radius);
-  padding: 0.75rem;
-  border-left: 3px solid var(--group-color, var(--cf-orange));
+  border-radius: var(--cf-radius-lg);
+  overflow: hidden;
+  background: #fff;
+  transition: opacity 0.15s, box-shadow 0.15s;
 }
 
-.cf-app-access-group-toggle {
+.cf-app-access-group.is-enabled {
+  box-shadow: var(--cf-shadow);
+}
+
+.cf-app-access-group:not(.is-enabled) {
+  opacity: 0.78;
+}
+
+.cf-app-access-group-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  background: color-mix(in srgb, var(--group-color, var(--cf-orange)) 10%, #fff);
+  border-bottom: 1px solid var(--cf-border);
+}
+
+.cf-app-access-group:not(.is-enabled) .cf-app-access-group-head {
+  border-bottom-color: transparent;
+}
+
+.cf-app-access-group-info {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.cf-app-access-group-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--group-color, var(--cf-orange));
+  flex-shrink: 0;
+}
+
+.cf-app-access-group-name {
   font-weight: 600;
-  margin-bottom: 0.5rem;
+  font-size: 0.92rem;
+}
+
+.cf-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.cf-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.cf-toggle-track {
+  position: relative;
+  width: 2.35rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: #c5cad3;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.cf-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.3rem - 4px);
+  height: calc(1.3rem - 4px);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+  transition: transform 0.15s ease;
+}
+
+.cf-toggle input:checked + .cf-toggle-track {
+  background: var(--group-color, var(--cf-orange));
+}
+
+.cf-toggle input:checked + .cf-toggle-track::after {
+  transform: translateX(1.05rem);
+}
+
+.cf-toggle input:focus-visible + .cf-toggle-track {
+  outline: 2px solid color-mix(in srgb, var(--cf-orange) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.cf-toggle-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cf-muted);
+}
+
+.cf-app-access-group.is-enabled .cf-toggle-label {
+  color: var(--cf-text);
+}
+
+.cf-app-access-roles {
+  padding: 0.75rem 1rem 1rem;
+}
+
+.cf-app-access-roles.is-disabled {
+  opacity: 0.42;
+  pointer-events: none;
 }
 
 .cf-app-access-roles-hint,
@@ -1564,17 +1774,86 @@ body.cf-admin-login {
   color: var(--cf-muted);
 }
 
-.cf-app-access-roles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  padding-left: 1.5rem;
+.cf-app-access-no-roles {
+  padding: 0.75rem 1rem 1rem;
 }
 
-.cf-app-access-role-check {
+.cf-app-access-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.cf-app-access-chip {
+  position: relative;
+  cursor: pointer;
+}
+
+.cf-app-access-chip input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.cf-app-access-chip-body {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.85rem;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--role-color, var(--cf-orange)) 28%, var(--cf-border));
+  background: #fff;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--cf-text);
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, color 0.12s;
+}
+
+.cf-app-access-chip:hover .cf-app-access-chip-body {
+  border-color: color-mix(in srgb, var(--role-color, var(--cf-orange)) 45%, var(--cf-border));
+  background: color-mix(in srgb, var(--role-color, var(--cf-orange)) 6%, #fff);
+}
+
+.cf-app-access-chip input:checked + .cf-app-access-chip-body {
+  border-color: color-mix(in srgb, var(--role-color, var(--cf-orange)) 55%, transparent);
+  background: color-mix(in srgb, var(--role-color, var(--cf-orange)) 16%, #fff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--role-color, var(--cf-orange)) 20%, transparent);
+}
+
+.cf-app-access-chip.is-implied .cf-app-access-chip-body {
+  border-style: dashed;
+  opacity: 0.88;
+}
+
+.cf-app-access-chip-weight {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--cf-muted);
+  margin-left: 0.15rem;
+}
+
+.cf-app-access-chip input:focus-visible + .cf-app-access-chip-body {
+  outline: 2px solid color-mix(in srgb, var(--role-color, var(--cf-orange)) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.cf-app-access-chip input:disabled + .cf-app-access-chip-body {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cf-app-access-chip-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--role-color, var(--cf-orange));
+  flex-shrink: 0;
+}
+
+.cf-app-access-chip-label {
+  line-height: 1.2;
 }
 

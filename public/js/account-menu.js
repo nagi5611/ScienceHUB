@@ -57,6 +57,9 @@ export function initAccountMenu() {
   const iconPreview = document.getElementById("profile-icon-preview");
   const iconInitials = document.getElementById("profile-icon-initials");
   const notifyForm = document.getElementById("notify-form");
+  const passwordForm = document.getElementById("password-form");
+  const passwordMenuItem = document.getElementById("account-menu-password");
+  const passwordTab = document.getElementById("profile-tab-password");
 
   let currentUser = null;
   let dropdownOpen = false;
@@ -87,6 +90,10 @@ export function initAccountMenu() {
       imgClass: "hub-account-avatar-img",
       initialsClass: "hub-account-avatar--initials",
     });
+
+    const canChangePassword = user.has_password === true;
+    if (passwordMenuItem) passwordMenuItem.hidden = !canChangePassword;
+    if (passwordTab) passwordTab.hidden = !canChangePassword;
   }
 
   /** プロフィールのアイコン表示を更新 */
@@ -141,23 +148,32 @@ export function initAccountMenu() {
     toggleBtn?.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
+  /** パスワード変更フォームをリセット */
+  function resetPasswordForm() {
+    passwordForm?.reset();
+  }
+
   /** プロフィールモーダル開閉 */
   function openProfileModal(tab = "profile") {
     setDropdownOpen(false);
     if (!currentUser) return;
     fillProfileForm(currentUser);
     fillNotifyForm();
+    resetPasswordForm();
     profileModal?.classList.add("is-open");
     profileModal?.setAttribute("aria-hidden", "false");
     document.body.classList.add("hub-modal-open");
 
+    const activeTab = tab === "password" && !currentUser.has_password ? "profile" : tab;
+
     document.querySelectorAll(".hub-profile-tab").forEach((btn) => {
-      const active = btn.dataset.profileTab === tab;
+      const active = btn.dataset.profileTab === activeTab;
       btn.classList.toggle("is-active", active);
       btn.setAttribute("aria-selected", active ? "true" : "false");
     });
-    document.getElementById("profile-panel-profile")?.classList.toggle("is-active", tab === "profile");
-    document.getElementById("profile-panel-notify")?.classList.toggle("is-active", tab === "notify");
+    document.getElementById("profile-panel-profile")?.classList.toggle("is-active", activeTab === "profile");
+    document.getElementById("profile-panel-password")?.classList.toggle("is-active", activeTab === "password");
+    document.getElementById("profile-panel-notify")?.classList.toggle("is-active", activeTab === "notify");
     profileAlert.innerHTML = "";
   }
 
@@ -258,6 +274,45 @@ export function initAccountMenu() {
     showProfileAlert("通知設定を保存しました", "success");
   }
 
+  /** パスワード変更 */
+  async function handlePasswordSubmit(event) {
+    event.preventDefault();
+
+    const currentPassword = document.getElementById("password-current")?.value ?? "";
+    const newPassword = document.getElementById("password-new")?.value ?? "";
+    const confirmPassword = document.getElementById("password-confirm")?.value ?? "";
+
+    if (newPassword !== confirmPassword) {
+      showProfileAlert("新しいパスワードと確認用パスワードが一致しません");
+      return;
+    }
+
+    const saveBtn = document.getElementById("password-save-btn");
+    saveBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showProfileAlert(data.error ?? "パスワードの変更に失敗しました");
+        return;
+      }
+      resetPasswordForm();
+      showProfileAlert("パスワードを変更しました", "success");
+    } catch {
+      showProfileAlert("通信エラーが発生しました");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
   toggleBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     setDropdownOpen(!dropdownOpen);
@@ -277,6 +332,10 @@ export function initAccountMenu() {
     openProfileModal("notify");
   });
 
+  document.getElementById("account-menu-password")?.addEventListener("click", () => {
+    openProfileModal("password");
+  });
+
   document.getElementById("account-menu-logout")?.addEventListener("click", handleLogout);
 
   profileClose?.addEventListener("click", closeProfileModal);
@@ -290,6 +349,7 @@ export function initAccountMenu() {
 
   profileForm?.addEventListener("submit", handleProfileSubmit);
   notifyForm?.addEventListener("submit", handleNotifySubmit);
+  passwordForm?.addEventListener("submit", handlePasswordSubmit);
   iconInput?.addEventListener("change", handleIconChange);
 
   document.addEventListener("keydown", (e) => {

@@ -29,6 +29,7 @@ export interface RoleRow {
   is_admin: number;
   color?: string;
   position?: number;
+  weight?: number;
   created_at: number;
 }
 

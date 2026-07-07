@@ -6,11 +6,13 @@ import type { Env } from "../../../../lib/types";
 import { jsonError } from "../../../../lib/types";
 import { getDb } from "../../../../lib/db";
 import { createGroupRole, getGroupById } from "../../../../lib/groups";
+import { parseRoleWeight } from "../../../../lib/roleWeight";
 
 interface CreateGroupRoleBody {
   display_name?: string;
   slug?: string;
   color?: string;
+  weight?: number;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -45,11 +47,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonError("グループロール名を入力してください", 400);
   }
 
+  const weight =
+    body.weight !== undefined ? parseRoleWeight(body.weight) : undefined;
+  if (body.weight !== undefined && weight === null) {
+    return jsonError("重みは整数で指定してください", 400);
+  }
+
   try {
     const role = await createGroupRole(getDb(context.env), groupId, {
       display_name: displayName,
       slug: body.slug,
       color: body.color,
+      weight,
     });
 
     if (!role) {

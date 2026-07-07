@@ -7,6 +7,7 @@ import { jsonError, now } from "../../lib/types";
 import { normalizeSlug } from "../../lib/auth";
 import { getDb } from "../../lib/db";
 import { listRolesWithCounts, toPublicRole } from "../../lib/roles";
+import { parseRoleWeight } from "../../lib/roleWeight";
 import type { RoleRow } from "../../lib/types";
 
 interface CreateRoleBody {
@@ -14,6 +15,7 @@ interface CreateRoleBody {
   display_name?: string;
   is_admin?: boolean;
   color?: string;
+  weight?: number;
 }
 
 const DEFAULT_COLORS = [
@@ -47,6 +49,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const slug = normalizeSlug(body.slug?.trim() || displayName);
   const isAdmin = body.is_admin === true ? 1 : 0;
   const color = body.color?.trim() || DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)];
+  const weight = body.weight !== undefined ? parseRoleWeight(body.weight) : 1;
+  if (weight === null) {
+    return jsonError("重みは整数で指定してください", 400);
+  }
 
   if (!displayName) {
     return jsonError("ロール名を入力してください", 400);
@@ -74,14 +80,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   await db
     .prepare(
-      "INSERT INTO roles (slug, display_name, is_admin, color, position, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO roles (slug, display_name, is_admin, color, position, weight, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
-    .bind(slug, displayName, isAdmin, color, position, createdAt)
+    .bind(slug, displayName, isAdmin, color, position, weight, createdAt)
     .run();
 
   const role = await db
     .prepare(
-      "SELECT slug, display_name, is_admin, color, position, created_at FROM roles WHERE slug = ?"
+      "SELECT slug, display_name, is_admin, color, position, weight, created_at FROM roles WHERE slug = ?"
     )
     .bind(slug)
     .first<RoleRow>();

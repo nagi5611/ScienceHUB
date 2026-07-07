@@ -6,6 +6,7 @@ import { createId, now } from "./types";
 import { normalizeSlug } from "./auth";
 import { getUserGroupMemberships, type UserGroupMembership } from "./groups";
 import { userHasAdminRole } from "./roles";
+import { expandRoleIdsByWeight } from "./roleWeight";
 
 const ADMIN_APPS_GROUP_ID = "admin-all-apps";
 
@@ -443,11 +444,37 @@ async function loadAppAccessMeta(
     (settings.results ?? []).map((row) => row.group_id)
   );
 
-  const roleRestrictions = new Map<string, Set<string>>();
+  const explicitByGroup = new Map<string, string[]>();
   for (const row of roles.results ?? []) {
-    const set = roleRestrictions.get(row.group_id) ?? new Set<string>();
-    set.add(row.group_role_id);
-    roleRestrictions.set(row.group_id, set);
+    const list = explicitByGroup.get(row.group_id) ?? [];
+    list.push(row.group_role_id);
+    explicitByGroup.set(row.group_id, list);
+  }
+
+  const groupIds = [...new Set([...enabledGroupIds, ...explicitByGroup.keys()])];
+  const groupRolesByGroup = new Map<string, Array<{ id: string; weight: number }>>();
+
+  if (groupIds.length > 0) {
+    const placeholders = groupIds.map(() => "?").join(", ");
+    const weightRows = await db
+      .prepare(
+        `SELECT id, group_id, weight FROM group_roles WHERE group_id IN (${placeholders})`
+      )
+      .bind(...groupIds)
+      .all<{ id: string; group_id: string; weight: number }>();
+
+    for (const row of weightRows.results ?? []) {
+      const list = groupRolesByGroup.get(row.group_id) ?? [];
+      list.push({ id: row.id, weight: row.weight ?? 1 });
+      groupRolesByGroup.set(row.group_id, list);
+    }
+  }
+
+  const roleRestrictions = new Map<string, Set<string>>();
+  for (const [groupId, explicitIds] of explicitByGroup) {
+    if (explicitIds.length === 0) continue;
+    const groupRoles = groupRolesByGroup.get(groupId) ?? [];
+    roleRestrictions.set(groupId, expandRoleIdsByWeight(explicitIds, groupRoles));
   }
 
   return { enabledGroupIds, roleRestrictions };

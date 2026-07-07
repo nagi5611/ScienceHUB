@@ -6,11 +6,13 @@ import type { Env } from "../../../../../lib/types";
 import { jsonError } from "../../../../../lib/types";
 import { getDb } from "../../../../../lib/db";
 import { deleteGroupRole, updateGroupRole } from "../../../../../lib/groups";
+import { parseRoleWeight } from "../../../../../lib/roleWeight";
 
 interface UpdateGroupRoleBody {
   display_name?: string;
   color?: string;
   position?: number;
+  weight?: number;
 }
 
 export const onRequestPatch: PagesFunction<Env> = async (context) => {
@@ -26,6 +28,14 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
     body = await context.request.json<UpdateGroupRoleBody>();
   } catch {
     return jsonError("リクエスト形式が不正です", 400);
+  }
+
+  if (body.weight !== undefined) {
+    const weight = parseRoleWeight(body.weight);
+    if (weight === null) {
+      return jsonError("重みは整数で指定してください", 400);
+    }
+    body = { ...body, weight };
   }
 
   try {

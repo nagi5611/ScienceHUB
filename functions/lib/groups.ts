@@ -23,6 +23,7 @@ export interface GroupRoleRow {
   display_name: string;
   color: string;
   position: number;
+  weight: number;
   created_at: number;
 }
 
@@ -32,6 +33,7 @@ export interface PublicGroupRole {
   display_name: string;
   color: string;
   position: number;
+  weight: number;
   member_count?: number;
 }
 
@@ -74,6 +76,16 @@ const DEFAULT_COLORS = [
   "#D97706",
 ];
 
+const SLUG_WEIGHT_DEFAULTS: Record<string, number> = {
+  teacher: 10,
+  student: 5,
+  guest: 1,
+};
+
+function defaultWeightForSlug(slug: string): number {
+  return SLUG_WEIGHT_DEFAULTS[slug] ?? 1;
+}
+
 function toPublicGroupRole(
   role: GroupRoleRow & { member_count?: number }
 ): PublicGroupRole {
@@ -83,6 +95,7 @@ function toPublicGroupRole(
     display_name: role.display_name,
     color: role.color ?? "#2C7CB0",
     position: role.position ?? 0,
+    weight: role.weight ?? 1,
     member_count: role.member_count,
   };
 }
@@ -107,12 +120,12 @@ export async function listGroupsWithDetails(db: D1Database): Promise<PublicGroup
 
   const rolesResult = await db
     .prepare(
-      `SELECT gr.id, gr.group_id, gr.slug, gr.display_name, gr.color, gr.position, gr.created_at,
+      `SELECT gr.id, gr.group_id, gr.slug, gr.display_name, gr.color, gr.position, gr.weight, gr.created_at,
               COUNT(ugm.user_id) AS member_count
        FROM group_roles gr
        LEFT JOIN user_group_memberships ugm ON ugm.group_role_id = gr.id
        GROUP BY gr.id
-       ORDER BY gr.position ASC, gr.display_name ASC`
+       ORDER BY gr.weight DESC, gr.position ASC, gr.display_name ASC`
     )
     .all<GroupRoleRow & { member_count: number }>();
 
@@ -272,7 +285,7 @@ export async function deleteGroup(db: D1Database, groupId: string): Promise<void
 export async function createGroupRole(
   db: D1Database,
   groupId: string,
-  input: { display_name: string; slug?: string; color?: string }
+  input: { display_name: string; slug?: string; color?: string; weight?: number }
 ): Promise<PublicGroupRole | null> {
   const group = await db
     .prepare("SELECT id FROM hub_groups WHERE id = ?")
@@ -292,6 +305,11 @@ export async function createGroupRole(
   const color =
     input.color?.trim() ||
     DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)];
+  const weight =
+    input.weight !== undefined ? input.weight : defaultWeightForSlug(slug);
+  if (!Number.isInteger(weight)) {
+    throw new Error("重みは整数で指定してください");
+  }
 
   const dup = await db
     .prepare("SELECT id FROM group_roles WHERE group_id = ? AND slug = ?")
@@ -315,15 +333,15 @@ export async function createGroupRole(
 
   await db
     .prepare(
-      `INSERT INTO group_roles (id, group_id, slug, display_name, color, position, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO group_roles (id, group_id, slug, display_name, color, position, weight, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, groupId, slug, displayName, color, position, timestamp)
+    .bind(id, groupId, slug, displayName, color, position, weight, timestamp)
     .run();
 
   const role = await db
     .prepare(
-      "SELECT id, group_id, slug, display_name, color, position, created_at FROM group_roles WHERE id = ?"
+      "SELECT id, group_id, slug, display_name, color, position, weight, created_at FROM group_roles WHERE id = ?"
     )
     .bind(id)
     .first<GroupRoleRow>();
@@ -336,7 +354,7 @@ export async function updateGroupRole(
   db: D1Database,
   groupId: string,
   roleId: string,
-  input: { display_name?: string; color?: string; position?: number }
+  input: { display_name?: string; color?: string; position?: number; weight?: number }
 ): Promise<PublicGroupRole | null> {
   const existing = await db
     .prepare("SELECT id FROM group_roles WHERE id = ? AND group_id = ?")
@@ -371,10 +389,18 @@ export async function updateGroupRole(
     values.push(input.position);
   }
 
+  if (input.weight !== undefined) {
+    if (!Number.isInteger(input.weight)) {
+      throw new Error("重みは整数で指定してください");
+    }
+    updates.push("weight = ?");
+    values.push(input.weight);
+  }
+
   if (updates.length === 0) {
     const role = await db
       .prepare(
-        "SELECT id, group_id, slug, display_name, color, position, created_at FROM group_roles WHERE id = ?"
+        "SELECT id, group_id, slug, display_name, color, position, weight, created_at FROM group_roles WHERE id = ?"
       )
       .bind(roleId)
       .first<GroupRoleRow>();
@@ -390,7 +416,7 @@ export async function updateGroupRole(
 
   const role = await db
     .prepare(
-      "SELECT id, group_id, slug, display_name, color, position, created_at FROM group_roles WHERE id = ?"
+      "SELECT id, group_id, slug, display_name, color, position, weight, created_at FROM group_roles WHERE id = ?"
     )
     .bind(roleId)
     .first<GroupRoleRow>();
