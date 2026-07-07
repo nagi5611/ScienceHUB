@@ -6,7 +6,7 @@
 export const GROUP_ROLE_WEIGHT_PRESETS = {
   teacher: 10,
   student: 5,
-  guest: 1,
+  guest: 0,
 };
 
 /** フォーム入力から重みを取得 */

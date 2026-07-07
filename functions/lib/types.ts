@@ -9,6 +9,9 @@ export interface Env {
   sciencehub_files?: R2Bucket;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** Google カレンダー連携用 OAuth クライアント（ログイン用とは別） */
+  GOOGLE_CALENDAR_CLIENT_ID?: string;
+  GOOGLE_CALENDAR_CLIENT_SECRET?: string;
   /** Google Calendar 連携用リフレッシュトークン（calendar スコープ） */
   GOOGLE_CALENDAR_REFRESH_TOKEN?: string;
   /** 全グループ共通カレンダー ID（「自然科学部」） */
@@ -21,6 +24,17 @@ export interface Env {
   OAUTH_REDIRECT_BASE?: string;
   ADMIN_BASIC_USER?: string;
   ADMIN_BASIC_PASSWORD?: string;
+  /** 3D印刷 Google Calendar（Service Account） */
+  GOOGLE_3DPRINT_CALENDAR_ID?: string;
+  GOOGLE_3DPRINT_SERVICE_ACCOUNT_EMAIL?: string;
+  GOOGLE_3DPRINT_PRIVATE_KEY?: string;
+  /** 3D印刷 Discord 通知 */
+  DISCORD_WEBHOOK_URL?: string;
+  /** R2 S3 API（presigned URL 用・Cloudflare ダッシュボードで発行） */
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  R2_ACCOUNT_ID?: string;
+  R2_BUCKET_NAME?: string;
 }
 
 export interface RoleRow {
@@ -41,6 +55,9 @@ export interface UserRow {
   role_slug: string;
   password_hash: string;
   avatar_url: string | null;
+  homeroom: string | null;
+  student_number: number | null;
+  student_name: string | null;
   created_at: number;
   updated_at: number;
 }

@@ -14,6 +14,7 @@ import { getUserRoles, userHasAdminRole } from "./roles";
 import type { PublicRole } from "./roles";
 import { resolveUserAvatarUrl } from "./user-icons";
 import { getUserGroupMemberships, type UserGroupMembership } from "./groups";
+import { getUserOAuthProviders } from "./oauth-users";
 
 /** ログインセッションを作成する */
 export async function createSession(
@@ -151,6 +152,7 @@ export async function toPublicUser(
   const groups: UserGroupMembership[] = env
     ? await getUserGroupMemberships(db, user.id)
     : [];
+  const oauth_providers = await getUserOAuthProviders(db, user.id);
 
   return {
     id: user.id,
@@ -161,6 +163,7 @@ export async function toPublicUser(
     avatar_url,
     groups,
     roles: userRoles,
+    oauth_providers,
     created_at: user.created_at,
     updated_at: user.updated_at,
   };

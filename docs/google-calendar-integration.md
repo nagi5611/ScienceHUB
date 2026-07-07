@@ -42,11 +42,31 @@ ScienceHUB 予定作成
 
 > **注意:** ログイン用 OAuth（`openid email profile`）とは **別のスコープ** です。カレンダー連携用に **専用のリフレッシュトークン** を取得してください。
 
-### 2.3 OAuth クライアント
+### 2.3 OAuth クライアント（ログイン用とカレンダー用は別）
 
-既存の `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`（ログイン用）を流用可能です。
+Google Cloud Console で **2 つの Web アプリケーション クライアント** を用意します。
 
-**リダイレクト URI**（カレンダー連携用に別途追加する場合の例）:
+| 用途 | 例（コンソール上の名前） | 環境変数 |
+|------|-------------------------|----------|
+| **ログイン** | `ScienceHUB-OAuth` | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` |
+| **カレンダー連携** | `scienceHUBcalendar` | `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` |
+
+> クライアント ID/Secret は **用途ごとに別** です。Playground でリフレッシュトークンを取るときは **カレンダー用クライアント** の ID/Secret を使ってください。
+
+**ログイン用**の承認済みリダイレクト URI:
+
+```
+https://s.mmh-virtual.jp/api/auth/oauth/google/callback
+http://localhost:8788/api/auth/oauth/google/callback
+```
+
+**カレンダー用**（Playground でトークン取得する場合）の承認済みリダイレクト URI:
+
+```
+https://developers.google.com/oauthplayground
+```
+
+（将来、管理画面から OAuth 連携する場合の例）
 
 ```
 https://s.mmh-virtual.jp/api/admin/google-calendar/callback
@@ -91,10 +111,12 @@ Content-Type: application/json
 
 | 変数名 | 説明 |
 |--------|------|
-| `GOOGLE_CLIENT_ID` | 既存（OAuth クライアント ID） |
-| `GOOGLE_CLIENT_SECRET` | 既存 |
-| `GOOGLE_CALENDAR_REFRESH_TOKEN` | カレンダースコープ付きリフレッシュトークン |
-| `GOOGLE_CALENDAR_ALL_GROUPS_ID` | 全体カレンダー「自然科学部」のカレンダー ID |
+| `GOOGLE_CALENDAR_CLIENT_ID` | カレンダー用 OAuth クライアント ID（`scienceHUBcalendar` など） |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | カレンダー用 OAuth クライアント Secret |
+| `GOOGLE_CALENDAR_REFRESH_TOKEN` | カレンダースコープ付きリフレッシュトークン（上記クライアントで取得） |
+| `GOOGLE_CALENDAR_ALL_GROUPS_ID` | 全体カレンダー「自然科学部」のカレンダー ID（管理画面から DB 保存でも可） |
+
+ログイン用の `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` とは **別物** です。混同しないでください。
 
 ### 4.2 データベース
 
@@ -105,13 +127,75 @@ Content-Type: application/json
 | `hub_schedule_events.google_event_id_all` | 全体カレンダー側のイベント ID |
 | `hub_schedule_events.google_event_id_group` | グループカレンダー側のイベント ID |
 
-### 4.3 リフレッシュトークンの取得（初回のみ）
+### 4.3 リフレッシュトークンの取得（OAuth Playground・詳細手順）
 
-OAuth Playground または専用スクリプトで以下を実行:
+#### 事前準備（403 を防ぐ）
 
-1. スコープ: `https://www.googleapis.com/auth/calendar`
-2. `access_type=offline` と `prompt=consent` を指定（リフレッシュトークン取得のため）
-3. 認可後、トークンエンドポイントで `refresh_token` を取得
+OAuth 同意画面が **「テスト」** のとき、ログインする Google アカウントは **テストユーザーに登録されていないとブロック**されます。
+
+1. https://console.cloud.google.com/auth/audience を開く
+2. **対象ユーザー**（または「テストユーザー」）→ **ユーザーを追加**
+3. ログインに使うメールを追加（例: `harumacci94@gmail.com`）
+4. 部用共有アカウントを使う場合は、そのメールも追加
+
+> エラー `403: access_denied` / `審査プロセスを完了していません` は、ほぼこの「テストユーザー未登録」が原因です。  
+> ScienceHUB のコード不具合ではありません。
+
+#### OAuth クライアント側の設定
+
+1. https://console.cloud.google.com/apis/credentials
+2. **カレンダー用** OAuth クライアント（例: `scienceHUBcalendar`）を開く
+3. **承認済みのリダイレクト URI** に必ず追加:
+   ```
+   https://developers.google.com/oauthplayground
+   ```
+4. 保存
+
+#### Playground でトークン取得
+
+1. https://developers.google.com/oauthplayground を開く
+2. 右上 **⚙（設定）** をクリック
+3. **Use your own OAuth credentials** を **ON**
+4. **OAuth Client ID** / **OAuth Client secret** を入力（**カレンダー用** `scienceHUBcalendar` のもの）
+5. 設定ダイアログを閉じる
+6. 左側で **Input your own scopes** に以下を入力して **Add scope**:
+   ```
+   https://www.googleapis.com/auth/calendar
+   ```
+7. **Authorize APIs** をクリック
+8. **部用の Google アカウント**でログイン（テストユーザーに登録済みのもの）
+9. 「scienceHUBcalendar が Google アカウントへのアクセスをリクエストしています」→ **続行** → **許可**
+10. **Exchange authorization code for tokens** をクリック
+11. 右側の JSON に **`refresh_token`** があるのでコピーして保存
+
+```json
+{
+  "access_token": "ya29....",
+  "refresh_token": "1//0g....",   ← これを GOOGLE_CALENDAR_REFRESH_TOKEN に
+  "expires_in": 3599,
+  "token_type": "Bearer",
+  ...
+}
+```
+
+#### よくあるハマりどころ
+
+| 現象 | 対処 |
+|------|------|
+| `403 access_denied` | 同意画面のテストユーザーにログイン Gmail を追加 |
+| `redirect_uri_mismatch` | OAuth クライアントに Playground の URI を追加 |
+| `refresh_token` が出ない | Playground 設定で自分の Client ID を使う。再認可時は Google アカウント → セキュリティ → サードパーティアクセスから ScienceHUB-auth を削除してから `Authorize APIs` をやり直す |
+| ログイン用クライアントと混同 | Playground には **カレンダー用**（`GOOGLE_CALENDAR_CLIENT_ID`）の ID/Secret を入力。ログイン用（`ScienceHUB-OAuth`）ではない |
+
+#### curl で取得する場合（Playground が使えないとき）
+
+ブラウザで以下を開く（値を置き換え）:
+
+```
+https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=https://developers.google.com/oauthplayground&response_type=code&scope=https://www.googleapis.com/auth/calendar&access_type=offline&prompt=consent
+```
+
+表示された認可コードを Playground の Step 2 に貼るか、token エンドポイントへ POST:
 
 ```
 POST https://oauth2.googleapis.com/token
@@ -119,9 +203,9 @@ Content-Type: application/x-www-form-urlencoded
 
 client_id=...
 &client_secret=...
-&code=...
+&code=認可コード
 &grant_type=authorization_code
-&redirect_uri=...
+&redirect_uri=https://developers.google.com/oauthplayground
 ```
 
 ---
@@ -135,11 +219,11 @@ POST https://oauth2.googleapis.com/token
 
 grant_type=refresh_token
 &refresh_token={GOOGLE_CALENDAR_REFRESH_TOKEN}
-&client_id={GOOGLE_CLIENT_ID}
-&client_secret={GOOGLE_CLIENT_SECRET}
+&client_id={GOOGLE_CALENDAR_CLIENT_ID}
+&client_secret={GOOGLE_CALENDAR_CLIENT_SECRET}
 ```
 
-実装: `functions/lib/google-calendar.ts` → `fetchAccessToken()`
+実装: `functions/lib/google-calendar.ts` → `getGoogleCalendarAccessToken()`
 
 ### 5.2 イベント作成（予定追加時）
 
@@ -276,11 +360,13 @@ Google → ScienceHUB の取り込みには以下のいずれか:
 ## 7. 運用チェックリスト
 
 - [ ] Google Calendar API を有効化
-- [ ] カレンダースコープ付きリフレッシュトークンを取得
+- [ ] カレンダー用 OAuth クライアント（`scienceHUBcalendar` 等）を作成
+- [ ] `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` をシークレットに登録
+- [ ] カレンダースコープ付きリフレッシュトークンを取得（カレンダー用クライアントで）
 - [ ] `GOOGLE_CALENDAR_REFRESH_TOKEN` をシークレットに登録
 - [ ] 「自然科学部」カレンダーを作成し `GOOGLE_CALENDAR_ALL_GROUPS_ID` を設定
 - [ ] 各グループの `hub_groups.google_calendar_id` を設定（管理画面または SQL）
-- [ ] `npx wrangler d1 migrations apply sciencehub_db --remote` で `0010` を適用
+- [ ] `npx wrangler d1 migrations apply sciencehub-db --remote` で `0010` を適用
 - [ ] テスト予定を追加し、両カレンダーに反映されることを確認
 
 ### グループにカレンダー ID を設定する SQL 例

@@ -17,10 +17,19 @@ import {
   loadAnnouncements,
   renderAnnouncements,
 } from "./admin-announcements.js";
+import {
+  bindGoogleCalendarEvents,
+  loadGoogleCalendarSettings,
+} from "./admin-google-calendar.js";
 import { hydrateIconElements, iconHtml } from "./hub-icons.js";
 import { initColorFields, readColorValue, setColorInput } from "./color-input.js";
 import { bindDialogBackdropClose } from "./dialog.js";
 import { parseRoleWeightInput } from "./role-weight.js";
+import {
+  bindStorageEvents,
+  loadStorageRoots,
+  renderStorageRoots,
+} from "./admin-storage.js";
 
 let roles = [];
 let users = [];
@@ -61,6 +70,26 @@ function formatDate(ts) {
     month: "short",
     day: "numeric",
   });
+}
+
+/** OAuth ログイン表示ラベル */
+function oauthLoginLabel(provider) {
+  if (provider === "google") return "Google ログイン";
+  if (provider === "microsoft") return "Microsoft ログイン";
+  return `${provider} ログイン`;
+}
+
+/** メール列（OAuth ラベル付き） */
+function renderMemberEmail(user) {
+  const providers = user.oauth_providers ?? [];
+  const oauthHtml =
+    providers.length > 0
+      ? `<div class="cf-member-oauth">${providers
+          .map((p) => `<span>${escapeHtml(oauthLoginLabel(p))}</span>`)
+          .join("")}</div>`
+      : "";
+
+  return `<div class="cf-member-email">${escapeHtml(user.email)}</div>${oauthHtml}`;
 }
 
 /** 管理パネル初期表示 */
@@ -145,7 +174,7 @@ function renderMembers(filter = "") {
             </div>
           </div>
         </td>
-        <td>${escapeHtml(user.email)}</td>
+        <td>${renderMemberEmail(user)}</td>
         <td>${formatDate(user.created_at)}</td>
         <td class="cf-cell-roles">${renderMemberRoles(user)}</td>
         <td class="cf-cell-groups">${renderMemberGroups(user, escapeHtml)}</td>
@@ -329,7 +358,13 @@ function openEditRole(slug) {
 /** イベント登録 */
 function bindEvents() {
   document.querySelectorAll(".cf-nav-item").forEach((btn) => {
-    btn.addEventListener("click", () => switchView(btn.dataset.view));
+    btn.addEventListener("click", async () => {
+      switchView(btn.dataset.view);
+      if (btn.dataset.view === "storage") {
+        await loadStorageRoots(api);
+        renderStorageRoots(escapeHtml);
+      }
+    });
   });
 
   document.getElementById("member-search")?.addEventListener("input", (e) => {
@@ -571,6 +606,7 @@ async function init() {
     loadUsers,
     renderMembers,
     getUsers: () => users,
+    onGroupsChanged: () => loadGoogleCalendarSettings(api),
   });
   bindAppEvents({
     api,
@@ -578,9 +614,12 @@ async function init() {
     getGroups,
   });
   bindAnnouncementEvents({ api, escapeHtml });
+  bindGoogleCalendarEvents({ api });
+  bindStorageEvents({ api, escapeHtml });
   await loadRoles();
   await loadGroups(api);
   renderGroups("", escapeHtml);
+  await loadGoogleCalendarSettings(api);
   await loadApps(api);
   renderApps("", escapeHtml);
   await loadAnnouncements(api);

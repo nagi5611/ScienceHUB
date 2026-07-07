@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D印刷予約 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/apps/3dprint-reservation.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="/" class="site-title">ScienceHUB <span>3D印刷予約</span></a>
+      <div class="header-actions">
+        <button type="button" class="auth-header-btn auth-header-btn-muted" id="auth-dashboard-btn">ダッシュボード</button>
+        <div id="auth-user-menu" class="auth-user-menu">
+          <span class="auth-user-label" id="auth-user-label"></span>
+          <button type="button" class="auth-header-btn auth-header-btn-muted" id="auth-profile-btn">依頼者情報</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div id="page-toast" class="page-toast hidden"></div>
+
+    <h1 class="page-heading">3D印刷予約</h1>
+    <p class="page-subheading">カレンダーから印刷希望日をクリックして予約してください。タイトルをクリックすると詳細の確認・取り消しができます。</p>
+    <p class="contact-notice">予約の取り消しができない場合など：<br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
+
+    <section class="card" id="calendar-section">
+      <div id="retry-mode-banner" class="retry-mode-banner hidden">
+        <p>再予約モードです。新しい希望印刷日をカレンダーから選んでください。</p>
+        <button class="btn btn-secondary btn-sm" id="retry-mode-cancel" type="button">キャンセル</button>
+      </div>
+      <div class="calendar-sticky-header">
+        <div class="calendar-toolbar">
+          <div class="calendar-header calendar-header-desktop">
+            <button class="btn btn-secondary btn-sm" id="prev-month" type="button">← 前月</button>
+            <span class="calendar-month-label" id="calendar-month-label"></span>
+            <button class="btn btn-secondary btn-sm" id="next-month" type="button">翌月 →</button>
+          </div>
+
+          <div class="calendar-header-mobile">
+            <button class="calendar-nav-btn" id="prev-month-mobile" type="button" aria-label="前月">‹</button>
+            <button class="calendar-mobile-month" id="calendar-month-label-mobile" type="button">
+              <span id="calendar-month-label-mobile-text"></span>
+              <span class="calendar-mobile-month-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="calendar-mobile-actions">
+              <div class="calendar-today-group">
+                <span class="calendar-today-label">今日：</span>
+                <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="今月へ">
+                  <span class="calendar-today-icon" aria-hidden="true"></span>
+                  <span id="today-day-num"></span>
+                </button>
+              </div>
+              <button class="calendar-nav-btn" id="next-month-mobile" type="button" aria-label="翌月">›</button>
+            </div>
+          </div>
+
+          <div class="calendar-month-chips" id="calendar-month-chips" role="tablist" aria-label="月を選択"></div>
+        </div>
+
+        <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
+      </div>
+
+      <div class="calendar-grid-wrap">
+        <div class="calendar-grid" id="calendar-grid"></div>
+      </div>
+
+      <details class="calendar-mobile-hint">
+        <summary>予約のルール・凡例</summary>
+        <div class="calendar-legend">
+          <div class="legend-item"><span class="legend-dot shift-covered"></span> 対応可（緑）</div>
+          <div class="legend-item"><span class="legend-dot shift-empty"></span> 対応不可（赤）</div>
+        </div>
+        <p class="hint calendar-hint-text">当日・翌日は予約できません。対応不可の日は予約できません。スモールが入っている日はミディアム・ラージは選べません。予約名をタップすると詳細が開きます。</p>
+      </details>
+      <div class="calendar-legend calendar-legend-desktop">
+        <div class="legend-item"><span class="legend-dot shift-covered"></span> 対応可（緑枠）</div>
+        <div class="legend-item"><span class="legend-dot shift-empty"></span> 対応不可（赤枠・予約不可）</div>
+      </div>
+      <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">当日・翌日は予約できません。対応不可の日は予約できません。スモールが入っている日はミディアム・ラージは選べません。</p>
+    </section>
+
+    <section class="card" id="user-list-section">
+      <h2 class="section-heading">直近の予約一覧</h2>
+      <div id="user-list-mount">
+        <p class="hint">読み込み中...</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="form-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="form-modal-title">予約フォーム</h2>
+        <button class="modal-close" id="form-modal-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="form-alert"></div>
+        <form id="reservation-form">
+          <input type="hidden" id="desired_date" name="desired_date" />
+
+          <p class="selected-date-display" id="selected-date-display"></p>
+          <p class="hint hidden" id="retry-identity-hint">再予約のため、ホームルーム・出席番号・名前を再入力してください。</p>
+          <p class="hint hidden" id="logged-in-identity-note"></p>
+          <button class="btn btn-secondary btn-sm hidden" id="restore-draft-btn" type="button">前回の入力を反映</button>
+
+          <div id="requester-info-section">
+          <h3 class="form-section-title">依頼者情報</h3>
+          <div class="form-row">
+            <div class="form-group combobox-wrap">
+              <label for="homeroom">ホームルーム</label>
+              <input type="text" id="homeroom" name="homeroom" autocomplete="off" placeholder="例: 301" required />
+              <ul class="combobox-list hidden" id="homeroom-list"></ul>
+            </div>
+            <div class="form-group">
+              <label for="student_number">出席番号</label>
+              <input type="number" id="student_number" name="student_number" min="1" max="50" required />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="student_name">名前</label>
+            <input type="text" id="student_name" name="student_name" placeholder="松山太郎" required />
+            <p class="hint">名前・HR・出席番号は公開されません（取り消し時の本人確認に使用）</p>
+          </div>
+          </div>
+
+          <div class="form-group">
+            <label>目的</label>
+            <div class="radio-group">
+              <label><input type="radio" name="purpose" value="ss_s_tan" required /> SS・S探</label>
+              <label><input type="radio" name="purpose" value="club" /> 部活</label>
+              <label><input type="radio" name="purpose" value="other" /> その他</label>
+            </div>
+          </div>
+
+          <div class="form-group hidden" id="purpose-other-group">
+            <label for="purpose_other">その他の内容</label>
+            <input type="text" id="purpose_other" name="purpose_other" placeholder="目的を記述してください" />
+          </div>
+
+          <div class="form-group">
+            <label for="title">タイトル</label>
+            <input type="text" id="title" name="title" placeholder="歯車班_球場歯車" required maxlength="40" />
+            <p class="hint">カレンダーに表示される名前です（グレー表示）</p>
+          </div>
+
+          <div class="form-group">
+            <label for="summary">概要（任意）</label>
+            <textarea id="summary" name="summary" placeholder="印刷物の概要や用途を記入できます"></textarea>
+          </div>
+
+          <h3 class="form-section-title">印刷設定</h3>
+          <div class="form-group">
+            <label>印刷規模</label>
+            <div class="radio-group" id="print-scale-group">
+              <label id="scale-label-small"><input type="radio" name="print_scale" value="small" required /> スモール（1日2件まで・印刷時間上限2時間）</label>
+              <label id="scale-label-medium"><input type="radio" name="print_scale" value="medium" /> ミディアム（1日1件）</label>
+              <label id="scale-label-large"><input type="radio" name="print_scale" value="large" /> ラージ（1日1件）</label>
+            </div>
+            <div class="warning hidden" id="small-warning">
+              スモール印刷は印刷時間の上限が2時間です。2時間を超えた場合は強制的に終了します。
+            </div>
+            <p class="hint hidden" id="scale-restriction-hint"></p>
+          </div>
+
+          <div class="form-group">
+            <label for="print_notes">印刷時の注意点（任意）</label>
+            <textarea id="print_notes" name="print_notes" rows="4" placeholder="高さ20cm未満&#10;長辺25cmに合わせる&#10;サポーター有・tree&#10;充填率60%"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>ファイル（STL / g-code）</label>
+            <div class="upload-zone" id="upload-zone">
+              <input type="file" id="print-file" accept=".stl,.gcode,.gco,.nc" />
+              <div class="upload-icon">📁</div>
+              <p>クリックまたはドラッグ&ドロップでファイルを選択</p>
+              <p class="upload-info">.stl / .gcode / .gco / .nc 対応 / 20MB以上はマルチパート / 最大200MB</p>
+            </div>
+            <div class="progress-bar hidden" id="upload-progress">
+              <div class="progress-bar-fill" id="upload-progress-fill"></div>
+            </div>
+            <p id="upload-status" class="upload-info"></p>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="form-cancel-btn" type="button">キャンセル</button>
+        <button class="btn btn-primary" id="submit-btn" type="submit" form="reservation-form">予約を申請</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="edit-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="edit-modal-title">予約内容を修正</h2>
+        <button class="modal-close" id="edit-modal-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="edit-alert"></div>
+        <form id="edit-reservation-form">
+          <p class="hint">修正後は申請中に戻り、管理者の再承認が必要です。</p>
+
+          <h3 class="form-section-title">本人確認</h3>
+          <div id="edit-identity-section">
+          <div class="form-row">
+            <div class="form-group combobox-wrap">
+              <label for="edit-homeroom">ホームルーム</label>
+              <input type="text" id="edit-homeroom" name="homeroom" autocomplete="off" placeholder="例: 301" required />
+              <ul class="combobox-list hidden" id="edit-homeroom-list"></ul>
+            </div>
+            <div class="form-group">
+              <label for="edit-student-number">出席番号</label>
+              <input type="number" id="edit-student-number" name="student_number" min="1" max="50" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-student-name">名前</label>
+            <input type="text" id="edit-student-name" name="student_name" required />
+            <p class="hint">予約時に入力した内容と一致している必要があります</p>
+          </div>
+          </div>
+
+          <h3 class="form-section-title">修正内容</h3>
+          <div class="form-group">
+            <label for="edit-desired-date">希望印刷日</label>
+            <input type="date" id="edit-desired-date" name="desired_date" required />
+          </div>
+
+          <div class="form-group">
+            <label>目的</label>
+            <div class="radio-group">
+              <label><input type="radio" name="purpose" value="ss_s_tan" required /> SS・S探</label>
+              <label><input type="radio" name="purpose" value="club" /> 部活</label>
+              <label><input type="radio" name="purpose" value="other" /> その他</label>
+            </div>
+          </div>
+
+          <div class="form-group hidden" id="edit-purpose-other-group">
+            <label for="edit-purpose-other">その他の内容</label>
+            <input type="text" id="edit-purpose-other" name="purpose_other" />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-title">タイトル</label>
+            <input type="text" id="edit-title" name="title" required maxlength="40" />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-summary">概要（任意）</label>
+            <textarea id="edit-summary" name="summary"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>印刷規模</label>
+            <div class="radio-group" id="edit-print-scale-group">
+              <label id="edit-scale-label-small"><input type="radio" name="print_scale" value="small" required /> スモール</label>
+              <label id="edit-scale-label-medium"><input type="radio" name="print_scale" value="medium" /> ミディアム</label>
+              <label id="edit-scale-label-large"><input type="radio" name="print_scale" value="large" /> ラージ</label>
+            </div>
+            <p class="hint hidden" id="edit-scale-restriction-hint"></p>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-print-notes">印刷時の注意点（任意）</label>
+            <textarea id="edit-print-notes" name="print_notes" rows="4"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>ファイル（STL / g-code）</label>
+            <p class="hint" id="edit-current-file"></p>
+            <div class="upload-zone" id="edit-upload-zone">
+              <input type="file" id="edit-print-file" accept=".stl,.gcode,.gco,.nc" />
+              <div class="upload-icon">📁</div>
+              <p>変更する場合のみファイルを選択</p>
+            </div>
+            <div class="progress-bar hidden" id="edit-upload-progress">
+              <div class="progress-bar-fill" id="edit-upload-progress-fill"></div>
+            </div>
+            <p id="edit-upload-status" class="upload-info"></p>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="edit-cancel-btn" type="button">キャンセル</button>
+        <button class="btn btn-primary" id="edit-submit-btn" type="submit" form="edit-reservation-form">修正を保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="detail-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="detail-modal-title">予約詳細</h2>
+        <button class="modal-close" id="detail-modal-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body" id="detail-modal-body"></div>
+      <div class="modal-footer" id="detail-modal-footer">
+        <p class="contact-notice contact-notice-modal">取り消しできない場合：<br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
+        <button class="btn btn-secondary" id="detail-close-btn" type="button">閉じる</button>
+        <button class="btn btn-secondary hidden" id="detail-edit-toggle-btn" type="button">予約内容を修正</button>
+        <button class="btn btn-secondary" id="detail-cancel-toggle-btn" type="button">予約を取り消す</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="profile-gate-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>依頼者情報の登録</h2>
+        <button class="modal-close" id="profile-gate-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">初回予約前に、ホームルーム・出席番号・名前を登録してください。次回以降は自動入力されます。</p>
+        <div id="profile-gate-alert"></div>
+        <form id="profile-gate-form">
+          <div class="form-row">
+            <div class="form-group combobox-wrap">
+              <label for="profile-homeroom">ホームルーム</label>
+              <input type="text" id="profile-homeroom" autocomplete="off" placeholder="例: 301" required />
+              <ul class="combobox-list hidden" id="profile-homeroom-list"></ul>
+            </div>
+            <div class="form-group">
+              <label for="profile-student-number">出席番号</label>
+              <input type="number" id="profile-student-number" min="1" max="99" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="profile-student-name">名前</label>
+            <input type="text" id="profile-student-name" placeholder="松山太郎" required />
+          </div>
+          <button type="submit" class="btn btn-primary">保存して続ける</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

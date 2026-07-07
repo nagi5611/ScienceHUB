@@ -58,11 +58,43 @@ export function initAccountMenu() {
   const iconInitials = document.getElementById("profile-icon-initials");
   const notifyForm = document.getElementById("notify-form");
   const passwordForm = document.getElementById("password-form");
-  const passwordMenuItem = document.getElementById("account-menu-password");
   const passwordTab = document.getElementById("profile-tab-password");
+  const passwordOAuthNotice = document.getElementById("password-oauth-notice");
+  const passwordOAuthNoticeText = document.getElementById("password-oauth-notice-text");
 
   let currentUser = null;
   let dropdownOpen = false;
+
+  /** OAuth プロバイダー表示名 */
+  function oauthProviderLabel(provider) {
+    if (provider === "google") return "Google";
+    if (provider === "microsoft") return "Microsoft";
+    return provider;
+  }
+
+  /** OAuth 専用アカウント向けメッセージ */
+  function buildOAuthPasswordMessage(providers) {
+    if (providers.length === 1) {
+      const name = oauthProviderLabel(providers[0]);
+      return `このアカウントは ${name} でログインしています。パスワードの変更は ${name} アカウントの設定から行ってください。`;
+    }
+
+    const names = providers.map(oauthProviderLabel).join("・");
+    return `このアカウントは ${names} でログインしています。パスワードの変更は各サービスのアカウント設定から行ってください。`;
+  }
+
+  /** パスワードタブの表示を切り替え */
+  function updatePasswordPanel(user) {
+    const canChangePassword = user?.has_password === true;
+    const providers = user?.oauth_providers ?? [];
+    const showOAuthNotice = !canChangePassword && providers.length > 0;
+
+    if (passwordForm) passwordForm.hidden = !canChangePassword;
+    if (passwordOAuthNotice) passwordOAuthNotice.hidden = !showOAuthNotice;
+    if (passwordOAuthNoticeText && showOAuthNotice) {
+      passwordOAuthNoticeText.textContent = buildOAuthPasswordMessage(providers);
+    }
+  }
 
   /** ユーザー情報を API から取得 */
   async function fetchUser() {
@@ -91,9 +123,7 @@ export function initAccountMenu() {
       initialsClass: "hub-account-avatar--initials",
     });
 
-    const canChangePassword = user.has_password === true;
-    if (passwordMenuItem) passwordMenuItem.hidden = !canChangePassword;
-    if (passwordTab) passwordTab.hidden = !canChangePassword;
+    updatePasswordPanel(user);
   }
 
   /** プロフィールのアイコン表示を更新 */
@@ -160,11 +190,12 @@ export function initAccountMenu() {
     fillProfileForm(currentUser);
     fillNotifyForm();
     resetPasswordForm();
+    updatePasswordPanel(currentUser);
     profileModal?.classList.add("is-open");
     profileModal?.setAttribute("aria-hidden", "false");
     document.body.classList.add("hub-modal-open");
 
-    const activeTab = tab === "password" && !currentUser.has_password ? "profile" : tab;
+    const activeTab = tab;
 
     document.querySelectorAll(".hub-profile-tab").forEach((btn) => {
       const active = btn.dataset.profileTab === activeTab;

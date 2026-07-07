@@ -50,7 +50,7 @@
           <button type="button" class="hub-account-dropdown-item" id="account-menu-notify" role="menuitem">
             通知設定
           </button>
-          <button type="button" class="hub-account-dropdown-item" id="account-menu-password" role="menuitem" hidden>
+          <button type="button" class="hub-account-dropdown-item" id="account-menu-password" role="menuitem">
             パスワードを変更
           </button>
           <hr class="hub-account-dropdown-divider">
@@ -70,23 +70,46 @@
         <!-- お知らせ -->
         <article class="hub-panel hub-announcements">
           <h2 class="hub-panel-title">お知らせ</h2>
-          <ul class="hub-announcement-list" id="announcement-list"></ul>
+          <ul class="hub-announcement-list" id="announcement-list">
+            <li class="hub-announcement-item hub-announcement-loading">
+              <div class="hub-loading hub-loading--compact" role="status" aria-live="polite">
+                <span class="hub-loading-spinner" aria-hidden="true"></span>
+                <span class="hub-loading-label">お知らせを読み込み中…</span>
+              </div>
+            </li>
+          </ul>
         </article>
 
         <!-- 本日のタスク（お知らせの下） -->
         <article class="hub-panel hub-tasks">
           <h2 class="hub-panel-title">本日のタスク</h2>
+          <p class="hub-tasks-subtitle" id="tasks-date-label">読み込み中…</p>
           <div class="hub-tasks-viewport" id="tasks-viewport">
-            <ul class="hub-task-list" id="task-list"></ul>
+            <ul class="hub-task-list" id="task-list">
+              <li class="hub-tasks-loading-item">
+                <div class="hub-loading hub-loading--compact" role="status" aria-live="polite">
+                  <span class="hub-loading-spinner" aria-hidden="true"></span>
+                  <span class="hub-loading-label">本日の予定を読み込み中…</span>
+                </div>
+              </li>
+            </ul>
           </div>
-          <div class="hub-tasks-dots" id="tasks-dots" role="tablist" aria-label="タスクページ"></div>
         </article>
       </div>
 
       <!-- スケジュール（3dprinterman モバイル版カレンダー UI） -->
       <article class="hub-panel hub-schedule">
         <div class="hub-schedule-header">
-          <h2 class="hub-panel-title">スケジュール</h2>
+          <div class="hub-schedule-header-title">
+            <h2 class="hub-panel-title">スケジュール</h2>
+            <button
+              type="button"
+              class="hub-schedule-subscribe-btn"
+              id="schedule-subscribe-btn"
+              aria-label="Google カレンダーに追加"
+              title="Google カレンダーに追加"
+            >+</button>
+          </div>
           <div class="hub-schedule-scope" role="group" aria-label="表示範囲">
             <button type="button" class="hub-schedule-scope-btn is-active" data-schedule-scope="mine" aria-pressed="true">自分のグループの予定</button>
             <button type="button" class="hub-schedule-scope-btn" data-schedule-scope="all" aria-pressed="false">全グループの予定</button>
@@ -94,14 +117,17 @@
         </div>
         <section class="hub-calendar-card" id="calendar-section">
           <div class="calendar-sticky-header">
+            <div class="hub-schedule-legend" id="schedule-group-legend" hidden aria-label="グループの色"></div>
             <div class="calendar-toolbar">
-              <div class="calendar-header-mobile">
+              <div class="calendar-nav-row">
                 <button class="calendar-nav-btn" id="prev-month-mobile" type="button" aria-label="前月">‹</button>
-                <button class="calendar-mobile-month" id="calendar-month-label-mobile" type="button">
-                  <span id="calendar-month-label-mobile-text"></span>
-                  <span class="calendar-mobile-month-caret" aria-hidden="true">▾</span>
-                </button>
-                <div class="calendar-mobile-actions">
+                <div class="calendar-period-picker">
+                  <label class="calendar-period-field calendar-period-field--year">
+                    <span class="calendar-period-sr">年</span>
+                    <select id="calendar-year-select" class="calendar-period-select" aria-label="年"></select>
+                  </label>
+                </div>
+                <div class="calendar-nav-actions">
                   <div class="calendar-today-group">
                     <span class="calendar-today-label">今日：</span>
                     <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="今月へ">
@@ -117,14 +143,24 @@
             <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
           </div>
           <div class="calendar-grid-wrap">
-            <div class="calendar-grid" id="calendar-grid"></div>
+            <div class="calendar-grid is-loading" id="calendar-grid" role="status" aria-live="polite">
+              <div class="hub-loading hub-loading--calendar">
+                <span class="hub-loading-spinner" aria-hidden="true"></span>
+                <span class="hub-loading-label">スケジュールを読み込み中…</span>
+              </div>
+            </div>
           </div>
         </section>
       </article>
     </section>
 
     <!-- 下段: グループ別アプリ -->
-    <section class="hub-groups" id="groups-section" aria-label="プロジェクトグループ"></section>
+    <section class="hub-groups" id="groups-section" aria-label="プロジェクトグループ">
+      <div class="hub-loading" role="status" aria-live="polite">
+        <span class="hub-loading-spinner" aria-hidden="true"></span>
+        <span class="hub-loading-label">アプリを読み込み中…</span>
+      </div>
+    </section>
   </main>
 
   <!-- プロフィール / 通知設定モーダル -->
@@ -137,7 +173,7 @@
       </header>
       <div class="hub-profile-tabs" role="tablist">
         <button type="button" class="hub-profile-tab is-active" data-profile-tab="profile" role="tab" aria-selected="true">プロフィール</button>
-        <button type="button" class="hub-profile-tab" data-profile-tab="password" role="tab" aria-selected="false" id="profile-tab-password" hidden>パスワード</button>
+        <button type="button" class="hub-profile-tab" data-profile-tab="password" role="tab" aria-selected="false" id="profile-tab-password">パスワード</button>
         <button type="button" class="hub-profile-tab" data-profile-tab="notify" role="tab" aria-selected="false">通知設定</button>
       </div>
       <div class="hub-profile-modal-body">
@@ -181,6 +217,9 @@
         </section>
 
         <section class="hub-profile-panel" id="profile-panel-password" role="tabpanel">
+          <div class="hub-profile-oauth-notice" id="password-oauth-notice" hidden>
+            <p class="hub-profile-oauth-notice-text" id="password-oauth-notice-text"></p>
+          </div>
           <form id="password-form" class="hub-profile-form">
             <p class="hub-profile-notify-desc">ログインに使うパスワードを変更します。</p>
             <label class="hub-profile-field">
@@ -227,7 +266,7 @@
     <div class="hub-profile-modal-dialog hub-schedule-modal-dialog">
       <header class="hub-schedule-modal-header">
         <div class="hub-schedule-modal-heading">
-          <p class="hub-schedule-modal-kicker">新しい予定</p>
+          <p class="hub-schedule-modal-kicker" id="schedule-modal-kicker">新しい予定</p>
           <h2 class="hub-schedule-modal-title" id="schedule-modal-title">予定を追加</h2>
           <p class="hub-schedule-modal-date" id="schedule-modal-date-label"></p>
         </div>
@@ -237,6 +276,10 @@
         <div id="schedule-modal-alert"></div>
         <form id="schedule-form" class="hub-schedule-form">
           <input type="hidden" id="schedule-event-date" name="event_date">
+          <input type="hidden" id="schedule-edit-event-id" value="">
+          <input type="hidden" id="schedule-edit-source" value="hub">
+          <input type="hidden" id="schedule-google-calendar-id" value="">
+          <input type="hidden" id="schedule-google-event-id" value="">
 
           <section class="hub-schedule-form-section">
             <h3 class="hub-schedule-form-section-title">基本情報</h3>
@@ -297,6 +340,55 @@
             <button type="submit" class="hub-profile-save" id="schedule-modal-save">予定を追加</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 予定詳細モーダル -->
+  <div class="hub-profile-modal" id="schedule-detail-modal" aria-hidden="true" role="dialog" aria-labelledby="schedule-detail-title">
+    <div class="hub-profile-modal-backdrop" id="schedule-detail-backdrop"></div>
+    <div class="hub-profile-modal-dialog hub-schedule-modal-dialog hub-schedule-detail-dialog">
+      <header class="hub-schedule-modal-header">
+        <div class="hub-schedule-modal-heading">
+          <p class="hub-schedule-modal-kicker" id="schedule-detail-kicker">予定</p>
+          <h2 class="hub-schedule-modal-title" id="schedule-detail-title">予定の詳細</h2>
+          <p class="hub-schedule-modal-date" id="schedule-detail-date-label"></p>
+        </div>
+        <button type="button" class="hub-profile-modal-close" id="schedule-detail-close" aria-label="閉じる">×</button>
+      </header>
+      <div class="hub-profile-modal-body hub-schedule-modal-body">
+        <div id="schedule-detail-alert"></div>
+        <div class="hub-schedule-detail-body" id="schedule-detail-body"></div>
+        <div class="hub-profile-actions hub-schedule-actions hub-schedule-detail-actions">
+          <button type="button" class="hub-profile-cancel hub-schedule-detail-delete" id="schedule-detail-delete" hidden>削除</button>
+          <div class="hub-schedule-detail-actions-right">
+            <button type="button" class="hub-profile-cancel" id="schedule-detail-dismiss">閉じる</button>
+            <button type="button" class="hub-profile-save" id="schedule-detail-edit" hidden>編集</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google カレンダー追加モーダル -->
+  <div class="hub-profile-modal" id="schedule-subscribe-modal" aria-hidden="true" role="dialog" aria-labelledby="schedule-subscribe-title">
+    <div class="hub-profile-modal-backdrop" id="schedule-subscribe-backdrop"></div>
+    <div class="hub-profile-modal-dialog hub-schedule-modal-dialog hub-schedule-subscribe-dialog">
+      <header class="hub-schedule-modal-header">
+        <div class="hub-schedule-modal-heading">
+          <p class="hub-schedule-modal-kicker">Google カレンダー</p>
+          <h2 class="hub-schedule-modal-title" id="schedule-subscribe-title">カレンダーを追加</h2>
+          <p class="hub-schedule-modal-date">ScienceHUB のカレンダーを自分の Google カレンダーに表示できます</p>
+        </div>
+        <button type="button" class="hub-profile-modal-close" id="schedule-subscribe-close" aria-label="閉じる">×</button>
+      </header>
+      <div class="hub-profile-modal-body hub-schedule-modal-body">
+        <div id="schedule-subscribe-alert"></div>
+        <div class="hub-schedule-subscribe-body" id="schedule-subscribe-body"></div>
+        <div class="hub-profile-actions hub-schedule-actions">
+          <button type="button" class="hub-profile-cancel" id="schedule-subscribe-cancel">キャンセル</button>
+          <button type="button" class="hub-profile-save" id="schedule-subscribe-open" disabled>Google カレンダーで開く</button>
+        </div>
       </div>
     </div>
   </div>

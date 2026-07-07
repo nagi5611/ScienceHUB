@@ -12,6 +12,9 @@ export interface HubGroupRow {
   description: string | null;
   color: string;
   position: number;
+  google_calendar_id: string | null;
+  overall_calendar_name: string | null;
+  is_root: number;
   created_at: number;
   updated_at: number;
 }
@@ -44,10 +47,30 @@ export interface PublicGroup {
   description: string | null;
   color: string;
   position: number;
+  google_calendar_id: string | null;
+  overall_calendar_name: string | null;
+  is_root: boolean;
   member_count: number;
   roles: PublicGroupRole[];
   created_at: number;
   updated_at: number;
+}
+
+export interface RootGroupInfo {
+  id: string;
+  display_name: string;
+  overall_calendar_name: string | null;
+  color: string;
+  google_calendar_id: string | null;
+}
+
+/** ルートグループの全体カレンダー表示名 */
+export function resolveRootCalendarDisplayName(
+  rootGroup: Pick<RootGroupInfo, "display_name" | "overall_calendar_name">
+): string {
+  const overall = rootGroup.overall_calendar_name?.trim();
+  if (overall) return overall;
+  return rootGroup.display_name.trim();
 }
 
 export interface UserGroupMembership {
@@ -79,8 +102,16 @@ const DEFAULT_COLORS = [
 const SLUG_WEIGHT_DEFAULTS: Record<string, number> = {
   teacher: 10,
   student: 5,
-  guest: 1,
+  guest: 0,
 };
+
+/** グループ作成時に必ず用意するデフォルトゲストロール */
+const DEFAULT_GUEST_ROLE = {
+  slug: "guest",
+  display_name: "ゲスト",
+  color: "#6B7280",
+  weight: 0,
+} as const;
 
 function defaultWeightForSlug(slug: string): number {
   return SLUG_WEIGHT_DEFAULTS[slug] ?? 1;
@@ -100,16 +131,133 @@ function toPublicGroupRole(
   };
 }
 
+/** ルートグループを取得（全体カレンダーの基準） */
+export async function getRootGroup(
+  db: D1Database
+): Promise<RootGroupInfo | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, display_name, overall_calendar_name, color, google_calendar_id
+       FROM hub_groups
+       WHERE is_root = 1
+       LIMIT 1`
+    )
+    .first<{
+      id: string;
+      display_name: string;
+      overall_calendar_name: string | null;
+      color: string;
+      google_calendar_id: string | null;
+    }>();
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    display_name: row.display_name,
+    overall_calendar_name: row.overall_calendar_name ?? null,
+    color: row.color ?? "#F38020",
+    google_calendar_id: row.google_calendar_id ?? null,
+  };
+}
+
+/** ルートグループを1件だけにする */
+async function applyRootGroupFlag(
+  db: D1Database,
+  groupId: string,
+  isRoot: boolean
+): Promise<void> {
+  if (isRoot) {
+    await db
+      .prepare("UPDATE hub_groups SET is_root = 0 WHERE is_root = 1 AND id != ?")
+      .bind(groupId)
+      .run();
+    await db
+      .prepare("UPDATE hub_groups SET is_root = 1, updated_at = ? WHERE id = ?")
+      .bind(now(), groupId)
+      .run();
+    return;
+  }
+
+  await db
+    .prepare("UPDATE hub_groups SET is_root = 0, updated_at = ? WHERE id = ?")
+    .bind(now(), groupId)
+    .run();
+}
+
+/** ゲストロールが無いグループにデフォルトのゲストロールを追加 */
+export async function ensureDefaultGuestRole(
+  db: D1Database,
+  groupId: string
+): Promise<void> {
+  const existing = await db
+    .prepare("SELECT id FROM group_roles WHERE group_id = ? AND slug = ?")
+    .bind(groupId, DEFAULT_GUEST_ROLE.slug)
+    .first();
+
+  if (existing) {
+    return;
+  }
+
+  const maxPos = await db
+    .prepare(
+      "SELECT COALESCE(MAX(position), -1) AS max_pos FROM group_roles WHERE group_id = ?"
+    )
+    .bind(groupId)
+    .first<{ max_pos: number }>();
+
+  const id = createId("grl");
+  const timestamp = now();
+  const position = (maxPos?.max_pos ?? -1) + 1;
+
+  await db
+    .prepare(
+      `INSERT INTO group_roles (id, group_id, slug, display_name, color, position, weight, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      id,
+      groupId,
+      DEFAULT_GUEST_ROLE.slug,
+      DEFAULT_GUEST_ROLE.display_name,
+      DEFAULT_GUEST_ROLE.color,
+      position,
+      DEFAULT_GUEST_ROLE.weight,
+      timestamp
+    )
+    .run();
+}
+
+/** ゲストロール未設定のグループを一括補完 */
+async function ensureDefaultGuestRolesForAllGroups(db: D1Database): Promise<void> {
+  const missing = await db
+    .prepare(
+      `SELECT g.id
+       FROM hub_groups g
+       LEFT JOIN group_roles gr ON gr.group_id = g.id AND gr.slug = ?
+       WHERE gr.id IS NULL`
+    )
+    .bind(DEFAULT_GUEST_ROLE.slug)
+    .all<{ id: string }>();
+
+  for (const row of missing.results ?? []) {
+    await ensureDefaultGuestRole(db, row.id);
+  }
+}
+
 /** グループ一覧（グループロール・メンバー数付き） */
 export async function listGroupsWithDetails(db: D1Database): Promise<PublicGroup[]> {
+  await ensureDefaultGuestRolesForAllGroups(db);
+
   const groupsResult = await db
     .prepare(
-      `SELECT g.id, g.slug, g.display_name, g.description, g.color, g.position, g.created_at, g.updated_at,
+      `SELECT g.id, g.slug, g.display_name, g.description, g.color, g.position,
+              g.google_calendar_id, g.overall_calendar_name, g.is_root, g.created_at, g.updated_at,
               COUNT(DISTINCT ugm.user_id) AS member_count
        FROM hub_groups g
        LEFT JOIN user_group_memberships ugm ON ugm.group_id = g.id
        GROUP BY g.id
-       ORDER BY g.position ASC, g.created_at ASC, g.slug ASC`
+       ORDER BY g.is_root DESC, g.position ASC, g.created_at ASC, g.slug ASC`
     )
     .all<HubGroupRow & { member_count: number }>();
 
@@ -143,6 +291,9 @@ export async function listGroupsWithDetails(db: D1Database): Promise<PublicGroup
     description: group.description,
     color: group.color ?? "#F38020",
     position: group.position ?? 0,
+    google_calendar_id: group.google_calendar_id ?? null,
+    overall_calendar_name: group.overall_calendar_name ?? null,
+    is_root: group.is_root === 1,
     member_count: group.member_count ?? 0,
     roles: rolesByGroup.get(group.id) ?? [],
     created_at: group.created_at,
@@ -162,7 +313,15 @@ export async function getGroupById(
 /** グループを作成 */
 export async function createGroup(
   db: D1Database,
-  input: { display_name: string; slug?: string; description?: string; color?: string }
+  input: {
+    display_name: string;
+    slug?: string;
+    description?: string;
+    color?: string;
+    is_root?: boolean;
+    google_calendar_id?: string | null;
+    overall_calendar_name?: string | null;
+  }
 ): Promise<PublicGroup | null> {
   const displayName = input.display_name.trim();
   const slug = normalizeSlug(input.slug?.trim() || displayName);
@@ -204,6 +363,22 @@ export async function createGroup(
     )
     .run();
 
+  if (input.is_root) {
+    await applyRootGroupFlag(db, id, true);
+  }
+
+  await ensureDefaultGuestRole(db, id);
+
+  if (
+    input.google_calendar_id !== undefined ||
+    input.overall_calendar_name !== undefined
+  ) {
+    return updateGroup(db, id, {
+      google_calendar_id: input.google_calendar_id,
+      overall_calendar_name: input.overall_calendar_name,
+    });
+  }
+
   return getGroupById(db, id);
 }
 
@@ -217,8 +392,15 @@ export async function updateGroup(
     description?: string | null;
     color?: string;
     position?: number;
+    google_calendar_id?: string | null;
+    is_root?: boolean;
+    overall_calendar_name?: string | null;
   }
 ): Promise<PublicGroup | null> {
+  if (input.is_root !== undefined) {
+    await applyRootGroupFlag(db, groupId, input.is_root);
+  }
+
   const updates: string[] = [];
   const values: (string | number | null)[] = [];
 
@@ -260,6 +442,24 @@ export async function updateGroup(
     values.push(input.position);
   }
 
+  if (input.google_calendar_id !== undefined) {
+    const calId = input.google_calendar_id?.trim() || null;
+    if (calId && (!calId.includes("@") || calId.length < 5)) {
+      throw new Error("Google カレンダー ID の形式が不正です");
+    }
+    updates.push("google_calendar_id = ?");
+    values.push(calId);
+  }
+
+  if (input.overall_calendar_name !== undefined) {
+    const overallName = input.overall_calendar_name?.trim() || null;
+    if (overallName && overallName.length > 120) {
+      throw new Error("全体カレンダー表示名は120文字以内で入力してください");
+    }
+    updates.push("overall_calendar_name = ?");
+    values.push(overallName);
+  }
+
   if (updates.length === 0) {
     return getGroupById(db, groupId);
   }
@@ -278,6 +478,21 @@ export async function updateGroup(
 
 /** グループを削除 */
 export async function deleteGroup(db: D1Database, groupId: string): Promise<void> {
+  const existing = await db
+    .prepare("SELECT is_root FROM hub_groups WHERE id = ?")
+    .bind(groupId)
+    .first<{ is_root: number }>();
+
+  if (!existing) {
+    throw new Error("グループが見つかりません");
+  }
+
+  if (existing.is_root === 1) {
+    throw new Error(
+      "ルートグループは削除できません。先にルート設定を解除するか、別のグループをルートに指定してください"
+    );
+  }
+
   await db.prepare("DELETE FROM hub_groups WHERE id = ?").bind(groupId).run();
 }
 

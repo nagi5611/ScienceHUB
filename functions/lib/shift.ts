@@ -4,6 +4,7 @@
 
 import { createId, now } from "./types";
 import { getUserGroupMemberships } from "./groups";
+import { SHIFT_COLOR_COUNT, isValidShiftColorIndex } from "./shift-colors";
 
 export interface ShiftAvailabilityRow {
   id: string;
@@ -17,12 +18,19 @@ export interface ShiftMember {
   id: string;
   display_name: string;
   username: string;
+  color_index: number;
+  is_self: boolean;
+}
+
+export interface ShiftAvailabilityEntry {
+  user_id: string;
+  date: string;
 }
 
 export interface ShiftListResult {
-  mine: string[];
+  current_user_id: string;
   members: ShiftMember[];
-  others: Record<string, string[]>;
+  availability: ShiftAvailabilityEntry[];
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -39,7 +47,7 @@ export function isValidDateStr(value: string): boolean {
   );
 }
 
-/** 同一グループのメンバー一覧を取得 */
+/** 同一グループのメンバー ID を取得 */
 async function getSharedGroupMemberIds(
   db: D1Database,
   userId: string
@@ -63,7 +71,7 @@ async function getSharedGroupMemberIds(
   return ids;
 }
 
-/** 期間内の出勤可能日を取得 */
+/** 期間内のシフト一覧を取得 */
 export async function listShiftAvailability(
   db: D1Database,
   userId: string,
@@ -80,68 +88,104 @@ export async function listShiftAvailability(
   const memberIds = await getSharedGroupMemberIds(db, userId);
   const memberIdList = [...memberIds];
 
-  const mineResult = await db
-    .prepare(
-      `SELECT avail_date FROM shift_availability
-       WHERE user_id = ? AND avail_date >= ? AND avail_date <= ?
-       ORDER BY avail_date`
-    )
-    .bind(userId, from, to)
-    .all<{ avail_date: string }>();
-
-  const mine = (mineResult.results ?? []).map((r) => r.avail_date);
-
   if (memberIdList.length === 0) {
-    return { mine, members: [], others: {} };
+    return { current_user_id: userId, members: [], availability: [] };
   }
 
   const memberPlaceholders = memberIdList.map(() => "?").join(", ");
   const membersResult = await db
     .prepare(
-      `SELECT id, display_name, username
+      `SELECT id, display_name, username, shift_color_index
        FROM users
        WHERE id IN (${memberPlaceholders})
        ORDER BY display_name COLLATE NOCASE, username`
     )
     .bind(...memberIdList)
-    .all<{ id: string; display_name: string; username: string }>();
+    .all<{
+      id: string;
+      display_name: string;
+      username: string;
+      shift_color_index: number;
+    }>();
 
-  const members: ShiftMember[] = (membersResult.results ?? [])
-    .filter((u) => u.id !== userId)
-    .map((u) => ({
-      id: u.id,
-      display_name: u.display_name || u.username,
-      username: u.username,
-    }));
+  const members: ShiftMember[] = (membersResult.results ?? []).map((u) => ({
+    id: u.id,
+    display_name: u.display_name || u.username,
+    username: u.username,
+    color_index: normalizeColorIndex(u.shift_color_index),
+    is_self: u.id === userId,
+  }));
 
-  const otherIds = members.map((m) => m.id);
-  const others: Record<string, string[]> = {};
-  for (const m of members) {
-    others[m.id] = [];
-  }
+  const availResult = await db
+    .prepare(
+      `SELECT user_id, avail_date FROM shift_availability
+       WHERE user_id IN (${memberPlaceholders})
+         AND avail_date >= ? AND avail_date <= ?
+       ORDER BY avail_date`
+    )
+    .bind(...memberIdList, from, to)
+    .all<{ user_id: string; avail_date: string }>();
 
-  if (otherIds.length > 0) {
-    const otherPlaceholders = otherIds.map(() => "?").join(", ");
-    const othersResult = await db
-      .prepare(
-        `SELECT user_id, avail_date FROM shift_availability
-         WHERE user_id IN (${otherPlaceholders})
-           AND avail_date >= ? AND avail_date <= ?
-         ORDER BY avail_date`
-      )
-      .bind(...otherIds, from, to)
-      .all<{ user_id: string; avail_date: string }>();
+  const availability: ShiftAvailabilityEntry[] = (
+    availResult.results ?? []
+  ).map((row) => ({
+    user_id: row.user_id,
+    date: row.avail_date,
+  }));
 
-    for (const row of othersResult.results ?? []) {
-      const list = others[row.user_id];
-      if (list) list.push(row.avail_date);
-    }
-  }
-
-  return { mine, members, others };
+  return { current_user_id: userId, members, availability };
 }
 
-/** 出勤可能日を一括設定 */
+/** 色インデックスを 0〜7 に正規化 */
+function normalizeColorIndex(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) return 0;
+  return ((value % SHIFT_COLOR_COUNT) + SHIFT_COLOR_COUNT) % SHIFT_COLOR_COUNT;
+}
+
+/** 自分のシフト色を更新 */
+export async function updateShiftColor(
+  db: D1Database,
+  userId: string,
+  colorIndex: number
+): Promise<ShiftMember> {
+  if (!isValidShiftColorIndex(colorIndex)) {
+    throw new Error("色の指定が不正です");
+  }
+
+  const ts = now();
+  await db
+    .prepare(
+      "UPDATE users SET shift_color_index = ?, updated_at = ? WHERE id = ?"
+    )
+    .bind(colorIndex, ts, userId)
+    .run();
+
+  const user = await db
+    .prepare(
+      "SELECT id, display_name, username, shift_color_index FROM users WHERE id = ?"
+    )
+    .bind(userId)
+    .first<{
+      id: string;
+      display_name: string;
+      username: string;
+      shift_color_index: number;
+    }>();
+
+  if (!user) {
+    throw new Error("ユーザーが見つかりません");
+  }
+
+  return {
+    id: user.id,
+    display_name: user.display_name || user.username,
+    username: user.username,
+    color_index: normalizeColorIndex(user.shift_color_index),
+    is_self: true,
+  };
+}
+
+/** 出勤可能日を一括設定（自分のみ） */
 export async function setShiftAvailability(
   db: D1Database,
   userId: string,
@@ -196,7 +240,7 @@ export async function setShiftAvailability(
   return updated;
 }
 
-/** 単一日付の出勤可能をトグル */
+/** 単一日付の出勤可能をトグル（自分のみ） */
 export async function toggleShiftAvailability(
   db: D1Database,
   userId: string,

@@ -4,7 +4,7 @@
 
 import { createId, now } from "./types";
 import { normalizeSlug } from "./auth";
-import { getUserGroupMemberships, type UserGroupMembership } from "./groups";
+import { getUserGroupMemberships, getRootGroup, type UserGroupMembership } from "./groups";
 import { userHasAdminRole } from "./roles";
 import { expandRoleIdsByWeight } from "./roleWeight";
 
@@ -547,7 +547,15 @@ export async function getDashboardForUser(
     }
   }
 
+  const rootGroup = await getRootGroup(db);
+  const rootGroupId = rootGroup?.id ?? null;
+
   return [...groupMap.values()]
     .filter((g) => g.apps.length > 0)
-    .sort((a, b) => a.display_name.localeCompare(b.display_name, "ja"));
+    .sort((a, b) => {
+      const aIsRoot = a.id === rootGroupId ? 0 : 1;
+      const bIsRoot = b.id === rootGroupId ? 0 : 1;
+      if (aIsRoot !== bIsRoot) return aIsRoot - bIsRoot;
+      return a.display_name.localeCompare(b.display_name, "ja");
+    });
 }

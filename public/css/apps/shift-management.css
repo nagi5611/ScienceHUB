@@ -1,4 +1,4 @@
-/* シフト管理アプリ */
+/* シフト管理アプリ — 3dprinterman シフト管理表 UI を参考 */
 
 :root {
   --cf-orange: #f38020;
@@ -11,10 +11,6 @@
   --cf-radius: 8px;
   --cf-radius-lg: 12px;
   --cf-font: "Inter", system-ui, -apple-system, sans-serif;
-  --shift-available: #059669;
-  --shift-available-bg: #d1fae5;
-  --shift-others: #2c7cb0;
-  --shift-others-bg: #dbeafe;
 }
 
 *,
@@ -66,7 +62,7 @@ body.shift-app {
 }
 
 .shift-app-main {
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 1.25rem 1rem 2rem;
   display: flex;
@@ -74,7 +70,7 @@ body.shift-app {
   gap: 1rem;
 }
 
-.shift-app-toolbar {
+.shift-app-intro {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -109,10 +105,6 @@ body.shift-app {
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
 }
 
-.shift-app-tab:hover:not(.is-active) {
-  color: var(--cf-text);
-}
-
 .shift-app-hint {
   margin: 0;
   font-size: 0.875rem;
@@ -120,34 +112,156 @@ body.shift-app {
   line-height: 1.5;
 }
 
-.shift-app-others-filter {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-}
-
-.shift-app-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.shift-app-label {
+.shift-app-footnote {
+  margin: 0;
   font-size: 0.8125rem;
-  font-weight: 500;
   color: var(--cf-muted);
 }
 
-.shift-app-select {
-  font: inherit;
-  font-size: 0.9375rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--cf-border);
-  border-radius: var(--cf-radius);
-  background: var(--cf-bg);
-  min-width: 12rem;
+/* メンバーツールバー */
+.shift-member-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.75rem 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--cf-border);
 }
 
+.shift-toolbar-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--cf-muted);
+}
+
+.shift-member-toolbar-track {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 0.125rem;
+}
+
+.shift-member-toolbar-track::-webkit-scrollbar {
+  display: none;
+}
+
+.shift-member-card {
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  padding: 0.375rem 0.625rem 0.375rem 0.375rem;
+  background: #fff;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 11rem;
+}
+
+.shift-member-card-active {
+  border-color: var(--cf-orange);
+  box-shadow: 0 0 0 2px rgb(243 128 32 / 0.2);
+  background: var(--cf-orange-soft);
+}
+
+.shift-member-select {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--cf-text);
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.shift-member-name {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 7rem;
+}
+
+.shift-member-self {
+  display: inline-block;
+  margin-left: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--cf-orange);
+  vertical-align: middle;
+}
+
+.shift-member-sub {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--cf-muted);
+}
+
+.shift-color-card {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+.shift-color-card:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.shift-color-card:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.shift-color-card[aria-expanded="true"] {
+  box-shadow: 0 0 0 2px var(--cf-orange);
+}
+
+.shift-color-menu-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--cf-surface);
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius);
+}
+
+.shift-color-menu-item {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.shift-color-menu-item:hover {
+  filter: brightness(0.95);
+}
+
+.shift-color-menu-item.is-current {
+  box-shadow: 0 0 0 2px var(--cf-text);
+}
+
+/* カレンダー */
 .shift-calendar-card {
   display: flex;
   flex-direction: column;
@@ -243,10 +357,6 @@ body.shift-app {
   color: var(--cf-orange);
 }
 
-.shift-calendar-card .calendar-today-icon {
-  display: none;
-}
-
 .shift-calendar-card .calendar-month-chips {
   display: flex;
   gap: 0.35rem;
@@ -305,42 +415,35 @@ body.shift-app {
   overflow: auto;
 }
 
-.shift-calendar-card .calendar-grid {
+.shift-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   min-height: 280px;
 }
 
-.shift-calendar-card .calendar-day {
+.shift-calendar-grid .calendar-day {
   position: relative;
-  min-height: 3.5rem;
-  border: none;
+  min-height: 72px;
   border-right: 1px solid #f0f0f0;
   border-bottom: 1px solid #f0f0f0;
   background: var(--cf-bg);
   padding: 0.25rem;
-  cursor: default;
   text-align: left;
-  font: inherit;
-  color: inherit;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: none;
 }
 
-.shift-calendar-card .calendar-day:nth-child(7n) {
+.shift-calendar-grid .calendar-day:nth-child(7n) {
   border-right: none;
 }
 
-.shift-calendar-card .calendar-day.other-month {
+.shift-calendar-grid .calendar-day.other-month {
   background: #fafafa;
 }
 
-.shift-calendar-card .calendar-day.other-month .calendar-day-number {
+.shift-calendar-grid .calendar-day.other-month .calendar-day-number {
   color: #bbb;
 }
 
-.shift-calendar-card .calendar-day.today .calendar-day-number {
+.shift-calendar-grid .calendar-day.today .calendar-day-number {
   background: var(--cf-orange);
   color: #fff;
   border-radius: 50%;
@@ -351,45 +454,63 @@ body.shift-app {
   justify-content: center;
 }
 
-.shift-calendar-card .calendar-day--editable {
-  cursor: pointer;
+.shift-day-editable {
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
-.shift-calendar-card .calendar-day--editable:hover {
-  background: #f8f9fa;
+.shift-day-painting {
+  outline: 2px dashed var(--cf-orange);
+  outline-offset: -2px;
 }
 
-.shift-calendar-card .calendar-day.is-available {
-  background: var(--shift-available-bg);
+.shift-day.shift-covered {
+  box-shadow: inset 0 0 0 2px #86efac;
 }
 
-.shift-calendar-card .calendar-day.is-available:hover {
-  background: #a7f3d0;
+.shift-day.shift-empty {
+  box-shadow: inset 0 0 0 2px #f87171;
 }
 
-.shift-calendar-card .calendar-day.is-others-available {
-  background: var(--shift-others-bg);
+.shift-day.shift-covered.today,
+.shift-day.shift-empty.today {
+  box-shadow: inset 0 0 0 2px var(--cf-orange);
 }
 
-.shift-calendar-card .calendar-day-number {
+.shift-day-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.shift-day-chip {
+  display: block;
+  font-size: 0.55rem;
+  line-height: 1.2;
+  padding: 1px 3px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-day-chip-compact {
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.625rem;
+}
+
+.calendar-day-number {
   font-size: 0.8125rem;
   font-weight: 500;
   line-height: 1.5rem;
 }
 
-.shift-calendar-card .calendar-day-badge {
-  display: block;
-  margin-top: 0.15rem;
-  font-size: 0.625rem;
-  font-weight: 600;
-  color: var(--shift-available);
-  text-align: center;
-}
-
-.shift-calendar-card .calendar-day.is-others-available .calendar-day-badge {
-  color: var(--shift-others);
-}
-
+/* 凡例 */
 .shift-legend {
   display: flex;
   flex-wrap: wrap;
@@ -411,14 +532,19 @@ body.shift-app {
   border: 1px solid var(--cf-border);
 }
 
-.shift-legend-swatch--available {
-  background: var(--shift-available-bg);
-  border-color: var(--shift-available);
+.shift-legend-swatch--painting {
+  border: 2px dashed var(--cf-orange);
+  background: var(--cf-orange-soft);
 }
 
-.shift-legend-swatch--others {
-  background: var(--shift-others-bg);
-  border-color: var(--shift-others);
+.shift-legend-swatch--covered {
+  box-shadow: inset 0 0 0 2px #86efac;
+  background: #f0fdf4;
+}
+
+.shift-legend-swatch--empty {
+  box-shadow: inset 0 0 0 2px #f87171;
+  background: #fef2f2;
 }
 
 .shift-app-denied {
@@ -448,7 +574,6 @@ body.shift-app {
   border: 1px solid var(--cf-border);
   background: var(--cf-bg);
   color: var(--cf-text);
-  cursor: pointer;
 }
 
 .shift-app-btn--primary {
@@ -478,9 +603,5 @@ body.shift-app {
 @media (min-width: 640px) {
   .shift-app-main {
     padding: 1.5rem 2rem 2.5rem;
-  }
-
-  .shift-calendar-card .calendar-day {
-    min-height: 4.5rem;
   }
 }

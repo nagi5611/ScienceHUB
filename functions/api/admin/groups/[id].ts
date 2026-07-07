@@ -17,6 +17,9 @@ interface UpdateGroupBody {
   description?: string | null;
   color?: string;
   position?: number;
+  google_calendar_id?: string | null;
+  is_root?: boolean;
+  overall_calendar_name?: string | null;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {

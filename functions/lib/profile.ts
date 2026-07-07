@@ -9,6 +9,10 @@ import { jsonError, now } from "./types";
 import { userIconPublicUrl } from "./user-icons";
 import { validateDisplayName, validatePassword } from "./users";
 import { hashPassword, verifyPassword } from "./password";
+import {
+  validatePrintProfileInput,
+  type PrintProfileInput,
+} from "./3dprint/print-profile";
 
 export function validateEmail(email: string): string | null {
   const value = email.trim();
@@ -27,6 +31,9 @@ export function validateEmail(email: string): string | null {
 export interface ProfileUpdateInput {
   display_name?: string;
   email?: string;
+  homeroom?: string;
+  student_number?: number;
+  student_name?: string;
 }
 
 export interface PasswordChangeInput {
@@ -94,7 +101,8 @@ export async function updateUserProfile(
 
   const current = await db
     .prepare(
-      `SELECT id, username, email, display_name, role_slug, password_hash, avatar_url, created_at, updated_at
+      `SELECT id, username, email, display_name, role_slug, password_hash, avatar_url,
+              homeroom, student_number, student_name, created_at, updated_at
        FROM users WHERE id = ?`
     )
     .bind(userId)
@@ -124,17 +132,40 @@ export async function updateUserProfile(
     }
   }
 
+  let homeroom = current.homeroom;
+  let studentNumber = current.student_number;
+  let studentName = current.student_name;
+
+  const hasPrintFields =
+    input.homeroom !== undefined ||
+    input.student_number !== undefined ||
+    input.student_name !== undefined;
+
+  if (hasPrintFields) {
+    const printInput: PrintProfileInput = {
+      homeroom: input.homeroom ?? current.homeroom ?? "",
+      student_number: input.student_number ?? current.student_number ?? 0,
+      student_name: input.student_name ?? current.student_name ?? "",
+    };
+    const printError = validatePrintProfileInput(printInput);
+    if (printError) return jsonError(printError, 400);
+    homeroom = printInput.homeroom;
+    studentNumber = printInput.student_number;
+    studentName = printInput.student_name.trim();
+  }
+
   const timestamp = now();
   await db
     .prepare(
-      `UPDATE users SET display_name = ?, email = ?, updated_at = ? WHERE id = ?`
+      `UPDATE users SET display_name = ?, email = ?, homeroom = ?, student_number = ?, student_name = ?, updated_at = ? WHERE id = ?`
     )
-    .bind(displayName, email, timestamp, userId)
+    .bind(displayName, email, homeroom, studentNumber, studentName, timestamp, userId)
     .run();
 
   const user = await db
     .prepare(
-      `SELECT id, username, email, display_name, role_slug, password_hash, avatar_url, created_at, updated_at
+      `SELECT id, username, email, display_name, role_slug, password_hash, avatar_url,
+              homeroom, student_number, student_name, created_at, updated_at
        FROM users WHERE id = ?`
     )
     .bind(userId)

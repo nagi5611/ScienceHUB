@@ -9,6 +9,8 @@ import { parseRoleWeightInput } from "./role-weight.js";
 
 let groups = [];
 let editingGroupMembershipUserId = null;
+/** 展開中のグループ ID */
+const expandedGroupIds = new Set();
 
 /** グループメンバー編集（D&D）の状態 */
 let groupEditState = {
@@ -22,7 +24,7 @@ let groupEditState = {
 const GROUP_ROLE_PRESETS = [
   { display_name: "先生", slug: "teacher", color: "#2C7CB0", weight: 10 },
   { display_name: "生徒", slug: "student", color: "#059669", weight: 5 },
-  { display_name: "ゲスト", slug: "guest", color: "#6B7280", weight: 1 },
+  { display_name: "ゲスト", slug: "guest", color: "#6B7280", weight: 0 },
 ];
 
 /** よく使うロールプリセットボタンを初期化 */
@@ -127,8 +129,12 @@ export function renderGroups(filter = "", escapeHtml) {
 
   container.innerHTML = filtered
     .map((group) => {
+      const isExpanded = expandedGroupIds.has(group.id);
+      const roleCount = group.roles?.length ?? 0;
+      const memberCount = group.member_count ?? 0;
+
       const rolesHtml =
-        group.roles.length === 0
+        roleCount === 0
           ? `<p class="cf-group-roles-empty">グループロールがありません</p>`
           : group.roles
               .map(
@@ -146,25 +152,46 @@ export function renderGroups(filter = "", escapeHtml) {
               .join("");
 
       return `
-      <article class="cf-group-card" style="--group-color:${escapeHtml(group.color)}">
-        <header class="cf-group-card-header">
-          <div class="cf-group-card-title">
-            <span class="cf-group-card-icon" aria-hidden="true">${iconHtml("folder", "hub-icon hub-icon--md")}</span>
-            <div>
-              <h3 class="cf-group-card-name">${escapeHtml(group.display_name)}</h3>
-              <p class="cf-group-card-slug">${escapeHtml(group.slug)}${group.description ? ` — ${escapeHtml(group.description)}` : ""}</p>
+      <article class="cf-group-card${isExpanded ? " is-expanded" : ""}" style="--group-color:${escapeHtml(group.color)}" data-group-id="${escapeHtml(group.id)}">
+        <div class="cf-group-card-summary-row">
+          <button
+            type="button"
+            class="cf-group-toggle"
+            data-toggle-group="${escapeHtml(group.id)}"
+            aria-expanded="${isExpanded ? "true" : "false"}"
+            aria-controls="group-details-${escapeHtml(group.id)}"
+          >
+            <span class="cf-group-chevron" aria-hidden="true"></span>
+            <span class="cf-group-card-icon">${iconHtml("folder", "hub-icon hub-icon--md")}</span>
+            <span class="cf-group-summary-text">
+              <span class="cf-group-card-name">${escapeHtml(group.display_name)}${group.is_root ? `<span class="cf-group-root-badge">ルート</span>` : ""}</span>
+              <span class="cf-group-card-slug">${escapeHtml(group.slug)}</span>
+            </span>
+          </button>
+          <div class="cf-group-summary-meta">
+            <span class="cf-group-summary-stat">${roleCount} ロール</span>
+            <span class="cf-group-summary-stat cf-count-with-icon">${iconHtml("user", "hub-icon hub-icon--sm")} ${memberCount}</span>
+          </div>
+        </div>
+        <div class="cf-group-card-details" id="group-details-${escapeHtml(group.id)}"${isExpanded ? "" : " hidden"}>
+          <div class="cf-group-card-header">
+            <div class="cf-group-card-title">
+              <div>
+                <p class="cf-group-card-desc">${group.description ? escapeHtml(group.description) : "説明は未設定です"}</p>
+                ${group.is_root ? `<p class="cf-group-card-root">組織ルート — 全体カレンダー表示名: ${escapeHtml(group.overall_calendar_name || group.display_name)}</p>` : ""}
+                ${group.google_calendar_id ? `<p class="cf-group-card-gcal">Google カレンダー連携済</p>` : `<p class="cf-group-card-gcal cf-group-card-gcal--off">Google カレンダー未設定</p>`}
+              </div>
+            </div>
+            <div class="cf-group-card-meta">
+              <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-edit-group="${escapeHtml(group.id)}">編集</button>
+              <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-edit-group-members="${escapeHtml(group.id)}">メンバーを編集</button>
+              <button type="button" class="cf-btn cf-btn-primary cf-btn-sm" data-add-group-role="${escapeHtml(group.id)}">ロールを追加</button>
             </div>
           </div>
-          <div class="cf-group-card-meta">
-            <span class="cf-count-with-icon">${iconHtml("user", "hub-icon hub-icon--sm")} ${group.member_count ?? 0} メンバー</span>
-            <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-edit-group="${escapeHtml(group.id)}">編集</button>
-            <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-edit-group-members="${escapeHtml(group.id)}">メンバーを編集</button>
-            <button type="button" class="cf-btn cf-btn-primary cf-btn-sm" data-add-group-role="${escapeHtml(group.id)}">ロールを追加</button>
+          <div class="cf-group-roles">
+            <p class="cf-group-roles-label">グループロール</p>
+            ${rolesHtml}
           </div>
-        </header>
-        <div class="cf-group-roles">
-          <p class="cf-group-roles-label">グループロール</p>
-          ${rolesHtml}
         </div>
       </article>`;
     })
@@ -231,6 +258,7 @@ export function bindGroupEvents({
   loadUsers,
   renderMembers,
   getUsers,
+  onGroupsChanged,
 }) {
   document.getElementById("group-search")?.addEventListener("input", (e) => {
     renderGroups(e.target.value, escapeHtml);
@@ -242,9 +270,21 @@ export function bindGroupEvents({
   });
 
   document.getElementById("groups-list")?.addEventListener("click", (e) => {
+    const toggleBtn = e.target.closest("[data-toggle-group]");
+    if (toggleBtn) {
+      const groupId = toggleBtn.dataset.toggleGroup;
+      if (expandedGroupIds.has(groupId)) {
+        expandedGroupIds.delete(groupId);
+      } else {
+        expandedGroupIds.add(groupId);
+      }
+      renderGroups(document.getElementById("group-search")?.value ?? "", escapeHtml);
+      return;
+    }
+
     const editGroupBtn = e.target.closest("[data-edit-group]");
     if (editGroupBtn) {
-      openGroupEditor(editGroupBtn.dataset.editGroup, escapeHtml);
+      openGroupEditor(editGroupBtn.dataset.editGroup);
       return;
     }
     const addRoleBtn = e.target.closest("[data-add-group-role]");
@@ -278,6 +318,7 @@ export function bindGroupEvents({
     }
 
     try {
+      const isRoot = form.querySelector('[name="is_root"]')?.checked === true;
       await api("/api/admin/groups", {
         method: "POST",
         body: JSON.stringify({
@@ -285,18 +326,29 @@ export function bindGroupEvents({
           slug: String(formData.get("slug") ?? "").trim(),
           description: String(formData.get("description") ?? "").trim(),
           color,
+          is_root: isRoot,
+          overall_calendar_name: isRoot
+            ? document.getElementById("create-group-overall-calendar-name")?.value?.trim() || null
+            : undefined,
+          google_calendar_id: isRoot
+            ? document.getElementById("create-group-calendar-id")?.value?.trim() || null
+            : undefined,
         }),
       });
       form.reset();
       setColorInput(form.querySelector('[name="color"]'), "#F38020");
+      syncCreateGroupRootUi();
       document.getElementById("create-group-dialog")?.close();
       await loadGroups(api);
       renderGroups(document.getElementById("group-search")?.value ?? "", escapeHtml);
+      await onGroupsChanged?.();
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.hidden = false;
     }
   });
+
+  document.getElementById("create-group-is-root")?.addEventListener("change", syncCreateGroupRootUi);
 
   document.getElementById("edit-group-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -310,6 +362,10 @@ export function bindGroupEvents({
     }
 
     try {
+      const isRoot = document.getElementById("edit-group-is-root")?.checked === true;
+      const calId = isRoot
+        ? document.getElementById("edit-group-calendar-id")?.value?.trim() ?? ""
+        : document.getElementById("edit-group-group-calendar-id")?.value?.trim() ?? "";
       await api(`/api/admin/groups/${encodeURIComponent(groupId)}`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -317,11 +373,17 @@ export function bindGroupEvents({
           slug: document.getElementById("edit-group-slug").value.trim(),
           color,
           description: document.getElementById("edit-group-description").value.trim() || null,
+          google_calendar_id: calId || null,
+          is_root: isRoot,
+          overall_calendar_name: isRoot
+            ? document.getElementById("edit-group-overall-calendar-name")?.value?.trim() || null
+            : null,
         }),
       });
       document.getElementById("edit-group-dialog")?.close();
       await loadGroups(api);
       renderGroups(document.getElementById("group-search")?.value ?? "", escapeHtml);
+      await onGroupsChanged?.();
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.hidden = false;
@@ -342,6 +404,7 @@ export function bindGroupEvents({
       renderGroups(document.getElementById("group-search")?.value ?? "", escapeHtml);
       await loadUsers();
       renderMembers(document.getElementById("member-search")?.value ?? "");
+      await onGroupsChanged?.();
     } catch (err) {
       alert(err.message);
     }
@@ -506,9 +569,11 @@ export function bindGroupEvents({
 
   bindGroupRolePresets();
   bindGroupEditDnD();
+
+  document.getElementById("edit-group-is-root")?.addEventListener("change", syncEditGroupRootUi);
 }
 
-function openGroupEditor(groupId, escapeHtml) {
+function openGroupEditor(groupId) {
   const group = groups.find((g) => g.id === groupId);
   if (!group) return;
 
@@ -517,8 +582,40 @@ function openGroupEditor(groupId, escapeHtml) {
   document.getElementById("edit-group-slug").value = group.slug;
   setColorInput(document.getElementById("edit-group-color"), group.color);
   document.getElementById("edit-group-description").value = group.description ?? "";
+  document.getElementById("edit-group-overall-calendar-name").value =
+    group.overall_calendar_name ?? "";
+  document.getElementById("edit-group-calendar-id").value = group.is_root
+    ? group.google_calendar_id ?? ""
+    : "";
+  document.getElementById("edit-group-group-calendar-id").value = group.is_root
+    ? ""
+    : group.google_calendar_id ?? "";
+  const isRootInput = document.getElementById("edit-group-is-root");
+  if (isRootInput) isRootInput.checked = Boolean(group.is_root);
+  syncEditGroupRootUi();
   document.getElementById("edit-group-error").hidden = true;
   document.getElementById("edit-group-dialog")?.showModal();
+}
+
+/** ルートグループ編集を外部から開く */
+export function openGroupEditorById(groupId) {
+  openGroupEditor(groupId);
+}
+
+/** ルートグループ編集 UI の表示を同期 */
+function syncEditGroupRootUi() {
+  const isRoot = document.getElementById("edit-group-is-root")?.checked === true;
+  const rootSection = document.getElementById("edit-group-root-calendar-section");
+  const groupGcalField = document.getElementById("edit-group-group-gcal-field");
+  if (rootSection) rootSection.hidden = !isRoot;
+  if (groupGcalField) groupGcalField.hidden = isRoot;
+}
+
+/** グループ作成時のルート UI を同期 */
+function syncCreateGroupRootUi() {
+  const isRoot = document.getElementById("create-group-is-root")?.checked === true;
+  const rootSection = document.getElementById("create-group-root-calendar-section");
+  if (rootSection) rootSection.hidden = !isRoot;
 }
 
 function openCreateGroupRoleDialog(groupId, escapeHtml) {

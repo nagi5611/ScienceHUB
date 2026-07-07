@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>クラウドストレージ — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/cloud-storage.css">
+</head>
+<body class="cs-app-body">
+  <div id="cs-denied" class="cs-denied" hidden>
+    <p>このアプリへのアクセス権限がありません。</p>
+    <a href="/">ダッシュボードに戻る</a>
+  </div>
+
+  <div id="cs-app" hidden>
+    <header class="cs-header">
+      <a href="/" class="cs-back">← ダッシュボード</a>
+      <h1 class="cs-title">クラウドストレージ</h1>
+      <div class="cs-quota" id="cs-quota">
+        <div class="cs-quota-track"><div class="cs-quota-bar" id="cs-quota-bar"></div></div>
+        <span class="cs-quota-label" id="cs-quota-label">—</span>
+      </div>
+    </header>
+
+    <div class="cs-layout" id="cs-main">
+      <aside class="cs-sidebar" aria-label="ルート一覧">
+        <h2 class="cs-sidebar-title">場所</h2>
+        <div id="cs-roots" class="cs-roots"></div>
+      </aside>
+
+      <main class="cs-main" id="cs-drop-zone">
+        <div class="cs-toolbar">
+          <button type="button" class="cs-btn cs-btn-primary" id="cs-upload-btn">アップロード</button>
+          <button type="button" class="cs-btn" id="cs-mkdir-btn">新規フォルダ</button>
+          <button type="button" class="cs-btn" id="cs-download-btn">ダウンロード</button>
+          <button type="button" class="cs-btn" id="cs-rename-btn">リネーム</button>
+          <button type="button" class="cs-btn cs-btn-danger" id="cs-delete-btn">削除</button>
+          <div class="cs-sort-controls">
+            <label class="cs-sort-label" for="cs-sort-field">並び替え</label>
+            <select id="cs-sort-field" class="cs-sort-select" aria-label="並び替え項目">
+              <option value="name">名前</option>
+              <option value="updatedAt">更新日時</option>
+              <option value="createdAt">作成日時</option>
+              <option value="createdBy">作成者</option>
+              <option value="size">サイズ</option>
+            </select>
+            <button type="button" class="cs-btn cs-sort-order-btn" id="cs-sort-order">昇順</button>
+          </div>
+          <input type="file" id="cs-upload-input" multiple hidden>
+        </div>
+
+        <div class="cs-upload-banner" id="cs-upload-banner" hidden>
+          <div class="cs-upload-banner-track" aria-hidden="true">
+            <div class="cs-upload-banner-bar" id="cs-upload-banner-bar"></div>
+          </div>
+          <div class="cs-upload-banner-row">
+            <p class="cs-upload-banner-label" id="cs-upload-banner-label">アップロード中…</p>
+            <button type="button" class="cs-btn cs-btn-text" id="cs-upload-details-btn">詳細を表示</button>
+          </div>
+        </div>
+        <p class="cs-upload-progress" id="cs-upload-progress" hidden></p>
+        <p class="cs-upload-progress" id="cs-delete-progress" hidden role="status"></p>
+        <nav class="cs-breadcrumb" id="cs-breadcrumb" aria-label="パス"></nav>
+
+        <section class="cs-search-panel" id="cs-search-panel" aria-label="ファイル検索">
+          <div class="cs-search-main">
+            <label class="cs-search-label" for="cs-search-input">検索</label>
+            <input type="search" id="cs-search-input" class="cs-search-input" placeholder="ファイル名" autocomplete="off">
+            <select id="cs-search-scope" class="cs-search-select" aria-label="検索範囲">
+              <option value="folder">このフォルダ内</option>
+              <option value="subtree">サブフォルダも検索</option>
+              <option value="root">ルート全体を検索</option>
+            </select>
+            <button type="button" class="cs-btn cs-btn-primary" id="cs-search-btn">検索</button>
+            <button type="button" class="cs-btn" id="cs-search-clear" hidden>検索を解除</button>
+          </div>
+          <div class="cs-search-dates">
+            <label class="cs-search-date-label" for="cs-search-updated-from">更新日時</label>
+            <input type="date" id="cs-search-updated-from" class="cs-search-date" aria-label="更新日時（開始）">
+            <span class="cs-search-date-sep">〜</span>
+            <input type="date" id="cs-search-updated-to" class="cs-search-date" aria-label="更新日時（終了）">
+          </div>
+          <p class="cs-search-hint" id="cs-search-status" hidden></p>
+        </section>
+
+        <div class="cs-table-wrap" id="cs-table-wrap">
+          <div class="cs-marquee" id="cs-marquee" hidden></div>
+          <table class="cs-table" id="cs-files-table">
+            <thead>
+              <tr>
+                <th scope="col" aria-label="選択"></th>
+                <th scope="col" class="cs-sortable-th" data-sort="name">名前 <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+                <th scope="col" class="cs-search-location-th" id="cs-search-location-th" hidden>場所</th>
+                <th scope="col" class="cs-sortable-th" data-sort="size">サイズ <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+                <th scope="col" class="cs-sortable-th" data-sort="updatedAt">更新日時 <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+                <th scope="col" class="cs-sortable-th" data-sort="updatedBy">更新者 <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+              </tr>
+            </thead>
+            <tbody id="cs-files-body"></tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="cs-toast" id="cs-toast" hidden role="status"></div>
+
+  <div id="cs-context-menu" class="cs-context-menu" hidden role="menu" aria-label="ファイルメニュー">
+    <p class="cs-context-menu-title" id="cs-context-menu-title"></p>
+    <div class="cs-context-menu-items" id="cs-context-menu-items"></div>
+  </div>
+
+  <dialog class="cs-preview-dialog" id="cs-preview-dialog">
+    <header class="cs-preview-header">
+      <button type="button" class="cs-preview-nav" id="cs-preview-prev" aria-label="前のファイル" hidden>‹</button>
+      <div class="cs-preview-header-main">
+        <h2 class="cs-preview-title" id="cs-preview-title">プレビュー</h2>
+        <p class="cs-preview-counter" id="cs-preview-counter" hidden></p>
+      </div>
+      <button type="button" class="cs-preview-nav" id="cs-preview-next" aria-label="次のファイル" hidden>›</button>
+      <button type="button" class="cs-preview-close" id="cs-preview-close" aria-label="閉じる">✕</button>
+    </header>
+    <div class="cs-preview-body" id="cs-preview-body"></div>
+    <footer class="cs-preview-footer">
+      <button type="button" class="cs-btn" id="cs-preview-download">ダウンロード</button>
+      <button type="button" class="cs-btn" id="cs-preview-close-btn">閉じる</button>
+    </footer>
+  </dialog>
+
+  <dialog class="cs-upload-dialog" id="cs-upload-dialog">
+    <header class="cs-upload-dialog-header">
+      <h2 class="cs-upload-dialog-title">アップロードの詳細</h2>
+      <button type="button" class="cs-preview-close" id="cs-upload-dialog-close" aria-label="閉じる">✕</button>
+    </header>
+    <div class="cs-upload-dialog-body" id="cs-upload-dialog-body"></div>
+    <footer class="cs-upload-dialog-footer">
+      <button type="button" class="cs-btn" id="cs-upload-dialog-close-btn">閉じる</button>
+    </footer>
+  </dialog>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="/apps/cloud-storage/js/app.js"></script>
+</body>
+</html>

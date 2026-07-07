@@ -15,11 +15,15 @@
     "db:migrate:remote": "wrangler d1 migrations apply sciencehub-db --remote",
     "r2:create": "wrangler r2 bucket create sciencehub-files",
     "types": "wrangler types",
-    "admin:set-password": "node scripts/set-remote-admin-password.mjs admin"
+    "admin:set-password": "node scripts/set-remote-admin-password.mjs admin",
+    "worker:deploy": "wrangler deploy --config workers/sciencehub-worker/wrangler.jsonc"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250701.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.24.4"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20"
   }
 }

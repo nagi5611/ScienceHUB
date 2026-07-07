@@ -16,7 +16,7 @@
   </header>
 
   <main class="shift-app-main" id="app-main" hidden>
-    <div class="shift-app-toolbar">
+    <div class="shift-app-intro">
       <div class="shift-app-tabs" role="tablist" aria-label="カレンダー種別">
         <button type="button" class="shift-app-tab is-active" data-shift-view="mine" role="tab" aria-selected="true">
           予定カレンダー
@@ -26,17 +26,13 @@
         </button>
       </div>
       <p class="shift-app-hint" id="shift-hint">
-        日付をクリックまたはドラッグして出勤可能日を設定できます。出勤可能な日を再度操作すると解除されます。
+        メンバーを選んでカレンダー上をクリックまたはドラッグし、出勤可能日を設定します。
       </p>
-      <div class="shift-app-others-filter" id="others-filter" hidden>
-        <label class="shift-app-field">
-          <span class="shift-app-label">メンバー</span>
-          <select id="others-member-select" class="shift-app-select"></select>
-        </label>
-      </div>
     </div>
 
     <section class="shift-calendar-card" id="calendar-section" aria-label="シフトカレンダー">
+      <div id="shift-member-toolbar" class="shift-member-toolbar" hidden></div>
+
       <div class="calendar-sticky-header">
         <div class="calendar-toolbar">
           <div class="calendar-header-mobile">
@@ -49,7 +45,6 @@
               <div class="calendar-today-group">
                 <span class="calendar-today-label">今日：</span>
                 <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="今月へ">
-                  <span class="calendar-today-icon" aria-hidden="true"></span>
                   <span id="today-day-num"></span>
                 </button>
               </div>
@@ -61,20 +56,28 @@
         <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
       </div>
       <div class="calendar-grid-wrap">
-        <div class="calendar-grid" id="calendar-grid"></div>
+        <div class="calendar-grid shift-calendar-grid" id="calendar-grid"></div>
       </div>
     </section>
 
     <aside class="shift-legend" aria-label="凡例">
-      <span class="shift-legend-item">
-        <span class="shift-legend-swatch shift-legend-swatch--available"></span>
-        出勤可能
+      <span class="shift-legend-item" id="legend-edit" hidden>
+        <span class="shift-legend-swatch shift-legend-swatch--painting"></span>
+        ドラッグでまとめて出勤可能に
       </span>
-      <span class="shift-legend-item" id="legend-others" hidden>
-        <span class="shift-legend-swatch shift-legend-swatch--others"></span>
-        選択メンバーの出勤可能日
+      <span class="shift-legend-item" id="legend-covered" hidden>
+        <span class="shift-legend-swatch shift-legend-swatch--covered"></span>
+        出勤可能者あり
+      </span>
+      <span class="shift-legend-item" id="legend-empty" hidden>
+        <span class="shift-legend-swatch shift-legend-swatch--empty"></span>
+        出勤可能者なし
       </span>
     </aside>
+
+    <p class="shift-app-footnote" id="shift-footnote">
+      クリックで ON/OFF、ドラッグでまとめて ON。色カードから表示色を変更できます。
+    </p>
   </main>
 
   <div class="shift-app-denied" id="access-denied" hidden>

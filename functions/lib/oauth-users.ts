@@ -102,6 +102,21 @@ async function generateUniqueUsername(
   return candidate;
 }
 
+/** ユーザーに紐づく OAuth プロバイダー一覧 */
+export async function getUserOAuthProviders(
+  db: D1Database,
+  userId: string
+): Promise<OAuthProvider[]> {
+  const result = await db
+    .prepare(
+      `SELECT provider FROM oauth_identities WHERE user_id = ? ORDER BY linked_at ASC`
+    )
+    .bind(userId)
+    .all<{ provider: OAuthProvider }>();
+
+  return (result.results ?? []).map((row) => row.provider);
+}
+
 /** 既存 OAuth / メール連携ユーザーを検索する */
 export async function findExistingOAuthUser(
   db: D1Database,

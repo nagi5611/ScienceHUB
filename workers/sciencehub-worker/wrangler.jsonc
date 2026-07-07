@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sciencehub-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-06",
+  "triggers": {
+    "crons": ["0 21 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sciencehub-db",
+      "database_id": "1cce62b0-51f4-4619-9207-6a808557984c"
+    }
+  ]
+}

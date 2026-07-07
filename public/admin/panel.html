@@ -36,6 +36,10 @@
           <span class="cf-nav-icon" data-icon="app" aria-hidden="true"></span>
           アプリ
         </button>
+        <button type="button" class="cf-nav-item" data-view="storage">
+          <span class="cf-nav-icon" data-icon="folder" aria-hidden="true"></span>
+          ストレージ
+        </button>
         <p class="cf-nav-label">コンテンツ</p>
         <button type="button" class="cf-nav-item" data-view="announcements">
           <span class="cf-nav-icon" data-icon="bell" aria-hidden="true"></span>
@@ -129,6 +133,22 @@
           </label>
         </div>
 
+        <article class="cf-gcal-card" id="gcal-settings-card">
+          <header class="cf-gcal-card-header">
+            <div>
+              <h2 class="cf-gcal-card-title">Google カレンダー連携</h2>
+              <p class="cf-gcal-card-lead">接続状態の確認とテスト用です。全体カレンダーはルートグループの編集で設定します。環境変数 <code>GOOGLE_CALENDAR_CLIENT_ID</code> / <code>GOOGLE_CALENDAR_CLIENT_SECRET</code> / <code>GOOGLE_CALENDAR_REFRESH_TOKEN</code> が必要です。</p>
+            </div>
+            <div class="cf-gcal-status" id="gcal-status-badges" aria-live="polite"></div>
+          </header>
+          <div class="cf-gcal-actions">
+            <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-gcal-test="connect">接続テスト</button>
+            <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-gcal-test="read">読み込みテスト</button>
+            <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-gcal-test="write">書き込みテスト</button>
+          </div>
+          <div id="gcal-test-result" class="cf-gcal-test-result" hidden></div>
+        </article>
+
         <div class="cf-group-list" id="groups-list">
           <p class="cf-empty">読み込み中…</p>
         </div>
@@ -185,6 +205,34 @@
             </thead>
             <tbody id="announcements-tbody">
               <tr><td colspan="4" class="cf-empty">読み込み中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ストレージ画面 -->
+      <section class="cf-view" id="view-storage">
+        <header class="cf-page-header">
+          <div>
+            <h1>ストレージ</h1>
+            <p>ユーザー・グループごとの割り当て領域を管理します。</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-ghost" id="storage-refresh-btn">再読み込み</button>
+        </header>
+
+        <div class="cf-table-wrap">
+          <table class="cf-table">
+            <thead>
+              <tr>
+                <th>種別</th>
+                <th>名前</th>
+                <th>使用量</th>
+                <th>割り当て</th>
+                <th aria-label="操作"></th>
+              </tr>
+            </thead>
+            <tbody id="storage-tbody">
+              <tr><td colspan="5" class="cf-empty">読み込み中…</td></tr>
             </tbody>
           </table>
         </div>
@@ -386,6 +434,22 @@
           <span>説明（任意）</span>
           <input type="text" name="description" placeholder="グループの説明">
         </label>
+        <label class="cf-field cf-field-full cf-field-checkbox">
+          <input type="checkbox" name="is_root" id="create-group-is-root">
+          <span>組織ルートグループにする</span>
+        </label>
+        <div class="cf-form-section" id="create-group-root-calendar-section" hidden>
+          <p class="cf-form-section-title">全体カレンダー（組織ルート）</p>
+          <label class="cf-field cf-field-full">
+            <span>全体カレンダー表示名</span>
+            <input type="text" name="overall_calendar_name" id="create-group-overall-calendar-name" placeholder="例: 自然科学部" autocomplete="off">
+            <span class="cf-field-hint">空欄のときはグループ名を使います。</span>
+          </label>
+          <label class="cf-field cf-field-full">
+            <span>全体カレンダー ID</span>
+            <input type="text" name="google_calendar_id" id="create-group-calendar-id" placeholder="example@group.calendar.google.com" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
       </div>
       <p id="create-group-error" class="cf-form-error" hidden></p>
       <footer class="cf-dialog-footer">
@@ -422,6 +486,28 @@
         <label class="cf-field cf-field-full">
           <span>説明（任意）</span>
           <input type="text" id="edit-group-description">
+        </label>
+        <label class="cf-field cf-field-full cf-field-checkbox">
+          <input type="checkbox" id="edit-group-is-root">
+          <span>組織ルートグループにする</span>
+        </label>
+        <div class="cf-form-section" id="edit-group-root-calendar-section" hidden>
+          <p class="cf-form-section-title">全体カレンダー（組織ルート）</p>
+          <label class="cf-field cf-field-full">
+            <span>全体カレンダー表示名</span>
+            <input type="text" id="edit-group-overall-calendar-name" placeholder="例: 自然科学部" autocomplete="off">
+            <span class="cf-field-hint">スケジュールの凡例や Google 同期で使う名称です。空欄のときはグループ名を使います。</span>
+          </label>
+          <label class="cf-field cf-field-full">
+            <span>全体カレンダー ID</span>
+            <input type="text" id="edit-group-calendar-id" placeholder="example@group.calendar.google.com" autocomplete="off" spellcheck="false">
+            <span class="cf-field-hint" id="edit-group-calendar-hint">全体の予定が同期される Google カレンダーです。</span>
+          </label>
+        </div>
+        <label class="cf-field cf-field-full" id="edit-group-group-gcal-field">
+          <span>Google カレンダー ID（グループ用・任意）</span>
+          <input type="text" id="edit-group-group-calendar-id" placeholder="グループ専用カレンダーの ID" autocomplete="off" spellcheck="false">
+          <span class="cf-field-hint">このグループの予定を別カレンダーにも同期します。空欄で未連携。</span>
         </label>
       </div>
       <p id="edit-group-error" class="cf-form-error" hidden></p>

@@ -6,6 +6,7 @@ import type { Env } from "../../lib/types";
 import { jsonError } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { createUser } from "../../lib/users";
+import { ensureUserStorageRoot } from "../../lib/storage/roots";
 import type { UserRow } from "../../lib/types";
 import { toPublicUser } from "../../lib/auth";
 
@@ -63,6 +64,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (result instanceof Response) {
     return result;
   }
+
+  const primaryRole = roleSlugs[0] ?? "member";
+  await ensureUserStorageRoot(
+    context.env,
+    db,
+    result.user.id,
+    result.user.username,
+    primaryRole
+  );
 
   return Response.json({ user: result.user }, { status: 201 });
 };

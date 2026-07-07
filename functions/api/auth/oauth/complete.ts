@@ -11,6 +11,7 @@ import {
   readOAuthPending,
 } from "../../../lib/oauth-pending";
 import { createOAuthUser } from "../../../lib/oauth-users";
+import { ensureUserStorageRoot } from "../../../lib/storage/roots";
 import { isSecureRequest, sanitizeOAuthNext } from "../../../lib/oauth";
 import { getUserRoles } from "../../../lib/roles";
 import { validateDisplayName } from "../../../lib/users";
@@ -44,6 +45,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     email: pending.email,
     displayName: body.display_name!.trim(),
   });
+
+  await ensureUserStorageRoot(
+    context.env,
+    db,
+    user.id,
+    user.username,
+    user.role_slug
+  );
 
   const sessionId = await createSession(db, user.id);
   const roles = await getUserRoles(db, user.id);

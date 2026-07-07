@@ -7,6 +7,7 @@ import { SESSION_TTL_MS, jsonError, setSessionCookie } from "../../lib/types";
 import { createSession } from "../../lib/auth";
 import { getDb } from "../../lib/db";
 import { createUser, validateDisplayName } from "../../lib/users";
+import { ensureUserStorageRoot } from "../../lib/storage/roots";
 
 interface SignupBody {
   username?: string;
@@ -42,6 +43,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (result instanceof Response) {
       return result;
     }
+
+    await ensureUserStorageRoot(
+      context.env,
+      db,
+      result.user.id,
+      result.user.username,
+      result.user.role_slug ?? "guest"
+    );
 
     const sessionId = await createSession(db, result.user.id);
     const maxAgeSec = Math.floor(SESSION_TTL_MS / 1000);

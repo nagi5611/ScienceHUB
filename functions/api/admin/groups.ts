@@ -6,12 +6,16 @@ import type { Env } from "../../lib/types";
 import { jsonError } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { createGroup, listGroupsWithDetails } from "../../lib/groups";
+import { ensureGroupStorageRoot } from "../../lib/storage/roots";
 
 interface CreateGroupBody {
   display_name?: string;
   slug?: string;
   description?: string;
   color?: string;
+  is_root?: boolean;
+  google_calendar_id?: string | null;
+  overall_calendar_name?: string | null;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -39,11 +43,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       slug: body.slug,
       description: body.description,
       color: body.color,
+      is_root: body.is_root === true,
+      google_calendar_id: body.google_calendar_id,
+      overall_calendar_name: body.overall_calendar_name,
     });
 
     if (!group) {
       return jsonError("グループの作成に失敗しました", 500);
     }
+
+    await ensureGroupStorageRoot(
+      context.env,
+      getDb(context.env),
+      group.id,
+      group.slug,
+      "admin"
+    );
 
     return Response.json({ group }, { status: 201 });
   } catch (error) {

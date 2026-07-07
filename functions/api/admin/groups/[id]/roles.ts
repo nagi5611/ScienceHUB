@@ -47,10 +47,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonError("グループロール名を入力してください", 400);
   }
 
-  const weight =
-    body.weight !== undefined ? parseRoleWeight(body.weight) : undefined;
-  if (body.weight !== undefined && weight === null) {
-    return jsonError("重みは整数で指定してください", 400);
+  let weight: number | undefined;
+  if (body.weight !== undefined) {
+    const parsed = parseRoleWeight(body.weight);
+    if (parsed === null) {
+      return jsonError("重みは整数で指定してください", 400);
+    }
+    weight = parsed;
   }
 
   try {

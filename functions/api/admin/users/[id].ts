@@ -13,6 +13,7 @@ import {
   type GroupMembershipInput,
 } from "../../../lib/groups";
 import { validatePassword, validateUsername } from "../../../lib/users";
+import { applyUserQuotaOnRoleChange } from "../../../lib/storage/roots";
 import type { UserRow } from "../../../lib/types";
 
 interface UpdateUserBody {
@@ -101,12 +102,14 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
       return jsonError(roleError, 400);
     }
     await setUserRoles(db, userId, body.role_slugs);
+    await applyUserQuotaOnRoleChange(db, userId, body.role_slugs[0] ?? "guest");
   } else if (body.role_slug !== undefined) {
     const roleError = await validateRoleSlugs(db, [body.role_slug.trim()]);
     if (roleError) {
       return jsonError(roleError, 400);
     }
     await setUserRoles(db, userId, [body.role_slug.trim()]);
+    await applyUserQuotaOnRoleChange(db, userId, body.role_slug.trim());
   }
 
   if (body.group_memberships !== undefined) {

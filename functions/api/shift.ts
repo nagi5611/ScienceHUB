@@ -10,6 +10,7 @@ import {
   listShiftAvailability,
   setShiftAvailability,
   toggleShiftAvailability,
+  updateShiftColor,
 } from "../lib/shift";
 
 interface SetShiftBody {
@@ -19,6 +20,10 @@ interface SetShiftBody {
 
 interface ToggleShiftBody {
   date?: string;
+}
+
+interface ColorShiftBody {
+  color_index?: number;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -108,6 +113,35 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "シフトの更新に失敗しました";
+    return jsonError(message, 400);
+  }
+};
+
+export const onRequestPatch: PagesFunction<Env> = async (context) => {
+  const auth = await requireUser(context.request, context.env);
+  if (auth instanceof Response) return auth;
+
+  let body: ColorShiftBody;
+  try {
+    body = await context.request.json<ColorShiftBody>();
+  } catch {
+    return jsonError("リクエスト形式が不正です", 400);
+  }
+
+  if (typeof body.color_index !== "number") {
+    return jsonError("color_index を指定してください", 400);
+  }
+
+  try {
+    const member = await updateShiftColor(
+      getDb(context.env),
+      auth.id,
+      body.color_index
+    );
+    return Response.json({ member });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "色の更新に失敗しました";
     return jsonError(message, 400);
   }
 };
