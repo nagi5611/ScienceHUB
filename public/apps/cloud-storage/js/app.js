@@ -2,7 +2,7 @@
  * クラウドストレージ エクスプローラー
  */
 
-import { apiRequest, fetchDownloadBlob } from "./api.js";
+import { apiRequest, createShareLink, fetchDownloadBlob, moveStorageItems } from "./api.js";
 import { resolvePreviewBlob } from "./preview-cache.js";
 import {
   clearSessionPreviewCache,
@@ -10,10 +10,12 @@ import {
   getSessionPreviewObjectUrl,
 } from "./preview-session-cache.js";
 import { uploadFiles } from "./upload.js";
+import { collectFilesFromDataTransfer, isFolderUpload } from "./folder-upload.js";
 import { createUploadProgress } from "./upload-progress.js";
 import {
   classifyFile,
   getSameCategoryPreviewItems,
+  isExcalidrawFilename,
   isOfficePreviewableFilename,
   isPreviewableFile,
   needsLargePreviewWarning,
@@ -26,8 +28,15 @@ import { scheduleFileThumbnails } from "./file-thumbnails.js";
 import { resetThumbnailLoads } from "./thumbnail-session.js";
 import { mountModel3dPreview, unmountModel3dPreview, ensureModelBlobType } from "./preview-model3d.js";
 import {
+  mountExcalidrawPreview,
+  unmountExcalidrawPreview,
+} from "./preview-excalidraw.js";
+import {
   clearOfficePreview,
   fetchOfficePreviewInfo,
+  openOfficeInBrowserTab,
+  openOfficeInDesktopApp,
+  openOfficeInDesktopAppByPath,
   renderOfficePreview,
 } from "./preview-office.js";
 
@@ -40,6 +49,7 @@ let previewPath = null;
 let previewQueue = [];
 let previewIndex = -1;
 let previewLoadToken = 0;
+let currentOfficePreviewInfo = null;
 let selectionAnchorIndex = -1;
 let suppressRowClick = false;
 
@@ -47,6 +57,8 @@ const MARQUEE_DRAG_THRESHOLD = 4;
 const LIST_PAGE_SIZE = 40;
 const SORT_STORAGE_KEY = "cs-sort";
 const PARALLEL_DELETE = 8;
+const STORAGE_MOVE_MIME = "application/x-sciencehub-storage-move";
+let activeDragMoveItems = null;
 
 let listLoadGeneration = 0;
 let sortField = "name";
@@ -58,6 +70,8 @@ let searchScope = "folder";
 let searchUpdatedFrom = "";
 let searchUpdatedTo = "";
 let searchStatusText = "";
+let trashView = false;
+let trashQuota = { totalBytes: 0, quotaBytes: 50 * 1024 ** 3 };
 
 const SEARCH_SCOPE_LABELS = {
   folder: "このフォルダ内",
@@ -66,6 +80,264 @@ const SEARCH_SCOPE_LABELS = {
 };
 
 const uploadProgress = createUploadProgress();
+
+function getRootPath(path) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 2) return path;
+  return `${parts[0]}/${parts[1]}`;
+}
+
+function updateToolbarForView() {
+  const explorerIds = [
+    "cs-upload-btn",
+    "cs-upload-folder-btn",
+    "cs-mkdir-btn",
+    "cs-download-btn",
+    "cs-rename-btn",
+    "cs-delete-btn",
+    "cs-sort-field",
+    "cs-sort-order",
+    "cs-search-panel",
+  ];
+  const trashIds = [
+    "cs-trash-back-btn",
+    "cs-trash-restore-btn",
+    "cs-trash-purge-btn",
+    "cs-trash-empty-btn",
+  ];
+
+  for (const id of explorerIds) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = trashView;
+  }
+  for (const id of trashIds) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !trashView;
+  }
+
+  const status = document.getElementById("cs-trash-status");
+  if (status) status.hidden = !trashView;
+
+  const sortControls = document.querySelector(".cs-sort-controls");
+  if (sortControls) sortControls.hidden = trashView;
+}
+
+function enterTrashView(rootPath = null) {
+  const target = rootPath ?? getRootPath(currentPath);
+  if (!target) return;
+  currentPath = target;
+  trashView = true;
+  searchActive = false;
+  selectedItems.clear();
+  selectionAnchorIndex = -1;
+  updateSearchUi();
+  updateToolbarForView();
+  renderRoots();
+  refreshListing();
+}
+
+function exitTrashView() {
+  trashView = false;
+  selectedItems.clear();
+  selectionAnchorIndex = -1;
+  updateToolbarForView();
+  renderRoots();
+  refreshListing();
+}
+
+function updateTrashStatus() {
+  const bar = document.getElementById("cs-trash-quota-bar");
+  const label = document.getElementById("cs-trash-quota-label");
+  const headerBar = document.getElementById("cs-quota-bar");
+  const headerLabel = document.getElementById("cs-quota-label");
+  const pct =
+    trashQuota.quotaBytes > 0
+      ? Math.min(100, (trashQuota.totalBytes / trashQuota.quotaBytes) * 100)
+      : 0;
+  const text = `${formatBytes(trashQuota.totalBytes)} / ${formatBytes(trashQuota.quotaBytes)}`;
+
+  for (const el of [bar, headerBar]) {
+    if (!el) continue;
+    el.style.width = `${pct}%`;
+    el.classList.toggle("is-warning", pct >= 80 && pct < 95);
+    el.classList.toggle("is-danger", pct >= 95);
+  }
+
+  if (label) label.textContent = text;
+  if (headerLabel) headerLabel.textContent = `ごみ箱 ${text}`;
+}
+
+function applyQuotaBar(bar, usedBytes, quotaBytes) {
+  if (!bar) return;
+  const pct = quotaBytes > 0 ? Math.min(100, (usedBytes / quotaBytes) * 100) : 0;
+  bar.style.width = `${pct}%`;
+  bar.classList.toggle("is-warning", pct >= 80 && pct < 95);
+  bar.classList.toggle("is-danger", pct >= 95);
+}
+
+function canDragMove() {
+  return !trashView && !searchActive;
+}
+
+function getParentLogicalPath(path) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 2) return parts.join("/");
+  return parts.slice(0, -1).join("/");
+}
+
+function isInvalidMoveTarget(sourcePath, sourceType, destPath) {
+  if (!sourcePath || !destPath) return true;
+  if (sourcePath === destPath) return true;
+  if (getParentLogicalPath(sourcePath) === destPath) return true;
+  if (sourceType === "folder") {
+    if (destPath === sourcePath || destPath.startsWith(`${sourcePath}/`)) return true;
+  }
+  return false;
+}
+
+function getDragMoveItems(item) {
+  const items = selectedItems.has(item.path)
+    ? getSelectedItems().filter((entry) => entry.type === "file" || entry.type === "folder")
+    : [item];
+  return filterRedundantMoveItems(items);
+}
+
+function filterRedundantMoveItems(items) {
+  const folderPaths = items
+    .filter((entry) => entry.type === "folder")
+    .map((entry) => entry.path);
+
+  return items.filter((entry) => {
+    const enclosed = folderPaths.some(
+      (folderPath) => folderPath !== entry.path && entry.path.startsWith(`${folderPath}/`)
+    );
+    return !enclosed;
+  });
+}
+
+function readDragMoveItems(dataTransfer) {
+  const raw = dataTransfer.getData(STORAGE_MOVE_MIME);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDropTargetHighlight() {
+  document
+    .querySelectorAll(".is-drop-target")
+    .forEach((el) => el.classList.remove("is-drop-target"));
+}
+
+function bindStorageDropTarget(el, destPath) {
+  if (!el || el.dataset.dropBound === "1") return;
+  el.dataset.dropBound = "1";
+
+  el.addEventListener("dragenter", (e) => {
+    if (!activeDragMoveItems?.length) return;
+    e.preventDefault();
+  });
+
+  el.addEventListener("dragover", (e) => {
+    if (!activeDragMoveItems?.length) return;
+    const blocked = activeDragMoveItems.some((item) =>
+      isInvalidMoveTarget(item.path, item.type, destPath)
+    );
+    if (blocked) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    clearDropTargetHighlight();
+    el.classList.add("is-drop-target");
+  });
+
+  el.addEventListener("dragleave", (e) => {
+    if (!el.contains(e.relatedTarget)) {
+      el.classList.remove("is-drop-target");
+    }
+  });
+
+  el.addEventListener("drop", async (e) => {
+    const items = readDragMoveItems(e.dataTransfer) ?? activeDragMoveItems;
+    if (!items?.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearDropTargetHighlight();
+    await handleStorageMoveDrop(items, destPath);
+  });
+}
+
+async function handleStorageMoveDrop(items, destPath) {
+  if (!canDragMove()) return;
+
+  const movable = items.filter(
+    (item) => !isInvalidMoveTarget(item.path, item.type, destPath)
+  );
+  if (!movable.length) return;
+
+  try {
+    const result = await moveStorageItems(
+      movable.map((item) => ({ path: item.path, type: item.type })),
+      destPath
+    );
+    const renamedCount = (result.moved ?? []).filter((entry) => entry.renamed).length;
+    selectedItems.clear();
+    selectionAnchorIndex = -1;
+    if (renamedCount > 0) {
+      showToast(
+        `${result.moved.length} 件を移動しました（${renamedCount} 件は同名のため (1) 等を付与）`
+      );
+    } else {
+      showToast(`${result.moved.length} 件を移動しました`);
+    }
+    await refreshListing();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+function syncRowDragState() {
+  const draggable = canDragMove();
+  document.querySelectorAll(".cs-file-row").forEach((row) => {
+    const isSelected = selectedItems.has(row.dataset.path);
+    row.draggable = draggable && isSelected;
+    row.classList.toggle("is-draggable", draggable && isSelected);
+  });
+}
+
+function bindRowMoveDrag(row, item) {
+  if (!item || row.dataset.moveDragBound === "1") return;
+  row.dataset.moveDragBound = "1";
+
+  row.addEventListener("dragstart", (e) => {
+    if (!canDragMove() || !selectedItems.has(item.path)) {
+      e.preventDefault();
+      return;
+    }
+
+    const payload = getDragMoveItems(item).map((entry) => ({
+      path: entry.path,
+      type: entry.type,
+    }));
+    if (!payload.length) {
+      e.preventDefault();
+      return;
+    }
+
+    e.dataTransfer.setData(STORAGE_MOVE_MIME, JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = "move";
+    activeDragMoveItems = payload;
+    row.classList.add("is-dragging");
+  });
+
+  row.addEventListener("dragend", () => {
+    row.classList.remove("is-dragging");
+    activeDragMoveItems = null;
+    clearDropTargetHighlight();
+  });
+}
 
 function getItemByPath(path) {
   return listItems.find((i) => i.path === path);
@@ -82,6 +354,7 @@ function applySelectionToUi() {
     const cb = row.querySelector(".cs-select");
     if (cb) cb.checked = selected;
   });
+  syncRowDragState();
 }
 
 function getItemIndex(path) {
@@ -265,6 +538,7 @@ function bindMarqueeSelection() {
     const onWrapBackground = e.target === wrap;
 
     if (onCheckbox || onStatusRow || onHeader) return;
+    if (onRow && canDragMove() && selectedItems.has(onRow.dataset.path)) return;
     if (!onRow && !onWrapBackground && !tbody.contains(e.target)) return;
 
     e.preventDefault();
@@ -288,6 +562,11 @@ function hideContextMenu() {
 
 /** 単一項目のコンテキストメニュー */
 function showContextMenu(clientX, clientY, item) {
+  if (trashView || item.isTrash) {
+    showTrashContextMenu(clientX, clientY, item);
+    return;
+  }
+
   const menu = document.getElementById("cs-context-menu");
   const title = document.getElementById("cs-context-menu-title");
   const itemsEl = document.getElementById("cs-context-menu-items");
@@ -302,9 +581,21 @@ function showContextMenu(clientX, clientY, item) {
     actions.push({ id: "open", label: "開く" });
   } else {
     if (canPreviewFile(item)) {
-      actions.push({ id: "preview", label: "プレビュー" });
+      if (isOfficePreviewableFilename(item.name)) {
+        actions.push({
+          id: "preview-submenu",
+          label: "プレビュー",
+          children: [
+            { id: "preview-browser", label: "ブラウザで表示" },
+            { id: "preview-app", label: "アプリで表示" },
+          ],
+        });
+      } else {
+        actions.push({ id: "preview", label: "プレビュー" });
+      }
     }
     actions.push({ id: "download", label: "ダウンロード" });
+    actions.push({ id: "share", label: "共有リンクを作成" });
   }
 
   actions.push({ id: "rename", label: "名称変更" });
@@ -318,6 +609,11 @@ function showContextMenu(clientX, clientY, item) {
 
 /** 複数選択時のコンテキストメニュー */
 function showMultiContextMenu(clientX, clientY) {
+  if (trashView) {
+    showTrashMultiContextMenu(clientX, clientY);
+    return;
+  }
+
   const menu = document.getElementById("cs-context-menu");
   const title = document.getElementById("cs-context-menu-title");
   const itemsEl = document.getElementById("cs-context-menu-items");
@@ -327,26 +623,143 @@ function showMultiContextMenu(clientX, clientY) {
   const count = selectedItems.size;
   title.textContent = `${count} 件を選択中`;
 
-  const actions = [
-    { id: "download-selected", label: "選択項目をダウンロード" },
-    { id: "sep" },
-    { id: "delete-selected", label: "選択項目を削除", danger: true },
-  ];
+  const actions = [];
+  const fileCount = getSelectedFileItems().length;
+  if (fileCount > 0) {
+    actions.push({ id: "share-selected", label: "共有リンクを作成" });
+  }
+  actions.push({ id: "download-selected", label: "選択項目をダウンロード" });
+  actions.push({ id: "sep" });
+  actions.push({ id: "delete-selected", label: "選択項目を削除", danger: true });
 
   renderContextMenu(menu, title, itemsEl, clientX, clientY, actions, (action) => {
     handleMultiContextAction(action);
   });
 }
 
+/** ごみ箱: 単一項目のコンテキストメニュー */
+function showTrashContextMenu(clientX, clientY, item) {
+  const menu = document.getElementById("cs-context-menu");
+  const title = document.getElementById("cs-context-menu-title");
+  const itemsEl = document.getElementById("cs-context-menu-items");
+  if (!menu || !title || !itemsEl) return;
+
+  contextMenuItem = item;
+  title.textContent = item.name;
+
+  const actions = [
+    { id: "trash-restore", label: "復元" },
+    { id: "sep" },
+    { id: "trash-purge", label: "完全に削除", danger: true },
+  ];
+
+  renderContextMenu(menu, title, itemsEl, clientX, clientY, actions, (action) => {
+    handleTrashContextAction(action, item);
+  });
+}
+
+/** ごみ箱: 複数選択時のコンテキストメニュー */
+function showTrashMultiContextMenu(clientX, clientY) {
+  const menu = document.getElementById("cs-context-menu");
+  const title = document.getElementById("cs-context-menu-title");
+  const itemsEl = document.getElementById("cs-context-menu-items");
+  if (!menu || !title || !itemsEl) return;
+
+  contextMenuItem = null;
+  title.textContent = `${selectedItems.size} 件を選択中`;
+
+  const actions = [
+    { id: "trash-restore-selected", label: "選択項目を復元" },
+    { id: "sep" },
+    { id: "trash-purge-selected", label: "選択項目を完全に削除", danger: true },
+  ];
+
+  renderContextMenu(menu, title, itemsEl, clientX, clientY, actions, (action) => {
+    handleTrashMultiContextAction(action);
+  });
+}
+
+function handleTrashContextAction(action, item) {
+  switch (action) {
+    case "trash-restore":
+      handleTrashRestore([item]);
+      break;
+    case "trash-purge":
+      handleTrashPurge([item]);
+      break;
+    default:
+      break;
+  }
+}
+
+function handleTrashMultiContextAction(action) {
+  switch (action) {
+    case "trash-restore-selected":
+      handleTrashRestore();
+      break;
+    case "trash-purge-selected":
+      handleTrashPurge();
+      break;
+    default:
+      break;
+  }
+}
+
+function renderContextMenuAction(action) {
+  if (action.id === "sep") {
+    return '<div class="cs-context-menu-sep" role="separator"></div>';
+  }
+
+  if (action.children?.length) {
+    const childButtons = action.children
+      .map(
+        (child) =>
+          `<button type="button" class="cs-context-menu-item" data-action="${child.id}" role="menuitem">${escapeHtml(child.label)}</button>`
+      )
+      .join("");
+    return `<div class="cs-context-menu-item has-submenu" role="none">
+      <button type="button" class="cs-context-menu-submenu-trigger" aria-haspopup="true" aria-expanded="false">
+        <span>${escapeHtml(action.label)}</span>
+        <span class="cs-context-menu-chevron" aria-hidden="true">›</span>
+      </button>
+      <div class="cs-context-submenu" role="menu">${childButtons}</div>
+    </div>`;
+  }
+
+  return `<button type="button" class="cs-context-menu-item${action.danger ? " is-danger" : ""}" data-action="${action.id}" role="menuitem">${escapeHtml(action.label)}</button>`;
+}
+
+function bindContextSubmenus(itemsEl) {
+  itemsEl.querySelectorAll(".cs-context-menu-item.has-submenu").forEach((item) => {
+    const trigger = item.querySelector(".cs-context-menu-submenu-trigger");
+    if (!trigger) return;
+
+    const open = () => {
+      itemsEl.querySelectorAll(".cs-context-menu-item.has-submenu.is-open").forEach((other) => {
+        if (other !== item) other.classList.remove("is-open");
+      });
+      item.classList.add("is-open");
+      trigger.setAttribute("aria-expanded", "true");
+    };
+
+    const close = () => {
+      item.classList.remove("is-open");
+      trigger.setAttribute("aria-expanded", "false");
+    };
+
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (item.classList.contains("is-open")) close();
+      else open();
+    });
+
+    item.addEventListener("mouseenter", open);
+    item.addEventListener("mouseleave", close);
+  });
+}
+
 function renderContextMenu(menu, _title, itemsEl, clientX, clientY, actions, onAction) {
-  itemsEl.innerHTML = actions
-    .map((action) => {
-      if (action.id === "sep") {
-        return '<div class="cs-context-menu-sep" role="separator"></div>';
-      }
-      return `<button type="button" class="cs-context-menu-item${action.danger ? " is-danger" : ""}" data-action="${action.id}" role="menuitem">${escapeHtml(action.label)}</button>`;
-    })
-    .join("");
+  itemsEl.innerHTML = actions.map((action) => renderContextMenuAction(action)).join("");
 
   menu.hidden = false;
   menu.style.visibility = "hidden";
@@ -367,6 +780,8 @@ function renderContextMenu(menu, _title, itemsEl, clientX, clientY, actions, onA
   menu.style.top = `${Math.max(padding, top)}px`;
   menu.style.visibility = "";
 
+  bindContextSubmenus(itemsEl);
+
   itemsEl.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
       onAction(btn.dataset.action);
@@ -377,6 +792,9 @@ function renderContextMenu(menu, _title, itemsEl, clientX, clientY, actions, onA
 
 function handleMultiContextAction(action) {
   switch (action) {
+    case "share-selected":
+      openShareDialog(getSelectedFileItems());
+      break;
     case "download-selected":
       handleDownloadSelected();
       break;
@@ -394,10 +812,19 @@ function handleContextAction(action, item) {
       openFolderItem(item);
       break;
     case "preview":
+    case "preview-browser":
       previewFile(item);
+      break;
+    case "preview-app":
+      openOfficeInDesktopAppByPath(item.path).catch((err) => {
+        showToast(err.message ?? "アプリで開けませんでした", true);
+      });
       break;
     case "download":
       downloadSingleFile(item.path, item.name);
+      break;
+    case "share":
+      openShareDialog([item]);
       break;
     case "rename":
       renameItem(item);
@@ -418,6 +845,23 @@ function openFolderItem(item) {
   renderRoots();
 }
 
+function updateOfficePreviewFooter(info) {
+  currentOfficePreviewInfo = info;
+  const browserBtn = document.getElementById("cs-preview-office-browser");
+  const appBtn = document.getElementById("cs-preview-office-app");
+  const isOffice = Boolean(info);
+  if (browserBtn) browserBtn.hidden = !isOffice;
+  if (appBtn) appBtn.hidden = !isOffice || !info?.desktopScheme;
+}
+
+function updateExcalidrawPreviewFooter(item) {
+  const editBtn = document.getElementById("cs-preview-excalidraw-edit");
+  if (!editBtn) return;
+  const show = Boolean(item && isExcalidrawFilename(item.name));
+  editBtn.hidden = !show;
+  if (show) editBtn.dataset.path = item.path;
+}
+
 function closePreview() {
   document.getElementById("cs-preview-dialog")?.close();
 }
@@ -427,11 +871,14 @@ function cleanupPreview() {
   const body = document.getElementById("cs-preview-body");
   if (body) {
     unmountModel3dPreview(body);
+    unmountExcalidrawPreview(body);
     clearOfficePreview(body);
-    body.classList.remove("cs-preview-body--model3d");
+    body.classList.remove("cs-preview-body--model3d", "cs-preview-body--excalidraw");
     body.innerHTML = "";
   }
   clearSessionPreviewCache();
+  updateOfficePreviewFooter(null);
+  updateExcalidrawPreviewFooter(null);
   previewPath = null;
   previewQueue = [];
   previewIndex = -1;
@@ -493,8 +940,13 @@ function showLargePreviewWarning(item, loadToken) {
 
 async function renderPreviewBlob(item, blob, body, options = {}) {
   unmountModel3dPreview(body);
+  unmountExcalidrawPreview(body);
   clearOfficePreview(body);
-  body.classList.remove("cs-preview-body--model3d", "cs-preview-body--office");
+  body.classList.remove(
+    "cs-preview-body--model3d",
+    "cs-preview-body--office",
+    "cs-preview-body--excalidraw"
+  );
   const objectUrl = getSessionPreviewObjectUrl(item.path, item.updatedAt, blob);
   const kind = classifyFile(item.name).kind;
 
@@ -523,6 +975,11 @@ async function renderPreviewBlob(item, blob, body, options = {}) {
     const maxLen = 512000;
     const display = text.length > maxLen ? `${text.slice(0, maxLen)}\n\n…（表示を省略）` : text;
     body.innerHTML = `<pre>${escapeHtml(display)}</pre>`;
+    return;
+  }
+
+  if (kind === "excalidraw" || isExcalidrawFilename(item.name)) {
+    await mountExcalidrawPreview(body, blob, item.name);
     return;
   }
 
@@ -575,12 +1032,21 @@ async function loadPreviewContent(item, options = {}) {
       const info = await fetchOfficePreviewInfo(item.path);
       if (loadToken !== previewLoadToken) return;
       renderOfficePreview(body, info, item.name);
+      updateOfficePreviewFooter(info);
+      updateExcalidrawPreviewFooter(null);
     } catch (err) {
       if (loadToken !== previewLoadToken) return;
+      updateOfficePreviewFooter(null);
+      updateExcalidrawPreviewFooter(null);
       body.innerHTML = `<p class="cs-preview-loading">${escapeHtml(err.message)}</p>`;
     }
     return;
   }
+
+  updateOfficePreviewFooter(null);
+  updateExcalidrawPreviewFooter(
+    isExcalidrawFilename(item.name) ? item : null
+  );
 
   try {
     const { blob } = await resolvePreviewBlob(item, fetchDownloadBlob);
@@ -635,7 +1101,7 @@ async function renameItem(item) {
 }
 
 async function deleteItem(item) {
-  if (!confirm(`「${item.name}」を削除しますか？`)) return;
+  if (!confirm(`「${item.name}」をごみ箱に移動しますか？`)) return;
 
   try {
     await apiRequest("delete", {
@@ -643,7 +1109,7 @@ async function deleteItem(item) {
       body: JSON.stringify({ path: item.path, type: item.type }),
     });
     selectedItems.delete(item.path);
-    showToast("削除しました");
+    showTrashMovedToast();
     await refreshListing();
   } catch (err) {
     showToast(err.message, true);
@@ -675,16 +1141,38 @@ function formatDate(ts) {
   return new Date(ts).toLocaleString("ja-JP");
 }
 
-function showToast(message, isError = false) {
+function showToast(message, isError = false, action = null) {
   const toast = document.getElementById("cs-toast");
   if (!toast) return;
-  toast.textContent = message;
-  toast.hidden = false;
-  toast.classList.toggle("is-error", isError);
+
   clearTimeout(showToast._timer);
+  toast.classList.toggle("is-error", isError);
+  toast.classList.toggle("has-action", Boolean(action));
+
+  if (action) {
+    toast.innerHTML = `
+      <p class="cs-toast-message">${escapeHtml(message)}</p>
+      <button type="button" class="cs-toast-action">${escapeHtml(action.label)}</button>`;
+    toast.querySelector(".cs-toast-action")?.addEventListener("click", () => {
+      toast.hidden = true;
+      action.onClick();
+    });
+  } else {
+    toast.textContent = message;
+  }
+
+  toast.hidden = false;
   showToast._timer = setTimeout(() => {
     toast.hidden = true;
-  }, 3500);
+  }, action ? 8000 : 3500);
+}
+
+/** ごみ箱へ移動したあとのトースト（ごみ箱を開くボタン付き） */
+function showTrashMovedToast(message = "ごみ箱に移動しました") {
+  showToast(message, false, {
+    label: "ごみ箱に移動",
+    onClick: () => enterTrashView(),
+  });
 }
 
 function setLoading(loading) {
@@ -732,6 +1220,7 @@ function updateSortUi() {
 }
 
 function getTableColSpan() {
+  if (trashView) return 6;
   return searchActive ? 6 : 5;
 }
 
@@ -790,7 +1279,8 @@ function clearSearch() {
 }
 
 function refreshListing() {
-  if (searchActive) loadSearchResults();
+  if (trashView) loadTrash();
+  else if (searchActive) loadSearchResults();
   else loadDirectory();
 }
 
@@ -961,31 +1451,61 @@ function renderRoots() {
   const list = document.getElementById("cs-roots");
   if (!list) return;
   list.innerHTML = roots
-    .map(
-      (root) => `
-    <button type="button" class="cs-root-item${currentPath.startsWith(root.path) ? " is-active" : ""}" data-path="${escapeHtml(root.path)}">
-      <span class="cs-root-icon">${root.type === "user" ? "👤" : "👥"}</span>
-      <span class="cs-root-label">${escapeHtml(root.label)}</span>
-      <span class="cs-root-type">${root.type === "user" ? "個人" : "グループ"}</span>
-    </button>`
-    )
+    .map((root) => {
+      const isInRoot = currentPath.startsWith(root.path);
+      const isTrashForRoot = trashView && getRootPath(currentPath) === root.path;
+      return `
+    <div class="cs-root-group">
+      <button type="button" class="cs-root-item${!trashView && isInRoot ? " is-active" : ""}" data-path="${escapeHtml(root.path)}">
+        <span class="cs-root-icon">${root.type === "user" ? "👤" : "👥"}</span>
+        <span class="cs-root-label">${escapeHtml(root.label)}</span>
+        <span class="cs-root-type">${root.type === "user" ? "個人" : "グループ"}</span>
+      </button>
+      ${
+        isInRoot || isTrashForRoot
+          ? `<button type="button" class="cs-root-trash${isTrashForRoot ? " is-active" : ""}" data-root-path="${escapeHtml(root.path)}" aria-label="${escapeHtml(root.label)}のごみ箱">
+        <span class="cs-root-icon">🗑️</span>
+        <span class="cs-root-label">ごみ箱</span>
+      </button>`
+          : ""
+      }
+    </div>`;
+    })
     .join("");
 
   list.querySelectorAll(".cs-root-item").forEach((btn) => {
     btn.addEventListener("click", () => {
+      trashView = false;
       currentPath = btn.dataset.path;
       selectedItems.clear();
       selectionAnchorIndex = -1;
+      updateToolbarForView();
       refreshListing();
       renderRoots();
+    });
+  });
+
+  list.querySelectorAll(".cs-root-trash").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      enterTrashView(btn.dataset.rootPath);
     });
   });
 }
 
 function renderBreadcrumb() {
   const el = document.getElementById("cs-breadcrumb");
-  if (!el || !currentPath) {
-    if (el) el.innerHTML = "";
+  if (!el) return;
+
+  if (trashView) {
+    const rootPath = getRootPath(currentPath);
+    const root = roots.find((r) => r.path === rootPath);
+    const label = root?.label ?? rootPath;
+    el.innerHTML = `<span class="cs-crumb is-current">ごみ箱 · ${escapeHtml(label)}</span>`;
+    return;
+  }
+
+  if (!currentPath) {
+    el.innerHTML = "";
     return;
   }
 
@@ -1014,6 +1534,9 @@ function renderBreadcrumb() {
       refreshListing();
       renderRoots();
     });
+    if (canDragMove()) {
+      bindStorageDropTarget(btn, btn.dataset.path);
+    }
   });
 }
 
@@ -1033,6 +1556,8 @@ function buildFileRowHtml(item) {
 }
 
 function bindFileRowEvents(row) {
+  const item = getItemByPath(row.dataset.path);
+
   row.addEventListener("click", (e) => {
     if (e.target.closest(".cs-select")) return;
     if (suppressRowClick) return;
@@ -1069,6 +1594,8 @@ function bindFileRowEvents(row) {
     const item = getItemByPath(path);
     if (!item) return;
 
+    if (item.isTrash || trashView) return;
+
     if (item.type === "folder") {
       currentPath = path;
       selectedItems.clear();
@@ -1100,6 +1627,12 @@ function bindFileRowEvents(row) {
 
     showContextMenu(e.clientX, e.clientY, item);
   });
+
+  if (item && canDragMove()) bindRowMoveDrag(row, item);
+
+  if (item?.type === "folder" && canDragMove()) {
+    bindStorageDropTarget(row, item.path);
+  }
 }
 
 function getFileListBody() {
@@ -1169,6 +1702,7 @@ function appendFileListRows(items) {
   });
 
   enqueueListThumbnails(items, listLoadGeneration);
+  syncRowDragState();
 }
 
 function renderFileList() {
@@ -1187,16 +1721,16 @@ function renderFileList() {
   });
 
   enqueueListThumbnails(listItems, listLoadGeneration);
+  syncRowDragState();
 }
 
 async function loadQuota() {
-  if (!currentPath) return;
+  if (!currentPath || trashView) return;
   try {
     const data = await apiRequest(`quota?path=${encodeURIComponent(currentPath)}`);
     const bar = document.getElementById("cs-quota-bar");
     const label = document.getElementById("cs-quota-label");
-    const pct = data.quota_bytes > 0 ? (data.used_bytes / data.quota_bytes) * 100 : 0;
-    if (bar) bar.style.width = `${Math.min(100, pct)}%`;
+    applyQuotaBar(bar, data.used_bytes, data.quota_bytes);
     if (label) {
       label.textContent = `${formatBytes(data.used_bytes)} / ${formatBytes(data.quota_bytes)}`;
     }
@@ -1205,8 +1739,191 @@ async function loadQuota() {
   }
 }
 
+async function loadTrash() {
+  if (!currentPath) return;
+
+  const generation = ++listLoadGeneration;
+  const rootPath = getRootPath(currentPath);
+
+  listItems = [];
+  renderBreadcrumb();
+  setFileListLoading();
+  setLoading(true);
+
+  try {
+    const data = await apiRequest(`trash/list?path=${encodeURIComponent(rootPath)}`);
+    if (generation !== listLoadGeneration || !trashView) return;
+
+    trashQuota = {
+      totalBytes: data.totalBytes ?? 0,
+      quotaBytes: data.quotaBytes ?? trashQuota.quotaBytes,
+    };
+    updateTrashStatus();
+
+    listItems = (data.items ?? []).map((item) => ({
+      id: item.id,
+      path: `trash:${item.id}`,
+      name: item.originalName,
+      type: item.itemType,
+      sizeBytes: item.sizeBytes,
+      deletedAt: item.deletedAt,
+      daysRemaining: item.daysRemaining,
+      originalLogicalPath: item.originalLogicalPath,
+      isTrash: true,
+    }));
+
+    if (listItems.length === 0) {
+      setFileListEmpty("ごみ箱は空です");
+    } else {
+      setLoading(false);
+      renderTrashFileList();
+    }
+  } catch (err) {
+    if (generation === listLoadGeneration) {
+      showToast(err.message, true);
+      setFileListEmpty("ごみ箱の読み込みに失敗しました");
+    }
+  } finally {
+    if (generation === listLoadGeneration) {
+      setLoading(false);
+      clearFileListStatusRows();
+    }
+  }
+}
+
+function buildTrashRowHtml(item) {
+  const selected = selectedItems.has(item.path);
+  return `<tr class="cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
+    <td><input type="checkbox" class="cs-select" ${selected ? "checked" : ""} aria-label="選択"></td>
+    <td><span class="cs-file-name-cell">${renderFileTypeIcon(item)}<span class="cs-file-name">${escapeHtml(item.name)}</span></span></td>
+    <td>${item.type === "folder" ? "—" : formatBytes(item.sizeBytes)}</td>
+    <td>${formatDate(item.deletedAt)}</td>
+    <td>${item.daysRemaining}日</td>
+    <td title="${escapeHtml(item.originalLogicalPath)}">${escapeHtml(item.originalLogicalPath)}</td>
+  </tr>`;
+}
+
+function renderTrashFileList() {
+  const tbody = getFileListBody();
+  const thead = document.querySelector("#cs-files-table thead tr");
+  if (thead) {
+    thead.innerHTML = `
+      <th scope="col" aria-label="選択"></th>
+      <th scope="col">名前</th>
+      <th scope="col">サイズ</th>
+      <th scope="col">削除日時</th>
+      <th scope="col">残り日数</th>
+      <th scope="col">元の場所</th>`;
+  }
+
+  if (!tbody) return;
+  if (listItems.length === 0) {
+    setFileListEmpty("ごみ箱は空です");
+    return;
+  }
+
+  tbody.innerHTML = listItems.map((item) => buildTrashRowHtml(item)).join("");
+  tbody.querySelectorAll(".cs-file-row").forEach((row) => {
+    row.classList.remove("cs-file-row--appear");
+    bindFileRowEvents(row);
+  });
+}
+
+async function handleTrashRestore(explicitItems = null) {
+  const items = (explicitItems ?? getSelectedItems()).filter((item) => item.isTrash);
+  if (items.length === 0) {
+    showToast("復元する項目を選択してください", true);
+    return;
+  }
+  if (!confirm(`${items.length} 件を復元しますか？`)) return;
+
+  let renamedCount = 0;
+  for (const item of items) {
+    try {
+      const result = await apiRequest("trash/restore", {
+        method: "POST",
+        body: JSON.stringify({ id: item.id }),
+      });
+      if (result.renamed) renamedCount += 1;
+    } catch (err) {
+      showToast(err.message, true);
+      await loadTrash();
+      return;
+    }
+  }
+
+  selectedItems.clear();
+  if (renamedCount > 0) {
+    showToast(`${items.length} 件を復元しました（${renamedCount} 件は同名のため (1) 等を付与）`);
+  } else {
+    showToast(`${items.length} 件を復元しました`);
+  }
+  await loadTrash();
+}
+
+async function handleTrashPurge(explicitItems = null) {
+  const items = (explicitItems ?? getSelectedItems()).filter((item) => item.isTrash);
+  if (items.length === 0) {
+    showToast("完全削除する項目を選択してください", true);
+    return;
+  }
+  if (!confirm(`${items.length} 件を完全に削除しますか？この操作は取り消せません。`)) return;
+
+  for (const item of items) {
+    try {
+      await apiRequest("trash/purge", {
+        method: "DELETE",
+        body: JSON.stringify({ id: item.id }),
+      });
+    } catch (err) {
+      showToast(err.message, true);
+      await loadTrash();
+      return;
+    }
+  }
+
+  selectedItems.clear();
+  showToast("完全に削除しました");
+  await loadTrash();
+  await loadQuota();
+}
+
+async function handleTrashEmpty() {
+  const rootPath = getRootPath(currentPath);
+  if (!confirm("ごみ箱を空にしますか？すべての項目が完全に削除されます。")) return;
+
+  try {
+    const result = await apiRequest("trash/empty", {
+      method: "DELETE",
+      body: JSON.stringify({ path: rootPath }),
+    });
+    selectedItems.clear();
+    showToast(`${result.purgedCount ?? 0} 件を完全に削除しました`);
+    await loadTrash();
+    await loadQuota();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+function restoreExplorerTableHeader() {
+  const thead = document.querySelector("#cs-files-table thead tr");
+  if (!thead) return;
+  thead.innerHTML = `
+    <th scope="col" aria-label="選択"></th>
+    <th scope="col" class="cs-sortable-th" data-sort="name">名前 <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+    <th scope="col" class="cs-search-location-th" id="cs-search-location-th" hidden>場所</th>
+    <th scope="col" class="cs-sortable-th" data-sort="size">サイズ <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+    <th scope="col" class="cs-sortable-th" data-sort="updatedAt">更新日時 <span class="cs-sort-indicator" aria-hidden="true"></span></th>
+    <th scope="col" class="cs-sortable-th" data-sort="updatedBy">更新者 <span class="cs-sort-indicator" aria-hidden="true"></span></th>`;
+  updateSortUi();
+  updateSearchUi();
+}
+
 async function loadDirectory() {
   if (!currentPath) return;
+
+  restoreExplorerTableHeader();
 
   const generation = ++listLoadGeneration;
   resetThumbnailLoads(generation);
@@ -1267,6 +1984,19 @@ async function loadDirectory() {
 async function loadRoots() {
   const data = await apiRequest("roots");
   roots = data.roots ?? [];
+
+  // ?path= ディープリンク（プロジェクト管理などから）
+  if (!currentPath) {
+    const initialPath = new URLSearchParams(location.search).get("path")?.trim() ?? "";
+    if (initialPath) {
+      const rootOfInitial = getRootPath(initialPath);
+      const allowed = roots.some((r) => r.path === rootOfInitial || initialPath === r.path);
+      if (allowed) {
+        currentPath = initialPath;
+      }
+    }
+  }
+
   if (!currentPath && roots.length > 0) {
     currentPath = roots[0].path;
   }
@@ -1317,8 +2047,9 @@ async function downloadFile(path) {
 async function handleUpload(files) {
   if (!currentPath || files.length === 0) return;
 
-  let completed = 0;
+  let failed = 0;
   const total = files.length;
+  const folderMode = isFolderUpload(files);
 
   uploadProgress.start(files);
   showToast(`${total} 件をアップロード中…`);
@@ -1334,17 +2065,28 @@ async function handleUpload(files) {
       uploadProgress.fileProgress(file, detail);
     },
     onFileComplete(file, outcome) {
-      completed += 1;
       uploadProgress.fileComplete(file, outcome);
       if (outcome.ok) {
-        showToast(`${file.name} をアップロードしました`);
+        if (!folderMode) {
+          showToast(`${file.name} をアップロードしました`);
+        }
       } else {
-        showToast(outcome.error?.message ?? `${file.name} のアップロードに失敗しました`, true);
+        failed += 1;
+        if (!folderMode) {
+          showToast(outcome.error?.message ?? `${file.name} のアップロードに失敗しました`, true);
+        }
       }
     },
   });
 
   uploadProgress.finish();
+  if (folderMode) {
+    if (failed === 0) {
+      showToast(`${total} 件のアップロードが完了しました`);
+    } else {
+      showToast(`${total - failed} 件成功、${failed} 件失敗`, failed > 0);
+    }
+  }
   await refreshListing();
 }
 
@@ -1387,12 +2129,166 @@ async function runParallelQueue(items, concurrency, worker) {
   await Promise.all(workers);
 }
 
+/** 選択中のファイル項目のみ取得 */
+function getSelectedFileItems() {
+  return [...selectedItems]
+    .map((path) => getItemByPath(path))
+    .filter((item) => item && item.type !== "folder");
+}
+
+let shareDialogFiles = [];
+
+function closeShareDialog() {
+  document.getElementById("cs-share-dialog")?.close();
+  shareDialogFiles = [];
+}
+
+function renderShareDialogForm(files) {
+  const body = document.getElementById("cs-share-dialog-body");
+  const footer = document.getElementById("cs-share-dialog-footer");
+  const title = document.getElementById("cs-share-dialog-title");
+  if (!body || !footer || !title) return;
+
+  title.textContent = "共有リンクを作成";
+  footer.innerHTML = `
+    <button type="button" class="cs-btn" id="cs-share-dialog-cancel">キャンセル</button>
+    <button type="button" class="cs-btn cs-btn-primary" id="cs-share-dialog-create">リンクを作成</button>
+  `;
+
+  body.innerHTML = `
+    <p class="cs-share-dialog-lead">${files.length} 件のファイルを共有します。リンクは ScienceHUB アカウントなしで開けます。</p>
+    <ul class="cs-share-file-list">
+      ${files
+        .map(
+          (file) => `<li class="cs-share-file-item">
+            <span class="cs-share-file-name">${escapeHtml(file.name)}</span>
+            <span class="cs-share-file-size">${escapeHtml(formatBytes(file.sizeBytes))}</span>
+          </li>`
+        )
+        .join("")}
+    </ul>
+    <label class="cs-share-limit-label" for="cs-share-max-downloads">ダウンロード回数上限</label>
+    <div class="cs-share-limit-control">
+      <input
+        type="range"
+        id="cs-share-max-downloads"
+        class="cs-share-limit-slider"
+        min="1"
+        max="1000"
+        step="1"
+        value="10"
+        aria-valuemin="1"
+        aria-valuemax="1000"
+        aria-valuenow="10"
+      >
+      <output class="cs-share-limit-value" id="cs-share-max-downloads-value" for="cs-share-max-downloads">10 回</output>
+    </div>
+    <p class="cs-share-limit-note">1〜1000 回（デフォルト 10 回）</p>
+  `;
+
+  const slider = document.getElementById("cs-share-max-downloads");
+  const valueEl = document.getElementById("cs-share-max-downloads-value");
+  const syncShareLimitValue = () => {
+    if (!slider || !valueEl) return;
+    valueEl.textContent = `${slider.value} 回`;
+    slider.setAttribute("aria-valuenow", slider.value);
+  };
+  slider?.addEventListener("input", syncShareLimitValue);
+  syncShareLimitValue();
+
+  document.getElementById("cs-share-dialog-cancel")?.addEventListener("click", closeShareDialog);
+  document.getElementById("cs-share-dialog-create")?.addEventListener("click", () => {
+    handleShareCreate().catch((err) => showToast(err.message, true));
+  });
+}
+
+function renderShareDialogResult(result) {
+  const body = document.getElementById("cs-share-dialog-body");
+  const footer = document.getElementById("cs-share-dialog-footer");
+  const title = document.getElementById("cs-share-dialog-title");
+  if (!body || !footer || !title) return;
+
+  title.textContent = "共有リンクを作成しました";
+  footer.innerHTML = `
+    <button type="button" class="cs-btn cs-btn-primary" id="cs-share-dialog-done">閉じる</button>
+  `;
+
+  body.innerHTML = `
+    <p class="cs-share-dialog-lead">以下のリンクを共有してください。残りダウンロード回数は ${escapeHtml(String(result.max_downloads))} 回です。</p>
+    <div class="cs-share-result-row">
+      <input type="text" class="cs-share-result-input" id="cs-share-result-url" readonly value="${escapeHtml(result.url)}">
+      <button type="button" class="cs-btn" id="cs-share-copy-btn">コピー</button>
+    </div>
+  `;
+
+  document.getElementById("cs-share-dialog-done")?.addEventListener("click", closeShareDialog);
+  document.getElementById("cs-share-copy-btn")?.addEventListener("click", async () => {
+    const input = document.getElementById("cs-share-result-url");
+    if (!input) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showToast("リンクをコピーしました");
+    } catch {
+      input.select();
+      document.execCommand("copy");
+      showToast("リンクをコピーしました");
+    }
+  });
+}
+
+function openShareDialog(files) {
+  const dialog = document.getElementById("cs-share-dialog");
+  if (!dialog || files.length === 0) {
+    showToast("共有するファイルを選択してください", true);
+    return;
+  }
+
+  shareDialogFiles = files;
+  renderShareDialogForm(files);
+  if (!dialog.open) dialog.showModal();
+}
+
+async function handleShareCreate() {
+  if (shareDialogFiles.length === 0) {
+    showToast("共有するファイルがありません", true);
+    return;
+  }
+
+  const input = document.getElementById("cs-share-max-downloads");
+  const createBtn = document.getElementById("cs-share-dialog-create");
+  const maxDownloads = Number(input?.value ?? 10);
+
+  if (!Number.isFinite(maxDownloads) || maxDownloads < 1 || maxDownloads > 1000) {
+    showToast("ダウンロード回数は 1〜1000 の範囲で指定してください", true);
+    return;
+  }
+
+  if (createBtn) {
+    createBtn.disabled = true;
+    createBtn.textContent = "作成中…";
+  }
+
+  try {
+    const result = await createShareLink(
+      shareDialogFiles.map((file) => file.path),
+      maxDownloads
+    );
+    renderShareDialogResult(result);
+    showToast("共有リンクを作成しました");
+  } finally {
+    if (createBtn) {
+      createBtn.disabled = false;
+      createBtn.textContent = "リンクを作成";
+    }
+  }
+}
+
 async function handleDelete() {
   if (selectedItems.size === 0) {
     showToast("削除する項目を選択してください", true);
     return;
   }
-  if (!confirm(`${selectedItems.size} 件を削除しますか？`)) return;
+  if (!confirm(`${selectedItems.size} 件をごみ箱に移動しますか？`)) return;
 
   const prog = document.getElementById("cs-delete-progress");
   const tasks = [...selectedItems]
@@ -1434,11 +2330,11 @@ async function handleDelete() {
     }
 
     if (failures.length === 0) {
-      showToast("削除しました");
+      showTrashMovedToast();
     } else if (succeededPaths.length === 0) {
       showToast(failures[0]?.message ?? "削除に失敗しました", true);
     } else {
-      showToast(`${succeededPaths.length} 件削除、${failures.length} 件失敗`, true);
+      showTrashMovedToast(`${succeededPaths.length} 件をごみ箱に移動、${failures.length} 件失敗`);
     }
 
     if (succeededPaths.length > 0) {
@@ -1460,14 +2356,28 @@ function bindEvents() {
     if (files.length) handleUpload(files);
   });
 
+  document.getElementById("cs-upload-folder-input")?.addEventListener("change", (e) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = "";
+    if (files.length) handleUpload(files);
+  });
+
   document.getElementById("cs-upload-btn")?.addEventListener("click", () => {
     document.getElementById("cs-upload-input")?.click();
+  });
+
+  document.getElementById("cs-upload-folder-btn")?.addEventListener("click", () => {
+    document.getElementById("cs-upload-folder-input")?.click();
   });
 
   document.getElementById("cs-mkdir-btn")?.addEventListener("click", handleMkdir);
   document.getElementById("cs-delete-btn")?.addEventListener("click", handleDelete);
   document.getElementById("cs-rename-btn")?.addEventListener("click", handleRename);
   document.getElementById("cs-download-btn")?.addEventListener("click", handleDownloadSelected);
+  document.getElementById("cs-trash-back-btn")?.addEventListener("click", exitTrashView);
+  document.getElementById("cs-trash-restore-btn")?.addEventListener("click", handleTrashRestore);
+  document.getElementById("cs-trash-purge-btn")?.addEventListener("click", handleTrashPurge);
+  document.getElementById("cs-trash-empty-btn")?.addEventListener("click", handleTrashEmpty);
 
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("cs-context-menu");
@@ -1499,20 +2409,52 @@ function bindEvents() {
   document.getElementById("cs-preview-download")?.addEventListener("click", () => {
     if (previewPath) downloadFile(previewPath);
   });
+  document.getElementById("cs-preview-office-browser")?.addEventListener("click", () => {
+    if (!currentOfficePreviewInfo) return;
+    try {
+      openOfficeInBrowserTab(currentOfficePreviewInfo);
+    } catch (err) {
+      showToast(err.message ?? "ブラウザで開けませんでした", true);
+    }
+  });
+  document.getElementById("cs-preview-office-app")?.addEventListener("click", () => {
+    if (!currentOfficePreviewInfo) return;
+    try {
+      openOfficeInDesktopApp(currentOfficePreviewInfo);
+    } catch (err) {
+      showToast(err.message ?? "アプリで開けませんでした", true);
+    }
+  });
+  document.getElementById("cs-preview-excalidraw-edit")?.addEventListener("click", () => {
+    const btn = document.getElementById("cs-preview-excalidraw-edit");
+    const path = btn?.dataset.path || previewPath;
+    if (!path) return;
+    const url = `/apps/excalidraw/?storagePath=${encodeURIComponent(path)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  });
+
+  document.getElementById("cs-share-dialog-close")?.addEventListener("click", closeShareDialog);
+  document.getElementById("cs-share-dialog")?.addEventListener("cancel", closeShareDialog);
 
   const dropZone = document.getElementById("cs-drop-zone");
   dropZone?.addEventListener("dragover", (e) => {
+    if (activeDragMoveItems?.length) return;
     e.preventDefault();
     dropZone.classList.add("is-dragover");
   });
   dropZone?.addEventListener("dragleave", () => {
     dropZone.classList.remove("is-dragover");
   });
-  dropZone?.addEventListener("drop", (e) => {
+  dropZone?.addEventListener("drop", async (e) => {
     e.preventDefault();
     dropZone.classList.remove("is-dragover");
-    const files = [...(e.dataTransfer?.files ?? [])];
-    if (files.length) handleUpload(files);
+    if (trashView || activeDragMoveItems?.length) return;
+    try {
+      const files = await collectFilesFromDataTransfer(e.dataTransfer);
+      if (files.length) handleUpload(files);
+    } catch (err) {
+      showToast(err?.message ?? "ファイルの読み込みに失敗しました", true);
+    }
   });
 }
 
@@ -1522,6 +2464,7 @@ async function init() {
   loadSortPreference();
   bindEvents();
   updateSortUi();
+  updateToolbarForView();
   await loadRoots();
 }
 

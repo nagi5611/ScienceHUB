@@ -3,8 +3,15 @@
  */
 
 import { apiRequest, apiUpload, putToPresignedUrl } from "./api.js";
+import {
+  ensureStorageDirectories,
+  getFileRelativePath,
+  resolveUploadTarget,
+} from "./folder-upload.js";
 
 const MULTIPART_THRESHOLD = 30 * 1024 * 1024;
+/** 同時にマルチパート転送できるファイルサイズ合計の上限（サーバー MULTIPART_LARGE_THRESHOLD と一致） */
+const MULTIPART_CONCURRENT_BUDGET = 300 * 1024 * 1024;
 const PARALLEL_SMALL_FILES = 8;
 const PROGRESS_TICK_MS = 500;
 
@@ -163,13 +170,14 @@ async function uploadPartsProxy(
 
 /** ファイルをアップロード */
 export async function uploadFile(directoryPath, file, callbacks = {}) {
-  const { onProgress, onInit } = callbacks;
+  const { onProgress, onInit, filename: filenameOverride } = callbacks;
+  const filename = filenameOverride ?? file.name;
 
   const init = await apiRequest("upload/init", {
     method: "POST",
     body: JSON.stringify({
       path: directoryPath,
-      filename: file.name,
+      filename,
       size: file.size,
     }),
   });
@@ -309,26 +317,85 @@ async function runParallelQueue(items, concurrency, worker) {
 }
 
 /**
+ * マルチパート対象ファイルを、同時転送サイズ合計の上限内で並列アップロード
+ * 例: 100MB×3 件なら 3 件同時、200MB+150MB なら 200MB 完了後に 150MB を開始
+ */
+async function runMultipartBudgetQueue(items, budgetBytes, worker) {
+  if (items.length === 0) return;
+
+  const queue = [...items];
+  const running = new Set();
+  let activeBytes = 0;
+
+  await new Promise((resolve) => {
+    const pump = () => {
+      while (queue.length > 0) {
+        const item = queue[0];
+        const size = item.file.size;
+        if (activeBytes > 0 && activeBytes + size > budgetBytes) break;
+
+        queue.shift();
+        activeBytes += size;
+
+        const task = Promise.resolve(worker(item)).finally(() => {
+          activeBytes -= size;
+          running.delete(task);
+          pump();
+          if (running.size === 0 && queue.length === 0) resolve();
+        });
+        running.add(task);
+      }
+
+      if (running.size === 0 && queue.length === 0) resolve();
+    };
+
+    pump();
+  });
+}
+
+/**
  * 複数ファイルをアップロード
  * - 30MB 以下: 最大 8 ファイル並列
- * - 30MB 超: 別枠で 1 件ずつ（ファイル内マルチパート並列は維持）
+ * - 30MB 超: 合計 300MB まで複数ファイルのマルチパートを並列（各ファイル内のパート並列は維持）
+ * - webkitRelativePath / _relativePath があればフォルダ構造を維持
  */
 export async function uploadFiles(directoryPath, files, callbacks = {}) {
   const { onFileProgress, onFileComplete, onBatchStart, onFileStart } = callbacks;
+
+  const items = files.map((file) => {
+    const relativePath = getFileRelativePath(file);
+    const target = resolveUploadTarget(directoryPath, relativePath);
+    file._displayName = relativePath.includes("/") ? relativePath : file.name;
+    return { file, ...target };
+  });
+
+  await ensureStorageDirectories(
+    directoryPath,
+    items.map((item) => item.directoryPath),
+    async (parentPath, name) => {
+      await apiRequest("mkdir", {
+        method: "POST",
+        body: JSON.stringify({ path: parentPath, name }),
+      });
+    }
+  );
+
   const smallFiles = [];
   const largeFiles = [];
 
-  for (const file of files) {
-    if (file.size > MULTIPART_THRESHOLD) {
-      largeFiles.push(file);
+  for (const item of items) {
+    if (item.file.size > MULTIPART_THRESHOLD) {
+      largeFiles.push(item);
     } else {
-      smallFiles.push(file);
+      smallFiles.push(item);
     }
   }
 
-  const uploadOne = async (file) => {
+  const uploadOne = async (item) => {
+    const { file, directoryPath: targetPath, filename } = item;
     try {
-      const result = await uploadFile(directoryPath, file, {
+      const result = await uploadFile(targetPath, file, {
+        filename,
         onInit: (initInfo) => onFileStart?.(file, initInfo),
         onProgress: (detail) => onFileProgress?.(file, detail),
       });
@@ -344,9 +411,11 @@ export async function uploadFiles(directoryPath, files, callbacks = {}) {
   }
 
   if (largeFiles.length > 0) {
-    onBatchStart?.({ type: "large", count: largeFiles.length, parallel: 1 });
-    for (const file of largeFiles) {
-      await uploadOne(file);
-    }
+    onBatchStart?.({
+      type: "multipart",
+      count: largeFiles.length,
+      budgetBytes: MULTIPART_CONCURRENT_BUDGET,
+    });
+    await runMultipartBudgetQueue(largeFiles, MULTIPART_CONCURRENT_BUDGET, uploadOne);
   }
 }

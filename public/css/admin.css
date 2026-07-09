@@ -230,6 +230,29 @@ body.cf-admin {
   padding: 0.55rem 0;
   font: inherit;
   outline: none;
+  min-width: 0;
+}
+
+.cf-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cf-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cf-search-clear:hover {
+  background: rgb(15 23 42 / 0.08);
+  color: var(--cf-text);
 }
 
 /* Buttons */
@@ -1721,6 +1744,121 @@ body.cf-admin-login {
   margin: 0.75rem 1.25rem 0;
 }
 
+.cf-group-edit-tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0 1.25rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--cf-border);
+}
+
+.cf-group-edit-tab {
+  padding: 0.5rem 0.85rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--cf-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cf-group-edit-tab.is-active {
+  color: var(--cf-accent);
+  border-bottom-color: var(--cf-accent);
+}
+
+.cf-group-edit-tab-panel {
+  min-height: 200px;
+}
+
+.cf-invite-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: 0 1.25rem 0.75rem;
+}
+
+.cf-invite-create .cf-field {
+  flex: 1 1 200px;
+  margin: 0;
+}
+
+.cf-invite-links {
+  padding: 0 1.25rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.cf-invite-card {
+  border: 1px solid var(--cf-border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: var(--cf-surface-2, #fafbfc);
+}
+
+.cf-invite-card.is-revoked {
+  opacity: 0.65;
+}
+
+.cf-invite-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.cf-invite-card-meta {
+  font-size: 0.8125rem;
+  color: var(--cf-muted);
+}
+
+.cf-invite-card-url {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.cf-invite-card-url input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.cf-invite-redemptions {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--cf-border);
+}
+
+.cf-invite-redemptions-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--cf-muted);
+}
+
+.cf-invite-redemption-row {
+  font-size: 0.8125rem;
+  color: var(--cf-text);
+  padding: 0.15rem 0;
+}
+
+#group-invite-create-error.cf-form-error {
+  margin: 0 1.25rem 0.5rem;
+}
+
 .cf-dnd-member {
   display: flex;
   flex-direction: column;
@@ -2134,11 +2272,58 @@ body.cf-admin-login {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  margin-bottom: 0.35rem;
+}
+
+.cf-storage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.cf-storage-search-wrap {
+  flex: 1 1 280px;
+  max-width: 520px;
+}
+
+.cf-storage-search.cf-search {
+  max-width: none;
+  width: 100%;
+}
+
+.cf-storage-search-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--cf-muted);
+}
+
+.cf-storage-search-hint.is-empty {
+  color: #b45309;
+}
+
+.cf-storage-name {
+  font-weight: 600;
+}
+
+.cf-storage-subname {
+  margin-top: 0.15rem;
+  font-size: 0.8125rem;
+}
+
+.cf-storage-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 12rem;
+}
+
+.cf-storage-usage-label {
+  font-size: 0.8125rem;
+  color: var(--cf-muted);
 }
 
 .cf-storage-bar {
-  height: 6px;
+  height: 8px;
   background: var(--cf-surface);
   border-radius: 999px;
   overflow: hidden;
@@ -2147,5 +2332,14 @@ body.cf-admin-login {
 .cf-storage-bar-fill {
   height: 100%;
   background: var(--cf-orange);
+  transition: width 0.2s ease;
+}
+
+.cf-storage-bar.is-warning .cf-storage-bar-fill {
+  background: #f59e0b;
+}
+
+.cf-storage-bar.is-danger .cf-storage-bar-fill {
+  background: #ef4444;
 }
 

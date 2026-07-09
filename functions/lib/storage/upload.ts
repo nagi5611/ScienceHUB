@@ -19,6 +19,7 @@ import {
   buildAutoRenameName,
   dirListPrefix,
   fileMetaKey,
+  folderMetaKey,
   sanitizeFilename,
   toR2Key,
   type StorageRootType,
@@ -126,7 +127,8 @@ async function updateUploadSession(
 }
 
 /** ディレクトリ内の既存ファイル名一覧 */
-async function listExistingFilenames(
+/** ディレクトリ内の既存ファイル名一覧 */
+export async function listExistingFilenames(
   env: Env,
   rootType: StorageRootType,
   rootKey: string,
@@ -167,6 +169,31 @@ export async function resolveUniqueFilename(
   }
 
   throw new Error("同名ファイルが多すぎます");
+}
+
+/** 自動リネーム後のフォルダ名を決定 */
+export async function resolveUniqueFolderName(
+  env: Env,
+  rootType: StorageRootType,
+  rootKey: string,
+  parentDir: string,
+  folderName: string
+): Promise<string> {
+  const bucket = getFiles(env);
+  const safe = sanitizeFilename(folderName);
+  let candidate = safe;
+  let index = 1;
+
+  while (index < 10000) {
+    const relative = parentDir ? `${parentDir}/${candidate}` : candidate;
+    const metaKey = folderMetaKey(rootType, rootKey, relative);
+    const exists = await bucket.head(metaKey);
+    if (!exists) return candidate;
+    candidate = buildAutoRenameName(safe, index);
+    index++;
+  }
+
+  throw new Error("同名フォルダが多すぎます");
 }
 
 /** アップロードを初期化 */

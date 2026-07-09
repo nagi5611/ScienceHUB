@@ -9,6 +9,7 @@ import {
   buildLogicalPath,
   fileMetaKey,
   folderMetaKey,
+  parseLogicalPath,
   sanitizeFilename,
   toR2Key,
   validatePathSegment,
@@ -23,6 +24,7 @@ import {
 import { subtractUsedBytes } from "./quota";
 import { authorizeStoragePath } from "./permissions";
 import { dirListPrefix } from "./keys";
+import { resolveUniqueFilename, resolveUniqueFolderName } from "./upload";
 
 /** フォルダを作成 */
 export async function createStorageDirectory(
@@ -208,6 +210,177 @@ async function renameDirectoryRecursive(
   }
 }
 
+function getParentRelativePath(relativePath: string): string {
+  const parts = relativePath.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+
+function isDescendantOrEqual(ancestor: string, target: string): boolean {
+  if (!ancestor) return false;
+  return target === ancestor || target.startsWith(`${ancestor}/`);
+}
+
+/** ファイルまたはフォルダを別ディレクトリへ移動 */
+export async function moveStoragePath(
+  env: Env,
+  _db: D1Database,
+  parsed: ParsedStoragePath,
+  isDirectory: boolean,
+  destDirRelative: string
+): Promise<{ path: string; renamed: boolean }> {
+  const destRelative = destDirRelative.replace(/^\/+|\/+$/g, "");
+  const itemName = parsed.relativePath.split("/").pop() ?? "";
+  if (!itemName) throw new Error("移動元が不正です");
+
+  if (isDirectory && isDescendantOrEqual(parsed.relativePath, destRelative)) {
+    throw new Error("フォルダを自身の中に移動できません");
+  }
+
+  const currentParent = getParentRelativePath(parsed.relativePath);
+  if (currentParent === destRelative) {
+    throw new Error("同じ場所に移動できません");
+  }
+
+  const targetName = isDirectory
+    ? await resolveUniqueFolderName(
+        env,
+        parsed.rootType,
+        parsed.rootKey,
+        destRelative,
+        itemName
+      )
+    : await resolveUniqueFilename(
+        env,
+        parsed.rootType,
+        parsed.rootKey,
+        destRelative,
+        itemName
+      );
+  const renamed = targetName !== itemName;
+  const newRelative = destRelative ? `${destRelative}/${targetName}` : targetName;
+
+  if (isDirectory) {
+    await renameDirectoryRecursive(
+      env,
+      parsed.rootType,
+      parsed.rootKey,
+      parsed.relativePath,
+      newRelative
+    );
+    return {
+      path: buildLogicalPath(parsed.rootType, parsed.rootKey, newRelative),
+      renamed,
+    };
+  }
+
+  const bucket = getFiles(env);
+  const oldKey = toR2Key(parsed.rootType, parsed.rootKey, parsed.relativePath);
+  const newKey = toR2Key(parsed.rootType, parsed.rootKey, newRelative);
+
+  const obj = await bucket.get(oldKey);
+  if (!obj) throw new Error("ファイルが見つかりません");
+
+  await bucket.put(newKey, obj.body, { httpMetadata: obj.httpMetadata });
+  await bucket.delete(oldKey);
+
+  const oldMetaKey = fileMetaKey(parsed.rootType, parsed.rootKey, parsed.relativePath);
+  const newMetaKey = fileMetaKey(parsed.rootType, parsed.rootKey, newRelative);
+  const metaObj = await bucket.get(oldMetaKey);
+  if (metaObj) {
+    await bucket.put(newMetaKey, metaObj.body, { httpMetadata: metaObj.httpMetadata });
+    await bucket.delete(oldMetaKey);
+  }
+
+  return {
+    path: buildLogicalPath(parsed.rootType, parsed.rootKey, newRelative),
+    renamed,
+  };
+}
+
+export interface StorageMoveItem {
+  path: string;
+  type: "file" | "folder";
+}
+
+/** 複数項目を認証付きで移動 */
+export async function moveItemsWithAuth(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  items: StorageMoveItem[],
+  destLogicalPath: string
+): Promise<{
+  moved: Array<{ from: string; to: string; renamed: boolean }>;
+}> {
+  if (!items.length) throw new Error("移動する項目を指定してください");
+
+  const destParsed = parseLogicalPath(destLogicalPath);
+  if (!destParsed) throw new Error("移動先が不正です");
+
+  const destAuth = await authorizeStoragePath(
+    env,
+    db,
+    user,
+    destLogicalPath,
+    "write",
+    true
+  );
+  if (typeof destAuth === "string") throw new Error(destAuth);
+
+  const destDirRelative = destParsed.relativePath;
+  const moved: Array<{ from: string; to: string; renamed: boolean }> = [];
+
+  const folderPaths = items
+    .filter((item) => item.type === "folder")
+    .map((item) => item.path);
+  const filtered = items.filter((item) => {
+    return !folderPaths.some(
+      (folderPath) => folderPath !== item.path && item.path.startsWith(`${folderPath}/`)
+    );
+  });
+
+  const sorted = [...filtered].sort((a, b) => b.path.length - a.path.length);
+
+  for (const item of sorted) {
+    const isDirectory = item.type === "folder";
+    const sourceAuth = await authorizeStoragePath(
+      env,
+      db,
+      user,
+      item.path,
+      "write",
+      isDirectory
+    );
+    if (typeof sourceAuth === "string") throw new Error(sourceAuth);
+
+    if (
+      sourceAuth.parsed.rootType !== destParsed.rootType ||
+      sourceAuth.parsed.rootKey !== destParsed.rootKey
+    ) {
+      throw new Error("別のストレージ間では移動できません");
+    }
+
+    try {
+      const result = await moveStoragePath(
+        env,
+        db,
+        sourceAuth.parsed,
+        isDirectory,
+        destDirRelative
+      );
+      moved.push({ from: item.path, to: result.path, renamed: result.renamed });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "移動に失敗しました";
+      if (message === "同じ場所に移動できません") continue;
+      throw err;
+    }
+  }
+
+  if (!moved.length) throw new Error("移動できる項目がありません");
+  return { moved };
+}
+
 async function resolveRootFromParsed(
   db: D1Database,
   parsed: ParsedStoragePath
@@ -233,24 +406,16 @@ async function resolveRootFromParsed(
     .first<{ id: string }>();
 }
 
-/** 削除前の認証付き削除エントリポイント */
+/** 削除前の認証付き削除エントリポイント（ごみ箱へ移動） */
 export async function deleteWithAuth(
   env: Env,
   db: D1Database,
   user: SessionUser,
   logicalPath: string,
   isDirectory: boolean
-): Promise<{ freedBytes: number }> {
-  const auth = await authorizeStoragePath(
-    env,
-    db,
-    user,
-    logicalPath,
-    "delete",
-    isDirectory
-  );
-  if (typeof auth === "string") throw new Error(auth);
-  return deleteStoragePath(env, db, auth.parsed, isDirectory);
+): Promise<{ trashId: string; trashed: true }> {
+  const { moveToTrashWithAuth } = await import("./trash");
+  return moveToTrashWithAuth(env, db, user, logicalPath, isDirectory);
 }
 
 /** mkdir 認証付き */

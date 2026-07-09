@@ -415,14 +415,6 @@ export function createTidyEditor(els) {
     setCorners(next);
   }
 
-  function save() {
-    if (!els.outputCanvas.width) return;
-    const link = document.createElement("a");
-    link.download = `${els.filenameInput.value || "corrected_image"}.jpg`;
-    link.href = els.outputCanvas.toDataURL("image/jpeg", 0.92);
-    link.click();
-  }
-
   function getOutputBlob() {
     return new Promise((resolve) => {
       if (!els.outputCanvas.width) {
@@ -454,7 +446,6 @@ export function createTidyEditor(els) {
 
   els.ccwBtn.addEventListener("click", () => rotate("CCW"));
   els.cwBtn.addEventListener("click", () => rotate("CW"));
-  els.saveBtn.addEventListener("click", save);
 
   /** ドロップゾーンへ画像をドラッグ＆ドロップ */
   function pickImageFile(dataTransfer) {

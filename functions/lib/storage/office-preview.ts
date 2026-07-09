@@ -5,7 +5,7 @@
 import type { Env } from "../types";
 import { getFiles } from "../r2";
 import { isR2PresignConfigured, presignGetObject } from "../r2-presign";
-import { OFFICE_PRESIGN_EXPIRES_SEC, OFFICE_PREVIEW_MAX_BYTES } from "./constants";
+import { OFFICE_PRESIGN_EXPIRES_SEC, OFFICE_PREVIEW_MAX_BYTES, OFFICE_PREVIEW_WARN_BYTES } from "./constants";
 import { toR2Key, buildLogicalPath, parseLogicalPath, type ParsedStoragePath } from "./keys";
 import { getFileMeta } from "./meta";
 import { createOfficePreviewToken, verifyOfficePreviewToken } from "./office-preview-token";
@@ -49,6 +49,26 @@ const OFFICE_MIME_TYPES: Record<string, string> = {
 };
 
 const OFFICE_EMBED_BASE = "https://view.officeapps.live.com/op/embed.aspx";
+const OFFICE_VIEW_BASE = "https://view.officeapps.live.com/op/view.aspx";
+
+const OFFICE_DESKTOP_SCHEMES: Record<string, string> = {
+  doc: "ms-word",
+  docx: "ms-word",
+  dot: "ms-word",
+  dotx: "ms-word",
+  odt: "ms-word",
+  xls: "ms-excel",
+  xlsx: "ms-excel",
+  xlsm: "ms-excel",
+  xlsb: "ms-excel",
+  ods: "ms-excel",
+  ppt: "ms-powerpoint",
+  pptx: "ms-powerpoint",
+  pps: "ms-powerpoint",
+  ppsx: "ms-powerpoint",
+  potx: "ms-powerpoint",
+  odp: "ms-powerpoint",
+};
 
 export function getOfficePreviewExtension(filename: string): string | null {
   const lower = filename.toLowerCase();
@@ -70,6 +90,16 @@ export function getOfficeMimeType(filename: string): string {
 
 export function buildOfficeEmbedUrl(fileUrl: string): string {
   return `${OFFICE_EMBED_BASE}?src=${encodeURIComponent(fileUrl)}`;
+}
+
+export function buildOfficeViewUrl(fileUrl: string): string {
+  return `${OFFICE_VIEW_BASE}?src=${encodeURIComponent(fileUrl)}`;
+}
+
+export function getOfficeDesktopScheme(filename: string): string | null {
+  const ext = getOfficePreviewExtension(filename);
+  if (!ext) return null;
+  return OFFICE_DESKTOP_SCHEMES[ext] ?? null;
 }
 
 function isLocalOrigin(origin: string): boolean {
@@ -125,6 +155,9 @@ async function resolveFileSize(
 export interface OfficePreviewInfo {
   mode: "office";
   embedUrl: string;
+  viewUrl: string;
+  fileUrl: string;
+  desktopScheme: string | null;
   expiresIn: number;
   sizeBytes: number | null;
   sizeWarning: boolean;
@@ -157,13 +190,17 @@ export async function getOfficePreviewInfo(
 
   const { url, expiresIn } = await createPublicFileUrl(env, requestUrl, parsed, filename);
   const embedUrl = buildOfficeEmbedUrl(url);
+  const viewUrl = buildOfficeViewUrl(url);
 
   return {
     mode: "office",
     embedUrl,
+    viewUrl,
+    fileUrl: url,
+    desktopScheme: getOfficeDesktopScheme(filename),
     expiresIn,
     sizeBytes,
-    sizeWarning: sizeBytes != null && sizeBytes > 8 * 1024 * 1024,
+    sizeWarning: sizeBytes != null && sizeBytes > OFFICE_PREVIEW_WARN_BYTES,
     privacyNotice:
       "表示は Microsoft Office Online 経由です。ファイルは Microsoft のサーバーから取得されます。",
   };

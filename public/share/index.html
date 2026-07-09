@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>共有ファイル — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/share.css">
+</head>
+<body class="share-body">
+  <main class="share-page" id="share-page">
+    <header class="share-header">
+      <p class="share-brand">ScienceHUB</p>
+      <h1 class="share-title">共有ファイル</h1>
+    </header>
+
+    <div class="share-card" id="share-loading" role="status">
+      <p>読み込み中…</p>
+    </div>
+
+    <div class="share-card share-card--error" id="share-error" hidden>
+      <p class="share-error-text" id="share-error-text"></p>
+    </div>
+
+    <div class="share-card" id="share-content" hidden>
+      <p class="share-meta" id="share-meta"></p>
+      <ul class="share-file-list" id="share-file-list"></ul>
+    </div>
+  </main>
+
+  <script type="module" src="/share/share.js"></script>
+</body>
+</html>

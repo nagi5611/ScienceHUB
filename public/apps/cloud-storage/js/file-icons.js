@@ -26,17 +26,22 @@ const EXT_GROUPS = [
   {
     kind: "document",
     label: "ドキュメント",
-    exts: ["pdf", "doc", "docx", "odt", "rtf", "pages"],
+    exts: ["pdf", "doc", "docx", "dot", "dotx", "odt", "rtf", "pages"],
   },
   {
     kind: "spreadsheet",
     label: "表計算",
-    exts: ["xls", "xlsx", "ods", "numbers", "csv"],
+    exts: ["xls", "xlsx", "xlsm", "xlsb", "ods", "numbers", "csv"],
   },
   {
     kind: "presentation",
     label: "プレゼン",
-    exts: ["ppt", "pptx", "odp", "key"],
+    exts: ["ppt", "pptx", "pps", "ppsx", "potx", "odp", "key"],
+  },
+  {
+    kind: "excalidraw",
+    label: "Excalidraw",
+    exts: ["excalidraw"],
   },
   {
     kind: "archive",
@@ -89,6 +94,7 @@ const ICONS = {
   document: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2 5 5h-5V4zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"/></svg>`,
   spreadsheet: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5L14 3.5zM7 11h3v3H7v-3zm5 0h3v3h-3v-3zm-5 5h3v3H7v-3zm5 0h3v3h-3v-3z"/></svg>`,
   presentation: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 4h16v10H4V4zm2 12h12v2H6v-2zm-1 4h14v2H5v-2z"/><rect x="7" y="7" width="10" height="4" rx="1" fill="#fff" opacity=".35"/></svg>`,
+  excalidraw: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`,
   archive: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 4h16v4H4V4zm2 6h2v2H6v-2zm0 4h2v2H6v-2zm0 4h2v2H6v-2zm4-8h8v10a2 2 0 0 1-2 2h-6V10zm2 2v8h4v-8h-4z"/></svg>`,
   code: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/><path d="M13.5 6 10.5 18"/></svg>`,
   text: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2 5 5h-5V4zM7 11h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>`,
@@ -156,16 +162,20 @@ export function getModel3dPreviewFormat(filename) {
   return null;
 }
 
+/** Excalidraw ファイルか */
+export function isExcalidrawFilename(filename) {
+  return getFileExtension(filename).toLowerCase() === "excalidraw";
+}
+
 /** プレビュー可否 */
 export function isPreviewableFile(item) {
   if (!item || item.type !== "file") return false;
+  if (isOfficePreviewableFilename(item.name)) return true;
+  if (isExcalidrawFilename(item.name)) return true;
   const kind = classifyFile(item.name).kind;
   if (kind === "image" || kind === "video" || kind === "audio") return true;
   if (kind === "text" || kind === "code") return true;
   if (kind === "document" && /\.pdf$/i.test(item.name)) return true;
-  if (kind === "document" || kind === "spreadsheet" || kind === "presentation") {
-    return isOfficePreviewableFilename(item.name);
-  }
   if (kind === "model3d") return getModel3dPreviewFormat(item.name) !== null;
   return false;
 }
@@ -191,7 +201,9 @@ export function getSameCategoryPreviewItems(items, currentItem) {
 
     if (currentOffice) return isOfficePreviewableFilename(item.name);
     if (currentPdf) return /\.pdf$/i.test(item.name);
+    if (isExcalidrawFilename(currentItem.name)) return isExcalidrawFilename(item.name);
     if (isOfficePreviewableFilename(item.name) || /\.pdf$/i.test(item.name)) return false;
+    if (isExcalidrawFilename(item.name)) return false;
 
     return classifyFile(item.name).kind === currentKind;
   });

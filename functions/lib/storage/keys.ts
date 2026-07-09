@@ -129,6 +129,19 @@ export function validatePathSegment(segment: string): boolean {
   return true;
 }
 
+/** ごみ箱内の R2 プレフィックス */
+export function trashR2Prefix(rootId: string, trashItemId: string): string {
+  return `${STORAGE_PREFIX}/trash/${rootId}/${trashItemId}/`;
+}
+
+/** ルート論理パス（例: u/alice）を取得 */
+export function rootLogicalPath(
+  rootType: StorageRootType,
+  rootKey: string
+): string {
+  return buildLogicalPath(rootType, rootKey, "");
+}
+
 /** 同名回避のためのファイル名を決定 */
 export function buildAutoRenameName(filename: string, index: number): string {
   const dot = filename.lastIndexOf(".");

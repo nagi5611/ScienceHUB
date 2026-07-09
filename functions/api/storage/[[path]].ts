@@ -36,13 +36,27 @@ import { isR2PresignConfigured } from "../../lib/r2-presign";
 import {
   deleteWithAuth,
   mkdirWithAuth,
+  moveItemsWithAuth,
   renameWithAuth,
   streamStorageFile,
 } from "../../lib/storage/operations";
 import {
+  authorizeTrashItemAccess,
+  authorizeTrashRootAccess,
+  emptyTrashForRoot,
+  listTrashForRoot,
+  purgeTrashItemById,
+  restoreTrashItem,
+} from "../../lib/storage/trash";
+import {
   getOfficePreviewInfo,
   streamOfficePreviewFile,
 } from "../../lib/storage/office-preview";
+import {
+  createStorageShareLink,
+  downloadStorageShareFile,
+  getStorageShareInfo,
+} from "../../lib/storage/share";
 
 function parseRoute(path: string | string[] | undefined): string[] {
   if (Array.isArray(path)) return path.filter(Boolean);
@@ -77,6 +91,33 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const token = new URL(request.url).searchParams.get("t") ?? "";
       if (!token) return jsonError("トークンが必要です", 400);
       return streamOfficePreviewFile(env, token);
+    }
+
+    if (route === "share/info" && method === "GET") {
+      const token = new URL(request.url).searchParams.get("token") ?? "";
+      if (!token) return jsonError("トークンが必要です", 400);
+
+      const info = await getStorageShareInfo(db, token);
+      if (!info) return jsonError("共有リンクが見つかりません", 404);
+      return Response.json(info);
+    }
+
+    if (route === "share/download" && method === "GET") {
+      const url = new URL(request.url);
+      const token = url.searchParams.get("token") ?? "";
+      const fileId = url.searchParams.get("file") ?? "";
+      if (!token || !fileId) {
+        return jsonError("トークンとファイル ID が必要です", 400);
+      }
+
+      try {
+        return await downloadStorageShareFile(env, db, token, fileId);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "ダウンロードに失敗しました";
+        const status = message.includes("上限") ? 403 : 404;
+        return jsonError(message, status);
+      }
     }
 
     if (route === "access" && method === "GET") {
@@ -553,6 +594,73 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
     }
 
+    if (route === "trash/list" && method === "GET") {
+      const rootPath = new URL(request.url).searchParams.get("path")?.trim() ?? "";
+      if (!rootPath) return jsonError("path が必要です", 400);
+
+      const allowed = await authorizeTrashRootAccess(env, db, auth, rootPath, "read");
+      if (typeof allowed === "string") return jsonError(allowed, 403);
+
+      try {
+        const result = await listTrashForRoot(env, db, rootPath);
+        return Response.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "ごみ箱の取得に失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
+    if (route === "trash/restore" && method === "POST") {
+      const body = await request.json<{ id?: string }>();
+      const trashId = body.id?.trim() ?? "";
+      if (!trashId) return jsonError("id が必要です", 400);
+
+      const allowed = await authorizeTrashItemAccess(env, db, auth, trashId, "write");
+      if (typeof allowed === "string") return jsonError(allowed, 403);
+
+      try {
+        const result = await restoreTrashItem(env, db, trashId);
+        return Response.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "復元に失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
+    if (route === "trash/purge" && method === "DELETE") {
+      const body = await request.json<{ id?: string }>();
+      const trashId = body.id?.trim() ?? "";
+      if (!trashId) return jsonError("id が必要です", 400);
+
+      const allowed = await authorizeTrashItemAccess(env, db, auth, trashId, "delete");
+      if (typeof allowed === "string") return jsonError(allowed, 403);
+
+      try {
+        await purgeTrashItemById(env, db, trashId);
+        return Response.json({ purged: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "完全削除に失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
+    if (route === "trash/empty" && method === "DELETE") {
+      const body = await request.json<{ path?: string }>();
+      const rootPath = body.path?.trim() ?? "";
+      if (!rootPath) return jsonError("path が必要です", 400);
+
+      const allowed = await authorizeTrashRootAccess(env, db, auth, rootPath, "delete");
+      if (typeof allowed === "string") return jsonError(allowed, 403);
+
+      try {
+        const result = await emptyTrashForRoot(env, db, rootPath);
+        return Response.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "ごみ箱の空に失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
     if (route === "rename" && method === "PATCH") {
       const body = await request.json<{
         path?: string;
@@ -569,6 +677,61 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return Response.json(result);
       } catch (error) {
         const message = error instanceof Error ? error.message : "リネームに失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
+    if (route === "move" && method === "POST") {
+      const body = await request.json<{
+        items?: Array<{ path?: string; type?: string }>;
+        destPath?: string;
+      }>();
+      const destPath = body.destPath?.trim() ?? "";
+      const items = Array.isArray(body.items)
+        ? body.items
+            .map((item) => ({
+              path: item.path?.trim() ?? "",
+              type: item.type === "folder" ? ("folder" as const) : ("file" as const),
+            }))
+            .filter((item) => item.path)
+        : [];
+
+      if (!destPath || items.length === 0) {
+        return jsonError("destPath と items が必要です", 400);
+      }
+
+      try {
+        const result = await moveItemsWithAuth(env, db, auth, items, destPath);
+        return Response.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "移動に失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
+    if (route === "share/create" && method === "POST") {
+      const body = await request.json<{
+        paths?: string[];
+        max_downloads?: number;
+      }>();
+      const paths = Array.isArray(body.paths) ? body.paths : [];
+      if (paths.length === 0) {
+        return jsonError("共有するファイルを指定してください", 400);
+      }
+
+      try {
+        const result = await createStorageShareLink(
+          env,
+          db,
+          auth,
+          paths,
+          body.max_downloads,
+          request
+        );
+        return Response.json(result);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "共有リンクの作成に失敗しました";
         return jsonError(message, 400);
       }
     }

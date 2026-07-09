@@ -423,7 +423,7 @@ async function getDashboardForAdmin(db: D1Database): Promise<DashboardGroup[]> {
 }
 
 /** アプリのアクセス用メタデータを読み込む */
-async function loadAppAccessMeta(
+export async function loadAppAccessMeta(
   db: D1Database,
   appId: string
 ): Promise<{
@@ -478,6 +478,64 @@ async function loadAppAccessMeta(
   }
 
   return { enabledGroupIds, roleRestrictions };
+}
+
+/** アプリにアクセス可能なメンバー ID を取得（閲覧者と共通グループかつロール許可） */
+export async function getAppAccessibleMemberIds(
+  db: D1Database,
+  appSlug: string,
+  viewerUserId: string
+): Promise<Set<string>> {
+  const app = await getAppBySlug(db, appSlug);
+  if (!app) {
+    return new Set([viewerUserId]);
+  }
+
+  const { enabledGroupIds, roleRestrictions } = await loadAppAccessMeta(db, app.id);
+  if (enabledGroupIds.size === 0) {
+    return new Set([viewerUserId]);
+  }
+
+  const isAdmin = await userHasAdminRole(db, viewerUserId);
+  let relevantGroupIds: string[];
+
+  if (isAdmin) {
+    relevantGroupIds = [...enabledGroupIds];
+  } else {
+    const myMemberships = await getUserGroupMemberships(db, viewerUserId);
+    relevantGroupIds = myMemberships
+      .filter((m) => membershipCanAccessApp(m, enabledGroupIds, roleRestrictions))
+      .map((m) => m.group_id);
+  }
+
+  if (relevantGroupIds.length === 0) {
+    return new Set([viewerUserId]);
+  }
+
+  const placeholders = relevantGroupIds.map(() => "?").join(", ");
+  const result = await db
+    .prepare(
+      `SELECT ugm.user_id, ugm.group_id, ugm.group_role_id
+       FROM user_group_memberships ugm
+       WHERE ugm.group_id IN (${placeholders})`
+    )
+    .bind(...relevantGroupIds)
+    .all<{ user_id: string; group_id: string; group_role_id: string }>();
+
+  const ids = new Set<string>();
+  for (const row of result.results ?? []) {
+    const membership = {
+      group_id: row.group_id,
+      group_role_id: row.group_role_id,
+    } as UserGroupMembership;
+
+    if (membershipCanAccessApp(membership, enabledGroupIds, roleRestrictions)) {
+      ids.add(row.user_id);
+    }
+  }
+
+  ids.add(viewerUserId);
+  return ids;
 }
 
 /** ユーザーがアプリにアクセス可能か */

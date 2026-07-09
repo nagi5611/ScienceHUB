@@ -117,7 +117,7 @@ export async function updateRootQuota(
   quotaBytes: number
 ): Promise<string | null> {
   if (quotaBytes <= 0 || quotaBytes > QUOTA_ADMIN_MAX) {
-    return `割り当て領域は 1 バイト以上 ${QUOTA_ADMIN_MAX} バイト以下にしてください`;
+    return "割り当て領域は 1 バイト以上 10 TB 以下にしてください";
   }
 
   const root = await getStorageRootById(db, rootId);
@@ -144,6 +144,7 @@ export async function listAllStorageRoots(
   Array<
     StorageRootRow & {
       username: string | null;
+      user_email: string | null;
       user_display_name: string | null;
       group_slug: string | null;
       group_display_name: string | null;
@@ -154,6 +155,7 @@ export async function listAllStorageRoots(
     .prepare(
       `SELECT sr.*,
               u.username,
+              u.email AS user_email,
               u.display_name AS user_display_name,
               hg.slug AS group_slug,
               hg.display_name AS group_display_name
@@ -165,6 +167,7 @@ export async function listAllStorageRoots(
     .all<
       StorageRootRow & {
         username: string | null;
+        user_email: string | null;
         user_display_name: string | null;
         group_slug: string | null;
         group_display_name: string | null;

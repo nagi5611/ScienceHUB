@@ -1,0 +1,283 @@
+/* クラウドストレージ保存モーダル（共通） */
+
+.cloud-save-dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  width: min(720px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  box-shadow: 0 20px 50px rgb(0 0 0 / 0.18);
+  font-family: Inter, system-ui, sans-serif;
+  color: #1b1b1f;
+}
+
+.cloud-save-dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.cloud-save-dialog-header,
+.cloud-save-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.cloud-save-dialog-footer {
+  border-bottom: none;
+  border-top: 1px solid #e5e7eb;
+}
+
+.cloud-save-dialog-footer-right {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.cloud-save-dialog-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.cloud-save-dialog-close {
+  border: none;
+  background: transparent;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.cloud-save-dialog-body {
+  padding: 1rem 1.25rem 1.25rem;
+  overflow: auto;
+  max-height: min(70vh, 36rem);
+}
+
+.cloud-save-alert {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.cloud-save-alert--error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.cloud-save-alert--success {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.cloud-save-denied {
+  padding: 0.5rem 0;
+  color: #6b7280;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.cloud-save-denied p {
+  margin: 0 0 0.75rem;
+}
+
+.cloud-save-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.cloud-save-field input {
+  font: inherit;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.cloud-save-layout {
+  display: grid;
+  grid-template-columns: minmax(8rem, 10rem) 1fr;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.cloud-save-section-label {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.cloud-save-roots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cloud-save-root-btn,
+.cloud-save-folder-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.cloud-save-root-btn:hover:not(:disabled),
+.cloud-save-folder-btn:hover:not(:disabled) {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.cloud-save-root-btn.is-active {
+  border-color: #6965db;
+  background: color-mix(in srgb, #6965db 10%, white);
+}
+
+.cloud-save-root-label,
+.cloud-save-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-save-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.cloud-save-crumb {
+  border: none;
+  background: transparent;
+  color: #6965db;
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cloud-save-crumb-sep {
+  color: #9ca3af;
+}
+
+.cloud-save-folders {
+  min-height: 8rem;
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #fafafa;
+}
+
+.cloud-save-folders-status {
+  margin: 0;
+  padding: 0.75rem 0;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.cloud-save-folders-status--error {
+  color: #b91c1c;
+}
+
+.cloud-save-hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.cloud-save-progress {
+  margin-top: 0.75rem;
+}
+
+.cloud-save-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.cloud-save-progress-bar {
+  height: 100%;
+  width: 0;
+  background: #6965db;
+  transition: width 0.15s linear;
+}
+
+.cloud-save-progress-label {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.cloud-save-btn {
+  appearance: none;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.4rem 0.85rem;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.cloud-save-btn:hover {
+  background: #f3f4f6;
+}
+
+.cloud-save-btn--primary {
+  background: #6965db;
+  border-color: #6965db;
+  color: #fff;
+}
+
+.cloud-save-btn--primary:hover {
+  background: #5753c6;
+  border-color: #5753c6;
+  color: #fff;
+}
+
+.cloud-save-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .cloud-save-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-save-dialog-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cloud-save-dialog-footer-right {
+    justify-content: flex-end;
+  }
+}

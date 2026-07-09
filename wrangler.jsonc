@@ -31,5 +31,14 @@
 			"binding": "sciencehub_files",
 			"remote": true
 		}
-	]
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "EXCALIDRAW_COLLAB",
+				"class_name": "ExcalidrawCollabRoom",
+				"script_name": "excalidraw-collab"
+			}
+		]
+	}
 }

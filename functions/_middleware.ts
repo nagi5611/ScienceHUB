@@ -24,7 +24,7 @@ function isPublicAsset(path: string): boolean {
 }
 
 function isProtectedPage(path: string): boolean {
-  return path === "/" || path.startsWith("/apps");
+  return path === "/" || path.startsWith("/apps") || path.startsWith("/join");
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {

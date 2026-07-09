@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>共有ノート — Excalidraw</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link
+    rel="stylesheet"
+    href="https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/index.css"
+  >
+  <link rel="stylesheet" href="/css/apps/excalidraw.css">
+  <script>
+    window.EXCALIDRAW_ASSET_PATH =
+      "https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/";
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@19.0.0",
+        "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
+        "react-dom": "https://esm.sh/react-dom@19.0.0",
+        "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+        "@excalidraw/excalidraw": "https://esm.sh/@excalidraw/excalidraw@0.18.1?external=react,react-dom"
+      }
+    }
+  </script>
+</head>
+<body class="excal-app">
+  <div class="excal-loading" id="app-loading">
+    <p>読み込み中…</p>
+  </div>
+
+  <div class="excal-denied" id="share-error" hidden>
+    <h2>共有リンクが無効です</h2>
+    <p id="share-error-msg">リンクが見つからないか、無効化されています。</p>
+  </div>
+
+  <section class="excal-editor" id="editor-view" hidden>
+    <header class="excal-header">
+      <h1 class="excal-title" id="note-title">共有ノート</h1>
+      <div class="excal-header-actions">
+        <span class="excal-peers" id="peers-status" aria-live="polite"></span>
+        <span class="excal-status" id="save-status" aria-live="polite"></span>
+        <span class="excal-badge">共同編集</span>
+      </div>
+    </header>
+    <main class="excal-main">
+      <div id="excalidraw-root" class="excal-root" aria-label="ホワイトボード"></div>
+    </main>
+  </section>
+
+  <script src="/excalidraw-share/share.js" type="module"></script>
+</body>
+</html>

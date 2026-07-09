@@ -18,12 +18,15 @@ const ICONS = {
   search: `<circle cx="11" cy="11" r="6" ${STROKE}/><path d="M16 16l5 5" ${STROKE}/>`,
   bell: `<path d="M12 4a4 4 0 0 0-4 4v2.5L6 13.5V15h12v-1.5l-2-3V8a4 4 0 0 0-4-4z" ${STROKE}/><path d="M10 17a2 2 0 0 0 4 0" ${STROKE}/>`,
   calendar: `<rect x="3" y="5" width="18" height="16" rx="2" ${STROKE}/><path d="M3 10h18M8 3v4M16 3v4" ${STROKE}/>`,
+  clipboard: `<rect x="6" y="4" width="12" height="17" rx="2" ${STROKE}/><path d="M9 4.5h6v2H9z" ${STROKE}/><path d="M9 11h6M9 15h4" ${STROKE}/>`,
 };
 
 const SLUG_ICON = {
   "image-editor": "image",
   uvcreator: "layout",
   "shift-management": "calendar",
+  "project-management": "clipboard",
+  excalidraw: "edit",
 };
 
 const EMOJI_ICON = {
@@ -31,6 +34,9 @@ const EMOJI_ICON = {
   "🖼": "image",
   "📐": "layout",
   "📅": "calendar",
+  "📋": "clipboard",
+  "✏️": "edit",
+  "✏": "edit",
   "👥": "users",
   "🛡": "shield",
   "🛡️": "shield",

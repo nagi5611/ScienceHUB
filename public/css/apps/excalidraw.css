@@ -1,0 +1,322 @@
+/* Excalidraw ノート・共同編集 */
+
+.excal-app {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: Inter, system-ui, sans-serif;
+  background: #f8f9fa;
+  color: #1b1b1f;
+  overflow: hidden;
+}
+
+.excal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  padding: 0.65rem 1rem;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  z-index: 10;
+}
+
+.excal-back,
+.excal-back-btn {
+  color: #6b7280;
+  text-decoration: none;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.excal-back:hover,
+.excal-back-btn:hover {
+  color: #6965db;
+}
+
+.excal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.excal-title-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  background: transparent;
+}
+
+.excal-title-input:hover,
+.excal-title-input:focus {
+  border-color: #d1d5db;
+  background: #fff;
+  outline: none;
+}
+
+.excal-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.excal-status,
+.excal-peers {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.excal-peers {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.excal-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #6965db 14%, white);
+  color: #4c48b0;
+  font-weight: 600;
+}
+
+.excal-btn {
+  appearance: none;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.excal-btn:hover {
+  background: #f3f4f6;
+}
+
+.excal-btn--primary {
+  background: #6965db;
+  border-color: #6965db;
+  color: #fff;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.excal-btn--primary:hover {
+  background: #5753c6;
+  border-color: #5753c6;
+  color: #fff;
+}
+
+.excal-list,
+.excal-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.excal-list-body {
+  flex: 1;
+  overflow: auto;
+  padding: 1.25rem;
+  max-width: 40rem;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.excal-list-empty {
+  color: #6b7280;
+  text-align: center;
+  margin: 3rem 0;
+}
+
+.excal-note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.excal-note-item {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.excal-note-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  padding: 0.85rem 1rem;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.excal-note-open:hover {
+  background: #f9fafb;
+}
+
+.excal-note-name {
+  font-weight: 600;
+  color: #1b1b1f;
+}
+
+.excal-note-meta {
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.excal-note-delete {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 1.25rem;
+  padding: 0 0.85rem;
+  cursor: pointer;
+}
+
+.excal-note-delete:hover {
+  color: #e03131;
+  background: #fef2f2;
+}
+
+.excal-main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.excal-root {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.excal-loading,
+.excal-denied {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.excal-denied h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.excal-denied p {
+  margin: 0;
+  max-width: 28rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.excal-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.excal-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 35%);
+}
+
+.excal-modal-panel {
+  position: relative;
+  width: min(28rem, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 15%);
+}
+
+.excal-modal-panel h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.excal-modal-desc {
+  margin: 0 0 1rem;
+  color: #6b7280;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.excal-share-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.excal-share-url {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.excal-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  .excal-peers {
+    display: none;
+  }
+
+  .excal-header {
+    flex-wrap: wrap;
+  }
+}

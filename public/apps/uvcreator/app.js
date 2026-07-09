@@ -4,6 +4,8 @@
 
 import { createTidyEditor } from "./modules/tidy.js";
 import { createCombineEditor } from "./modules/combine.js";
+import { bindSaveMenu } from "./modules/save-menu.js";
+import { createCloudSaveModal } from "./modules/cloud-save-modal.js";
 
 const APP_SLUG = "uvcreator";
 
@@ -58,11 +60,31 @@ function initTabs() {
   };
 }
 
+/** 保存メニューをセットアップ */
+function setupSaveMenu({ menuId, triggerId, getBlob, getFilename, cloudModal }) {
+  const menuEl = document.getElementById(menuId);
+  const triggerEl = document.getElementById(triggerId);
+  if (!menuEl || !triggerEl) return;
+
+  bindSaveMenu({
+    menuEl,
+    triggerEl,
+    getBlob,
+    getFilename,
+    onCloudSave: ({ blob, filename }) => {
+      cloudModal.open({ blob, filename });
+    },
+  });
+}
+
 const allowed = await checkAccess();
 if (!allowed) {
   // アクセス拒否時は初期化しない
 } else {
   const tabs = initTabs();
+  const cloudModal = createCloudSaveModal(
+    document.getElementById("uv-cloud-save-dialog")
+  );
 
   const combine = createCombineEditor({
     list: document.getElementById("combine-img-list"),
@@ -87,7 +109,7 @@ if (!allowed) {
     saveBtn: document.getElementById("combine-save"),
   });
 
-  createTidyEditor({
+  const tidy = createTidyEditor({
     loadInput: document.getElementById("tidy-load"),
     inputWrap: document.getElementById("tidy-input-wrap"),
     dropZone: document.getElementById("tidy-drop-zone"),
@@ -100,6 +122,22 @@ if (!allowed) {
     cwBtn: document.getElementById("tidy-cw"),
     saveBtn: document.getElementById("tidy-save"),
     sendCombineBtn: document.getElementById("tidy-add-combine"),
+  });
+
+  setupSaveMenu({
+    menuId: "tidy-save-menu",
+    triggerId: "tidy-save",
+    getBlob: () => tidy.getOutputBlob(),
+    getFilename: () => `${document.getElementById("tidy-filename").value || "corrected_image"}.jpg`,
+    cloudModal,
+  });
+
+  setupSaveMenu({
+    menuId: "combine-save-menu",
+    triggerId: "combine-save",
+    getBlob: () => combine.getOutputBlob(),
+    getFilename: () => `${document.getElementById("combine-filename").value || "combined_image"}.png`,
+    cloudModal,
   });
 
   const feedbackEl = document.getElementById("tidy-add-feedback");
@@ -118,9 +156,7 @@ if (!allowed) {
     const outputCanvas = document.getElementById("tidy-output-canvas");
     if (!outputCanvas.width) return;
 
-    const blob = await new Promise((resolve) => {
-      outputCanvas.toBlob((b) => resolve(b), "image/jpeg", 0.92);
-    });
+    const blob = await tidy.getOutputBlob();
     if (!blob) return;
 
     const name = `${document.getElementById("tidy-filename").value || "corrected"}.jpg`;

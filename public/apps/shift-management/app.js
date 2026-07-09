@@ -193,7 +193,7 @@ function renderMemberToolbar() {
 
   if (!shiftMembers.length) {
     toolbar.innerHTML =
-      '<p class="shift-toolbar-hint">同じグループのメンバーがいません。グループに所属してからシフトを設定してください。</p>';
+      '<p class="shift-toolbar-hint">このアプリにアクセスできるメンバーがいません。グループのアクセス設定を確認してください。</p>';
     return;
   }
 

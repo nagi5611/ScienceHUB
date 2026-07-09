@@ -20,6 +20,12 @@ let groupEditState = {
   usersById: new Map(),
 };
 
+/** グループメンバー編集ダイアログのタブ */
+let groupEditActiveTab = "members";
+
+/** 招待リンク一覧キャッシュ */
+let groupInviteLinks = [];
+
 /** グループロール作成時のよく使うプリセット */
 const GROUP_ROLE_PRESETS = [
   { display_name: "先生", slug: "teacher", color: "#2C7CB0", weight: 10 },
@@ -300,7 +306,7 @@ export function bindGroupEvents({
     }
     const editMembersBtn = e.target.closest("[data-edit-group-members]");
     if (editMembersBtn) {
-      openGroupEditMembersDialog(editMembersBtn.dataset.editGroupMembers, getUsers(), escapeHtml);
+      openGroupEditMembersDialog(editMembersBtn.dataset.editGroupMembers, getUsers(), escapeHtml, api);
     }
   });
 
@@ -557,7 +563,58 @@ export function bindGroupEvents({
 
   document.getElementById("group-edit-members-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (groupEditActiveTab === "invites") {
+      return;
+    }
     await saveGroupEditMembers(api, loadUsers, renderMembers, loadGroups, escapeHtml);
+  });
+
+  document.querySelectorAll("[data-group-edit-tab]").forEach((tabBtn) => {
+    tabBtn.addEventListener("click", () => {
+      switchGroupEditTab(tabBtn.dataset.groupEditTab);
+    });
+  });
+
+  document.getElementById("group-invite-create-btn")?.addEventListener("click", async () => {
+    await createGroupInviteLink(api, escapeHtml);
+  });
+
+  document.getElementById("group-invite-links-list")?.addEventListener("click", async (e) => {
+    const copyBtn = e.target.closest("[data-copy-invite-url]");
+    if (copyBtn) {
+      const input = copyBtn.closest(".cf-invite-card-url")?.querySelector("input");
+      if (input) {
+        try {
+          await navigator.clipboard.writeText(input.value);
+          copyBtn.textContent = "コピー済";
+          setTimeout(() => {
+            copyBtn.textContent = "コピー";
+          }, 1500);
+        } catch {
+          input.select();
+          document.execCommand("copy");
+        }
+      }
+      return;
+    }
+
+    const revokeBtn = e.target.closest("[data-revoke-invite]");
+    if (revokeBtn) {
+      const groupId = document.getElementById("group-edit-members-group-id")?.value;
+      const linkId = revokeBtn.dataset.revokeInvite;
+      if (!groupId || !linkId) return;
+      if (!confirm("この招待リンクを無効化しますか？")) return;
+      try {
+        await api(
+          `/api/admin/groups/${encodeURIComponent(groupId)}/invite-links/${encodeURIComponent(linkId)}`,
+          { method: "DELETE" }
+        );
+        await loadGroupInviteLinks(api, groupId);
+        renderGroupInviteLinks(escapeHtml);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
   });
 
   document.getElementById("close-group-edit-members")?.addEventListener("click", () => {
@@ -644,7 +701,7 @@ function openEditGroupRoleDialog(groupId, roleId, escapeHtml) {
 }
 
 /** グループメンバー編集ダイアログを開く */
-function openGroupEditMembersDialog(groupId, users, escapeHtml) {
+function openGroupEditMembersDialog(groupId, users, escapeHtml, api) {
   const group = groups.find((g) => g.id === groupId);
   if (!group) return;
 
@@ -655,8 +712,9 @@ function openGroupEditMembersDialog(groupId, users, escapeHtml) {
 
   document.getElementById("group-edit-members-group-id").value = groupId;
   document.getElementById("group-edit-members-subtitle").textContent =
-    `「${group.display_name}」のメンバーをグループロールへドラッグして配置`;
+    `「${group.display_name}」のメンバー管理`;
   document.getElementById("group-edit-members-error").hidden = true;
+  document.getElementById("group-invite-create-error").hidden = true;
   document.getElementById("group-edit-members-search").value = "";
 
   groupEditState = {
@@ -677,8 +735,19 @@ function openGroupEditMembersDialog(groupId, users, escapeHtml) {
     groupEditState.byRole.set(membership.group_role_id, list);
   }
 
+  renderGroupInviteRoleSelect(group);
+  switchGroupEditTab("members");
   renderGroupEditMembersBoard(group, escapeHtml);
   document.getElementById("group-edit-members-dialog")?.showModal();
+
+  if (api) {
+    loadGroupInviteLinks(api, groupId)
+      .then(() => renderGroupInviteLinks(escapeHtml))
+      .catch(() => {
+        groupInviteLinks = [];
+        renderGroupInviteLinks(escapeHtml);
+      });
+  }
 }
 
 /** D&D ボードを描画 */
@@ -866,5 +935,132 @@ async function saveGroupEditMembers(api, loadUsers, renderMembers, loadGroups, e
   } catch (err) {
     errorEl.textContent = err.message;
     errorEl.hidden = false;
+  }
+}
+
+/** メンバー編集ダイアログのタブを切り替え */
+function switchGroupEditTab(tab) {
+  groupEditActiveTab = tab === "invites" ? "invites" : "members";
+
+  document.querySelectorAll("[data-group-edit-tab]").forEach((btn) => {
+    const isActive = btn.dataset.groupEditTab === groupEditActiveTab;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+
+  document.querySelectorAll("[data-group-edit-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.groupEditPanel !== groupEditActiveTab;
+  });
+
+  const saveBtn = document.getElementById("group-edit-members-save-btn");
+  if (saveBtn) {
+    saveBtn.hidden = groupEditActiveTab === "invites";
+  }
+}
+
+/** 招待リンク作成用のロール選択を描画 */
+function renderGroupInviteRoleSelect(group) {
+  const select = document.getElementById("group-invite-role-select");
+  if (!select) return;
+
+  select.innerHTML = group.roles
+    .map(
+      (role) =>
+        `<option value="${role.id}">${role.display_name} (${role.slug})</option>`
+    )
+    .join("");
+}
+
+/** 招待リンク一覧を読み込む */
+async function loadGroupInviteLinks(api, groupId) {
+  const data = await api(`/api/admin/groups/${encodeURIComponent(groupId)}/invite-links`);
+  groupInviteLinks = data.invite_links ?? [];
+}
+
+/** 招待リンク一覧を描画 */
+function renderGroupInviteLinks(escapeHtml) {
+  const container = document.getElementById("group-invite-links-list");
+  if (!container) return;
+
+  if (groupInviteLinks.length === 0) {
+    container.innerHTML = `<p class="cf-empty">招待リンクはまだありません</p>`;
+    return;
+  }
+
+  container.innerHTML = groupInviteLinks
+    .map((link) => {
+      const revoked = link.revoked_at !== null;
+      const redemptions = link.redemptions ?? [];
+      const redemptionHtml =
+        redemptions.length === 0
+          ? `<p class="cf-invite-card-meta">まだ参加したユーザーはいません</p>`
+          : `<div class="cf-invite-redemptions">
+              <p class="cf-invite-redemptions-title">参加したユーザー (${redemptions.length})</p>
+              ${redemptions
+                .map(
+                  (r) =>
+                    `<div class="cf-invite-redemption-row">${escapeHtml(r.display_name)} (@${escapeHtml(r.username)}) · ${formatInviteDate(r.redeemed_at)}</div>`
+                )
+                .join("")}
+            </div>`;
+
+      return `
+      <article class="cf-invite-card${revoked ? " is-revoked" : ""}">
+        <div class="cf-invite-card-header">
+          <div>
+            <strong>${escapeHtml(link.group_role_display_name)}</strong>
+            <span class="cf-invite-card-meta"> · 作成: ${escapeHtml(link.created_by_admin_username)} · ${formatInviteDate(link.created_at)}${revoked ? " · 無効" : ""}</span>
+          </div>
+          ${revoked ? "" : `<button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-revoke-invite="${escapeHtml(link.id)}">無効化</button>`}
+        </div>
+        <div class="cf-invite-card-url">
+          <input type="text" value="${escapeHtml(link.url)}" readonly>
+          <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-copy-invite-url>コピー</button>
+        </div>
+        <p class="cf-invite-card-meta">参加人数: ${link.use_count}</p>
+        ${redemptionHtml}
+      </article>`;
+    })
+    .join("");
+}
+
+/** 招待リンクの日時を表示用に整形 */
+function formatInviteDate(timestamp) {
+  if (!timestamp) return "—";
+  return new Date(timestamp).toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** 招待リンクを作成 */
+async function createGroupInviteLink(api, escapeHtml) {
+  const groupId = document.getElementById("group-edit-members-group-id")?.value;
+  const roleId = document.getElementById("group-invite-role-select")?.value;
+  const errorEl = document.getElementById("group-invite-create-error");
+  const createBtn = document.getElementById("group-invite-create-btn");
+
+  if (!groupId || !roleId) return;
+
+  if (errorEl) errorEl.hidden = true;
+  if (createBtn) createBtn.disabled = true;
+
+  try {
+    await api(`/api/admin/groups/${encodeURIComponent(groupId)}/invite-links`, {
+      method: "POST",
+      body: JSON.stringify({ group_role_id: roleId }),
+    });
+    await loadGroupInviteLinks(api, groupId);
+    renderGroupInviteLinks(escapeHtml);
+  } catch (err) {
+    if (errorEl) {
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+    }
+  } finally {
+    if (createBtn) createBtn.disabled = false;
   }
 }

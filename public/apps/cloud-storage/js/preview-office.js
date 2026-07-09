@@ -9,6 +9,29 @@ export async function fetchOfficePreviewInfo(storagePath) {
   return apiRequest(`preview/office?path=${encodeURIComponent(storagePath)}`);
 }
 
+/** ブラウザの新しいタブで Office Online を開く（Teams のブラウザ表示に相当） */
+export function openOfficeInBrowserTab(info) {
+  if (!info?.viewUrl) {
+    throw new Error("ブラウザで開く URL を取得できませんでした");
+  }
+  window.open(info.viewUrl, "_blank", "noopener,noreferrer");
+}
+
+/** デスクトップ Office アプリで開く（Teams のアプリで表示に相当） */
+export function openOfficeInDesktopApp(info) {
+  if (!info?.desktopScheme || !info?.fileUrl) {
+    throw new Error("この形式はデスクトップアプリで開けません");
+  }
+  window.location.href = `${info.desktopScheme}:ofv|u|${info.fileUrl}`;
+}
+
+/** パス指定でデスクトップ Office を起動 */
+export async function openOfficeInDesktopAppByPath(storagePath) {
+  const info = await fetchOfficePreviewInfo(storagePath);
+  openOfficeInDesktopApp(info);
+  return info;
+}
+
 /** プレビューダイアログに Office iframe を表示 */
 export function renderOfficePreview(body, info, itemName) {
   const notice = info.privacyNotice ?? "Microsoft Office Online で表示しています。";

@@ -6,12 +6,30 @@ import type { Env } from "../lib/types";
 import { getDb } from "../lib/db";
 import { requireUser } from "../lib/auth";
 import { jsonError } from "../lib/types";
+import { canUserAccessApp } from "../lib/apps";
 import {
   listShiftAvailability,
   setShiftAvailability,
   toggleShiftAvailability,
   updateShiftColor,
+  SHIFT_APP_SLUG,
 } from "../lib/shift";
+
+/** ログインとシフト管理アプリへのアクセス権を検証 */
+async function requireShiftAppAccess(
+  request: Request,
+  env: Env
+): Promise<{ id: string } | Response> {
+  const auth = await requireUser(request, env);
+  if (auth instanceof Response) return auth;
+
+  const allowed = await canUserAccessApp(getDb(env), auth.id, SHIFT_APP_SLUG);
+  if (!allowed) {
+    return jsonError("このアプリへのアクセス権限がありません", 403);
+  }
+
+  return { id: auth.id };
+}
 
 interface SetShiftBody {
   dates?: string[];
@@ -27,7 +45,7 @@ interface ColorShiftBody {
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const auth = await requireUser(context.request, context.env);
+  const auth = await requireShiftAppAccess(context.request, context.env);
   if (auth instanceof Response) return auth;
 
   const url = new URL(context.request.url);
@@ -54,7 +72,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
-  const auth = await requireUser(context.request, context.env);
+  const auth = await requireShiftAppAccess(context.request, context.env);
   if (auth instanceof Response) return auth;
 
   let body: SetShiftBody;
@@ -88,7 +106,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const auth = await requireUser(context.request, context.env);
+  const auth = await requireShiftAppAccess(context.request, context.env);
   if (auth instanceof Response) return auth;
 
   let body: ToggleShiftBody;
@@ -118,7 +136,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPatch: PagesFunction<Env> = async (context) => {
-  const auth = await requireUser(context.request, context.env);
+  const auth = await requireShiftAppAccess(context.request, context.env);
   if (auth instanceof Response) return auth;
 
   let body: ColorShiftBody;

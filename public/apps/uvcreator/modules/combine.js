@@ -384,16 +384,18 @@ export function createCombineEditor(els) {
     renderPreview();
   }
 
-  function save() {
-    if (!fullResultCanvas?.width) return;
-    const link = document.createElement("a");
-    link.download = `${els.filenameInput.value || "combined_image"}.png`;
-    link.href = fullResultCanvas.toDataURL("image/png");
-    link.click();
-  }
-
   function getImageCount() {
     return images.length;
+  }
+
+  function getOutputBlob() {
+    return new Promise((resolve) => {
+      if (!fullResultCanvas?.width) {
+        resolve(null);
+        return;
+      }
+      fullResultCanvas.toBlob((blob) => resolve(blob), "image/png");
+    });
   }
 
   els.addBtn.addEventListener("click", () => els.fileInput.click());
@@ -402,7 +404,6 @@ export function createCombineEditor(els) {
     e.target.value = "";
   });
   els.clearBtn.addEventListener("click", clearAll);
-  els.saveBtn.addEventListener("click", save);
 
   els.bgPicker.addEventListener("input", () => {
     syncBgFromPicker();
@@ -445,5 +446,5 @@ export function createCombineEditor(els) {
   syncBgControlsFromRgba(els.bgInput.value);
   updateListEmptyState();
 
-  return { addFromBlob, loadFiles, renderPreview, getImageCount };
+  return { addFromBlob, loadFiles, renderPreview, getImageCount, getOutputBlob };
 }

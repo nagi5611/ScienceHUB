@@ -28,7 +28,8 @@ function escapeHtml(str) {
 }
 
 function fileKey(file) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
+  const rel = file._relativePath || file.webkitRelativePath || "";
+  return `${rel}:${file.name}:${file.size}:${file.lastModified}`;
 }
 
 /** アップロード進捗 UI を管理 */
@@ -157,7 +158,7 @@ export function createUploadProgress() {
       for (const file of fileList) {
         files.set(fileKey(file), {
           key: fileKey(file),
-          name: file.name,
+          name: file._displayName || file.webkitRelativePath || file.name,
           totalBytes: file.size,
           bytesUploaded: 0,
           percent: 0,
@@ -175,12 +176,14 @@ export function createUploadProgress() {
       render();
     },
 
-    setBatch({ type, count, parallel }) {
+    setBatch({ type, count, parallel, budgetBytes }) {
       const label =
         type === "small"
           ? `小ファイル ${count} 件を最大 ${parallel} 件ずつ並列アップロード`
-          : `大ファイル ${count} 件を順次アップロード（ファイル内マルチパート並列）`;
-      batchInfo = { type, count, parallel, label };
+          : type === "multipart"
+            ? `マルチパート ${count} 件（同時転送上限 ${formatBytes(budgetBytes)}）`
+            : `大ファイル ${count} 件を順次アップロード（ファイル内マルチパート並列）`;
+      batchInfo = { type, count, parallel, budgetBytes, label };
       render();
     },
 

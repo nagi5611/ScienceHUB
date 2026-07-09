@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excalidraw — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link
+    rel="stylesheet"
+    href="https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/index.css"
+  >
+  <link rel="stylesheet" href="/css/apps/excalidraw.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script>
+    window.EXCALIDRAW_ASSET_PATH =
+      "https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/";
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@19.0.0",
+        "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
+        "react-dom": "https://esm.sh/react-dom@19.0.0",
+        "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+        "@excalidraw/excalidraw": "https://esm.sh/@excalidraw/excalidraw@0.18.1?external=react,react-dom"
+      }
+    }
+  </script>
+</head>
+<body class="excal-app">
+  <div class="excal-loading" id="app-loading">
+    <p>読み込み中…</p>
+  </div>
+
+  <div class="excal-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="excal-btn excal-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <!-- ノート一覧 -->
+  <section class="excal-list" id="list-view" hidden>
+    <header class="excal-header">
+      <a href="/" class="excal-back">← ダッシュボード</a>
+      <h1 class="excal-title">Excalidraw</h1>
+      <div class="excal-header-actions">
+        <button type="button" class="excal-btn excal-btn--primary" id="new-note-btn">新規ノート</button>
+      </div>
+    </header>
+    <div class="excal-list-body">
+      <p class="excal-list-empty" id="list-empty" hidden>ノートがありません。新規ノートを作成してください。</p>
+      <ul class="excal-note-list" id="note-list"></ul>
+    </div>
+  </section>
+
+  <!-- エディタ -->
+  <section class="excal-editor" id="editor-view" hidden>
+    <header class="excal-header">
+      <button type="button" class="excal-back excal-back-btn" id="back-to-list">← ノート一覧</button>
+      <input type="text" class="excal-title-input" id="note-title" maxlength="120" aria-label="ノートタイトル">
+      <div class="excal-header-actions">
+        <span class="excal-peers" id="peers-status" aria-live="polite"></span>
+        <span class="excal-status" id="save-status" aria-live="polite"></span>
+        <button type="button" class="excal-btn excal-btn--primary" id="cloud-save-btn">保存</button>
+        <button type="button" class="excal-btn" id="share-btn">共有</button>
+      </div>
+    </header>
+    <main class="excal-main">
+      <div id="excalidraw-root" class="excal-root" aria-label="ホワイトボード"></div>
+    </main>
+  </section>
+
+  <!-- 共有モーダル -->
+  <div class="excal-modal" id="share-modal" hidden>
+    <div class="excal-modal-backdrop" data-close-modal></div>
+    <div class="excal-modal-panel" role="dialog" aria-labelledby="share-modal-title">
+      <h2 id="share-modal-title">共有リンク</h2>
+      <p class="excal-modal-desc">リンクを知っている人はログインなしでリアルタイム共同編集できます。</p>
+      <div class="excal-share-row">
+        <input type="text" class="excal-share-url" id="share-url" readonly>
+        <button type="button" class="excal-btn excal-btn--primary" id="copy-share-btn">コピー</button>
+      </div>
+      <div class="excal-modal-actions">
+        <button type="button" class="excal-btn" id="revoke-share-btn">リンクを無効化</button>
+        <button type="button" class="excal-btn" data-close-modal>閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <dialog class="cloud-save-dialog" id="excal-cloud-save-dialog" aria-labelledby="excal-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="excal-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="excal-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="excal-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="excal-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="excal-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="excal-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="excal-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="excal-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。表示中のフォルダに保存されます。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="excal-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="excal-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="excal-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="excal-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="excal-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <script src="/apps/excalidraw/app.js" type="module"></script>
+</body>
+</html>

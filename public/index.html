@@ -154,6 +154,37 @@
       </article>
     </section>
 
+    <!-- クラウドストレージ使用量 -->
+    <section class="hub-storage-section" id="hub-storage-section" hidden aria-label="クラウドストレージ使用量">
+      <div class="hub-storage-header">
+        <h2 class="hub-storage-title">クラウドストレージ</h2>
+        <a href="/apps/cloud-storage/" class="hub-storage-link">ストレージを開く</a>
+      </div>
+      <div class="hub-storage-table-wrap">
+        <table class="hub-storage-table">
+          <thead>
+            <tr>
+              <th rowspan="2" scope="col">グループ</th>
+              <th rowspan="2" scope="col">ストレージ</th>
+              <th colspan="4" scope="colgroup">使用可能領域</th>
+              <th colspan="4" scope="colgroup">ごみ箱</th>
+            </tr>
+            <tr>
+              <th scope="col">上限</th>
+              <th scope="col">使用済み</th>
+              <th scope="col">空き</th>
+              <th scope="col">使用率</th>
+              <th scope="col">上限</th>
+              <th scope="col">使用済み</th>
+              <th scope="col">空き</th>
+              <th scope="col">使用率</th>
+            </tr>
+          </thead>
+          <tbody id="hub-storage-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- 下段: グループ別アプリ -->
     <section class="hub-groups" id="groups-section" aria-label="プロジェクトグループ">
       <div class="hub-loading" role="status" aria-live="polite">

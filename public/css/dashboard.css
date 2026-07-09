@@ -660,6 +660,9 @@ body.hub-modal-open {
   align-items: center;
   justify-content: center;
   min-height: 18rem;
+  transition: none;
+  transform: none;
+  opacity: 1;
 }
 
 .hub-announcement-loading,
@@ -1695,6 +1698,28 @@ body.hub-modal-open {
   gap: 0;
   border-left: 1px solid #dadce0;
   min-height: 0;
+  transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+.hub-calendar-card .calendar-grid.is-sliding-out-next {
+  transform: translateY(-1.25rem);
+  opacity: 0;
+}
+
+.hub-calendar-card .calendar-grid.is-sliding-out-prev {
+  transform: translateY(1.25rem);
+  opacity: 0;
+}
+
+.hub-calendar-card .calendar-grid.is-sliding-in-from-next {
+  transform: translateY(1.25rem);
+  opacity: 0;
+}
+
+.hub-calendar-card .calendar-grid.is-sliding-in-from-prev {
+  transform: translateY(-1.25rem);
+  opacity: 0;
 }
 
 .hub-calendar-card .calendar-day {
@@ -1815,6 +1840,155 @@ body.hub-modal-open {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* クラウドストレージ使用量 */
+.hub-storage-section {
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.75rem;
+  border-bottom: 1px solid var(--cf-border);
+}
+
+.hub-storage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.hub-storage-title {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--cf-text);
+}
+
+.hub-storage-title::before {
+  content: "";
+  flex-shrink: 0;
+  width: 4px;
+  height: 1.15em;
+  background: var(--cf-orange);
+  border-radius: 2px;
+}
+
+.hub-storage-link {
+  font-size: 0.875rem;
+  color: var(--cf-orange);
+  text-decoration: none;
+  transition: color 0.12s;
+}
+
+.hub-storage-link:hover {
+  color: var(--cf-orange-hover);
+  text-decoration: underline;
+}
+
+.hub-storage-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-bg);
+  box-shadow: var(--cf-shadow);
+}
+
+.hub-storage-table {
+  width: 100%;
+  min-width: 52rem;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  background: var(--cf-bg);
+}
+
+.hub-storage-table thead th {
+  padding: 0.65rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-align: center;
+  color: var(--cf-muted);
+  background: var(--cf-surface);
+  border-bottom: 1px solid var(--cf-border);
+  border-right: 1px solid var(--cf-border);
+  white-space: nowrap;
+}
+
+.hub-storage-table thead th:last-child {
+  border-right: none;
+}
+
+.hub-storage-table thead tr:first-child th[rowspan="2"] {
+  vertical-align: middle;
+  text-align: left;
+  font-size: 0.8125rem;
+  letter-spacing: normal;
+  color: var(--cf-text);
+}
+
+.hub-storage-table tbody th,
+.hub-storage-table tbody td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--cf-border);
+  vertical-align: middle;
+  background: var(--cf-bg);
+}
+
+.hub-storage-table tbody tr:last-child th,
+.hub-storage-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.hub-storage-table tbody tr:hover th,
+.hub-storage-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--cf-orange-soft) 40%, var(--cf-bg));
+}
+
+.hub-storage-table tbody th {
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--cf-text);
+}
+
+.hub-storage-path {
+  color: var(--cf-muted);
+  text-decoration: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  transition: color 0.12s;
+}
+
+.hub-storage-path:hover {
+  color: var(--cf-orange);
+  text-decoration: underline;
+}
+
+.hub-storage-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--cf-text);
+}
+
+.hub-storage-ratio {
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--cf-text);
+}
+
+.hub-storage-ratio.is-warning {
+  background: var(--cf-orange-soft);
+  color: #b45309;
+}
+
+.hub-storage-ratio.is-danger {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 /* グループセクション */

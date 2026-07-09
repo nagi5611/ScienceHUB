@@ -1,0 +1,146 @@
+/* public/css/share.css — 共有リンク公開ページ */
+
+:root {
+  --share-bg: #f6f8fb;
+  --share-card: #ffffff;
+  --share-text: #1f2937;
+  --share-muted: #6b7280;
+  --share-accent: #0ea5e9;
+  --share-accent-hover: #0284c7;
+  --share-danger: #dc2626;
+  --share-border: #e5e7eb;
+  --share-radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body.share-body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color: var(--share-text);
+  background: var(--share-bg);
+}
+
+.share-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.share-header {
+  margin-bottom: 1.25rem;
+}
+
+.share-brand {
+  margin: 0 0 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--share-accent);
+}
+
+.share-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.share-card {
+  background: var(--share-card);
+  border: 1px solid var(--share-border);
+  border-radius: var(--share-radius);
+  padding: 1.25rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.share-card--error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.share-error-text {
+  margin: 0;
+  color: var(--share-danger);
+}
+
+.share-meta {
+  margin: 0 0 1rem;
+  font-size: 0.9375rem;
+  color: var(--share-muted);
+}
+
+.share-meta.is-exhausted {
+  color: var(--share-danger);
+  font-weight: 600;
+}
+
+.share-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.share-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--share-border);
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+.share-file-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.share-file-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.share-file-size {
+  font-size: 0.8125rem;
+  color: var(--share-muted);
+}
+
+.share-download-btn {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--share-accent);
+  cursor: pointer;
+}
+
+.share-download-btn:hover:not(:disabled) {
+  background: var(--share-accent-hover);
+}
+
+.share-download-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+  .share-file-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .share-download-btn {
+    width: 100%;
+  }
+}

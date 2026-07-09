@@ -7,6 +7,8 @@ export interface Env {
   FILES: R2Bucket;
   sciencehub_db?: D1Database;
   sciencehub_files?: R2Bucket;
+  /** Excalidraw 共同編集 Durable Object（workers/excalidraw-collab） */
+  EXCALIDRAW_COLLAB?: DurableObjectNamespace;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** Google カレンダー連携用 OAuth クライアント（ログイン用とは別） */

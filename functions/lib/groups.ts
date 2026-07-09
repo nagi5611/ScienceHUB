@@ -83,6 +83,7 @@ export interface UserGroupMembership {
   group_role_display_name: string;
   group_role_color: string;
   group_role_position: number;
+  group_role_weight: number;
 }
 
 export interface GroupMembershipInput {
@@ -671,7 +672,8 @@ export async function getUserGroupMemberships(
          gr.slug AS group_role_slug,
          gr.display_name AS group_role_display_name,
          gr.color AS group_role_color,
-         gr.position AS group_role_position
+         gr.position AS group_role_position,
+         gr.weight AS group_role_weight
        FROM user_group_memberships ugm
        JOIN hub_groups g ON g.id = ugm.group_id
        JOIN group_roles gr ON gr.id = ugm.group_role_id

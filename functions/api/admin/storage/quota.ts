@@ -29,6 +29,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       quota_bytes: r.quota_bytes,
       used_bytes: r.used_bytes,
       username: r.username,
+      user_email: r.user_email,
       user_display_name: r.user_display_name,
       group_slug: r.group_slug,
       group_display_name: r.group_display_name,

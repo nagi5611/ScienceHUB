@@ -3,8 +3,10 @@
  */
 
 import { createId, now } from "./types";
-import { getUserGroupMemberships } from "./groups";
+import { getAppAccessibleMemberIds } from "./apps";
 import { SHIFT_COLOR_COUNT, isValidShiftColorIndex } from "./shift-colors";
+
+export const SHIFT_APP_SLUG = "shift-management";
 
 export interface ShiftAvailabilityRow {
   id: string;
@@ -47,30 +49,6 @@ export function isValidDateStr(value: string): boolean {
   );
 }
 
-/** 同一グループのメンバー ID を取得 */
-async function getSharedGroupMemberIds(
-  db: D1Database,
-  userId: string
-): Promise<Set<string>> {
-  const memberships = await getUserGroupMemberships(db, userId);
-  const groupIds = memberships.map((m) => m.group_id);
-  if (groupIds.length === 0) return new Set([userId]);
-
-  const placeholders = groupIds.map(() => "?").join(", ");
-  const result = await db
-    .prepare(
-      `SELECT DISTINCT ugm.user_id
-       FROM user_group_memberships ugm
-       WHERE ugm.group_id IN (${placeholders})`
-    )
-    .bind(...groupIds)
-    .all<{ user_id: string }>();
-
-  const ids = new Set((result.results ?? []).map((r) => r.user_id));
-  ids.add(userId);
-  return ids;
-}
-
 /** 期間内のシフト一覧を取得 */
 export async function listShiftAvailability(
   db: D1Database,
@@ -85,7 +63,7 @@ export async function listShiftAvailability(
     throw new Error("from は to 以前である必要があります");
   }
 
-  const memberIds = await getSharedGroupMemberIds(db, userId);
+  const memberIds = await getAppAccessibleMemberIds(db, SHIFT_APP_SLUG, userId);
   const memberIdList = [...memberIds];
 
   if (memberIdList.length === 0) {

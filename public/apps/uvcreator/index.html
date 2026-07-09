@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/apps/uv-creator.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
 </head>
 <body class="uv-app">
   <header class="uv-header">
@@ -66,7 +67,15 @@
             <span class="uv-filename-suffix">.jpg</span>
           </div>
           <div class="uv-actions">
-            <button type="button" class="uv-btn uv-btn--primary" id="tidy-save" disabled>保存</button>
+            <div class="uv-save-menu" id="tidy-save-menu">
+              <button type="button" class="uv-btn uv-btn--primary uv-save-menu-trigger" id="tidy-save" disabled>
+                保存 <span class="uv-save-menu-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="uv-save-menu-popover" role="menu" hidden>
+                <button type="button" class="uv-save-menu-item" role="menuitem" data-save-action="local">ローカルに保存</button>
+                <button type="button" class="uv-save-menu-item" role="menuitem" data-save-action="cloud">クラウドストレージに保存</button>
+              </div>
+            </div>
             <button type="button" class="uv-btn" id="tidy-add-combine" disabled>結合リストへ追加</button>
           </div>
           <p class="uv-add-feedback" id="tidy-add-feedback" hidden role="status"></p>
@@ -146,7 +155,15 @@
           <span class="uv-filename-suffix">.png</span>
         </div>
         <div class="uv-actions">
-          <button type="button" class="uv-btn uv-btn--primary" id="combine-save" disabled>保存</button>
+          <div class="uv-save-menu" id="combine-save-menu">
+            <button type="button" class="uv-btn uv-btn--primary uv-save-menu-trigger" id="combine-save" disabled>
+              保存 <span class="uv-save-menu-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="uv-save-menu-popover" role="menu" hidden>
+              <button type="button" class="uv-save-menu-item" role="menuitem" data-save-action="local">ローカルに保存</button>
+              <button type="button" class="uv-save-menu-item" role="menuitem" data-save-action="cloud">クラウドストレージに保存</button>
+            </div>
+          </div>
         </div>
       </article>
     </section>
@@ -157,6 +174,50 @@
     <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
     <a href="/" class="uv-btn uv-btn--primary">ダッシュボードへ戻る</a>
   </div>
+
+  <dialog class="cloud-save-dialog" id="uv-cloud-save-dialog" aria-labelledby="uv-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="uv-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="uv-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="uv-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+        <a href="/apps/cloud-storage/" class="uv-btn uv-btn--sm" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="uv-cloud-save-body">
+        <label class="uv-field">
+          <span>ファイル名</span>
+          <input type="text" id="uv-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="uv-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="uv-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="uv-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。表示中のフォルダに保存されます。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="uv-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="uv-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="uv-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="uv-btn cloud-save-btn" id="uv-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="uv-btn cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="uv-btn uv-btn--primary cloud-save-btn cloud-save-btn--primary" id="uv-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
 
   <script src="/apps/uvcreator/lib/glfx.js"></script>
   <script src="/apps/uvcreator/app.js" type="module"></script>

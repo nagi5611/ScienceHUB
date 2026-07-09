@@ -220,6 +220,29 @@
           <button type="button" class="cf-btn cf-btn-ghost" id="storage-refresh-btn">再読み込み</button>
         </header>
 
+        <div class="cf-storage-toolbar">
+          <div class="cf-storage-search-wrap">
+            <label class="cf-search cf-storage-search" for="storage-user-search">
+              <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+              <input
+                type="search"
+                id="storage-user-search"
+                placeholder="メール・表示名・ユーザー名で検索"
+                autocomplete="off"
+                enterkeyhint="search"
+              >
+              <button
+                type="button"
+                class="cf-search-clear"
+                id="storage-user-search-clear"
+                hidden
+                aria-label="検索をクリア"
+              >✕</button>
+            </label>
+            <p class="cf-storage-search-hint" id="storage-search-hint" aria-live="polite"></p>
+          </div>
+        </div>
+
         <div class="cf-table-wrap">
           <table class="cf-table">
             <thead>
@@ -613,23 +636,42 @@
         <button type="button" class="cf-icon-btn" id="close-group-edit-members" aria-label="閉じる">✕</button>
       </header>
       <p class="cf-dialog-lead" id="group-edit-members-subtitle"></p>
-      <div class="cf-group-edit-toolbar">
-        <label class="cf-search cf-group-edit-search">
-          <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
-          <input type="search" id="group-edit-members-search" placeholder="無所属ユーザーを検索" autocomplete="off">
-        </label>
+      <div class="cf-group-edit-tabs" role="tablist">
+        <button type="button" class="cf-group-edit-tab is-active" data-group-edit-tab="members" role="tab" aria-selected="true">メンバー配置</button>
+        <button type="button" class="cf-group-edit-tab" data-group-edit-tab="invites" role="tab" aria-selected="false">招待リンク</button>
       </div>
-      <div class="cf-group-edit-board">
-        <aside class="cf-group-edit-pool-wrap">
-          <p class="cf-group-edit-pool-label">無所属</p>
-          <div class="cf-group-edit-pool" id="group-edit-members-pool" data-drop-zone="pool"></div>
-        </aside>
-        <div class="cf-group-edit-roles" id="group-edit-members-roles"></div>
+      <div class="cf-group-edit-tab-panel" id="group-edit-tab-members" data-group-edit-panel="members">
+        <div class="cf-group-edit-toolbar">
+          <label class="cf-search cf-group-edit-search">
+            <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+            <input type="search" id="group-edit-members-search" placeholder="無所属ユーザーを検索" autocomplete="off">
+          </label>
+        </div>
+        <div class="cf-group-edit-board">
+          <aside class="cf-group-edit-pool-wrap">
+            <p class="cf-group-edit-pool-label">無所属</p>
+            <div class="cf-group-edit-pool" id="group-edit-members-pool" data-drop-zone="pool"></div>
+          </aside>
+          <div class="cf-group-edit-roles" id="group-edit-members-roles"></div>
+        </div>
+      </div>
+      <div class="cf-group-edit-tab-panel" id="group-edit-tab-invites" data-group-edit-panel="invites" hidden>
+        <div class="cf-invite-create">
+          <label class="cf-field">
+            <span>参加時の権限</span>
+            <select class="cf-select" id="group-invite-role-select"></select>
+          </label>
+          <button type="button" class="cf-btn cf-btn-primary cf-btn-sm" id="group-invite-create-btn">招待リンクを作成</button>
+        </div>
+        <p id="group-invite-create-error" class="cf-form-error" hidden></p>
+        <div class="cf-invite-links" id="group-invite-links-list">
+          <p class="cf-empty">招待リンクはまだありません</p>
+        </div>
       </div>
       <p id="group-edit-members-error" class="cf-form-error" hidden></p>
       <footer class="cf-dialog-footer">
         <button type="button" class="cf-btn cf-btn-ghost" id="cancel-group-edit-members">キャンセル</button>
-        <button type="submit" class="cf-btn cf-btn-primary">保存</button>
+        <button type="submit" class="cf-btn cf-btn-primary" id="group-edit-members-save-btn">保存</button>
       </footer>
     </form>
   </dialog>

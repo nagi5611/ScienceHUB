@@ -8,6 +8,26 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/apps/cloud-storage.css">
+  <link
+    id="excalidraw-preview-css"
+    rel="stylesheet"
+    href="https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/index.css"
+  >
+  <script>
+    window.EXCALIDRAW_ASSET_PATH =
+      "https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/";
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@19.0.0",
+        "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
+        "react-dom": "https://esm.sh/react-dom@19.0.0",
+        "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+        "@excalidraw/excalidraw": "https://esm.sh/@excalidraw/excalidraw@0.18.1?external=react,react-dom"
+      }
+    }
+  </script>
 </head>
 <body class="cs-app-body">
   <div id="cs-denied" class="cs-denied" hidden>
@@ -34,10 +54,15 @@
       <main class="cs-main" id="cs-drop-zone">
         <div class="cs-toolbar">
           <button type="button" class="cs-btn cs-btn-primary" id="cs-upload-btn">アップロード</button>
+          <button type="button" class="cs-btn" id="cs-upload-folder-btn">フォルダをアップロード</button>
           <button type="button" class="cs-btn" id="cs-mkdir-btn">新規フォルダ</button>
           <button type="button" class="cs-btn" id="cs-download-btn">ダウンロード</button>
           <button type="button" class="cs-btn" id="cs-rename-btn">リネーム</button>
           <button type="button" class="cs-btn cs-btn-danger" id="cs-delete-btn">削除</button>
+          <button type="button" class="cs-btn" id="cs-trash-back-btn" hidden>← ファイル一覧</button>
+          <button type="button" class="cs-btn cs-btn-primary" id="cs-trash-restore-btn" hidden>復元</button>
+          <button type="button" class="cs-btn cs-btn-danger" id="cs-trash-purge-btn" hidden>完全削除</button>
+          <button type="button" class="cs-btn cs-btn-danger" id="cs-trash-empty-btn" hidden>ごみ箱を空にする</button>
           <div class="cs-sort-controls">
             <label class="cs-sort-label" for="cs-sort-field">並び替え</label>
             <select id="cs-sort-field" class="cs-sort-select" aria-label="並び替え項目">
@@ -50,6 +75,7 @@
             <button type="button" class="cs-btn cs-sort-order-btn" id="cs-sort-order">昇順</button>
           </div>
           <input type="file" id="cs-upload-input" multiple hidden>
+          <input type="file" id="cs-upload-folder-input" webkitdirectory directory multiple hidden>
         </div>
 
         <div class="cs-upload-banner" id="cs-upload-banner" hidden>
@@ -62,6 +88,13 @@
           </div>
         </div>
         <p class="cs-upload-progress" id="cs-upload-progress" hidden></p>
+        <div class="cs-trash-status" id="cs-trash-status" hidden role="status">
+          <div class="cs-trash-quota">
+            <div class="cs-quota-track"><div class="cs-quota-bar" id="cs-trash-quota-bar"></div></div>
+            <span class="cs-quota-label" id="cs-trash-quota-label">—</span>
+          </div>
+          <p class="cs-trash-status-note">90日経過または50GB超過で自動削除</p>
+        </div>
         <p class="cs-upload-progress" id="cs-delete-progress" hidden role="status"></p>
         <nav class="cs-breadcrumb" id="cs-breadcrumb" aria-label="パス"></nav>
 
@@ -125,6 +158,9 @@
     </header>
     <div class="cs-preview-body" id="cs-preview-body"></div>
     <footer class="cs-preview-footer">
+      <button type="button" class="cs-btn" id="cs-preview-office-browser" hidden>ブラウザで表示</button>
+      <button type="button" class="cs-btn" id="cs-preview-office-app" hidden>アプリで表示</button>
+      <button type="button" class="cs-btn cs-btn-primary" id="cs-preview-excalidraw-edit" hidden>編集</button>
       <button type="button" class="cs-btn" id="cs-preview-download">ダウンロード</button>
       <button type="button" class="cs-btn" id="cs-preview-close-btn">閉じる</button>
     </footer>
@@ -138,6 +174,18 @@
     <div class="cs-upload-dialog-body" id="cs-upload-dialog-body"></div>
     <footer class="cs-upload-dialog-footer">
       <button type="button" class="cs-btn" id="cs-upload-dialog-close-btn">閉じる</button>
+    </footer>
+  </dialog>
+
+  <dialog class="cs-upload-dialog" id="cs-share-dialog">
+    <header class="cs-upload-dialog-header">
+      <h2 class="cs-upload-dialog-title" id="cs-share-dialog-title">共有リンクを作成</h2>
+      <button type="button" class="cs-preview-close" id="cs-share-dialog-close" aria-label="閉じる">✕</button>
+    </header>
+    <div class="cs-upload-dialog-body" id="cs-share-dialog-body"></div>
+    <footer class="cs-upload-dialog-footer" id="cs-share-dialog-footer">
+      <button type="button" class="cs-btn" id="cs-share-dialog-cancel">キャンセル</button>
+      <button type="button" class="cs-btn cs-btn-primary" id="cs-share-dialog-create">リンクを作成</button>
     </footer>
   </dialog>
 

@@ -158,3 +158,22 @@ export async function apiUpload(path, body, params = {}, options = {}) {
     parseJson: true,
   });
 }
+
+/** ファイル・フォルダを移動 */
+export async function moveStorageItems(items, destPath) {
+  return apiRequest("move", {
+    method: "POST",
+    body: JSON.stringify({ items, destPath }),
+  });
+}
+
+/** 共有リンクを作成 */
+export async function createShareLink(paths, maxDownloads = 10) {
+  return apiRequest("share/create", {
+    method: "POST",
+    body: JSON.stringify({
+      paths,
+      max_downloads: maxDownloads,
+    }),
+  });
+}

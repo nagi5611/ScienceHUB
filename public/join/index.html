@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>グループに参加 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/join.css">
+</head>
+<body class="join-body">
+  <main class="join-page" id="join-page">
+    <header class="join-header">
+      <p class="join-brand">ScienceHUB</p>
+      <h1 class="join-title">グループへの参加</h1>
+    </header>
+
+    <div class="join-card" id="join-loading" role="status">
+      <p>読み込み中…</p>
+    </div>
+
+    <div class="join-card join-card--error" id="join-error" hidden>
+      <p class="join-error-text" id="join-error-text"></p>
+      <a href="/" class="join-home-link">ダッシュボードへ戻る</a>
+    </div>
+
+    <div class="join-card" id="join-content" hidden>
+      <p class="join-lead">以下のグループに参加しますか？</p>
+      <div class="join-group" id="join-group">
+        <span class="join-group-dot" id="join-group-dot"></span>
+        <div class="join-group-text">
+          <p class="join-group-name" id="join-group-name"></p>
+          <p class="join-group-role" id="join-group-role"></p>
+        </div>
+      </div>
+      <p class="join-note" id="join-note" hidden></p>
+      <div class="join-actions">
+        <a href="/" class="join-btn join-btn-ghost">キャンセル</a>
+        <button type="button" class="join-btn join-btn-primary" id="join-submit">参加する</button>
+      </div>
+    </div>
+
+    <div class="join-card join-card--success" id="join-success" hidden>
+      <p class="join-success-text" id="join-success-text"></p>
+      <a href="/" class="join-btn join-btn-primary">ダッシュボードへ</a>
+    </div>
+  </main>
+
+  <script type="module" src="/join/join.js"></script>
+</body>
+</html>

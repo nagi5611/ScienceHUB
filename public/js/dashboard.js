@@ -20,6 +20,9 @@ let calendarSync = { enabled: false, all_groups_calendar_name: "自然科学部"
 /** @type {{ id: string, display_name: string, color: string }[]} */
 let scheduleLegendGroups = [];
 let scheduleLoading = false;
+let calendarNavLock = false;
+let lastWheelMonthNavAt = 0;
+const WHEEL_MONTH_COOLDOWN_MS = 400;
 let scheduleFetchedYear = null;
 let scheduleFetchedScope = null;
 /** @type {Map<string, object>} */
@@ -214,6 +217,58 @@ function renderTodayTasks() {
   });
 }
 
+/** バイト数を表示用に整形 */
+function formatBytes(bytes) {
+  if (bytes == null) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+/** 使用率セルの警告クラス */
+function storageRatioClass(ratio) {
+  if (ratio >= 95) return "hub-storage-ratio is-danger";
+  if (ratio >= 80) return "hub-storage-ratio is-warning";
+  return "hub-storage-ratio";
+}
+
+/** クラウドストレージ使用量表を描画 */
+function renderStorageOverview(storage) {
+  const section = document.getElementById("hub-storage-section");
+  const tbody = document.getElementById("hub-storage-tbody");
+  if (!section || !tbody) return;
+
+  if (!storage?.enabled || !storage.roots?.length) {
+    section.hidden = true;
+    tbody.innerHTML = "";
+    return;
+  }
+
+  section.hidden = false;
+  tbody.innerHTML = storage.roots
+    .map((row) => {
+      const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(row.path)}`;
+      return `<tr>
+        <th scope="row">${escapeHtml(row.group_label)}</th>
+        <td><a href="${escapeHtml(storageHref)}" class="hub-storage-path">${escapeHtml(row.path)}</a></td>
+        <td class="hub-storage-num">${formatBytes(row.quota_bytes)}</td>
+        <td class="hub-storage-num">${formatBytes(row.used_bytes)}</td>
+        <td class="hub-storage-num">${formatBytes(row.available_bytes)}</td>
+        <td class="${storageRatioClass(row.usage_ratio)}">${row.usage_ratio}%</td>
+        <td class="hub-storage-num">${formatBytes(row.trash_quota_bytes)}</td>
+        <td class="hub-storage-num">${formatBytes(row.trash_used_bytes)}</td>
+        <td class="hub-storage-num">${formatBytes(row.trash_available_bytes)}</td>
+        <td class="${storageRatioClass(row.trash_usage_ratio)}">${row.trash_usage_ratio}%</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 /** グループセクションを描画（API から取得） */
 async function renderGroups() {
   const section = document.getElementById("groups-section");
@@ -229,6 +284,7 @@ async function renderGroups() {
     }
     const data = await response.json();
     const groups = data.groups ?? [];
+    renderStorageOverview(data.storage);
 
     if (groups.length === 0) {
       section.innerHTML = `<p class="hub-groups-empty">利用可能なアプリがありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>`;
@@ -483,6 +539,100 @@ function renderWeekdayHeaders() {
   });
 }
 
+/** CSS トランジション完了を待つ */
+function waitForTransition(el, ms = 320) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      el.removeEventListener("transitionend", onEnd);
+      resolve();
+    };
+    const onEnd = (e) => {
+      if (e.target !== el) return;
+      finish();
+    };
+    el.addEventListener("transitionend", onEnd);
+    setTimeout(finish, ms);
+  });
+}
+
+/** スライドアニメーション付きで月を移動 */
+async function navigateMonthWithSlide(delta) {
+  if (calendarNavLock || scheduleLoading) return;
+
+  const grid = document.getElementById("calendar-grid");
+  if (!grid || grid.classList.contains("is-loading")) {
+    changeMonth(delta);
+    return;
+  }
+
+  calendarNavLock = true;
+  const exitClass = delta > 0 ? "is-sliding-out-next" : "is-sliding-out-prev";
+  const enterClass = delta > 0 ? "is-sliding-in-from-next" : "is-sliding-in-from-prev";
+
+  try {
+    grid.classList.add(exitClass);
+    await waitForTransition(grid);
+
+    grid.classList.remove(exitClass);
+    grid.classList.add(enterClass);
+    await changeMonth(delta);
+
+    if (grid.classList.contains("is-loading")) {
+      grid.classList.remove(enterClass);
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        grid.classList.remove(enterClass);
+      });
+    });
+    await waitForTransition(grid);
+  } finally {
+    calendarNavLock = false;
+    lastWheelMonthNavAt = Date.now();
+  }
+}
+
+/** カレンダー上のホイールで月を移動 */
+function initCalendarWheelNavigation() {
+  const section = document.getElementById("calendar-section");
+  if (!section || section.dataset.wheelBound === "1") return;
+  section.dataset.wheelBound = "1";
+
+  section.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.target.closest(".calendar-month-chips, .calendar-nav-row")) return;
+      if (
+        document.querySelector(
+          ".hub-profile-modal.is-open, #schedule-modal.is-open, #schedule-detail-modal.is-open, #schedule-subscribe-modal.is-open"
+        )
+      ) {
+        return;
+      }
+
+      const raw = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (Math.abs(raw) < 15) return;
+
+      e.preventDefault();
+
+      if (Date.now() - lastWheelMonthNavAt < WHEEL_MONTH_COOLDOWN_MS) return;
+      if (calendarNavLock || scheduleLoading) return;
+
+      const delta = raw > 0 ? 1 : -1;
+      navigateMonthWithSlide(delta).catch(() => {
+        calendarNavLock = false;
+        changeMonth(delta);
+      });
+    },
+    { passive: false }
+  );
+}
+
 /** 月を変更 */
 function changeMonth(delta) {
   currentMonth += delta;
@@ -493,7 +643,7 @@ function changeMonth(delta) {
     currentMonth = 12;
     currentYear--;
   }
-  loadSchedule();
+  return loadSchedule();
 }
 
 /** 今月へジャンプ */
@@ -1168,6 +1318,7 @@ function bindEvents() {
   document.getElementById("next-month-mobile")?.addEventListener("click", () => changeMonth(1));
   document.getElementById("go-today-btn")?.addEventListener("click", goToToday);
   initCalendarPeriodControls();
+  initCalendarWheelNavigation();
 
   document.querySelectorAll("[data-schedule-scope]").forEach((btn) => {
     btn.addEventListener("click", () => setScheduleScope(btn.dataset.scheduleScope ?? "mine"));
