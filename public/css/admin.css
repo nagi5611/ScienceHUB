@@ -88,6 +88,60 @@ body.cf-admin {
   line-height: 1.45;
 }
 
+.cf-table-announcements .cf-announce-groups {
+  min-width: 6rem;
+  font-size: 0.85rem;
+  color: var(--cf-muted);
+}
+
+.cf-announce-groups-all {
+  color: var(--cf-text);
+  font-weight: 500;
+}
+
+.cf-announcement-group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.cf-announce-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius);
+  background: var(--cf-surface);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cf-announce-group-chip:has(input:checked) {
+  border-color: var(--group-color, var(--cf-orange));
+  background: color-mix(in srgb, var(--group-color, var(--cf-orange)) 10%, white);
+}
+
+.cf-announce-group-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cf-announce-group-chip-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--group-color, var(--cf-orange));
+  flex-shrink: 0;
+}
+
+.cf-announce-group-chip-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .cf-nav-label {
   margin: 0.5rem 0.75rem 0.35rem;
   font-size: 0.7rem;
@@ -2027,6 +2081,27 @@ body.cf-admin-login {
 .cf-app-card-name {
   margin: 0 0 0.2rem;
   font-size: 1rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cf-app-card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--cf-orange-soft);
+  color: var(--cf-orange);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cf-app-default-toggle {
+  margin-top: 0.25rem;
 }
 
 .cf-app-card-slug {
@@ -2045,6 +2120,7 @@ body.cf-admin-login {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .cf-app-access-list {

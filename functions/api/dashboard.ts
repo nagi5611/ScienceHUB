@@ -5,7 +5,7 @@
 import type { Env } from "../lib/types";
 import { getDb } from "../lib/db";
 import { requireUser } from "../lib/auth";
-import { getDashboardForUser } from "../lib/apps";
+import { getDashboardForUser, getDefaultAppsForUser } from "../lib/apps";
 import { getStorageOverviewForDashboard } from "../lib/storage/overview";
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -13,9 +13,10 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   if (auth instanceof Response) return auth;
 
   const db = getDb(context.env);
-  const [groups, storage] = await Promise.all([
+  const [groups, storage, default_apps] = await Promise.all([
     getDashboardForUser(db, auth.id),
     getStorageOverviewForDashboard(context.env, db, auth),
+    getDefaultAppsForUser(db, auth.id),
   ]);
-  return Response.json({ groups, storage });
+  return Response.json({ groups, storage, default_apps });
 };

@@ -13,20 +13,38 @@
 <body class="hub-dashboard">
   <header class="hub-header">
     <div class="hub-header-inner">
-      <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
-        <span class="hub-logo" aria-hidden="true">
-          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/>
-            <ellipse cx="16" cy="16" rx="6" ry="14" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M2 16h28M6 10h20M6 22h20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </span>
-        <span class="hub-brand-text">ScienceHUB</span>
-      </a>
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/>
+              <ellipse cx="16" cy="16" rx="6" ry="14" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M2 16h28M6 10h20M6 22h20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <div class="hub-default-app-menu" id="default-app-menu">
+          <button
+            type="button"
+            class="hub-header-text-btn hub-default-app-toggle"
+            id="default-app-menu-toggle"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="default-app-dropdown"
+          >
+            Default App
+          </button>
+          <div class="hub-default-app-dropdown" id="default-app-dropdown" role="menu" hidden>
+            <p class="hub-default-app-empty" id="default-app-empty">Default App が設定されていません</p>
+            <ul class="hub-default-app-list" id="default-app-list" role="none"></ul>
+          </div>
+        </div>
+      </div>
       <div class="hub-header-actions">
         <a
           href="/status/"
-          class="hub-header-status"
+          class="hub-header-text-btn hub-header-status"
           target="_blank"
           rel="noopener noreferrer"
         >ステータス</a>

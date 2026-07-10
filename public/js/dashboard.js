@@ -3,6 +3,7 @@
  */
 
 import { initAccountMenu } from "./account-menu.js";
+import { initDefaultAppMenu } from "./default-app-menu.js";
 import { appIconHtml } from "./hub-icons.js";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -269,20 +270,30 @@ function renderStorageOverview(storage) {
     .join("");
 }
 
+/** ダッシュボード API を取得 */
+async function fetchDashboard() {
+  const response = await fetch("/api/dashboard", { credentials: "same-origin" });
+  if (response.status === 401) {
+    window.location.href = "/login/?next=" + encodeURIComponent("/");
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error("dashboard fetch failed");
+  }
+  return response.json();
+}
+
 /** グループセクションを描画（API から取得） */
-async function renderGroups() {
+async function renderGroups(dashboardData) {
   const section = document.getElementById("groups-section");
   if (!section) return;
 
   section.innerHTML = hubLoadingHtml("アプリを読み込み中…");
 
   try {
-    const response = await fetch("/api/dashboard", { credentials: "same-origin" });
-    if (response.status === 401) {
-      window.location.href = "/login/?next=" + encodeURIComponent("/");
-      return;
-    }
-    const data = await response.json();
+    const data = dashboardData ?? (await fetchDashboard());
+    if (!data) return;
+
     const groups = data.groups ?? [];
     renderStorageOverview(data.storage);
 
@@ -1363,9 +1374,18 @@ async function init() {
 
   bindEvents();
 
+  let dashboardData = null;
+  try {
+    dashboardData = await fetchDashboard();
+  } catch {
+    dashboardData = null;
+  }
+
+  initDefaultAppMenu(dashboardData?.default_apps ?? []);
+
   await Promise.all([
     renderAnnouncements(),
-    renderGroups(),
+    renderGroups(dashboardData),
     loadSchedule(),
   ]);
 

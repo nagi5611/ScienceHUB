@@ -5,7 +5,7 @@ INSERT OR IGNORE INTO hub_apps (
 ) VALUES (
   'app_excalidraw',
   'excalidraw',
-  'Excalidraw',
+  'ホワイトボード',
   '手書き風ホワイトボード（図形・矢印・テキスト）',
   '/apps/excalidraw/',
   '✏️',

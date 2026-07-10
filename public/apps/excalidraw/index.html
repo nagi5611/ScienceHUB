@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Excalidraw — ScienceHUB</title>
+  <title>ホワイトボード — ScienceHUB</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -44,13 +44,16 @@
   <section class="excal-list" id="list-view" hidden>
     <header class="excal-header">
       <a href="/" class="excal-back">← ダッシュボード</a>
-      <h1 class="excal-title">Excalidraw</h1>
+      <h1 class="excal-title">ホワイトボード</h1>
       <div class="excal-header-actions">
         <button type="button" class="excal-btn excal-btn--primary" id="new-note-btn">新規ノート</button>
       </div>
     </header>
-    <div class="excal-list-body">
-      <p class="excal-list-empty" id="list-empty" hidden>ノートがありません。新規ノートを作成してください。</p>
+    <div class="excal-list-body" id="list-body">
+      <div class="excal-list-empty" id="list-empty" hidden>
+        <p class="excal-list-empty-text">ノートがありません</p>
+        <button type="button" class="excal-btn excal-btn--primary excal-btn--lg" id="empty-new-note-btn">新規ノート</button>
+      </div>
       <ul class="excal-note-list" id="note-list"></ul>
     </div>
   </section>

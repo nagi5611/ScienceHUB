@@ -1229,6 +1229,78 @@ function renderStorageLink(storagePath) {
   </a>`;
 }
 
+/** Excalidraw プロジェクトノートへのリンク HTML */
+function renderNoteLink(noteId, projectId) {
+  if (noteId) {
+    const href = `/apps/excalidraw/?noteId=${encodeURIComponent(noteId)}`;
+    return `<a class="pm-note-link" href="${href}" target="_blank" rel="noopener" title="プロジェクトノートを開く">
+      <span class="pm-note-link-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 20h9" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="pm-note-link-label">ノート</span>
+    </a>`;
+  }
+  return `<button type="button" class="pm-note-link" data-open-note="${escapeHtml(projectId)}" title="プロジェクトノートを開く">
+    <span class="pm-note-link-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 20h9" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="pm-note-link-label">ノート</span>
+  </button>`;
+}
+
+/** ストレージ・ノートリンクを横並びで描画 */
+function renderProjectResourceLinks({ storagePath, noteId, projectId }) {
+  return `<div class="pm-project-resource-links">
+    ${renderStorageLink(storagePath)}
+    ${renderNoteLink(noteId, projectId)}
+  </div>`;
+}
+
+/** ノート未作成時のクリックで取得/作成して開く */
+function bindNoteLinkHandlers(scope) {
+  scope.querySelectorAll("[data-open-note]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const projectId = btn.getAttribute("data-open-note");
+      if (!projectId) return;
+      btn.disabled = true;
+      try {
+        await openProjectNote(projectId);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+/** プロジェクトノートを開く（なければ作成） */
+async function openProjectNote(projectId) {
+  const response = await fetch(
+    `/api/project-management/projects/${encodeURIComponent(projectId)}/note`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error ?? "ノートを開けませんでした");
+  }
+  window.open(
+    `/apps/excalidraw/?noteId=${encodeURIComponent(data.note_id)}`,
+    "_blank",
+    "noopener"
+  );
+}
+
 /** 詳細画面の子行 */
 function renderDetailChildRow(child) {
   const isCompleted = Boolean(child.is_completed);
@@ -1236,7 +1308,11 @@ function renderDetailChildRow(child) {
   const nameHtml = isCompleted
     ? `<span class="pm-detail-child-name pm-detail-child-name--done">${escapeHtml(child.name)}</span>`
     : `<span class="pm-detail-child-name">${escapeHtml(child.name)}</span>`;
-  const storageHtml = renderStorageLink(child.storage_path);
+  const storageHtml = renderProjectResourceLinks({
+    storagePath: child.storage_path,
+    noteId: child.excalidraw_note_id,
+    projectId: child.id,
+  });
 
   return `<li class="pm-detail-child-row ${itemClass}">
     <div class="pm-detail-child-info">
@@ -1282,6 +1358,11 @@ function renderDetailView(parent) {
     <div class="pm-detail-header-main">
       <h2 class="pm-detail-title">${escapeHtml(parent.name)}</h2>
       <p class="pm-detail-leader">リーダー: ${escapeHtml(leaderName)}</p>
+      ${renderProjectResourceLinks({
+        storagePath: null,
+        noteId: parent.excalidraw_note_id,
+        projectId: parent.id,
+      })}
       ${renderProgressBar(percent)}
     </div>
     <div class="pm-detail-header-actions">
@@ -1317,6 +1398,8 @@ function renderDetailView(parent) {
     .getElementById("pm-detail-delete-parent")
     ?.addEventListener("click", () => handleDeleteProject(parent.id));
 
+  bindNoteLinkHandlers(header);
+
   const activeChildren = parent.children ?? [];
   const completedChildren = parent.completed_children ?? [];
 
@@ -1325,6 +1408,7 @@ function renderDetailView(parent) {
   } else {
     childList.innerHTML = activeChildren.map(renderDetailChildRow).join("");
     bindDetailChildEditButtons(childList);
+    bindNoteLinkHandlers(childList);
   }
 
   if (completedWrap) {
@@ -1349,6 +1433,7 @@ function renderDetailView(parent) {
           toggleBtn.setAttribute("aria-expanded", String(open));
         });
         bindDetailChildEditButtons(completedList);
+        bindNoteLinkHandlers(completedList);
       }
     }
   }
@@ -1400,9 +1485,11 @@ function renderChildItem(child) {
     ? `<a class="pm-child-name-link" href="/apps/cloud-storage/?path=${encodeURIComponent(storagePath)}" title="クラウドストレージを開く">${escapeHtml(child.name)}</a>`
     : `<span class="pm-child-name">${escapeHtml(child.name)}</span>`;
 
-  const storageLabel = storagePath
-    ? storagePath.split("/").slice(2).join("/") || "（ルート）"
-    : "未設定";
+  const storageLinksHtml = renderProjectResourceLinks({
+    storagePath,
+    noteId: child.excalidraw_note_id,
+    projectId: child.id,
+  });
 
   return `<li class="${itemClass}" data-child-id="${escapeHtml(child.id)}">
     <div class="pm-child-top">
@@ -1417,7 +1504,7 @@ function renderChildItem(child) {
       <span class="pm-child-meta-item">開始: <strong>${escapeHtml(startLabel)}</strong>${escapeHtml(startNote)}</span>
       <span class="pm-child-meta-item">納期: <strong>${escapeHtml(dueLabel)}</strong></span>
       <span class="pm-child-meta-item">工数: <strong>${escapeHtml(effortLabel)}</strong></span>
-      <span class="pm-child-meta-item">フォルダ: <strong>${escapeHtml(storageLabel)}</strong></span>
+      <span class="pm-child-meta-item pm-child-meta-item--resources">${storageLinksHtml}</span>
     </div>
   </li>`;
 }

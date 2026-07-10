@@ -40,7 +40,7 @@ const EXT_GROUPS = [
   },
   {
     kind: "excalidraw",
-    label: "Excalidraw",
+    label: "ホワイトボード",
     exts: ["excalidraw"],
   },
   {

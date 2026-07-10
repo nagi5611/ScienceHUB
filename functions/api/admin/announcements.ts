@@ -16,6 +16,7 @@ interface CreateAnnouncementBody {
   published_date?: string;
   is_published?: boolean;
   position?: number;
+  group_ids?: string[];
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -41,6 +42,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       published_at: dateInputToPublishedAt(body.published_date),
       is_published: body.is_published,
       position: body.position,
+      group_ids: Array.isArray(body.group_ids) ? body.group_ids : [],
     });
     return Response.json({ announcement }, { status: 201 });
   } catch (error) {

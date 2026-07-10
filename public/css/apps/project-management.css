@@ -1496,6 +1496,63 @@ body.pm-app {
   white-space: nowrap;
 }
 
+.pm-project-resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.pm-project-resource-links .pm-storage-link,
+.pm-project-resource-links .pm-note-link {
+  margin-top: 0;
+}
+
+.pm-note-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.2rem 0.4rem 0.2rem 0.25rem;
+  border-radius: var(--pm-radius-sm);
+  color: var(--pm-accent);
+  text-decoration: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.3;
+  background: var(--pm-accent-soft);
+  border: 1px solid transparent;
+  transition: border-color 0.12s, background 0.12s;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pm-note-link:hover {
+  border-color: var(--pm-accent);
+  text-decoration: underline;
+}
+
+.pm-note-link:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.pm-note-link-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--pm-accent);
+}
+
+.pm-child-meta-item--resources {
+  flex-basis: 100%;
+}
+
+.pm-detail-header-main .pm-project-resource-links {
+  margin-top: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+
 .pm-detail-completed-list {
   margin-top: 0.5rem;
 }

@@ -5,6 +5,7 @@
  * POST   /api/project-management/projects
  * DELETE /api/project-management/projects/:id
  * PUT    /api/project-management/projects/:id — 納期・担当更新
+ * POST   /api/project-management/projects/:id/note — Excalidraw ノート取得/作成
  * PUT    /api/project-management/availability
  * GET    /api/project-management/projects/:id/effort?due_date=
  */
@@ -33,6 +34,7 @@ import {
   deleteTask,
   getGroupStorageRootPath,
   previewEffort,
+  getOrCreateProjectNote,
   PROJECT_APP_SLUG,
 } from "../../lib/project-management";
 
@@ -429,6 +431,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json(result);
     } catch (error) {
       return toErrorResponse(error, "タスクの作成に失敗しました");
+    }
+  }
+
+  // POST /api/project-management/projects/:id/note
+  if (parts.length === 3 && parts[0] === "projects" && parts[2] === "note") {
+    const projectId = parts[1] ?? "";
+    if (!projectId) {
+      return jsonError("プロジェクト ID が不正です", 400);
+    }
+    try {
+      const result = await getOrCreateProjectNote(db, auth.id, projectId);
+      return Response.json(result);
+    } catch (error) {
+      return toErrorResponse(error, "ノートの取得に失敗しました");
     }
   }
 

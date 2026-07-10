@@ -17,6 +17,7 @@ interface UpdateAnnouncementBody {
   published_date?: string;
   is_published?: boolean;
   position?: number;
+  group_ids?: string[];
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -47,6 +48,10 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
           : undefined,
       is_published: body.is_published,
       position: body.position,
+      group_ids:
+        body.group_ids !== undefined && Array.isArray(body.group_ids)
+          ? body.group_ids
+          : undefined,
     });
 
     if (!announcement) {

@@ -199,12 +199,13 @@
               <tr>
                 <th>日付</th>
                 <th>内容</th>
+                <th>表示先</th>
                 <th>状態</th>
                 <th aria-label="操作"></th>
               </tr>
             </thead>
             <tbody id="announcements-tbody">
-              <tr><td colspan="4" class="cf-empty">読み込み中…</td></tr>
+              <tr><td colspan="5" class="cf-empty">読み込み中…</td></tr>
             </tbody>
           </table>
         </div>
@@ -773,6 +774,11 @@
           </div>
         </label>
       </div>
+      <label class="cf-toggle cf-app-default-toggle">
+        <input type="checkbox" id="edit-app-default">
+        <span class="cf-toggle-track" aria-hidden="true"></span>
+        <span class="cf-toggle-label">Default App（ヘッダーメニューに表示）</span>
+      </label>
       <p id="edit-app-error" class="cf-form-error" hidden></p>
       <footer class="cf-dialog-footer">
         <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost" id="delete-app-btn">アプリを削除</button>
@@ -826,6 +832,11 @@
           <input type="checkbox" id="create-announcement-published" checked>
           <span>ダッシュボードに公開する</span>
         </label>
+        <div class="cf-field cf-field-full">
+          <span>表示するグループ</span>
+          <p class="cf-field-hint">未選択の場合は全員に表示されます</p>
+          <div class="cf-announcement-group-chips" id="create-announcement-groups"></div>
+        </div>
       </div>
       <p id="create-announcement-error" class="cf-form-error" hidden></p>
       <footer class="cf-dialog-footer">
@@ -860,6 +871,11 @@
           <input type="checkbox" id="edit-announcement-published">
           <span>ダッシュボードに公開する</span>
         </label>
+        <div class="cf-field cf-field-full">
+          <span>表示するグループ</span>
+          <p class="cf-field-hint">未選択の場合は全員に表示されます</p>
+          <div class="cf-announcement-group-chips" id="edit-announcement-groups"></div>
+        </div>
       </div>
       <p id="edit-announcement-error" class="cf-form-error" hidden></p>
       <footer class="cf-dialog-footer">

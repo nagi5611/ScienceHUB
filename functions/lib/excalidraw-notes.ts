@@ -20,16 +20,21 @@ export interface ExcalidrawNoteSummary {
   updated_at: number;
   share_url: string | null;
   share_token: string | null;
+  scene: ExcalidrawScene;
 }
 
 export interface ExcalidrawNoteDetail extends ExcalidrawNoteSummary {
   scene: ExcalidrawScene;
   owner_user_id: string;
+  group_id: string | null;
+  /** グループ共有ノートで編集可能 */
+  can_edit: boolean;
 }
 
 interface NoteRow {
   id: string;
   owner_user_id: string;
+  group_id: string | null;
   title: string;
   scene_json: string;
   created_at: number;
@@ -108,6 +113,60 @@ export function buildExcalidrawShareUrl(request: Request, token: string): string
   return `${origin}/excalidraw-share/?t=${encodeURIComponent(token)}`;
 }
 
+const NOTE_SELECT =
+  "id, owner_user_id, group_id, title, scene_json, created_at, updated_at";
+
+/** グループメンバーか */
+async function isGroupMember(
+  db: D1Database,
+  userId: string,
+  groupId: string
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS ok FROM user_group_memberships
+       WHERE user_id = ? AND group_id = ?`
+    )
+    .bind(userId, groupId)
+    .first<{ ok: number }>();
+  return row != null;
+}
+
+/** ノートへのアクセス権（所有者またはグループ共有） */
+async function userCanAccessNote(
+  db: D1Database,
+  userId: string,
+  row: NoteRow
+): Promise<boolean> {
+  if (row.owner_user_id === userId) return true;
+  if (!row.group_id) return false;
+  return isGroupMember(db, userId, row.group_id);
+}
+
+/** ノートの編集権（アクセス権と同じ — グループメンバーは共同編集可） */
+async function userCanEditNote(
+  db: D1Database,
+  userId: string,
+  row: NoteRow
+): Promise<boolean> {
+  return userCanAccessNote(db, userId, row);
+}
+
+function toDetail(
+  row: NoteRow,
+  request: Request,
+  share: ShareRow | null,
+  canEdit: boolean
+): ExcalidrawNoteDetail {
+  return {
+    ...toSummary(row, request, share),
+    scene: parseScene(row.scene_json),
+    owner_user_id: row.owner_user_id,
+    group_id: row.group_id ?? null,
+    can_edit: canEdit,
+  };
+}
+
 /** ノートの有効な共有リンクを取得 */
 async function getActiveShare(
   db: D1Database,
@@ -139,6 +198,7 @@ function toSummary(
     updated_at: row.updated_at,
     share_token: share?.token ?? null,
     share_url: share ? buildExcalidrawShareUrl(request, share.token) : null,
+    scene: parseScene(row.scene_json),
   };
 }
 
@@ -150,7 +210,7 @@ export async function listNotes(
 ): Promise<ExcalidrawNoteSummary[]> {
   const result = await db
     .prepare(
-      `SELECT id, owner_user_id, title, scene_json, created_at, updated_at
+      `SELECT ${NOTE_SELECT}
        FROM excalidraw_notes
        WHERE owner_user_id = ?
        ORDER BY updated_at DESC`
@@ -176,7 +236,7 @@ export async function getOwnedNote(
 ): Promise<ExcalidrawNoteDetail | null> {
   const row = await db
     .prepare(
-      `SELECT id, owner_user_id, title, scene_json, created_at, updated_at
+      `SELECT ${NOTE_SELECT}
        FROM excalidraw_notes
        WHERE id = ? AND owner_user_id = ?`
     )
@@ -184,11 +244,26 @@ export async function getOwnedNote(
     .first<NoteRow>();
   if (!row) return null;
   const share = await getActiveShare(db, row.id);
-  return {
-    ...toSummary(row, request, share),
-    scene: parseScene(row.scene_json),
-    owner_user_id: row.owner_user_id,
-  };
+  return toDetail(row, request, share, true);
+}
+
+/** ノート詳細（所有者またはグループメンバー） */
+export async function getAccessibleNote(
+  db: D1Database,
+  userId: string,
+  noteId: string,
+  request: Request
+): Promise<ExcalidrawNoteDetail | null> {
+  const row = await db
+    .prepare(`SELECT ${NOTE_SELECT} FROM excalidraw_notes WHERE id = ?`)
+    .bind(noteId)
+    .first<NoteRow>();
+  if (!row) return null;
+  const canAccess = await userCanAccessNote(db, userId, row);
+  if (!canAccess) return null;
+  const canEdit = await userCanEditNote(db, userId, row);
+  const share = await getActiveShare(db, row.id);
+  return toDetail(row, request, share, canEdit);
 }
 
 /** ノート作成 */
@@ -209,8 +284,8 @@ export async function createNote(
   await db
     .prepare(
       `INSERT INTO excalidraw_notes
-         (id, owner_user_id, title, scene_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+         (id, owner_user_id, group_id, title, scene_json, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?)`
     )
     .bind(id, user.id, title, JSON.stringify(scene), ts, ts)
     .run();
@@ -224,7 +299,36 @@ export async function createNote(
     share_url: null,
     scene,
     owner_user_id: user.id,
+    group_id: null,
+    can_edit: true,
   };
+}
+
+/** グループ共有ノートを作成（プロジェクトノート用） */
+export async function createGroupNote(
+  db: D1Database,
+  userId: string,
+  groupId: string,
+  titleInput: string
+): Promise<string> {
+  const title =
+    typeof titleInput === "string" && titleInput.trim()
+      ? titleInput.trim().slice(0, 120)
+      : "無題のノート";
+  const id = createId("exn");
+  const ts = now();
+  const scene = emptyScene();
+
+  await db
+    .prepare(
+      `INSERT INTO excalidraw_notes
+         (id, owner_user_id, group_id, title, scene_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, userId, groupId, title, JSON.stringify(scene), ts, ts)
+    .run();
+
+  return id;
 }
 
 /** タイトル更新 */
@@ -242,17 +346,24 @@ export async function updateNoteTitle(
   if (!title) throw new Error("タイトルを入力してください");
 
   const ts = now();
-  const result = await db
+  const row = await db
+    .prepare(`SELECT ${NOTE_SELECT} FROM excalidraw_notes WHERE id = ?`)
+    .bind(noteId)
+    .first<NoteRow>();
+  if (!row) return null;
+  const canEdit = await userCanEditNote(db, userId, row);
+  if (!canEdit) return null;
+
+  await db
     .prepare(
       `UPDATE excalidraw_notes
        SET title = ?, updated_at = ?
-       WHERE id = ? AND owner_user_id = ?`
+       WHERE id = ?`
     )
-    .bind(title, ts, noteId, userId)
+    .bind(title, ts, noteId)
     .run();
 
-  if (!result.meta.changes) return null;
-  return getOwnedNote(db, userId, noteId, request);
+  return getAccessibleNote(db, userId, noteId, request);
 }
 
 /** シーン保存（所有者） */
@@ -263,18 +374,36 @@ export async function saveOwnedNoteScene(
   sceneInput: unknown,
   request: Request
 ): Promise<ExcalidrawNoteDetail | null> {
+  return saveAccessibleNoteScene(db, userId, noteId, sceneInput, request);
+}
+
+/** シーン保存（所有者またはグループメンバー） */
+export async function saveAccessibleNoteScene(
+  db: D1Database,
+  userId: string,
+  noteId: string,
+  sceneInput: unknown,
+  request: Request
+): Promise<ExcalidrawNoteDetail | null> {
+  const row = await db
+    .prepare(`SELECT ${NOTE_SELECT} FROM excalidraw_notes WHERE id = ?`)
+    .bind(noteId)
+    .first<NoteRow>();
+  if (!row) return null;
+  const canEdit = await userCanEditNote(db, userId, row);
+  if (!canEdit) return null;
+
   const sceneJson = serializeScene(sceneInput);
   const ts = now();
-  const result = await db
+  await db
     .prepare(
       `UPDATE excalidraw_notes
        SET scene_json = ?, updated_at = ?
-       WHERE id = ? AND owner_user_id = ?`
+       WHERE id = ?`
     )
-    .bind(sceneJson, ts, noteId, userId)
+    .bind(sceneJson, ts, noteId)
     .run();
-  if (!result.meta.changes) return null;
-  return getOwnedNote(db, userId, noteId, request);
+  return getAccessibleNote(db, userId, noteId, request);
 }
 
 /** 共有トークン経由でシーン保存 */

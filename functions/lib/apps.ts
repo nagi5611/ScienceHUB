@@ -19,6 +19,7 @@ export interface HubAppRow {
   icon_emoji: string | null;
   color: string;
   position: number;
+  is_default: number;
   created_at: number;
   updated_at: number;
 }
@@ -32,6 +33,7 @@ export interface PublicApp {
   icon_emoji: string | null;
   color: string;
   position: number;
+  is_default: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -73,16 +75,20 @@ function toPublicApp(row: HubAppRow): PublicApp {
     icon_emoji: row.icon_emoji,
     color: row.color ?? "#F38020",
     position: row.position ?? 0,
+    is_default: row.is_default === 1,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
+const APP_SELECT_COLUMNS =
+  "id, slug, display_name, description, href, icon_emoji, color, position, is_default, created_at, updated_at";
+
 /** アプリ一覧 */
 export async function listApps(db: D1Database): Promise<PublicApp[]> {
   const result = await db
     .prepare(
-      `SELECT id, slug, display_name, description, href, icon_emoji, color, position, created_at, updated_at
+      `SELECT ${APP_SELECT_COLUMNS}
        FROM hub_apps
        ORDER BY position ASC, display_name ASC, slug ASC`
     )
@@ -98,7 +104,7 @@ export async function getAppBySlug(
 ): Promise<PublicApp | null> {
   const row = await db
     .prepare(
-      `SELECT id, slug, display_name, description, href, icon_emoji, color, position, created_at, updated_at
+      `SELECT ${APP_SELECT_COLUMNS}
        FROM hub_apps WHERE slug = ?`
     )
     .bind(slug)
@@ -114,7 +120,7 @@ export async function getAppById(
 ): Promise<PublicApp | null> {
   const row = await db
     .prepare(
-      `SELECT id, slug, display_name, description, href, icon_emoji, color, position, created_at, updated_at
+      `SELECT ${APP_SELECT_COLUMNS}
        FROM hub_apps WHERE id = ?`
     )
     .bind(appId)
@@ -204,8 +210,8 @@ export async function createApp(
 
   await db
     .prepare(
-      `INSERT INTO hub_apps (id, slug, display_name, description, href, icon_emoji, color, position, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO hub_apps (id, slug, display_name, description, href, icon_emoji, color, position, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .bind(
       id,
@@ -236,6 +242,7 @@ export async function updateApp(
     icon_emoji?: string | null;
     color?: string;
     position?: number;
+    is_default?: boolean;
   }
 ): Promise<PublicApp | null> {
   const updates: string[] = [];
@@ -288,6 +295,11 @@ export async function updateApp(
   if (input.position !== undefined) {
     updates.push("position = ?");
     values.push(input.position);
+  }
+
+  if (input.is_default !== undefined) {
+    updates.push("is_default = ?");
+    values.push(input.is_default ? 1 : 0);
   }
 
   if (updates.length > 0) {
@@ -547,6 +559,11 @@ export async function canUserAccessApp(
   const app = await getAppBySlug(db, appSlug);
   if (!app) return false;
 
+  /** Default App はログイン済みユーザーならグループ権限なし（ゲスト含む）でも利用可 */
+  if (app.is_default) {
+    return true;
+  }
+
   if (await userHasAdminRole(db, userId)) {
     return true;
   }
@@ -616,4 +633,21 @@ export async function getDashboardForUser(
       if (aIsRoot !== bIsRoot) return aIsRoot - bIsRoot;
       return a.display_name.localeCompare(b.display_name, "ja");
     });
+}
+
+/** ヘッダー Default App メニュー用（権限に関係なく is_default のアプリを返す） */
+export async function getDefaultAppsForUser(
+  db: D1Database,
+  _userId: string
+): Promise<DashboardApp[]> {
+  const result = await db
+    .prepare(
+      `SELECT ${APP_SELECT_COLUMNS}
+       FROM hub_apps
+       WHERE is_default = 1
+       ORDER BY position ASC, display_name ASC, slug ASC`
+    )
+    .all<HubAppRow>();
+
+  return (result.results ?? []).map((row) => toDashboardApp(toPublicApp(row)));
 }

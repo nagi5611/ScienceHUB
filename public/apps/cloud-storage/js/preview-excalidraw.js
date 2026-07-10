@@ -15,7 +15,7 @@ export async function mountExcalidrawPreview(container, blob, filename) {
   try {
     scene = JSON.parse(text);
   } catch {
-    throw new Error("Excalidraw ファイルの形式が不正です");
+    throw new Error("ホワイトボードファイル（.excalidraw）の形式が不正です");
   }
 
   const elements = Array.isArray(scene.elements) ? scene.elements : [];

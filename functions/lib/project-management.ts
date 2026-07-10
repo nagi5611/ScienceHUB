@@ -14,6 +14,7 @@ import {
   membershipCanAccessApp,
 } from "./apps";
 import { userHasAdminRole } from "./roles";
+import { createGroupNote } from "./excalidraw-notes";
 
 export const PROJECT_APP_SLUG = "project-management";
 
@@ -110,6 +111,8 @@ export interface PmChildProject {
   effort_days: number | null;
   /** 紐づいたグループストレージの論理パス（例: g/lab-a/docs） */
   storage_path: string | null;
+  /** プロジェクト用 Excalidraw ノート ID */
+  excalidraw_note_id: string | null;
 }
 
 export interface PmParentProject {
@@ -136,6 +139,8 @@ export interface PmParentProject {
   updated_at: number;
   /** 子の最遅納期（YYYY-MM-DD） */
   latest_due_date: string | null;
+  /** プロジェクト用 Excalidraw ノート ID */
+  excalidraw_note_id: string | null;
 }
 
 export type PmActivityAction =
@@ -204,6 +209,7 @@ interface ProjectRow {
   created_at: number;
   updated_at: number;
   storage_path: string | null;
+  excalidraw_note_id: string | null;
   leader_user_id: string | null;
   progress_override: number | null;
 }
@@ -471,6 +477,7 @@ async function toChildProject(
     assignees,
     effort_days: effortDays,
     storage_path: row.storage_path ?? null,
+    excalidraw_note_id: row.excalidraw_note_id ?? null,
   };
 }
 
@@ -1047,7 +1054,7 @@ export async function listProjects(
 ): Promise<PmParentProject[]> {
   const result = await db
     .prepare(
-      `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, updated_at, storage_path, leader_user_id, progress_override
+      `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, updated_at, storage_path, excalidraw_note_id, leader_user_id, progress_override
        FROM pm_projects
        WHERE group_id = ?
        ORDER BY position ASC, created_at ASC`
@@ -1114,6 +1121,7 @@ export async function listProjects(
       child_completed: stats.child_completed,
       updated_at: parent.updated_at ?? parent.created_at,
       latest_due_date: stats.latest_due_date,
+      excalidraw_note_id: parent.excalidraw_note_id ?? null,
     };
   });
 }
@@ -2182,6 +2190,58 @@ export async function setAvailability(
     sorted[0]!,
     sorted[sorted.length - 1]!
   );
+}
+
+/** プロジェクト用 Excalidraw ノートを取得または作成 */
+export async function getOrCreateProjectNote(
+  db: D1Database,
+  userId: string,
+  projectId: string
+): Promise<{ note_id: string; created: boolean }> {
+  const project = await db
+    .prepare(
+      `SELECT id, group_id, name, excalidraw_note_id
+       FROM pm_projects WHERE id = ?`
+    )
+    .bind(projectId)
+    .first<{
+      id: string;
+      group_id: string;
+      name: string;
+      excalidraw_note_id: string | null;
+    }>();
+
+  if (!project) {
+    throw new Error("プロジェクトが見つかりません");
+  }
+
+  await requireGroupMembership(db, userId, project.group_id);
+
+  if (project.excalidraw_note_id) {
+    const note = await db
+      .prepare(`SELECT id FROM excalidraw_notes WHERE id = ?`)
+      .bind(project.excalidraw_note_id)
+      .first<{ id: string }>();
+    if (note) {
+      return { note_id: note.id, created: false };
+    }
+  }
+
+  const noteId = await createGroupNote(
+    db,
+    userId,
+    project.group_id,
+    project.name
+  );
+  const ts = now();
+  await db
+    .prepare(
+      `UPDATE pm_projects SET excalidraw_note_id = ?, updated_at = ? WHERE id = ?`
+    )
+    .bind(noteId, ts, projectId)
+    .run();
+
+  return { note_id: noteId, created: true };
 }
 
 /** ダッシュボードデータを取得 */

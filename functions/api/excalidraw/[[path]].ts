@@ -23,11 +23,11 @@ import {
   createNote,
   createOrGetShareLink,
   deleteNote,
-  getOwnedNote,
+  getAccessibleNote,
   getPublicShareInfo,
   listNotes,
   revokeShareLink,
-  saveOwnedNoteScene,
+  saveAccessibleNoteScene,
   saveSharedNoteScene,
   updateNoteTitle,
 } from "../../lib/excalidraw-notes";
@@ -95,7 +95,7 @@ async function handleCollab(
   } else if (noteId) {
     const auth = await requireAppAccess(request, env);
     if (auth instanceof Response) return auth;
-    const note = await getOwnedNote(db, auth.id, noteId, request);
+    const note = await getAccessibleNote(db, auth.id, noteId, request);
     if (!note) return jsonError("ノートが見つかりません", 404);
     roomNoteId = note.id;
     seedScene = note.scene;
@@ -206,7 +206,7 @@ export const onRequest: PagesFunction<ExtendedEnv> = async (context) => {
     const action = parts[2];
 
     if (!action && method === "GET") {
-      const note = await getOwnedNote(db, auth.id, noteId, request);
+      const note = await getAccessibleNote(db, auth.id, noteId, request);
       if (!note) return jsonError("ノートが見つかりません", 404);
       return Response.json({ note });
     }
@@ -232,7 +232,7 @@ export const onRequest: PagesFunction<ExtendedEnv> = async (context) => {
       const body = (await request.json().catch(() => null)) as {
         scene?: unknown;
       } | null;
-      const note = await saveOwnedNoteScene(
+      const note = await saveAccessibleNoteScene(
         db,
         auth.id,
         noteId,

@@ -46,11 +46,15 @@ export function renderApps(filter = "", escapeHtml) {
       <article class="cf-app-card" style="--app-color:${escapeHtml(app.color)}">
         <div class="cf-app-card-icon" aria-hidden="true">${appIconHtml(app, "hub-icon hub-icon--md")}</div>
         <div class="cf-app-card-body">
-          <h3 class="cf-app-card-name">${escapeHtml(app.display_name)}</h3>
+          <h3 class="cf-app-card-name">
+            ${escapeHtml(app.display_name)}
+            ${app.is_default ? `<span class="cf-app-card-badge">Default App</span>` : ""}
+          </h3>
           <p class="cf-app-card-slug">${escapeHtml(app.slug)} · ${escapeHtml(app.href)}</p>
           ${app.description ? `<p class="cf-app-card-desc">${escapeHtml(app.description)}</p>` : ""}
         </div>
         <div class="cf-app-card-actions">
+          <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-toggle-app-default="${escapeHtml(app.id)}" aria-pressed="${app.is_default ? "true" : "false"}">${app.is_default ? "Default 解除" : "Default 設定"}</button>
           <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-edit-app-access="${escapeHtml(app.id)}">アクセス設定</button>
           <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-edit-app="${escapeHtml(app.id)}">編集</button>
         </div>
@@ -70,7 +74,25 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
     document.getElementById("create-app-dialog")?.showModal();
   });
 
-  document.getElementById("apps-list")?.addEventListener("click", (e) => {
+  document.getElementById("apps-list")?.addEventListener("click", async (e) => {
+    const defaultBtn = e.target.closest("[data-toggle-app-default]");
+    if (defaultBtn) {
+      const appId = defaultBtn.dataset.toggleAppDefault;
+      const app = apps.find((a) => a.id === appId);
+      if (!app) return;
+      try {
+        await api(`/api/admin/apps/${encodeURIComponent(appId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_default: !app.is_default }),
+        });
+        await loadApps(api);
+        renderApps(document.getElementById("app-search")?.value ?? "", escapeHtml);
+      } catch (err) {
+        alert(err.message);
+      }
+      return;
+    }
+
     const editBtn = e.target.closest("[data-edit-app]");
     if (editBtn) {
       openAppEditor(editBtn.dataset.editApp);
@@ -139,6 +161,7 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
           href: document.getElementById("edit-app-href").value.trim(),
           icon_emoji: document.getElementById("edit-app-icon").value.trim() || null,
           color,
+          is_default: document.getElementById("edit-app-default")?.checked ?? false,
         }),
       });
       document.getElementById("edit-app-dialog")?.close();
@@ -212,6 +235,8 @@ function openAppEditor(appId) {
   document.getElementById("edit-app-href").value = app.href;
   document.getElementById("edit-app-icon").value = app.icon_emoji ?? "";
   setColorInput(document.getElementById("edit-app-color"), app.color);
+  const defaultInput = document.getElementById("edit-app-default");
+  if (defaultInput) defaultInput.checked = Boolean(app.is_default);
   document.getElementById("edit-app-error").hidden = true;
   document.getElementById("edit-app-dialog")?.showModal();
 }

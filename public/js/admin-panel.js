@@ -613,7 +613,7 @@ async function init() {
     escapeHtml,
     getGroups,
   });
-  bindAnnouncementEvents({ api, escapeHtml });
+  bindAnnouncementEvents({ api, escapeHtml, getGroups });
   bindGoogleCalendarEvents({ api });
   bindStorageEvents({ api, escapeHtml });
   await loadRoles();
@@ -623,7 +623,7 @@ async function init() {
   await loadApps(api);
   renderApps("", escapeHtml);
   await loadAnnouncements(api);
-  renderAnnouncements("", escapeHtml);
+  renderAnnouncements("", escapeHtml, getGroups());
   await loadUsers();
 }
 

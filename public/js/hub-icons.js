@@ -24,7 +24,6 @@ const ICONS = {
 const SLUG_ICON = {
   "image-editor": "image",
   uvcreator: "layout",
-  "shift-management": "calendar",
   "project-management": "clipboard",
   excalidraw: "edit",
 };

@@ -15,6 +15,7 @@ interface UpdateAppBody {
   icon_emoji?: string | null;
   color?: string;
   position?: number;
+  is_default?: boolean;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {

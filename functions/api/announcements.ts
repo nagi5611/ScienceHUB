@@ -11,6 +11,6 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireUser(context.request, context.env);
   if (auth instanceof Response) return auth;
 
-  const announcements = await listPublishedAnnouncements(getDb(context.env));
+  const announcements = await listPublishedAnnouncements(getDb(context.env), auth.id);
   return Response.json({ announcements });
 };
