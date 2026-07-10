@@ -1,5 +1,6 @@
 # sciencehub-files → sciencehub-files-backup/<YYYY>/<MM>/<DD>/ （rclone・日次世代バックアップ）
-name: Backup R2 Storage
+# D1 sciencehub-db（本番）→ R2: .../d1/sciencehub-db.sql + sciencehub-db-backup へ復元
+name: Backup R2 Storage and D1
 
 on:
   schedule:
@@ -31,12 +32,32 @@ jobs:
       R2_SOURCE_BUCKET: sciencehub-files
       R2_BACKUP_BUCKET: sciencehub-files-backup
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_SOURCE_DATABASE_NAME: sciencehub-db
+      D1_SOURCE_DATABASE_ID: 1cce62b0-51f4-4619-9207-6a808557984c
+      D1_BACKUP_DATABASE_NAME: sciencehub-db-backup
+      D1_BACKUP_DATABASE_ID: 9f81acc1-11f9-4147-99ec-b22274c8abf5
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Validate secrets
         run: |
           if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "::error::CLOUDFLARE_ACCOUNT_ID secret is required"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is required for D1 export"
             exit 1
           fi
           if [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
@@ -108,6 +129,60 @@ jobs:
           echo "Running: rclone ${ARGS[*]}"
           rclone "${ARGS[@]}"
 
+      - name: Export production D1, upload to R2, restore to backup D1
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          BACKUP_DATE="${{ steps.date.outputs.backup_date }}"
+          EXPORT_DIR="${RUNNER_TEMP}/d1-export"
+          EXPORT_FILE="${EXPORT_DIR}/${D1_SOURCE_DATABASE_NAME}.sql"
+          IMPORT_FILE="${EXPORT_DIR}/${D1_SOURCE_DATABASE_NAME}-import.sql"
+          DROP_FILE="${EXPORT_DIR}/drop-tables.sql"
+          R2_DEST="r2:${R2_BACKUP_BUCKET}/${BACKUP_DATE}/d1/${D1_SOURCE_DATABASE_NAME}.sql"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run: would export D1 '${D1_SOURCE_DATABASE_NAME}' (${D1_SOURCE_DATABASE_ID})"
+            echo "Dry run: would upload to ${R2_DEST}"
+            echo "Dry run: would restore into '${D1_BACKUP_DATABASE_NAME}' (${D1_BACKUP_DATABASE_ID})"
+            exit 0
+          fi
+
+          mkdir -p "$EXPORT_DIR"
+
+          echo "Exporting production D1 '${D1_SOURCE_DATABASE_NAME}' (${D1_SOURCE_DATABASE_ID})"
+          npx wrangler d1 export "${D1_SOURCE_DATABASE_NAME}" \
+            --remote \
+            --output "$EXPORT_FILE" \
+            -y
+
+          echo "Uploading D1 export to ${R2_DEST}"
+          rclone copyto "$EXPORT_FILE" "$R2_DEST" --progress
+
+          echo "Preparing import SQL (disable FK checks during restore)"
+          {
+            echo "PRAGMA foreign_keys=OFF;"
+            cat "$EXPORT_FILE"
+            echo "PRAGMA foreign_keys=ON;"
+          } > "$IMPORT_FILE"
+
+          echo "Dropping existing tables in backup D1 '${D1_BACKUP_DATABASE_NAME}'"
+          TABLES_JSON="$(npx wrangler d1 execute "${D1_BACKUP_DATABASE_NAME}" --remote --json --command \
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%';")"
+          {
+            echo "PRAGMA foreign_keys=OFF;"
+            echo "$TABLES_JSON" | jq -r '.[0].results[]?.name // empty | select(length > 0) | "DROP TABLE IF EXISTS \"\(.)\";"'
+            echo "PRAGMA foreign_keys=ON;"
+          } > "$DROP_FILE"
+
+          if grep -q '^DROP TABLE' "$DROP_FILE"; then
+            npx wrangler d1 execute "${D1_BACKUP_DATABASE_NAME}" --remote --file "$DROP_FILE" -y
+          fi
+
+          echo "Restoring export into backup D1 '${D1_BACKUP_DATABASE_NAME}' (${D1_BACKUP_DATABASE_ID})"
+          npx wrangler d1 execute "${D1_BACKUP_DATABASE_NAME}" --remote --file "$IMPORT_FILE" -y
+
       - name: Summary
         if: always()
         run: |
@@ -117,4 +192,10 @@ jobs:
             echo "- Source: \`${R2_SOURCE_BUCKET}\`"
             echo "- Destination: \`${R2_BACKUP_BUCKET}/${{ steps.date.outputs.backup_date }}/\`"
             echo "- Dry run: \`${{ github.event.inputs.dry_run || 'false' }}\`"
+            echo ""
+            echo "### D1 backup"
+            echo ""
+            echo "- Source (production): \`${D1_SOURCE_DATABASE_NAME}\` (\`${D1_SOURCE_DATABASE_ID}\`)"
+            echo "- R2 archive: \`${R2_BACKUP_BUCKET}/${{ steps.date.outputs.backup_date }}/d1/${D1_SOURCE_DATABASE_NAME}.sql\`"
+            echo "- Backup D1: \`${D1_BACKUP_DATABASE_NAME}\` (\`${D1_BACKUP_DATABASE_ID}\`)"
           } >> "$GITHUB_STEP_SUMMARY"
