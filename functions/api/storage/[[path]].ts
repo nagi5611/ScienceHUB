@@ -57,6 +57,10 @@ import {
   downloadStorageShareFile,
   getStorageShareInfo,
 } from "../../lib/storage/share";
+import {
+  createStorageShortcutLink,
+  resolveStorageShortcutLink,
+} from "../../lib/storage/shortcut";
 
 function parseRoute(path: string | string[] | undefined): string[] {
   if (Array.isArray(path)) return path.filter(Boolean);
@@ -733,6 +737,51 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const message =
           error instanceof Error ? error.message : "共有リンクの作成に失敗しました";
         return jsonError(message, 400);
+      }
+    }
+
+    if (route === "shortcut/create" && method === "POST") {
+      const body = await request.json<{
+        storage_path?: string;
+        label?: string;
+      }>();
+      const storagePath = body.storage_path?.trim() ?? "";
+      if (!storagePath) {
+        return jsonError("フォルダパスが必要です", 400);
+      }
+
+      try {
+        const result = await createStorageShortcutLink(
+          env,
+          db,
+          auth,
+          storagePath,
+          body.label,
+          request
+        );
+        return Response.json(result);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "ショートカットリンクの作成に失敗しました";
+        return jsonError(message, 400);
+      }
+    }
+
+    if (route === "shortcut/resolve" && method === "GET") {
+      const token = new URL(request.url).searchParams.get("token") ?? "";
+      if (!token) return jsonError("トークンが必要です", 400);
+
+      try {
+        const result = await resolveStorageShortcutLink(env, db, auth, token);
+        if (!result) {
+          return jsonError("ショートカットリンクが見つかりません", 404);
+        }
+        return Response.json(result);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "ショートカットを開けませんでした";
+        const status = message.includes("権限") ? 403 : 400;
+        return jsonError(message, status);
       }
     }
 

@@ -1,5 +1,12 @@
 ﻿// functions/api/lib/slots.ts
 import { LEAD_TIME_DAYS, PRINT_SCALE_WEIGHT, SLOT_CAPACITY } from './constants';
+import {
+  DEFAULT_PRINTER_DAILY_CAPACITY,
+  getAvailableScalesWithCapacity,
+  canBookSlotWithCapacity,
+  isPrinterDayFull,
+  type PrinterDailyCapacity,
+} from './printer-daily-capacity';
 
 export type PrintScale = 'small' | 'medium' | 'large';
 
@@ -56,23 +63,29 @@ export function hasMediumOrLargeOnDay(existingScales: PrintScale[]): boolean {
   return existingScales.some((s) => s === 'medium' || s === 'large');
 }
 
-/** Returns available print scales for a given day. */
-export function getAvailableScales(existingScales: PrintScale[]): PrintScale[] {
-  if (hasMediumOrLargeOnDay(existingScales)) return [];
-  const smallCount = existingScales.filter((s) => s === 'small').length;
-  if (smallCount >= 2) return [];
-  if (smallCount >= 1) return ['small'];
-  return ['small', 'medium', 'large'];
+/** Returns available print scales for a given day (legacy global default capacity). */
+export function getAvailableScales(
+  existingScales: PrintScale[],
+  capacity: PrinterDailyCapacity = DEFAULT_PRINTER_DAILY_CAPACITY
+): PrintScale[] {
+  return getAvailableScalesWithCapacity(existingScales, capacity);
 }
 
 /** Returns whether the day is fully booked. */
-export function isDayFull(existingScales: PrintScale[]): boolean {
-  return getAvailableScales(existingScales).length === 0;
+export function isDayFull(
+  existingScales: PrintScale[],
+  capacity: PrinterDailyCapacity = DEFAULT_PRINTER_DAILY_CAPACITY
+): boolean {
+  return isPrinterDayFull(existingScales, capacity);
 }
 
 /** Determines if a new reservation can be added given existing scales on that date. */
-export function canBookSlot(existingScales: PrintScale[], newScale: PrintScale): boolean {
-  return getAvailableScales(existingScales).includes(newScale);
+export function canBookSlot(
+  existingScales: PrintScale[],
+  newScale: PrintScale,
+  capacity: PrinterDailyCapacity = DEFAULT_PRINTER_DAILY_CAPACITY
+): boolean {
+  return canBookSlotWithCapacity(existingScales, newScale, capacity);
 }
 
 /** Returns remaining slot capacity for a date (0 to 1). */

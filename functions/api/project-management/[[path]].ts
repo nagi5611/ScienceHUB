@@ -27,6 +27,7 @@ import {
   setChildStoragePath,
   setParentLeader,
   setParentLeaders,
+  setParentMembers,
   setParentProgress,
   createTask,
   completeTask,
@@ -101,6 +102,7 @@ interface UpdateProjectBody {
   storage_path?: string | null;
   leader_user_id?: string | null;
   leader_user_ids?: string[];
+  member_user_ids?: string[];
   progress_percent?: number | null;
 }
 
@@ -113,6 +115,7 @@ interface CreateTaskBody {
   due_date?: string | null;
   status?: "pending" | "active";
   assignee_id?: string;
+  assignee_ids?: string[];
 }
 
 interface UpdateTaskBody {
@@ -297,6 +300,16 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
           projectId,
           body.leader_user_ids
         );
+      } else if (body.member_user_ids !== undefined) {
+        if (!Array.isArray(body.member_user_ids)) {
+          return jsonError("member_user_ids は配列で指定してください", 400);
+        }
+        projects = await setParentMembers(
+          db,
+          auth.id,
+          projectId,
+          body.member_user_ids
+        );
       } else if (body.leader_user_id !== undefined) {
         projects = await setParentLeader(
           db,
@@ -341,7 +354,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         });
       } else {
         return jsonError(
-          "due_date / start_date / assignee_ids / completed / storage_path / leader_user_ids / progress_percent のいずれかを指定してください",
+          "due_date / start_date / assignee_ids / completed / storage_path / leader_user_ids / member_user_ids / progress_percent のいずれかを指定してください",
           400
         );
       }
@@ -405,13 +418,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const parentId = body.parent_project_id?.trim() ?? "";
     const title = body.title?.trim() ?? "";
-    const assigneeId = body.assignee_id?.trim() ?? "";
+    const assigneeIds = Array.isArray(body.assignee_ids)
+      ? body.assignee_ids.map((id) => String(id ?? "").trim()).filter(Boolean)
+      : body.assignee_id?.trim()
+        ? [body.assignee_id.trim()]
+        : [];
     const groupId = body.group_id?.trim() ?? "";
     if (!title) {
       return jsonError("title を指定してください", 400);
     }
-    if (!assigneeId) {
-      return jsonError("assignee_id を指定してください", 400);
+    if (assigneeIds.length === 0) {
+      return jsonError("assignee_id または assignee_ids を指定してください", 400);
     }
     if (!parentId && !groupId) {
       return jsonError("group_id または parent_project_id を指定してください", 400);
@@ -426,7 +443,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         description: body.description,
         due_date: body.due_date,
         status: body.status,
-        assignee_id: assigneeId,
+        assignee_ids: assigneeIds,
       });
       return Response.json(result);
     } catch (error) {

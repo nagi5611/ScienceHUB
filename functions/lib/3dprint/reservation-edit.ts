@@ -1,11 +1,9 @@
-﻿// functions/api/lib/reservation-edit.ts
-import {
-  canBookSlot,
-  getAvailableScales,
-  isDayFull,
-  type PrintScale,
-} from './slots';
-import { getReservationsByDate, hasStaffOnDate, type Reservation } from './reservations';
+﻿// functions/lib/3dprint/reservation-edit.ts
+import { getDateAvailability, validatePrinterReservationSlot } from './availability';
+import { type PrintScale } from './slots';
+import { hasStaffOnDate, type Reservation } from './reservations';
+import { isPrinterAvailableOnDate } from './printer-availability';
+import { getPrinterById } from './printers';
 import { isValidHomeroom } from './homeroom';
 
 export interface ReservationContentInput {
@@ -17,7 +15,9 @@ export interface ReservationContentInput {
   purpose_other?: string | null;
   summary?: string | null;
   print_notes?: string | null;
+  request_print_video?: boolean;
   print_scale: PrintScale;
+  printer_id?: string | null;
   desired_date: string;
   stl_r2_key?: string;
   stl_filename?: string;
@@ -47,6 +47,10 @@ export function validateReservationContentFields(
     }
   }
 
+  if (!body.printer_id?.trim()) {
+    return '印刷機種を選択してください';
+  }
+
   if (!SCALES.includes(body.print_scale as PrintScale)) {
     return '印刷規模が不正です';
   }
@@ -71,25 +75,22 @@ export async function validateReservationSlot(
   db: D1Database,
   desiredDate: string,
   printScale: PrintScale,
-  excludeReservationId: string
+  excludeReservationId: string,
+  printerId?: string | null,
+  options: { isAdmin?: boolean } = {}
 ): Promise<string | null> {
-  const existing = await getReservationsByDate(db, desiredDate);
-  const existingScales = existing
-    .filter((r) => r.id !== excludeReservationId)
-    .map((r) => r.print_scale);
-
-  if (isDayFull(existingScales)) {
-    return 'この日はもう満杯です。別の日付を選んでください';
+  if (!printerId?.trim()) {
+    return '印刷機種を選択してください';
   }
 
-  if (!canBookSlot(existingScales, printScale)) {
-    if (existingScales.includes('small') && (printScale === 'medium' || printScale === 'large')) {
-      return 'この日はスモール印刷が入っているため、ミディアム・ラージは選択できません';
-    }
-    return '選択した日付の予約枠がいっぱいです。別の日付を選んでください';
-  }
-
-  return null;
+  return validatePrinterReservationSlot(
+    db,
+    desiredDate,
+    printerId,
+    printScale,
+    excludeReservationId,
+    options
+  );
 }
 
 /** Returns whether a reservation can be edited. */
@@ -97,17 +98,22 @@ export function canEditReservation(reservation: Reservation): boolean {
   return reservation.status !== 'cancelled';
 }
 
-/** Returns available scales for edit form on a given date. */
+/** Returns available scales for edit form on a given date and printer. */
 export async function getEditAvailableScales(
   db: D1Database,
   desiredDate: string,
-  excludeReservationId: string
+  excludeReservationId: string,
+  printerId?: string | null,
+  options: { isAdmin?: boolean } = {}
 ): Promise<PrintScale[]> {
-  const existing = await getReservationsByDate(db, desiredDate);
-  const existingScales = existing
-    .filter((r) => r.id !== excludeReservationId)
-    .map((r) => r.print_scale);
-  return getAvailableScales(existingScales);
+  if (!printerId?.trim()) return [];
+
+  const availability = await getDateAvailability(db, desiredDate, {
+    printerId,
+    excludeReservationId,
+    isAdmin: options.isAdmin,
+  });
+  return availability.available_scales;
 }
 
 /** Validates staff availability for guest edits. */
@@ -119,5 +125,22 @@ export async function validateGuestStaffAvailability(
   if (!staffAvailable) {
     return 'この日は対応可能な印刷担当者がいないため予約できません';
   }
+  return null;
+}
+
+/** Validates printer shift availability for guest edits. */
+export async function validateGuestPrinterShiftAvailability(
+  db: D1Database,
+  desiredDate: string,
+  printerId: string
+): Promise<string | null> {
+  const printer = await getPrinterById(db, printerId);
+  if (!printer) return '指定されたプリンターが見つかりません';
+
+  const shiftOk = await isPrinterAvailableOnDate(db, printerId, desiredDate);
+  if (!shiftOk) {
+    return 'この日は選択したプリンターが稼働予定に入っていません';
+  }
+
   return null;
 }

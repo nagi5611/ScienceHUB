@@ -33,6 +33,23 @@ export async function apiRequest(path, options = {}) {
   return data;
 }
 
+/** Performs a multipart form API request. */
+export async function apiFormRequest(path, formData, options = {}) {
+  const res = await fetch(`${API_BASE}/${path}`, {
+    credentials: 'include',
+    body: formData,
+    ...options,
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new ApiError(data.error || `リクエストに失敗しました (${res.status})`, res.status, data);
+  }
+
+  return data;
+}
+
 /** Performs a binary upload request. */
 export async function apiUpload(path, body, params = {}) {
   const qs = new URLSearchParams(params).toString();

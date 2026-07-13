@@ -4,6 +4,7 @@
 
 import { apiRequest } from "./api.js";
 import { resolveMediaThumbBlob } from "./media-thumb.js";
+import { findFileEntryByPath } from "./list-dom.js";
 import { createThumbnailTask, isActiveThumbnailGeneration } from "./thumbnail-session.js";
 
 const FOLDER_FETCH_CONCURRENCY = 3;
@@ -11,7 +12,7 @@ const FOLDER_FETCH_CONCURRENCY = 3;
 const objectUrlByElement = new WeakMap();
 
 /** 表示中フォルダ行のプレビューを段階的に読み込む */
-export function scheduleFolderThumbnails(folderItems, generation) {
+export function scheduleFolderThumbnails(folderItems, generation, options = {}) {
   if (!folderItems?.length || generation == null) return;
 
   const token = generation;
@@ -24,7 +25,7 @@ export function scheduleFolderThumbnails(folderItems, generation) {
       const item = queue.shift();
       if (!item) break;
       active += 1;
-      loadFolderPreview(item, token)
+      loadFolderPreview(item, token, options)
         .catch(() => {})
         .finally(() => {
           active -= 1;
@@ -36,14 +37,14 @@ export function scheduleFolderThumbnails(folderItems, generation) {
   pump();
 }
 
-async function loadFolderPreview(folderItem, generation) {
+async function loadFolderPreview(folderItem, generation, options = {}) {
   const scope = createThumbnailTask(generation);
   if (!scope) return;
 
   const { signal, isStale, dispose } = scope;
 
   try {
-    const row = document.querySelector(`.cs-file-row[data-path="${cssEscape(folderItem.path)}"]`);
+    const row = findFileEntryByPath(folderItem.path);
     if (!row || isStale()) return;
 
     const icon = row.querySelector(".cs-type-icon--folder[data-folder-preview]");
@@ -68,7 +69,11 @@ async function loadFolderPreview(folderItem, generation) {
     for (const previewItem of items) {
       if (isStale() || !document.contains(icon)) return;
 
-      const thumbBlob = await resolveMediaThumbBlob(previewItem, { signal, isStale });
+      const thumbBlob = await resolveMediaThumbBlob(previewItem, {
+        signal,
+        isStale,
+        maxEdge: options.maxEdge,
+      });
       if (!thumbBlob || isStale()) continue;
 
       appendThumbToGrid(grid, thumbBlob);
@@ -100,11 +105,4 @@ function appendThumbToGrid(grid, blob) {
   const count = grid.querySelectorAll(".cs-folder-preview-cell").length;
   grid.dataset.count = String(count);
   grid.classList.toggle("cs-folder-preview-grid--multi", count > 1);
-}
-
-function cssEscape(value) {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }

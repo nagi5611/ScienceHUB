@@ -177,3 +177,14 @@ export async function createShareLink(paths, maxDownloads = 10) {
     }),
   });
 }
+
+/** フォルダショートカットリンクを作成 */
+export async function createShortcutLink(storagePath, label) {
+  return apiRequest("shortcut/create", {
+    method: "POST",
+    body: JSON.stringify({
+      storage_path: storagePath,
+      label,
+    }),
+  });
+}

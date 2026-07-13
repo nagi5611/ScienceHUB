@@ -17,6 +17,7 @@ export function extractReservationDraft(form, homeroomField) {
     title: String(formData.get('title') ?? ''),
     summary: String(formData.get('summary') ?? ''),
     print_scale: String(formData.get('print_scale') ?? ''),
+    printer_id: String(formData.get('printer_id') ?? ''),
     print_notes: String(formData.get('print_notes') ?? ''),
   };
 }
@@ -108,6 +109,11 @@ function applyReservationFormFields(form, data, { purposeOtherGroupId, onApplied
     if (scaleRadio && !scaleRadio.disabled) {
       scaleRadio.checked = true;
     }
+  }
+
+  if (data.printer_id) {
+    const printerSelect = form.querySelector('[name="printer_id"]');
+    if (printerSelect) printerSelect.value = data.printer_id;
   }
 
   onApplied?.({ purpose: data.purpose, print_scale: data.print_scale });

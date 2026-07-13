@@ -10,13 +10,18 @@ let shiftYear;
 let shiftMonth;
 let shiftMembers = [];
 let shiftAvailability = [];
+let shiftPrinters = [];
+let shiftPrinterAvailability = [];
+let shiftEditMode = 'member';
 let selectedMemberId = null;
+let selectedPrinterId = null;
 let openColorMenuMemberId = null;
 let isDragging = false;
 let dragTouchedDates = new Set();
 let dragStartDate = null;
 let initialized = false;
 let pendingShiftRemoval = null;
+let pendingPrinterShiftRemoval = null;
 let shiftBlockReservations = [];
 
 /** Returns today's date in JST (YYYY-MM-DD). */
@@ -61,6 +66,7 @@ export function initShiftPanel() {
 function closeShiftRescheduleModal() {
   document.getElementById('shift-reschedule-modal')?.classList.add('hidden');
   pendingShiftRemoval = null;
+  pendingPrinterShiftRemoval = null;
   shiftBlockReservations = [];
 }
 
@@ -130,6 +136,14 @@ async function handleShiftRescheduleSave() {
           date: pendingShiftRemoval.date,
         }),
       });
+    } else if (pendingPrinterShiftRemoval) {
+      await apiRequest('admin/shifts/printer-toggle', {
+        method: 'POST',
+        body: JSON.stringify({
+          printer_id: pendingPrinterShiftRemoval.printerId,
+          date: pendingPrinterShiftRemoval.date,
+        }),
+      });
     }
 
     closeShiftRescheduleModal();
@@ -174,15 +188,29 @@ export async function renderShiftPanel() {
     const data = await apiRequest(`admin/shifts?year=${shiftYear}&month=${shiftMonth}`);
     shiftMembers = data.members;
     shiftAvailability = data.availability;
+    shiftPrinters = data.printers ?? [];
+    shiftPrinterAvailability = data.printer_availability ?? [];
 
-    if (!selectedMemberId && shiftMembers.length) {
-      selectedMemberId = shiftMembers[0].id;
+    if (shiftEditMode === 'member') {
+      if (!selectedMemberId && shiftMembers.length) {
+        selectedMemberId = shiftMembers[0].id;
+      }
+      if (selectedMemberId && !shiftMembers.find((m) => m.id === selectedMemberId)) {
+        selectedMemberId = shiftMembers[0]?.id ?? null;
+      }
     }
-    if (selectedMemberId && !shiftMembers.find((m) => m.id === selectedMemberId)) {
-      selectedMemberId = shiftMembers[0]?.id ?? null;
+
+    if (shiftEditMode === 'printer') {
+      if (!selectedPrinterId && shiftPrinters.length) {
+        selectedPrinterId = shiftPrinters[0].id;
+      }
+      if (selectedPrinterId && !shiftPrinters.find((p) => p.id === selectedPrinterId)) {
+        selectedPrinterId = shiftPrinters[0]?.id ?? null;
+      }
     }
 
     renderShiftToolbar();
+    renderShiftPrinterToolbar();
     renderShiftCalendar();
   } catch (err) {
     document.getElementById('shift-member-toolbar').innerHTML =
@@ -276,7 +304,8 @@ function renderShiftToolbar() {
 
   const cardsHtml = shiftMembers
     .map((m) => {
-      const selected = m.id === selectedMemberId ? ' shift-member-card-active' : '';
+      const selected =
+        shiftEditMode === 'member' && m.id === selectedMemberId ? ' shift-member-card-active' : '';
       const menuOpen = m.id === openColorMenuMemberId;
 
       return `
@@ -307,8 +336,11 @@ function renderShiftToolbar() {
   toolbar.querySelectorAll('.shift-member-select').forEach((btn) => {
     btn.addEventListener('click', () => {
       selectedMemberId = btn.dataset.memberId;
+      shiftEditMode = 'member';
       openColorMenuMemberId = null;
       renderShiftToolbar();
+      renderShiftPrinterToolbar();
+      renderShiftCalendar();
     });
   });
 
@@ -318,7 +350,10 @@ function renderShiftToolbar() {
       const memberId = btn.dataset.memberId;
       openColorMenuMemberId = openColorMenuMemberId === memberId ? null : memberId;
       selectedMemberId = memberId;
+      shiftEditMode = 'member';
       renderShiftToolbar();
+      renderShiftPrinterToolbar();
+      renderShiftCalendar();
     });
   });
 
@@ -338,6 +373,55 @@ function renderShiftToolbar() {
         inline: 'center',
         block: 'nearest',
       });
+  });
+}
+
+/** Builds printer icon HTML for the shift toolbar. */
+function shiftPrinterIconHtml(printer) {
+  if (printer.image_url) {
+    return `<img class="shift-printer-icon" src="${escapeHtml(printer.image_url)}" alt="" loading="lazy" />`;
+  }
+  return `<span class="shift-printer-icon shift-printer-icon-placeholder" aria-hidden="true">🖨️</span>`;
+}
+
+/** Renders printer toolbar for shift editing. */
+function renderShiftPrinterToolbar() {
+  const toolbar = document.getElementById('shift-printer-toolbar');
+  if (!toolbar) return;
+
+  if (!shiftPrinters.length) {
+    toolbar.innerHTML =
+      '<p class="hint">プリンター管理で機種を登録してから、稼働日を設定してください。</p>';
+    return;
+  }
+
+  toolbar.innerHTML = `
+    <div class="shift-printer-toolbar-track">
+      ${shiftPrinters
+        .map((printer) => {
+          const active =
+            shiftEditMode === 'printer' && printer.id === selectedPrinterId
+              ? ' shift-printer-card-active'
+              : '';
+          return `
+            <button type="button" class="shift-printer-card${active}" data-printer-id="${printer.id}">
+              ${shiftPrinterIconHtml(printer)}
+              <span class="shift-printer-name">${escapeHtml(printer.name)}</span>
+            </button>`;
+        })
+        .join('')}
+    </div>`;
+
+  toolbar.querySelectorAll('[data-printer-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedPrinterId = btn.dataset.printerId;
+      shiftEditMode = 'printer';
+      selectedMemberId = null;
+      openColorMenuMemberId = null;
+      renderShiftToolbar();
+      renderShiftPrinterToolbar();
+      renderShiftCalendar();
+    });
   });
 }
 
@@ -372,6 +456,20 @@ function availabilityByDate() {
   return map;
 }
 
+/** Builds printer availability lookup keyed by date. */
+function printerAvailabilityByDate() {
+  const map = {};
+  const printerById = Object.fromEntries(shiftPrinters.map((p) => [p.id, p]));
+
+  for (const row of shiftPrinterAvailability) {
+    if (!map[row.date]) map[row.date] = [];
+    const printer = printerById[row.printer_id];
+    if (printer) map[row.date].push(printer);
+  }
+
+  return map;
+}
+
 /** Renders the shift calendar grid. */
 function renderShiftCalendar() {
   const grid = document.getElementById('shift-calendar-grid');
@@ -379,6 +477,7 @@ function renderShiftCalendar() {
   renderShiftWeekdayHeaders();
 
   const byDate = availabilityByDate();
+  const printersByDate = printerAvailabilityByDate();
   const firstDay = new Date(shiftYear, shiftMonth - 1, 1);
   const lastDay = new Date(shiftYear, shiftMonth, 0).getDate();
   const startWeekday = firstDay.getDay();
@@ -386,23 +485,23 @@ function renderShiftCalendar() {
 
   const prevMonthLast = new Date(shiftYear, shiftMonth - 1, 0).getDate();
   for (let i = startWeekday - 1; i >= 0; i--) {
-    grid.appendChild(createShiftDayCell(prevMonthLast - i, true, {}, todayStr));
+    grid.appendChild(createShiftDayCell(prevMonthLast - i, true, {}, {}, todayStr));
   }
 
   for (let day = 1; day <= lastDay; day++) {
     const dateStr = `${shiftYear}-${String(shiftMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    grid.appendChild(createShiftDayCell(day, false, byDate, todayStr, dateStr));
+    grid.appendChild(createShiftDayCell(day, false, byDate, printersByDate, todayStr, dateStr));
   }
 
   const totalCells = startWeekday + lastDay;
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
   for (let day = 1; day <= remaining; day++) {
-    grid.appendChild(createShiftDayCell(day, true, {}, todayStr));
+    grid.appendChild(createShiftDayCell(day, true, {}, {}, todayStr));
   }
 }
 
 /** Creates a shift calendar day cell. */
-function createShiftDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
+function createShiftDayCell(dayNum, otherMonth, byDate, printersByDate, todayStr, dateStr) {
   const cell = document.createElement('div');
   cell.className = 'calendar-day shift-day';
   if (otherMonth) cell.classList.add('other-month');
@@ -416,6 +515,7 @@ function createShiftDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   if (dateStr && !otherMonth) {
     cell.dataset.date = dateStr;
     const members = byDate[dateStr] ?? [];
+    const printers = printersByDate[dateStr] ?? [];
 
     if (members.length) {
       const chips = document.createElement('div');
@@ -432,7 +532,22 @@ function createShiftDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
       cell.appendChild(chips);
     }
 
-    if (selectedMemberId) {
+    if (printers.length) {
+      const printerChips = document.createElement('div');
+      printerChips.className = 'shift-day-printer-chips';
+      for (const p of printers) {
+        const chip = document.createElement('span');
+        chip.className = 'shift-day-printer-chip';
+        chip.textContent = isMobileShiftView() ? p.name.slice(0, 2) : p.name;
+        chip.title = p.name;
+        printerChips.appendChild(chip);
+      }
+      cell.appendChild(printerChips);
+    }
+
+    const canEditMember = shiftEditMode === 'member' && selectedMemberId;
+    const canEditPrinter = shiftEditMode === 'printer' && selectedPrinterId;
+    if (canEditMember || canEditPrinter) {
       cell.classList.add('shift-day-editable');
       cell.addEventListener('mousedown', (e) => handleShiftDayMouseDown(e, dateStr, cell));
       cell.addEventListener('mouseenter', () => handleShiftDayMouseEnter(dateStr, cell));
@@ -446,14 +561,17 @@ function createShiftDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
 
 /** Handles mousedown on a shift day cell. */
 function handleShiftDayMouseDown(e, dateStr, cell) {
-  if (!selectedMemberId || e.button !== 0) return;
+  if (shiftEditMode === 'member' && !selectedMemberId) return;
+  if (shiftEditMode === 'printer' && !selectedPrinterId) return;
+  if (e.button !== undefined && e.button !== 0) return;
   e.preventDefault();
   startShiftDrag(dateStr, cell);
 }
 
 /** Handles touchstart on a shift day cell. */
 function handleShiftDayTouchStart(e, dateStr, cell) {
-  if (!selectedMemberId) return;
+  if (shiftEditMode === 'member' && !selectedMemberId) return;
+  if (shiftEditMode === 'printer' && !selectedPrinterId) return;
   e.preventDefault();
   startShiftDrag(dateStr, cell);
 }
@@ -474,7 +592,9 @@ function shiftCellFromTouch(touch) {
 
 /** Handles touchmove while painting shift days. */
 function handleShiftDayTouchMove(e) {
-  if (!isDragging || !selectedMemberId) return;
+  if (!isDragging) return;
+  if (shiftEditMode === 'member' && !selectedMemberId) return;
+  if (shiftEditMode === 'printer' && !selectedPrinterId) return;
   e.preventDefault();
   for (const touch of e.changedTouches) {
     const cell = shiftCellFromTouch(touch);
@@ -488,7 +608,9 @@ function handleShiftDayTouchMove(e) {
 
 /** Handles mouseenter while dragging on shift calendar. */
 function handleShiftDayMouseEnter(dateStr, cell) {
-  if (!isDragging || !selectedMemberId || !dateStr) return;
+  if (!isDragging || !dateStr) return;
+  if (shiftEditMode === 'member' && !selectedMemberId) return;
+  if (shiftEditMode === 'printer' && !selectedPrinterId) return;
   if (dragTouchedDates.has(dateStr)) return;
   dragTouchedDates.add(dateStr);
   applyDragPreview(dateStr, cell);
@@ -499,9 +621,37 @@ function applyDragPreview(_dateStr, cell) {
   cell.classList.add('shift-day-painting');
 }
 
+/** Toggles printer shift; opens reschedule modal when blocked. */
+async function togglePrinterShiftAvailability(printerId, date) {
+  try {
+    await apiRequest('admin/shifts/printer-toggle', {
+      method: 'POST',
+      body: JSON.stringify({ printer_id: printerId, date }),
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof ApiError && err.code === 'RESERVATIONS_ON_PRINTER_DATE') {
+      pendingPrinterShiftRemoval = { printerId, date };
+      pendingShiftRemoval = null;
+      openShiftRescheduleModal(err.payload);
+      return false;
+    }
+    throw err;
+  }
+}
+
 /** Finishes drag and syncs availability to the server. */
 async function handleShiftMouseUp() {
-  if (!isDragging || !selectedMemberId) {
+  if (!isDragging) {
+    isDragging = false;
+    return;
+  }
+
+  if (shiftEditMode === 'member' && !selectedMemberId) {
+    isDragging = false;
+    return;
+  }
+  if (shiftEditMode === 'printer' && !selectedPrinterId) {
     isDragging = false;
     return;
   }
@@ -512,23 +662,43 @@ async function handleShiftMouseUp() {
 
   if (dates.length === 1 && dates[0] === dragStartDate) {
     try {
-      await toggleShiftAvailability(selectedMemberId, dates[0]);
+      if (shiftEditMode === 'printer') {
+        await togglePrinterShiftAvailability(selectedPrinterId, dates[0]);
+      } else {
+        await toggleShiftAvailability(selectedMemberId, dates[0]);
+      }
     } catch (err) {
       alert(err.message);
     }
   } else if (dates.length > 0) {
     try {
-      await apiRequest('admin/shifts/availability', {
-        method: 'PUT',
-        body: JSON.stringify({
-          member_id: selectedMemberId,
-          dates,
-          available: true,
-        }),
-      });
+      if (shiftEditMode === 'printer') {
+        await apiRequest('admin/shifts/printer-availability', {
+          method: 'PUT',
+          body: JSON.stringify({
+            printer_id: selectedPrinterId,
+            dates,
+            available: true,
+          }),
+        });
+      } else {
+        await apiRequest('admin/shifts/availability', {
+          method: 'PUT',
+          body: JSON.stringify({
+            member_id: selectedMemberId,
+            dates,
+            available: true,
+          }),
+        });
+      }
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'RESERVATIONS_ON_DATE') {
+      if (err instanceof ApiError && err.code === 'RESERVATIONS_ON_PRINTER_DATE') {
+        pendingPrinterShiftRemoval = { printerId: selectedPrinterId, date: err.payload.date };
+        pendingShiftRemoval = null;
+        openShiftRescheduleModal(err.payload);
+      } else if (err instanceof ApiError && err.code === 'RESERVATIONS_ON_DATE') {
         pendingShiftRemoval = { memberId: selectedMemberId, date: err.payload.date };
+        pendingPrinterShiftRemoval = null;
         openShiftRescheduleModal(err.payload);
       } else {
         alert(err.message);

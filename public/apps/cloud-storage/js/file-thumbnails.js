@@ -4,13 +4,14 @@
 
 import { classifyFile } from "./file-icons.js";
 import { resolveMediaThumbBlob } from "./media-thumb.js";
+import { findFileEntryByPath } from "./list-dom.js";
 import { createThumbnailTask, isActiveThumbnailGeneration } from "./thumbnail-session.js";
 
 const FILE_FETCH_CONCURRENCY = 4;
 const objectUrlByElement = new WeakMap();
 
 /** 表示中ファイル行のサムネイルを段階的に読み込む */
-export function scheduleFileThumbnails(fileItems, generation) {
+export function scheduleFileThumbnails(fileItems, generation, options = {}) {
   if (!fileItems?.length || generation == null) return;
 
   const targets = fileItems.filter((item) => {
@@ -30,7 +31,7 @@ export function scheduleFileThumbnails(fileItems, generation) {
       const item = queue.shift();
       if (!item) break;
       active += 1;
-      loadFileThumbnail(item, token)
+      loadFileThumbnail(item, token, options)
         .catch(() => {})
         .finally(() => {
           active -= 1;
@@ -42,14 +43,14 @@ export function scheduleFileThumbnails(fileItems, generation) {
   pump();
 }
 
-async function loadFileThumbnail(fileItem, generation) {
+async function loadFileThumbnail(fileItem, generation, options = {}) {
   const scope = createThumbnailTask(generation);
   if (!scope) return;
 
   const { signal, isStale, dispose } = scope;
 
   try {
-    const row = document.querySelector(`.cs-file-row[data-path="${cssEscape(fileItem.path)}"]`);
+    const row = findFileEntryByPath(fileItem.path);
     if (!row || isStale()) return;
 
     const icon = row.querySelector("[data-file-thumb]");
@@ -58,7 +59,7 @@ async function loadFileThumbnail(fileItem, generation) {
     const kind = classifyFile(fileItem.name).kind;
     const thumbBlob = await resolveMediaThumbBlob(
       { ...fileItem, kind },
-      { signal, isStale }
+      { signal, isStale, maxEdge: options.maxEdge }
     );
 
     if (!thumbBlob || isStale() || !document.contains(icon)) return;
@@ -82,11 +83,4 @@ function applyThumbToIcon(icon, blob) {
   img.src = url;
   img.hidden = false;
   icon.classList.add("cs-type-icon--has-thumb");
-}
-
-function cssEscape(value) {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }

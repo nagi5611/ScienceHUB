@@ -3,6 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <title>3D印刷管理 — ScienceHUB</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -45,6 +52,16 @@
         </span>
         <span>メンバー</span>
       </button>
+      <button class="admin-mobile-nav-item" data-panel="printers" type="button">
+        <span class="admin-mobile-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+            <path d="M6 9V3h12v6" />
+            <rect x="6" y="14" width="12" height="8" rx="1" />
+          </svg>
+        </span>
+        <span>プリンター</span>
+      </button>
       <button class="admin-mobile-nav-item" data-panel="shifts" type="button">
         <span class="admin-mobile-nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -66,6 +83,7 @@
           <button class="admin-menu-item active" data-panel="dashboard" type="button">カレンダー</button>
           <button class="admin-menu-item" data-panel="history" type="button">印刷履歴</button>
           <button class="admin-menu-item" data-panel="members" type="button">メンバー一覧</button>
+          <button class="admin-menu-item" data-panel="printers" type="button">プリンター管理</button>
           <button class="admin-menu-item" data-panel="shifts" type="button">シフト管理表</button>
         </nav>
         <button class="btn btn-secondary btn-sm admin-logout" id="logout-btn" type="button">ダッシュボード</button>
@@ -196,12 +214,164 @@
           </section>
         </div>
 
+        <div class="admin-panel hidden" id="panel-printers">
+          <h1 class="page-heading">プリンター管理</h1>
+          <p class="page-subheading">予約時に選べる3Dプリンター機種を登録します。名前・画像に加え、稼働ステータスやノズル径・動画撮影可否などの仕様を設定できます。</p>
+
+          <section class="card" id="print-video-settings-section">
+            <h2 class="section-heading">印刷動画の保存先</h2>
+            <p class="hint">管理画面からアップロードする印刷動画は、指定したチームのクラウドストレージフォルダに保存されます。</p>
+            <div id="print-video-settings-alert"></div>
+            <div class="form-group">
+              <label for="print-video-storage-path">保存先フォルダ</label>
+              <div class="storage-path-picker-row">
+                <input type="text" id="print-video-storage-path" readonly placeholder="未設定（参照から選択）" />
+                <button type="button" class="btn btn-secondary btn-sm" id="print-video-browse-btn">参照…</button>
+              </div>
+              <p class="hint">クラウドストレージ上のフォルダを選び、「このフォルダを選択」で確定後、下のボタンで保存してください。</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="print-video-settings-save">保存先を保存</button>
+          </section>
+
+          <section class="card">
+            <h2 class="section-heading">プリンターを追加</h2>
+            <div id="printer-add-alert"></div>
+            <form id="printer-add-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="printer-name">プリンター名</label>
+                  <input type="text" id="printer-name" placeholder="例: Bambu Lab X1 Carbon" required maxlength="80" />
+                </div>
+                <div class="form-group">
+                  <label for="printer-image">機種画像（任意）</label>
+                  <input type="file" id="printer-image" accept="image/png,image/jpeg,image/webp,image/gif" />
+                  <p class="hint">PNG / JPEG / WebP / GIF（最大2MB）</p>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary">追加</button>
+            </form>
+          </section>
+
+          <section class="card admin-list-section" style="margin-top:1.5rem">
+            <h2 class="section-heading">登録済みプリンター</h2>
+            <div id="printers-mount">
+              <p class="hint">読み込み中...</p>
+            </div>
+          </section>
+        </div>
+
+        <div class="modal-overlay" id="printer-edit-modal">
+          <div class="modal modal-lg">
+            <div class="modal-header">
+              <h2 id="printer-edit-modal-title">プリンターを編集</h2>
+              <button class="modal-close" id="printer-edit-modal-close" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div id="printer-edit-alert"></div>
+              <form id="printer-edit-form">
+                <input type="hidden" id="printer-edit-id" />
+
+                <div class="printer-edit-header">
+                  <div id="printer-edit-image-preview" class="printer-edit-image-preview" aria-hidden="true">🖨️</div>
+                  <div class="form-group printer-edit-name-field">
+                    <label for="printer-edit-name">プリンター名</label>
+                    <input type="text" id="printer-edit-name" maxlength="80" required />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="printer-edit-image">機種画像</label>
+                  <input type="file" id="printer-edit-image" accept="image/png,image/jpeg,image/webp,image/gif" />
+                  <p class="hint">変更する場合のみ選択してください（PNG / JPEG / WebP / GIF・最大2MB）</p>
+                </div>
+
+                <div class="form-group">
+                  <label for="printer-edit-status">稼働ステータス</label>
+                  <select id="printer-edit-status" required>
+                    <option value="available">印刷可能</option>
+                    <option value="unavailable">印刷不能</option>
+                    <option value="maintenance">メンテナンス中</option>
+                  </select>
+                  <p class="hint">「印刷不能」「メンテナンス中」の機種は、一般ユーザーの予約画面で選択できません。</p>
+                </div>
+
+                <h3 class="form-section-title">1日の印刷キャパ</h3>
+                <p class="hint">この機種で1日に受け付けられる印刷規模の上限です。プリンターごとに独立してカウントされます。</p>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="printer-edit-cap-max-small">スモール上限（単独時）</label>
+                    <input type="number" id="printer-edit-cap-max-small" min="1" max="8" value="2" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="printer-edit-cap-max-small-with-main">スモール上限（ミディアム/ラージ併用時）</label>
+                    <input type="number" id="printer-edit-cap-max-small-with-main" min="0" max="4" value="0" required />
+                    <p class="hint">0 = スモールとミディアム/ラージは同日不可。1以上 = 併用可（例: スモール1 + ミディアム1）</p>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="printer-edit-cap-max-medium">ミディアム上限</label>
+                    <input type="number" id="printer-edit-cap-max-medium" min="0" max="4" value="1" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="printer-edit-cap-max-large">ラージ上限</label>
+                    <input type="number" id="printer-edit-cap-max-large" min="0" max="4" value="1" required />
+                  </div>
+                </div>
+
+                <h3 class="form-section-title">この機種でできること</h3>
+                <p class="hint">予約画面に表示される機種の仕様です。</p>
+
+                <div class="form-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="printer-edit-can-record-video" />
+                    印刷中の動画撮影が可能
+                  </label>
+                </div>
+
+                <div class="form-group">
+                  <label for="printer-edit-nozzle-sizes">ノズル径（mm）</label>
+                  <input type="text" id="printer-edit-nozzle-sizes" placeholder="例: 0.4, 0.6" required />
+                  <p class="hint">カンマ区切りで入力（例: 0.4, 0.6, 0.8）</p>
+                </div>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" id="printer-edit-cancel-btn" type="button">キャンセル</button>
+              <button class="btn btn-primary" id="printer-edit-save-btn" type="submit" form="printer-edit-form">保存</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="print-video-folder-modal">
+          <div class="modal modal-lg storage-folder-modal">
+            <div class="modal-header">
+              <h2>保存先フォルダを選択</h2>
+              <button class="modal-close" id="print-video-folder-modal-close" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+              <nav class="storage-folder-breadcrumb" id="print-video-folder-breadcrumb" aria-label="フォルダパス"></nav>
+              <div id="print-video-folder-list" class="storage-folder-list" role="listbox" aria-label="フォルダ一覧"></div>
+              <p class="hint" id="print-video-folder-hint"></p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" id="print-video-folder-cancel" type="button">キャンセル</button>
+              <button class="btn btn-primary" id="print-video-folder-confirm" type="button" disabled>このフォルダを選択</button>
+            </div>
+          </div>
+        </div>
+
         <div class="admin-panel hidden" id="panel-shifts">
           <h1 class="page-heading">シフト管理表</h1>
-          <p class="page-subheading">メンバーを選んでカレンダー上をクリックまたはドラッグし、対応可能日を設定します。対応可能日がない日はゲストが予約できません。</p>
+          <p class="page-subheading">印刷担当者とプリンターそれぞれの稼働日を設定します。メンバーまたはプリンターを選び、カレンダー上をクリック・ドラッグして対応可能日を登録してください。予約は「担当者がいる」かつ「プリンターが稼働」かつ「その機種に空きがある」日のみ可能です。</p>
 
           <section class="card" id="shift-calendar-section">
+            <p class="hint shift-toolbar-label">印刷担当者</p>
             <div id="shift-member-toolbar" class="shift-member-toolbar"></div>
+            <p class="hint shift-toolbar-label">プリンター稼働</p>
+            <div id="shift-printer-toolbar" class="shift-printer-toolbar"></div>
 
             <div class="calendar-sticky-header shift-calendar-sticky">
               <div class="calendar-toolbar">
@@ -241,9 +411,9 @@
 
             <details class="calendar-mobile-hint">
               <summary>操作のヒント</summary>
-              <p class="hint calendar-hint-text">メンバーを選んで日付をタップでON/OFF。長押しドラッグでまとめてON。色カードで8色から選択。</p>
+              <p class="hint calendar-hint-text">担当者またはプリンターを選び、日付をタップでON/OFF。長押しドラッグでまとめてON。</p>
             </details>
-            <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">クリックでON/OFF、ドラッグでまとめてON。色カードをクリックすると8色から選べます。</p>
+            <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">担当者・プリンターを選んでから日付をクリックまたはドラッグ。カレンダーにはその日の担当者（色チップ）と稼働プリンター名が表示されます。</p>
           </section>
         </div>
       </div>
@@ -260,6 +430,11 @@
         <div id="admin-form-alert"></div>
         <form id="admin-reservation-form">
           <input type="hidden" id="admin-desired-date" name="desired_date" />
+
+          <div class="form-group" id="admin-printer-group">
+            <label for="admin-printer-select">印刷機種</label>
+            <select id="admin-printer-select" name="printer_id" required></select>
+          </div>
 
           <p class="selected-date-display" id="admin-selected-date-display"></p>
           <div class="form-group hidden" id="admin-desired-date-group">
@@ -383,5 +558,6 @@
   </div>
 
   <script type="module" src="./js/admin.js"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
 </body>
 </html>

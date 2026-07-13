@@ -1,5 +1,5 @@
 // src/admin/js/admin.js
-import { apiRequest } from '../../3dprint-reservation/js/api.js';
+import { apiRequest, apiFormRequest } from '../../3dprint-reservation/js/api.js';
 import { uploadPrintFile } from '../../3dprint-reservation/js/upload/simple.js';
 import { setupHomeroomCombobox } from '../../3dprint-reservation/js/homeroom.js';
 import {
@@ -11,6 +11,20 @@ import {
   updateDraftRestoreButton,
 } from '../../3dprint-reservation/js/reservation-draft.js';
 import { initShiftPanel, renderShiftPanel } from './shift.js';
+import {
+  buildPrinterCapabilityBadges,
+  formatNozzleSizes,
+  normalizePrinterCapabilities,
+  nozzleSizesToInputValue,
+  parseNozzleSizesInput,
+} from '../../3dprint-reservation/js/printer-capabilities.js';
+import { buildPrinterStatusBadge } from '../../3dprint-reservation/js/printer-status.js';
+import {
+  initPrintVideoFolderPicker,
+  openPrintVideoFolderPicker,
+} from './print-video-folder-picker.js';
+let printVideoGroupRoots = [];
+let printVideoStoragePath = '';
 
 const STATUS_LABELS = {
   applied: '申請中',
@@ -30,18 +44,21 @@ const ADMIN_PANEL_TITLES = {
   dashboard: 'カレンダー',
   history: '印刷履歴',
   members: 'メンバー',
+  printers: 'プリンター',
   shifts: 'シフト',
 };
 
 let currentReservationId = null;
 let allReservations = [];
 let allMembers = [];
+let allPrinters = [];
 let memberHomeroomField = null;
 let reservationHomeroomField = null;
 let adminSelectedDate = '';
 let adminUploadResult = null;
 let adminFormMode = 'create';
 let currentReservationData = null;
+let editingPrinterId = null;
 let currentYear;
 let currentMonth;
 let activePanel = 'dashboard';
@@ -137,6 +154,10 @@ async function init() {
       renderTodayTasks();
       if (activePanel === 'history') renderHistory();
       if (activePanel === 'members') renderMembers();
+      if (activePanel === 'printers') {
+        renderPrinters();
+        loadPrintVideoSettings();
+      }
       if (activePanel === 'shifts') renderShiftPanel();
     }
     updateAdminStickyOffsets();
@@ -146,6 +167,9 @@ async function init() {
   memberHomeroomField = setupHomeroomCombobox('member-homeroom', 'member-homeroom-list');
   reservationHomeroomField = setupHomeroomCombobox('admin-homeroom', 'admin-homeroom-list');
   document.getElementById('member-add-form').addEventListener('submit', handleAddMember);
+  document.getElementById('printer-add-form').addEventListener('submit', handleAddPrinter);
+  setupPrinterEditModal();
+  setupPrintVideoSettings();
   document.getElementById('calendar-test-btn')?.addEventListener('click', testGoogleCalendar);
   setupAdminFormModal();
   initShiftPanel();
@@ -178,6 +202,10 @@ function switchPanel(panel) {
   if (titleEl) titleEl.textContent = ADMIN_PANEL_TITLES[panel] ?? panel;
   if (panel === 'history') renderHistory();
   if (panel === 'members') renderMembers();
+  if (panel === 'printers') {
+    renderPrinters();
+    loadPrintVideoSettings();
+  }
   if (panel === 'shifts') renderShiftPanel();
   updateAdminStickyOffsets();
 }
@@ -185,16 +213,22 @@ function switchPanel(panel) {
 /** Refreshes dashboard data. */
 async function refreshAll() {
   try {
-    const [resData, membersData] = await Promise.all([
+    const [resData, membersData, printersData] = await Promise.all([
       apiRequest('admin/reservations'),
       apiRequest('admin/members'),
+      apiRequest('admin/printers'),
     ]);
     allReservations = resData.reservations.filter((r) => r.status !== 'cancelled');
     allMembers = membersData.members;
+    allPrinters = printersData.printers;
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
     if (activePanel === 'members') renderMembers();
+    if (activePanel === 'printers') {
+      renderPrinters();
+      loadPrintVideoSettings();
+    }
   } catch (err) {
     document.getElementById('today-tasks-mount').innerHTML =
       `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
@@ -529,6 +563,11 @@ function setupAdminFormModal() {
       return;
     }
 
+    if (!formData.get('printer_id')) {
+      showAdminFormAlert('印刷機種を選択してください', 'error');
+      return;
+    }
+
     const excludeParam = isEdit ? `&exclude_reservation_id=${currentReservationId}` : '';
 
     try {
@@ -556,6 +595,7 @@ function setupAdminFormModal() {
         summary: formData.get('summary')?.trim() || null,
         print_notes: formData.get('print_notes')?.trim() || null,
         print_scale: printScale,
+        printer_id: formData.get('printer_id'),
         desired_date: desiredDate,
       };
 
@@ -673,6 +713,7 @@ async function openAdminFormForDate(dateStr) {
   }
 
   document.getElementById('admin-form-modal').classList.add('open');
+  populateAdminPrinterSelect();
   updateDraftRestoreButton(
     document.getElementById('admin-restore-draft-btn'),
     DRAFT_STORAGE_KEYS.admin
@@ -731,6 +772,7 @@ async function openAdminEditForm(r) {
 
   document.getElementById('admin-form-modal-title').textContent = `${r.title} を修正`;
   document.getElementById('admin-submit-btn').textContent = '修正を保存';
+  populateAdminPrinterSelect(r.printer_id);
   document.getElementById('admin-form-modal').classList.add('open');
 }
 
@@ -1114,14 +1156,35 @@ async function openDetail(id) {
         <div class="detail-row"><span class="detail-label">目的</span><span>${PURPOSE_LABELS[r.purpose]}${r.purpose_other ? `（${escapeHtml(r.purpose_other)}）` : ''}</span></div>
         <div class="detail-row"><span class="detail-label">概要</span><span>${escapeHtml(r.summary)}</span></div>
         <div class="detail-row"><span class="detail-label">印刷規模</span><span>${SCALE_LABELS[r.print_scale]}</span></div>
+        <div class="detail-row"><span class="detail-label">印刷機種</span><span>${escapeHtml(r.printer_name ?? '未指定')}${r.printer_capabilities ? `（ノズル ${escapeHtml(formatNozzleSizes(r.printer_capabilities.nozzle_sizes_mm))}${r.printer_capabilities.can_record_print_video ? '・動画撮影可' : ''}）` : ''}</span></div>
         ${r.print_notes ? `<div class="detail-row"><span class="detail-label">印刷時の注意点</span><span>${escapeHtml(r.print_notes).replace(/\n/g, '<br>')}</span></div>` : ''}
+        ${r.request_print_video ? `<div class="detail-row"><span class="detail-label">動画撮影</span><span>依頼者が希望</span></div>` : ''}
         <div class="detail-row"><span class="detail-label">ファイル</span><span>${escapeHtml(r.stl_filename)} (${formatSize(r.stl_size_bytes)})</span></div>
         <div class="detail-row"><span class="detail-label">申請日時</span><span>${r.created_at}</span></div>
       </div>
       ${statusField}
       ${printStaffField}
+      <div class="form-group" style="margin-top:1rem">
+        <label>印刷動画（クラウドストレージ）</label>
+        ${r.print_video_storage_path
+          ? `<p class="hint">${escapeHtml(r.print_video_filename ?? '動画')} (${formatSize(r.print_video_size_bytes ?? 0)})</p>
+             <a href="/api/3dprint/admin/reservations/${r.id}/print-video/download" class="btn btn-secondary btn-sm" download>動画をダウンロード</a>
+             <button type="button" class="btn btn-secondary btn-sm" id="delete-print-video-btn">動画を削除</button>`
+          : '<p class="hint">まだアップロードされていません。</p>'}
+        <input type="file" id="admin-print-video-file" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" style="margin-top:0.5rem" />
+        <button type="button" class="btn btn-primary btn-sm" id="upload-print-video-btn" style="margin-top:0.5rem">動画をアップロード</button>
+        <p class="hint">mp4 / mov / webm など（最大500MB）。保存先はプリンター管理の「印刷動画の保存先」で設定します。</p>
+        <p class="hint hidden" id="print-video-upload-status"></p>
+      </div>
       <a href="/api/3dprint/admin/stl/${r.id}" class="btn btn-secondary btn-sm" download>ファイルをダウンロード</a>
     `;
+
+    document.getElementById('upload-print-video-btn')?.addEventListener('click', () =>
+      handleUploadPrintVideo(r.id)
+    );
+    document.getElementById('delete-print-video-btn')?.addEventListener('click', () =>
+      handleDeletePrintVideo(r.id)
+    );
 
     document.getElementById('accept-btn').classList.toggle('hidden', !isApplication);
     document.getElementById('save-btn').classList.toggle('hidden', isApplication);
@@ -1214,6 +1277,385 @@ function escapeHtml(str) {
 function formatSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Populates the admin printer select dropdown. */
+function populateAdminPrinterSelect(selectedId = '') {
+  const select = document.getElementById('admin-printer-select');
+  if (!select) return;
+
+  if (!allPrinters.length) {
+    select.innerHTML = '<option value="">プリンターが登録されていません</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  select.innerHTML = allPrinters
+    .map(
+      (p) =>
+        `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+    )
+    .join('');
+}
+
+/** 印刷動画保存先設定のイベントを登録 */
+function setupPrintVideoSettings() {
+  const saveBtn = document.getElementById('print-video-settings-save');
+  const browseBtn = document.getElementById('print-video-browse-btn');
+
+  saveBtn?.addEventListener('click', savePrintVideoSettings);
+  browseBtn?.addEventListener('click', async () => {
+    if (!printVideoGroupRoots.length) {
+      await loadPrintVideoSettings();
+    }
+    openPrintVideoFolderPicker(printVideoStoragePath);
+  });
+
+  initPrintVideoFolderPicker({
+    getGroupRoots: () => printVideoGroupRoots,
+    onSelect: (path) => {
+      printVideoStoragePath = path;
+      updatePrintVideoPathDisplay();
+    },
+  });
+}
+
+/** 保存先パス表示を更新 */
+function updatePrintVideoPathDisplay() {
+  const input = document.getElementById('print-video-storage-path');
+  if (!input) return;
+
+  if (!printVideoStoragePath) {
+    input.value = '';
+    input.placeholder = '未設定（参照から選択）';
+    return;
+  }
+
+  const roots = printVideoGroupRoots;
+  const matchedRoot = roots.find(
+    (root) =>
+      printVideoStoragePath === root.path || printVideoStoragePath.startsWith(`${root.path}/`)
+  );
+
+  if (matchedRoot && printVideoStoragePath !== matchedRoot.path) {
+    const suffix = printVideoStoragePath.slice(matchedRoot.path.length + 1);
+    input.value = `${matchedRoot.label} / ${suffix}`;
+  } else if (matchedRoot) {
+    input.value = `${matchedRoot.label}（チームルート）`;
+  } else {
+    input.value = printVideoStoragePath;
+  }
+  input.title = printVideoStoragePath;
+}
+
+/** 印刷動画の保存先設定を読み込む */
+async function loadPrintVideoSettings() {
+  const alertEl = document.getElementById('print-video-settings-alert');
+  if (!document.getElementById('print-video-storage-path')) return;
+
+  try {
+    const data = await apiRequest('admin/settings/print-video');
+    printVideoGroupRoots = data.group_roots ?? [];
+    printVideoStoragePath = data.storage_path ?? '';
+
+    if (alertEl) alertEl.innerHTML = '';
+    updatePrintVideoPathDisplay();
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+/** 印刷動画の保存先設定を保存 */
+async function savePrintVideoSettings() {
+  const alertEl = document.getElementById('print-video-settings-alert');
+
+  if (!printVideoStoragePath) {
+    alert('保存先フォルダを選択してください');
+    return;
+  }
+
+  try {
+    const data = await apiRequest('admin/settings/print-video', {
+      method: 'PATCH',
+      body: JSON.stringify({ storage_path: printVideoStoragePath }),
+    });
+    printVideoStoragePath = data.storage_path ?? printVideoStoragePath;
+    if (alertEl) {
+      alertEl.innerHTML = '<p class="alert alert-success">保存先を更新しました</p>';
+    }
+    updatePrintVideoPathDisplay();
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+/** 予約詳細から印刷動画をアップロード */
+async function handleUploadPrintVideo(reservationId) {
+  const fileInput = document.getElementById('admin-print-video-file');
+  const statusEl = document.getElementById('print-video-upload-status');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    alert('動画ファイルを選択してください');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    if (statusEl) {
+      statusEl.textContent = 'アップロード中...';
+      statusEl.classList.remove('hidden');
+    }
+    await apiFormRequest(`admin/reservations/${reservationId}/print-video`, formData, {
+      method: 'POST',
+    });
+    await openDetail(reservationId);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    if (statusEl) statusEl.classList.add('hidden');
+  }
+}
+
+/** 予約詳細から印刷動画を削除 */
+async function handleDeletePrintVideo(reservationId) {
+  if (!confirm('印刷動画を削除しますか？')) return;
+
+  try {
+    await apiRequest(`admin/reservations/${reservationId}/print-video`, { method: 'DELETE' });
+    await openDetail(reservationId);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+/** Renders the printer management list. */
+function renderPrinters() {
+  const mount = document.getElementById('printers-mount');
+  if (!mount) return;
+
+  if (!allPrinters.length) {
+    mount.innerHTML = '<p class="hint admin-list-empty">登録されているプリンターはありません</p>';
+    return;
+  }
+
+  mount.innerHTML = `<div class="printer-admin-grid">${allPrinters.map(printerAdminCardHtml).join('')}</div>`;
+
+  mount.querySelectorAll('[data-printer-delete]').forEach((btn) => {
+    btn.addEventListener('click', () => handleDeletePrinter(btn.dataset.printerDelete));
+  });
+
+  mount.querySelectorAll('[data-printer-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => openPrinterEditModal(btn.dataset.printerEdit));
+  });
+}
+
+/** Builds HTML for a printer admin card. */
+function printerAdminCardHtml(printer) {
+  const caps = normalizePrinterCapabilities(printer.capabilities);
+  const imageHtml = printer.image_url
+    ? `<img class="printer-admin-image" src="${escapeHtml(printer.image_url)}" alt="" loading="lazy" />`
+    : `<div class="printer-admin-image printer-admin-image-placeholder" aria-hidden="true">🖨️</div>`;
+
+  const videoLabel = caps.can_record_print_video ? '動画撮影可' : '動画撮影不可';
+  const statusBadge = buildPrinterStatusBadge(printer.status ?? 'available', { escapeHtml });
+
+  return `
+    <article class="printer-admin-card">
+      ${imageHtml}
+      <div class="printer-admin-body">
+        <div class="printer-admin-title-row">
+          <h3 class="printer-admin-title">${escapeHtml(printer.name)}</h3>
+          ${statusBadge}
+        </div>
+        ${buildPrinterCapabilityBadges(caps, { escapeHtml })}
+        <p class="hint printer-admin-cap-summary">ノズル径: ${escapeHtml(formatNozzleSizes(caps.nozzle_sizes_mm))} / ${videoLabel}</p>
+        <div class="printer-admin-actions">
+          <button class="btn btn-primary btn-sm" data-printer-edit="${printer.id}" type="button">編集</button>
+          <button class="btn btn-secondary btn-sm" data-printer-delete="${printer.id}" type="button">削除</button>
+        </div>
+      </div>
+    </article>`;
+}
+
+/** Sets up the printer edit modal. */
+function setupPrinterEditModal() {
+  const modal = document.getElementById('printer-edit-modal');
+  const form = document.getElementById('printer-edit-form');
+  const closeBtn = document.getElementById('printer-edit-modal-close');
+  const cancelBtn = document.getElementById('printer-edit-cancel-btn');
+
+  const closeModal = () => {
+    modal.classList.remove('open');
+    editingPrinterId = null;
+    form.reset();
+    document.getElementById('printer-edit-alert').innerHTML = '';
+  };
+
+  closeBtn.addEventListener('click', closeModal);
+  cancelBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  form.addEventListener('submit', handlePrinterEditSave);
+}
+
+/** Applies daily capacity fields to the printer edit form. */
+function applyDailyCapacityToForm(capacity) {
+  const cap = capacity ?? {
+    max_small: 2,
+    max_small_with_main: 0,
+    max_medium: 1,
+    max_large: 1,
+  };
+  document.getElementById('printer-edit-cap-max-small').value = cap.max_small ?? 2;
+  document.getElementById('printer-edit-cap-max-small-with-main').value = cap.max_small_with_main ?? 0;
+  document.getElementById('printer-edit-cap-max-medium').value = cap.max_medium ?? 1;
+  document.getElementById('printer-edit-cap-max-large').value = cap.max_large ?? 1;
+}
+
+/** Reads daily capacity from the printer edit form. */
+function readDailyCapacityFromForm() {
+  return {
+    max_small: Number(document.getElementById('printer-edit-cap-max-small').value),
+    max_small_with_main: Number(document.getElementById('printer-edit-cap-max-small-with-main').value),
+    max_medium: Number(document.getElementById('printer-edit-cap-max-medium').value),
+    max_large: Number(document.getElementById('printer-edit-cap-max-large').value),
+  };
+}
+
+/** Opens the printer edit modal for a printer. */
+function openPrinterEditModal(id) {
+  const printer = allPrinters.find((p) => p.id === id);
+  if (!printer) return;
+
+  editingPrinterId = id;
+  const caps = normalizePrinterCapabilities(printer.capabilities);
+  const preview = document.getElementById('printer-edit-image-preview');
+  const alertEl = document.getElementById('printer-edit-alert');
+
+  alertEl.innerHTML = '';
+  document.getElementById('printer-edit-id').value = id;
+  document.getElementById('printer-edit-name').value = printer.name;
+  document.getElementById('printer-edit-status').value = printer.status ?? 'available';
+  document.getElementById('printer-edit-can-record-video').checked = caps.can_record_print_video;
+  document.getElementById('printer-edit-nozzle-sizes').value = nozzleSizesToInputValue(caps.nozzle_sizes_mm);
+  document.getElementById('printer-edit-image').value = '';
+  applyDailyCapacityToForm(printer.daily_capacity);
+
+  if (printer.image_url) {
+    preview.innerHTML = `<img src="${escapeHtml(printer.image_url)}" alt="" />`;
+  } else {
+    preview.textContent = '🖨️';
+  }
+
+  document.getElementById('printer-edit-modal-title').textContent = `${printer.name} を編集`;
+  document.getElementById('printer-edit-modal').classList.add('open');
+}
+
+/** Saves printer edits from the modal. */
+async function handlePrinterEditSave(e) {
+  e.preventDefault();
+  if (!editingPrinterId) return;
+
+  const alertEl = document.getElementById('printer-edit-alert');
+  alertEl.innerHTML = '';
+
+  const name = document.getElementById('printer-edit-name').value.trim();
+  const status = document.getElementById('printer-edit-status').value;
+  const nozzleSizes = parseNozzleSizesInput(document.getElementById('printer-edit-nozzle-sizes').value);
+  const canRecordVideo = document.getElementById('printer-edit-can-record-video').checked;
+  const dailyCapacity = readDailyCapacityFromForm();
+  const imageInput = document.getElementById('printer-edit-image');
+
+  if (!name) {
+    alertEl.innerHTML = '<div class="alert alert-error">プリンター名を入力してください</div>';
+    return;
+  }
+
+  if (!nozzleSizes.length) {
+    alertEl.innerHTML = '<div class="alert alert-error">ノズル径を1つ以上入力してください</div>';
+    return;
+  }
+
+  const saveBtn = document.getElementById('printer-edit-save-btn');
+  saveBtn.disabled = true;
+
+  try {
+    await apiRequest(`admin/printers/${editingPrinterId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name,
+        status,
+        daily_capacity: dailyCapacity,
+        capabilities: {
+          can_record_print_video: canRecordVideo,
+          nozzle_sizes_mm: nozzleSizes,
+        },
+      }),
+    });
+
+    if (imageInput.files?.[0]) {
+      const formData = new FormData();
+      formData.append('image', imageInput.files[0]);
+      await apiFormRequest(`admin/printers/${editingPrinterId}/image`, formData, { method: 'PUT' });
+    }
+
+    await refreshAll();
+    document.getElementById('printer-edit-modal').classList.remove('open');
+    editingPrinterId = null;
+  } catch (err) {
+    alertEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+/** Handles adding a new printer. */
+async function handleAddPrinter(e) {
+  e.preventDefault();
+  const alertEl = document.getElementById('printer-add-alert');
+  alertEl.innerHTML = '';
+
+  const name = document.getElementById('printer-name').value.trim();
+  const imageInput = document.getElementById('printer-image');
+  const formData = new FormData();
+  formData.append('name', name);
+  if (imageInput.files?.[0]) {
+    formData.append('image', imageInput.files[0]);
+  }
+
+  try {
+    await apiFormRequest('admin/printers', formData);
+    document.getElementById('printer-add-form').reset();
+    await refreshAll();
+    alertEl.innerHTML = '<div class="alert alert-success">プリンターを追加しました</div>';
+  } catch (err) {
+    alertEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/** Deletes a printer. */
+async function handleDeletePrinter(id) {
+  const printer = allPrinters.find((p) => p.id === id);
+  if (!printer) return;
+  if (!confirm(`「${printer.name}」を削除しますか？`)) return;
+
+  try {
+    await apiRequest(`admin/printers/${id}`, { method: 'DELETE' });
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

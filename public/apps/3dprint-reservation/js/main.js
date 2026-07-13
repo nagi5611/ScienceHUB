@@ -22,6 +22,19 @@ import {
   saveReservationDraft,
   updateDraftRestoreButton,
 } from './reservation-draft.js';
+import {
+  buildPrinterCapabilityBadges,
+  buildPrinterWaitingBadge,
+  formatNozzleSizes,
+  formatPrinterWaitingLabel,
+  normalizePrinterCapabilities,
+} from './printer-capabilities.js';
+import {
+  buildPrinterStatusBadge,
+  isPrinterBookable,
+  isPrinterOperational,
+  getPrinterStatusLabel,
+} from './printer-status.js';
 
 const SCALE_LABELS = { small: 'スモール', medium: 'ミディアム', large: 'ラージ' };
 const SCALE_SHORT = { small: 'S', medium: 'M', large: 'L' };
@@ -44,6 +57,7 @@ let selectedDate = '';
 let uploadResult = null;
 let calendarData = null;
 let staffCountByDate = {};
+let printerCountByDate = {};
 let homeroomField = null;
 let editHomeroomField = null;
 let currentDetailId = null;
@@ -58,6 +72,10 @@ let retryReservationId = null;
 let retryFormSnapshot = null;
 let retryExistingFile = null;
 let lastMobileCalendarView = null;
+let availablePrinters = [];
+let selectedPrinterId = '';
+let formStep = 'printer';
+let printerWaitingDateScoped = false;
 
 const MOBILE_CALENDAR_MQ = window.matchMedia('(max-width: 768px)');
 
@@ -121,8 +139,295 @@ async function init() {
   });
   window.addEventListener('resize', updateStickyOffsets);
   updateStickyOffsets();
-  await Promise.all([render(), loadReservationList()]);
+  await Promise.all([render(), loadReservationList(), loadPrinters(), loadPrintVideos()]);
   updateStickyOffsets();
+}
+
+/** Loads available printers for reservation. */
+async function loadPrinters(dateStr = '') {
+  try {
+    const query = dateStr ? `printers?date=${encodeURIComponent(dateStr)}` : 'printers';
+    const data = await apiRequest(query);
+    availablePrinters = data.printers ?? [];
+    printerWaitingDateScoped = Boolean(dateStr);
+  } catch {
+    availablePrinters = [];
+    printerWaitingDateScoped = false;
+  }
+}
+
+/** Returns whether the desktop layout should use the large printer picker modal. */
+function useLargePrinterModal() {
+  return !isMobileCalendarView();
+}
+
+/** Updates modal width class for the printer selection step. */
+function updateFormModalSize() {
+  const dialog = document.getElementById('form-modal-dialog');
+  if (!dialog) return;
+  dialog.classList.toggle('modal-xl', useLargePrinterModal() && formStep === 'printer');
+}
+
+/** Shows the reservation form step (printer or details). */
+function showFormStep(step) {
+  formStep = step;
+  document.getElementById('form-step-printer')?.classList.toggle('hidden', step !== 'printer');
+  document.getElementById('reservation-form')?.classList.toggle('hidden', step !== 'details');
+  document.getElementById('form-back-btn')?.classList.toggle('hidden', step !== 'details');
+  document.getElementById('form-next-btn')?.classList.toggle('hidden', step !== 'printer');
+  document.getElementById('submit-btn')?.classList.toggle('hidden', step !== 'details');
+  updateFormModalSize();
+}
+
+/** Renders the printer picker cards. */
+function renderPrinterPicker(preselectedId = '') {
+  const picker = document.getElementById('printer-picker');
+  const emptyEl = document.getElementById('printer-picker-empty');
+  const allUnavailableEl = document.getElementById('printer-picker-all-unavailable');
+  const nextBtn = document.getElementById('form-next-btn');
+  if (!picker || !emptyEl) return;
+
+  const bookablePrinters = availablePrinters.filter((printer) => isPrinterOperational(printer));
+
+  if (!availablePrinters.length) {
+    picker.innerHTML = '';
+    emptyEl.classList.remove('hidden');
+    allUnavailableEl?.classList.add('hidden');
+    selectedPrinterId = '';
+    document.getElementById('printer_id').value = '';
+    if (nextBtn) nextBtn.disabled = true;
+    return;
+  }
+
+  emptyEl.classList.add('hidden');
+
+  if (!bookablePrinters.length) {
+    picker.innerHTML = availablePrinters
+      .map((printer) => {
+        const imageHtml = printer.image_url
+          ? `<img class="printer-picker-image" src="${escapeHtml(printer.image_url)}" alt="" loading="lazy" />`
+          : `<div class="printer-picker-image printer-picker-image-placeholder" aria-hidden="true">🖨️</div>`;
+        const statusHtml = buildPrinterStatusBadge(printer.status ?? 'available', { escapeHtml });
+        return `
+          <div class="printer-picker-card printer-picker-card-unavailable" role="option" aria-disabled="true">
+            ${imageHtml}
+            <span class="printer-picker-name">${escapeHtml(printer.name)}</span>
+            ${statusHtml}
+          </div>`;
+      })
+      .join('');
+    allUnavailableEl?.classList.remove('hidden');
+    selectedPrinterId = '';
+    document.getElementById('printer_id').value = '';
+    if (nextBtn) nextBtn.disabled = true;
+    return;
+  }
+
+  allUnavailableEl?.classList.add('hidden');
+
+  if (preselectedId) {
+    const preselected = availablePrinters.find((p) => p.id === preselectedId);
+    selectedPrinterId = preselected && isPrinterOperational(preselected) ? preselectedId : '';
+  }
+
+  if (selectedPrinterId && !isPrinterOperational(availablePrinters.find((p) => p.id === selectedPrinterId))) {
+    selectedPrinterId = '';
+  }
+
+  if (!selectedPrinterId) {
+    selectedPrinterId = bookablePrinters[0]?.id ?? '';
+    document.getElementById('printer_id').value = selectedPrinterId;
+  }
+
+  picker.innerHTML = availablePrinters
+    .map((printer) => {
+      const bookable = isPrinterOperational(printer);
+      const selected = bookable && printer.id === selectedPrinterId;
+      const imageHtml = printer.image_url
+        ? `<img class="printer-picker-image" src="${escapeHtml(printer.image_url)}" alt="" loading="lazy" />`
+        : `<div class="printer-picker-image printer-picker-image-placeholder" aria-hidden="true">🖨️</div>`;
+      const capabilityHtml = bookable
+        ? buildPrinterCapabilityBadges(printer.capabilities, { escapeHtml })
+        : '';
+      const waitingHtml = bookable
+        ? buildPrinterWaitingBadge(printer.waiting_count ?? 0, {
+            escapeHtml,
+            dateScoped: printerWaitingDateScoped,
+          })
+        : '';
+      const statusHtml = buildPrinterStatusBadge(printer.status ?? 'available', { escapeHtml });
+      const unavailableNote = bookable
+        ? ''
+        : `<p class="printer-picker-unavailable-note">${escapeHtml(
+            printer.shift_available === false
+              ? 'この日は稼働予定がありません'
+              : `${getPrinterStatusLabel(printer.status)}のため予約できません`
+          )}</p>`;
+
+      if (!bookable) {
+        return `
+          <div class="printer-picker-card printer-picker-card-unavailable" role="option" aria-disabled="true">
+            ${imageHtml}
+            <span class="printer-picker-name">${escapeHtml(printer.name)}</span>
+            ${statusHtml}
+            ${unavailableNote}
+          </div>`;
+      }
+
+      return `
+        <button type="button" class="printer-picker-card${selected ? ' selected' : ''}" data-printer-id="${escapeHtml(printer.id)}" role="option" aria-selected="${selected ? 'true' : 'false'}">
+          ${imageHtml}
+          <span class="printer-picker-name">${escapeHtml(printer.name)}</span>
+          ${statusHtml}
+          ${waitingHtml}
+          ${capabilityHtml}
+        </button>`;
+    })
+    .join('');
+
+  picker.querySelectorAll('[data-printer-id]').forEach((btn) => {
+    btn.addEventListener('click', () => selectPrinter(btn.dataset.printerId));
+  });
+
+  const selectedPrinter = availablePrinters.find((p) => p.id === selectedPrinterId);
+  if (nextBtn) nextBtn.disabled = !selectedPrinterId || !isPrinterOperational(selectedPrinter);
+}
+
+/** Loads available scales for the selected printer and updates the form. */
+async function updateScaleOptionsForSelectedPrinter() {
+  const desiredDate = document.getElementById('desired_date')?.value;
+  if (!desiredDate || !selectedPrinterId) return;
+
+  const excludeParam = retryReservationId
+    ? `&exclude_reservation_id=${encodeURIComponent(retryReservationId)}`
+    : '';
+
+  try {
+    const availability = await apiRequest(
+      `calendar/availability?date=${encodeURIComponent(desiredDate)}&printer_id=${encodeURIComponent(selectedPrinterId)}${excludeParam}`
+    );
+    setScaleOptions(availability.availableScales ?? []);
+
+    const hint = document.getElementById('scale-restriction-hint');
+    if (availability.scales?.includes('small') && availability.availableScales?.length === 1) {
+      hint.textContent = 'この機種・この日はスモール印刷が入っているため、スモールのみ選択できます。';
+      hint.classList.remove('hidden');
+    } else {
+      hint.classList.add('hidden');
+    }
+  } catch (err) {
+    showFormAlert(err.message, 'error');
+  }
+}
+
+/** Selects a printer in the picker. */
+async function selectPrinter(printerId) {
+  const printer = availablePrinters.find((p) => p.id === printerId);
+  if (!printer || !isPrinterOperational(printer)) {
+    showFormAlert(
+      printer?.shift_available === false
+        ? 'この日は選択したプリンターの稼働予定がありません'
+        : `${getPrinterStatusLabel(printer?.status)}の機種は予約できません`,
+      'error'
+    );
+    return;
+  }
+  selectedPrinterId = printerId;
+  document.getElementById('printer_id').value = printerId;
+  renderPrinterPicker(printerId);
+  updateSelectedPrinterDisplay();
+  if (formStep === 'details') {
+    await updateScaleOptionsForSelectedPrinter();
+  }
+}
+
+/** Updates the selected printer summary in the details step. */
+function updateSelectedPrinterDisplay() {
+  const display = document.getElementById('selected-printer-display');
+  if (!display) return;
+
+  const printer = availablePrinters.find((p) => p.id === selectedPrinterId);
+  if (!printer) {
+    display.innerHTML = '';
+    display.classList.add('hidden');
+    return;
+  }
+
+  const caps = normalizePrinterCapabilities(printer.capabilities);
+  const imageHtml = printer.image_url
+    ? `<img class="selected-printer-thumb" src="${escapeHtml(printer.image_url)}" alt="" loading="lazy" />`
+    : `<span class="selected-printer-thumb selected-printer-thumb-placeholder" aria-hidden="true">🖨️</span>`;
+
+  const waitingCount = printer.waiting_count ?? 0;
+  const waitingLabel = formatPrinterWaitingLabel(waitingCount, { dateScoped: printerWaitingDateScoped });
+  const waitingClass =
+    waitingCount > 0 ? 'printer-waiting-summary printer-waiting-summary-busy' : 'printer-waiting-summary';
+
+  display.innerHTML = `
+    <div class="selected-printer-summary">
+      ${imageHtml}
+      <div>
+        <p class="selected-printer-label">選択中の機種</p>
+        <p class="selected-printer-name">${escapeHtml(printer.name)}</p>
+        <p class="${waitingClass}">${escapeHtml(waitingLabel)}</p>
+        ${buildPrinterCapabilityBadges(caps, { escapeHtml })}
+        <p class="hint selected-printer-spec">ノズル径 ${escapeHtml(formatNozzleSizes(caps.nozzle_sizes_mm))}${caps.can_record_print_video ? ' / 印刷中の動画撮影可' : ''}</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" id="change-printer-btn">変更</button>
+    </div>`;
+  display.classList.remove('hidden');
+  document.getElementById('change-printer-btn')?.addEventListener('click', () => showFormStep('printer'));
+  updatePrintVideoCheckboxVisibility();
+}
+
+/** 動画撮影希望チェックボックスの表示をプリンター能力に合わせて切り替え */
+function updatePrintVideoCheckboxVisibility() {
+  const group = document.getElementById('request-print-video-group');
+  const checkbox = document.getElementById('request_print_video');
+  if (!group || !checkbox) return;
+
+  const printer = availablePrinters.find((p) => p.id === selectedPrinterId);
+  const canRecord = Boolean(normalizePrinterCapabilities(printer?.capabilities).can_record_print_video);
+  group.classList.toggle('hidden', !canRecord);
+  if (!canRecord) checkbox.checked = false;
+}
+
+/** 修正フォームの動画撮影チェックボックス表示を切り替え */
+function updateEditPrintVideoCheckboxVisibility(printerId, checked = false) {
+  const group = document.getElementById('edit-request-print-video-group');
+  const checkbox = document.getElementById('edit-request-print-video');
+  if (!group || !checkbox) return;
+
+  const printer = availablePrinters.find((p) => p.id === printerId);
+  const canRecord = Boolean(normalizePrinterCapabilities(printer?.capabilities).can_record_print_video);
+  group.classList.toggle('hidden', !canRecord);
+  checkbox.checked = canRecord && Boolean(checked);
+  if (!canRecord) checkbox.checked = false;
+}
+
+/** Advances from printer selection to reservation details. */
+async function goToFormDetailsStep() {
+  if (!selectedPrinterId) {
+    showFormAlert('印刷機種を選択してください', 'error');
+    return;
+  }
+
+  const printer = availablePrinters.find((p) => p.id === selectedPrinterId);
+  if (!printer || !isPrinterOperational(printer)) {
+    showFormAlert(
+      printer?.shift_available === false
+        ? 'この日は選択したプリンターの稼働予定がありません'
+        : `${getPrinterStatusLabel(printer?.status)}の機種は予約できません`,
+      'error'
+    );
+    return;
+  }
+
+  document.getElementById('printer_id').value = selectedPrinterId;
+  updateSelectedPrinterDisplay();
+  await updateScaleOptionsForSelectedPrinter();
+  updatePrintVideoCheckboxVisibility();
+  showFormStep('details');
 }
 
 /** Sets up detail modal cancel toggle. */
@@ -169,12 +474,18 @@ function setupFormModal() {
   const closeModal = () => {
     modal.classList.remove('open');
     selectedDate = '';
+    selectedPrinterId = '';
+    formStep = 'printer';
     document.querySelectorAll('.calendar-day.selected').forEach((el) => el.classList.remove('selected'));
     clearRetryFormUi();
+    showFormStep('printer');
+    document.getElementById('form-modal-dialog')?.classList.remove('modal-xl');
   };
 
   closeBtn.addEventListener('click', closeModal);
   cancelBtn.addEventListener('click', closeModal);
+  document.getElementById('form-back-btn')?.addEventListener('click', () => showFormStep('printer'));
+  document.getElementById('form-next-btn')?.addEventListener('click', goToFormDetailsStep);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
   });
@@ -249,6 +560,11 @@ function setupFormModal() {
     const alertBox = document.getElementById('form-alert');
     alertBox.innerHTML = '';
 
+    if (!formData.get('printer_id')) {
+      showFormAlert('印刷機種を選択してください', 'error');
+      return;
+    }
+
     if (!uploadResult && !retryReservationId) {
       showFormAlert('ファイルをアップロードしてください', 'error');
       return;
@@ -284,7 +600,7 @@ function setupFormModal() {
         ? `&exclude_reservation_id=${encodeURIComponent(retryReservationId)}`
         : '';
       const availability = await apiRequest(
-        `calendar/availability?date=${desiredDate}&scale=${printScale}${excludeParam}`
+        `calendar/availability?date=${desiredDate}&scale=${printScale}&printer_id=${encodeURIComponent(formData.get('printer_id'))}${excludeParam}`
       );
 
       if (availability.isFull) {
@@ -312,7 +628,9 @@ function setupFormModal() {
         purpose_other: purpose === 'other' ? formData.get('purpose_other') : null,
         summary: formData.get('summary')?.trim() || null,
         print_notes: formData.get('print_notes')?.trim() || null,
+        request_print_video: document.getElementById('request_print_video')?.checked ?? false,
         print_scale: printScale,
+        printer_id: formData.get('printer_id'),
         desired_date: desiredDate,
       };
 
@@ -343,7 +661,7 @@ function setupFormModal() {
 
       submitBtn.disabled = false;
       resetForm();
-      await Promise.all([render(), loadReservationList()]);
+      await Promise.all([render(), loadReservationList(), loadPrintVideos()]);
       setTimeout(closeModal, 1500);
     } catch (err) {
       showFormAlert(err.message, 'error');
@@ -362,6 +680,9 @@ function setupFormModal() {
     document.getElementById('scale-restriction-hint').classList.add('hidden');
     setScaleOptions(['small', 'medium', 'large']);
     document.getElementById('submit-btn').textContent = '予約を申請';
+    selectedPrinterId = '';
+    showFormStep('printer');
+    renderPrinterPicker();
     clearRetryFormUi();
   }
 }
@@ -395,6 +716,7 @@ function startRetryFlow(reservation) {
     summary: reservation.summary ?? '',
     print_notes: reservation.print_notes ?? '',
     print_scale: reservation.print_scale,
+    printer_id: reservation.printer_id ?? '',
   };
   retryExistingFile = reservation.stl_filename
     ? { filename: reservation.stl_filename, size: reservation.stl_size_bytes }
@@ -445,6 +767,11 @@ async function openFormForDate(dateStr) {
     return;
   }
 
+  if (!availability.printerAvailable) {
+    showPageToast('この日は稼働予定のプリンターがありません');
+    return;
+  }
+
   if (availability.isFull) {
     showPageToast('この日はもう満杯です');
     return;
@@ -461,7 +788,7 @@ async function openFormForDate(dateStr) {
     : `${formatDateJa(dateStr)} の予約`;
   document.getElementById('form-alert').innerHTML = '';
 
-  setScaleOptions(availability.availableScales);
+  disableScaleOptions();
 
   const form = document.getElementById('reservation-form');
   const uploadStatus = document.getElementById('upload-status');
@@ -509,18 +836,30 @@ async function openFormForDate(dateStr) {
   }
 
   const hint = document.getElementById('scale-restriction-hint');
-  if (availability.scales.includes('small') && availability.availableScales.length === 1) {
-    hint.textContent = 'この日はスモール印刷が入っているため、スモールのみ選択できます。';
-    hint.classList.remove('hidden');
-  } else {
-    hint.classList.add('hidden');
-  }
+  hint.classList.add('hidden');
 
   document.getElementById('form-modal').classList.add('open');
+  await loadPrinters(dateStr);
+  selectedPrinterId = retryFormSnapshot?.printer_id || '';
+  renderPrinterPicker(selectedPrinterId);
+  showFormStep('printer');
   applyUserToReservationForm();
   if (!retryReservationId) {
     updateDraftRestoreButton(document.getElementById('restore-draft-btn'), DRAFT_STORAGE_KEYS.public);
   }
+}
+
+/** Disables all print scale options until a printer is chosen. */
+function disableScaleOptions() {
+  ['small', 'medium', 'large'].forEach((scale) => {
+    const label = document.getElementById(`scale-label-${scale}`);
+    const input = label?.querySelector('input');
+    if (!input) return;
+    input.disabled = true;
+    input.checked = false;
+    label.classList.add('disabled');
+  });
+  document.getElementById('small-warning')?.classList.add('hidden');
 }
 
 /** Enables/disables print scale options based on availability. */
@@ -575,15 +914,20 @@ function setupEditModal() {
 
   document.getElementById('edit-desired-date').addEventListener('change', async () => {
     const dateStr = document.getElementById('edit-desired-date').value;
-    if (!dateStr || !currentDetailId) return;
+    const printerId = document.getElementById('edit-printer-select')?.value;
+    if (!dateStr || !currentDetailId || !printerId) return;
     try {
       const availability = await apiRequest(
-        `calendar/availability?date=${dateStr}&exclude_reservation_id=${currentDetailId}`
+        `calendar/availability?date=${dateStr}&printer_id=${encodeURIComponent(printerId)}&exclude_reservation_id=${currentDetailId}`
       );
       setEditScaleOptions(availability.availableScales);
     } catch (err) {
       showEditAlert(err.message, 'error');
     }
+  });
+
+  document.getElementById('edit-printer-select')?.addEventListener('change', (e) => {
+    updateEditPrintVideoCheckboxVisibility(e.target.value, false);
   });
 
   uploadZone.addEventListener('click', () => fileInput.click());
@@ -643,8 +987,9 @@ function setupEditModal() {
     }
 
     try {
+      const printerId = formData.get('printer_id') || document.getElementById('edit-printer-select')?.value;
       const availability = await apiRequest(
-        `calendar/availability?date=${desiredDate}&scale=${printScale}&exclude_reservation_id=${currentDetailId}`
+        `calendar/availability?date=${desiredDate}&scale=${printScale}&printer_id=${encodeURIComponent(printerId)}&exclude_reservation_id=${currentDetailId}`
       );
 
       if (availability.isFull) {
@@ -673,7 +1018,9 @@ function setupEditModal() {
         purpose_other: purpose === 'other' ? formData.get('purpose_other') : null,
         summary: formData.get('summary')?.trim() || null,
         print_notes: formData.get('print_notes')?.trim() || null,
+        request_print_video: document.getElementById('edit-request-print-video')?.checked ?? false,
         print_scale: printScale,
+        printer_id: formData.get('printer_id'),
         desired_date: desiredDate,
       };
 
@@ -695,13 +1042,33 @@ function setupEditModal() {
       submitBtn.disabled = false;
       currentDetailId = null;
       currentEditSnapshot = null;
-      await Promise.all([render(), loadReservationList()]);
+      await Promise.all([render(), loadReservationList(), loadPrintVideos()]);
       setTimeout(closeModal, 1500);
     } catch (err) {
       showEditAlert(err.message, 'error');
       document.getElementById('edit-submit-btn').disabled = false;
     }
   });
+}
+
+/** Populates printer select elements. */
+function populatePrinterSelect(selectId, selectedId = '') {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+
+  if (!availablePrinters.length) {
+    select.innerHTML = '<option value="">プリンターが登録されていません</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  select.innerHTML = availablePrinters
+    .map(
+      (p) =>
+        `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+    )
+    .join('');
 }
 
 /** Opens the guest edit modal with reservation data pre-filled. */
@@ -727,9 +1094,15 @@ async function openEditModal(r) {
   if (purposeRadio) purposeRadio.checked = true;
   document.getElementById('edit-purpose-other-group').classList.toggle('hidden', r.purpose !== 'other');
 
+  populatePrinterSelect('edit-printer-select', r.printer_id ?? '');
+  updateEditPrintVideoCheckboxVisibility(r.printer_id, r.request_print_video);
+
   try {
+    const printerParam = r.printer_id
+      ? `&printer_id=${encodeURIComponent(r.printer_id)}`
+      : '';
     const availability = await apiRequest(
-      `calendar/availability?date=${r.desired_date}&exclude_reservation_id=${r.id}`
+      `calendar/availability?date=${r.desired_date}&exclude_reservation_id=${r.id}${printerParam}`
     );
     setEditScaleOptions(availability.availableScales);
     const scaleRadio = form.querySelector(`input[name="print_scale"][value="${r.print_scale}"]`);
@@ -796,12 +1169,15 @@ async function openReservationDetail(id) {
         <div class="detail-row"><span class="detail-label">タイトル</span><span class="calendar-title-display">${escapeHtml(r.title)}</span></div>
         <div class="detail-row"><span class="detail-label">希望印刷日</span><span>${r.desired_date}</span></div>
         <div class="detail-row"><span class="detail-label">印刷規模</span><span>${SCALE_LABELS[r.print_scale]}</span></div>
+        <div class="detail-row"><span class="detail-label">印刷機種</span><span>${escapeHtml(r.printer_name ?? '未指定')}${r.printer_capabilities ? `（ノズル ${escapeHtml(formatNozzleSizes(r.printer_capabilities.nozzle_sizes_mm))}${r.printer_capabilities.can_record_print_video ? '・動画撮影可' : ''}）` : ''}</span></div>
         <div class="detail-row"><span class="detail-label">ステータス</span><span class="status-with-action"><span class="status-badge status-${r.status}">${STATUS_LABELS[r.status] || r.status}</span>${r.retryable ? `<button type="button" class="btn btn-secondary btn-sm" id="retry-reservation-btn">再予約</button>` : ''}</span></div>
         ${r.status_comment ? `<div class="detail-row"><span class="detail-label">コメント</span><span>${escapeHtml(r.status_comment).replace(/\n/g, '<br>')}</span></div>` : ''}
         ${r.print_staff ? `<div class="detail-row"><span class="detail-label">担当者</span><span>担当者: ${escapeHtml(r.print_staff)}</span></div>` : ''}
         ${r.summary ? `<div class="detail-row"><span class="detail-label">概要</span><span>${escapeHtml(r.summary)}</span></div>` : ''}
         ${r.print_notes ? `<div class="detail-row"><span class="detail-label">印刷時の注意点</span><span>${escapeHtml(r.print_notes).replace(/\n/g, '<br>')}</span></div>` : ''}
+        ${r.request_print_video ? `<div class="detail-row"><span class="detail-label">動画撮影</span><span>希望あり</span></div>` : ''}
         ${r.stl_filename ? `<div class="detail-row"><span class="detail-label">ファイル</span><span>${escapeHtml(r.stl_filename)}</span></div>` : ''}
+        ${r.has_print_video ? `<div class="detail-row"><span class="detail-label">印刷動画</span><span><a href="/api/3dprint/reservations/${r.id}/print-video/download" class="btn btn-secondary btn-sm" download>${escapeHtml(r.print_video_filename ?? 'ダウンロード')}</a></span></div>` : ''}
       </div>
       <div id="guest-cancel-alert"></div>
     `;
@@ -959,6 +1335,7 @@ async function render() {
     calendarData = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
     earliestBookable = calendarData.earliestBookable;
     staffCountByDate = calendarData.staffCountByDate ?? {};
+    printerCountByDate = calendarData.printerCountByDate ?? {};
   } catch (err) {
     grid.innerHTML = `<div class="alert alert-error" style="grid-column:1/-1">${err.message}</div>`;
     return;
@@ -1184,14 +1561,12 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
   if (dateStr === selectedDate) cell.classList.add('selected');
 
   const dayReservations = dateStr && reservationsByDate[dateStr] ? reservationsByDate[dateStr] : [];
-  const hasMediumOrLarge = dayReservations.some((r) => r.print_scale === 'medium' || r.print_scale === 'large');
-  const smallCount = dayReservations.filter((r) => r.print_scale === 'small').length;
-  const isFull = hasMediumOrLarge || smallCount >= 2;
 
   const hasStaff = dateStr ? (staffCountByDate[dateStr] ?? 0) > 0 : false;
+  const hasPrinter = dateStr ? (printerCountByDate[dateStr] ?? 0) > 0 : false;
 
   if (dateStr && !otherMonth && dateStr >= earliestBookable) {
-    cell.classList.add(hasStaff ? 'shift-covered' : 'shift-empty');
+    cell.classList.add(hasStaff && hasPrinter ? 'shift-covered' : 'shift-empty');
   }
 
   if (dateStr && !otherMonth) {
@@ -1199,12 +1574,12 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
     if (dateStr >= earliestBookable && !hasStaff) {
       cell.classList.add('no-staff');
       cell.addEventListener('click', () => showPageToast('この日は対応可能な印刷担当者がいません'));
-    } else if (dateStr >= earliestBookable && !isFull && hasStaff) {
+    } else if (dateStr >= earliestBookable && !hasPrinter) {
+      cell.classList.add('no-printer');
+      cell.addEventListener('click', () => showPageToast('この日は稼働予定のプリンターがありません'));
+    } else if (dateStr >= earliestBookable && hasStaff && hasPrinter) {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openFormForDate(dateStr));
-    } else if (dateStr >= earliestBookable && isFull) {
-      cell.classList.add('full');
-      cell.addEventListener('click', () => showPageToast('この日はもう満杯です'));
     } else {
       cell.classList.add('disabled');
     }
@@ -1284,6 +1659,50 @@ function formatDateJa(isoDate) {
 function formatSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** 印刷動画一覧を読み込んで表示 */
+async function loadPrintVideos() {
+  const mount = document.getElementById('print-videos-mount');
+  if (!mount) return;
+
+  try {
+    const data = await apiRequest('print-videos');
+    const videos = data.videos ?? [];
+
+    if (!videos.length) {
+      mount.innerHTML = '<p class="hint">ダウンロード可能な印刷動画はまだありません。</p>';
+      return;
+    }
+
+    mount.innerHTML = `
+      <div class="table-wrap user-list-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>タイトル</th>
+              <th>希望印刷日</th>
+              <th>ファイル</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${videos
+              .map(
+                (v) => `<tr>
+              <td>${escapeHtml(v.title)}</td>
+              <td>${escapeHtml(v.desired_date)}</td>
+              <td>${escapeHtml(v.print_video_filename ?? '動画')}${v.print_video_size_bytes ? ` (${formatSize(v.print_video_size_bytes)})` : ''}</td>
+              <td><a href="${escapeHtml(v.download_url)}" class="btn btn-secondary btn-sm" download>ダウンロード</a></td>
+            </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    mount.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

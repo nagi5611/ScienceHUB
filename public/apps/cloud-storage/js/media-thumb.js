@@ -7,6 +7,7 @@ import { getCachedMediaThumb, putCachedMediaThumb } from "./media-cache.js";
 import { classifyFile } from "./file-icons.js";
 
 export const THUMB_MAX_EDGE = 96;
+export const ICON_THUMB_MAX_EDGE = 176;
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 
@@ -26,10 +27,11 @@ export async function resolveMediaThumbBlob(item, options = {}) {
   if (isStale?.()) return null;
 
   let thumbBlob = null;
+  const maxEdge = options.maxEdge ?? THUMB_MAX_EDGE;
   if (kind === "image") {
-    thumbBlob = await createImageThumb(item, signal, isStale);
+    thumbBlob = await createImageThumb(item, signal, isStale, maxEdge);
   } else {
-    thumbBlob = await createVideoThumb(item, signal, isStale);
+    thumbBlob = await createVideoThumb(item, signal, isStale, maxEdge);
   }
 
   if (!thumbBlob || isStale?.()) return null;
@@ -43,17 +45,17 @@ export async function resolveMediaThumbBlob(item, options = {}) {
   return thumbBlob;
 }
 
-async function createImageThumb(item, signal, isStale) {
+async function createImageThumb(item, signal, isStale, maxEdge = THUMB_MAX_EDGE) {
   if (item.sizeBytes != null && item.sizeBytes > MAX_IMAGE_BYTES) {
     return null;
   }
 
   const blob = await fetchDownloadBlob(item.path, { signal });
   if (isStale?.()) return null;
-  return resizeImageBlob(blob, THUMB_MAX_EDGE);
+  return resizeImageBlob(blob, maxEdge);
 }
 
-async function createVideoThumb(item, signal, isStale) {
+async function createVideoThumb(item, signal, isStale, maxEdge = THUMB_MAX_EDGE) {
   if (item.sizeBytes != null && item.sizeBytes > MAX_VIDEO_BYTES) {
     return null;
   }
@@ -66,7 +68,7 @@ async function createVideoThumb(item, signal, isStale) {
     ? info.url
     : `/api/storage/download?path=${encodeURIComponent(item.path)}`;
 
-  return captureVideoFrame(url, THUMB_MAX_EDGE, Boolean(isDirect), signal, isStale);
+  return captureVideoFrame(url, maxEdge, Boolean(isDirect), signal, isStale);
 }
 
 export async function resizeImageBlob(blob, maxEdge) {

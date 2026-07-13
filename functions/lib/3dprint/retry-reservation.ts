@@ -13,6 +13,7 @@ import {
 } from './reservation-edit';
 import { isDateBookable } from './slots';
 import { duplicatePrintFile, verifyR2Key } from './upload';
+import { resolveRequestPrintVideo } from './print-video';
 
 interface RetryReservationEnv {
   DB: D1Database;
@@ -30,9 +31,11 @@ interface RetryReservationInput {
   summary?: string | null;
   print_notes?: string | null;
   print_scale: Reservation['print_scale'];
+  printer_id?: string | null;
   stl_r2_key?: string;
   stl_filename?: string;
   stl_size_bytes?: number;
+  request_print_video?: boolean;
 }
 
 /** Creates a new reservation from a failed one; the failed record stays in history. */
@@ -64,10 +67,12 @@ export async function retryFailedReservation(
     summary: body.summary ?? null,
     print_notes: body.print_notes ?? null,
     print_scale: body.print_scale,
+    printer_id: body.printer_id ?? failedReservation.printer_id,
     desired_date: body.desired_date,
     stl_r2_key: body.stl_r2_key,
     stl_filename: body.stl_filename,
     stl_size_bytes: body.stl_size_bytes,
+    request_print_video: body.request_print_video,
   };
 
   const validationError = validateReservationContentFields(content);
@@ -83,7 +88,9 @@ export async function retryFailedReservation(
     env.DB,
     body.desired_date,
     body.print_scale,
-    failedReservation.id
+    failedReservation.id,
+    content.printer_id ?? undefined,
+    { isAdmin: false }
   );
   if (slotError) {
     throw new Error(slotError);
@@ -120,6 +127,20 @@ export async function retryFailedReservation(
     stlSizeBytes = copied.size;
   }
 
+  const printerId = content.printer_id ?? failedReservation.printer_id;
+  if (!printerId) {
+    throw new Error('印刷機種を選択してください');
+  }
+
+  const videoResolved = await resolveRequestPrintVideo(
+    env.DB,
+    printerId,
+    body.request_print_video ?? failedReservation.request_print_video === 1
+  );
+  if (!videoResolved.ok) {
+    throw new Error(videoResolved.error);
+  }
+
   const newReservation: Reservation = {
     id: crypto.randomUUID(),
     grade: gradeFromHomeroom(String(body.homeroom)),
@@ -132,6 +153,7 @@ export async function retryFailedReservation(
     summary: body.summary?.trim() || null,
     print_notes: body.print_notes?.trim() || null,
     print_scale: body.print_scale,
+    printer_id: body.printer_id ?? failedReservation.printer_id,
     desired_date: body.desired_date,
     stl_r2_key: stlR2Key,
     stl_filename: stlFilename,
@@ -142,6 +164,10 @@ export async function retryFailedReservation(
     print_staff_member_id: null,
     delivery_staff: null,
     google_event_id: null,
+    request_print_video: videoResolved.value ? 1 : 0,
+    print_video_storage_path: null,
+    print_video_filename: null,
+    print_video_size_bytes: null,
     user_id: userId,
     created_at: new Date().toISOString(),
   };

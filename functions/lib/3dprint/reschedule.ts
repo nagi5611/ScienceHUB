@@ -39,7 +39,9 @@ export async function adminRescheduleReservation(
     env.DB,
     desiredDate,
     reservation.print_scale,
-    reservation.id
+    reservation.id,
+    reservation.printer_id ?? undefined,
+    { isAdmin: true }
   );
   if (slotError) {
     throw new Error(slotError);

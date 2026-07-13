@@ -3,10 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <title>プロジェクト管理 — ScienceHUB</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
   <link rel="stylesheet" href="/css/apps/project-management.css">
 </head>
 <body class="pm-app">
@@ -31,7 +39,10 @@
         </section>
 
         <section class="pm-section" aria-labelledby="pm-cal-heading">
-          <h2 class="pm-section-title" id="pm-cal-heading">活動可能日</h2>
+          <div class="pm-section-head">
+            <h2 class="pm-section-title" id="pm-cal-heading">活動予定日</h2>
+            <button type="button" class="pm-btn pm-btn--ghost" id="pm-cal-edit-toggle">編集</button>
+          </div>
           <div class="pm-panel pm-panel--calendar">
             <div class="pm-cal-toolbar">
               <button type="button" class="pm-cal-nav" id="pm-cal-prev" aria-label="前月">‹</button>
@@ -43,43 +54,48 @@
             </div>
             <div class="pm-cal-weekdays" id="pm-cal-weekdays"></div>
             <div class="pm-cal-grid" id="pm-cal-grid"></div>
-            <div class="pm-cal-bulk" aria-label="曜日一括設定">
-              <p class="pm-cal-bulk-title">曜日一括設定</p>
-              <div class="pm-cal-bulk-weekdays" id="pm-cal-bulk-weekdays" role="group" aria-label="対象曜日">
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="0">日</label>
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="1">月</label>
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="2">火</label>
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="3">水</label>
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="4">木</label>
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="5">金</label>
-                <label class="pm-cal-bulk-day"><input type="checkbox" value="6">土</label>
+            <div class="pm-cal-edit-panel" id="pm-cal-edit-panel" hidden>
+              <div class="pm-cal-bulk" aria-label="曜日一括設定">
+                <p class="pm-cal-bulk-title">曜日一括設定</p>
+                <div class="pm-cal-bulk-weekdays" id="pm-cal-bulk-weekdays" role="group" aria-label="対象曜日">
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="0">日</label>
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="1">月</label>
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="2">火</label>
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="3">水</label>
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="4">木</label>
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="5">金</label>
+                  <label class="pm-cal-bulk-day"><input type="checkbox" value="6">土</label>
+                </div>
+                <div class="pm-cal-bulk-row">
+                  <label class="pm-cal-bulk-months-label" for="pm-cal-months-ahead">
+                    表示月を起点に
+                    <input type="number" id="pm-cal-months-ahead" class="pm-cal-months-input" min="1" max="24" value="1">
+                    か月先まで
+                  </label>
+                </div>
+                <div class="pm-cal-bulk-actions">
+                  <button type="button" class="pm-btn pm-btn--available" id="pm-cal-bulk-available">
+                    活動可能にする
+                  </button>
+                  <button type="button" class="pm-btn pm-btn--unavailable" id="pm-cal-bulk-unavailable">
+                    活動不可にする
+                  </button>
+                </div>
               </div>
-              <div class="pm-cal-bulk-row">
-                <label class="pm-cal-bulk-months-label" for="pm-cal-months-ahead">
-                  表示月を起点に
-                  <input type="number" id="pm-cal-months-ahead" class="pm-cal-months-input" min="1" max="24" value="1">
-                  か月先まで
-                </label>
+              <details class="pm-cal-hint-details">
+                <summary class="pm-cal-hint-summary">操作のヒント</summary>
+                <p class="pm-cal-hint">
+                  未設定の日は活動不可です。左クリック／ドラッグで活動可能、右クリック／ドラッグで活動不可。曜日チェックで月単位の一括設定もできます。
+                </p>
+              </details>
+              <div class="pm-cal-legend" aria-label="凡例">
+                <span class="pm-cal-legend-item">
+                  <span class="pm-cal-swatch pm-cal-swatch--available"></span>活動可能
+                </span>
+                <span class="pm-cal-legend-item">
+                  <span class="pm-cal-swatch pm-cal-swatch--unavailable"></span>活動不可（デフォルト）
+                </span>
               </div>
-              <div class="pm-cal-bulk-actions">
-                <button type="button" class="pm-btn pm-btn--available" id="pm-cal-bulk-available">
-                  活動可能にする
-                </button>
-                <button type="button" class="pm-btn pm-btn--unavailable" id="pm-cal-bulk-unavailable">
-                  活動不可にする
-                </button>
-              </div>
-            </div>
-            <p class="pm-cal-hint">
-              未設定の日は活動不可です。左クリック／ドラッグで活動可能、右クリック／ドラッグで活動不可。曜日チェックで月単位の一括設定もできます。
-            </p>
-            <div class="pm-cal-legend" aria-label="凡例">
-              <span class="pm-cal-legend-item">
-                <span class="pm-cal-swatch pm-cal-swatch--available"></span>活動可能
-              </span>
-              <span class="pm-cal-legend-item">
-                <span class="pm-cal-swatch pm-cal-swatch--unavailable"></span>活動不可（デフォルト）
-              </span>
             </div>
           </div>
         </section>
@@ -173,6 +189,11 @@
 
   <div class="pm-toast" id="pm-toast" hidden role="status"></div>
 
+  <div class="pm-cal-member-popover" id="pm-cal-member-popover" hidden role="dialog" aria-labelledby="pm-cal-member-popover-date">
+    <p class="pm-cal-member-popover-date" id="pm-cal-member-popover-date"></p>
+    <ul class="pm-cal-member-popover-list" id="pm-cal-member-popover-list"></ul>
+  </div>
+
   <dialog class="pm-dialog pm-dialog--wide" id="pm-edit-child-dialog">
     <form method="dialog" class="pm-dialog-form" id="pm-edit-child-form">
       <h3 class="pm-dialog-title">タスクの編集</h3>
@@ -244,7 +265,7 @@
       <p class="pm-dialog-sub" id="pm-leader-project-name"></p>
       <label class="pm-field-label">リーダー（複数可）</label>
       <div class="pm-assignee-checks" id="pm-leader-checks"></div>
-      <p class="pm-field-hint">グループメンバーから複数人を指定できます。リーダーは親プロジェクトのメンバーにタスクを振れます。</p>
+      <p class="pm-field-hint">グループメンバーから複数人を指定できます。リーダーは親プロジェクトの担当者にタスクを発行できます。</p>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
         <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-leader-save">保存</button>
@@ -288,28 +309,43 @@
     </form>
   </dialog>
 
-  <dialog class="pm-dialog" id="pm-task-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-task-form">
-      <h3 class="pm-dialog-title">タスクを振る</h3>
-      <p class="pm-dialog-sub" id="pm-task-project-name"></p>
-      <label class="pm-field-label" for="pm-task-title">タイトル</label>
-      <input type="text" id="pm-task-title" class="pm-field-input" maxlength="200" required placeholder="やること">
-      <label class="pm-field-label" for="pm-task-description">詳細</label>
-      <textarea id="pm-task-description" class="pm-field-textarea" maxlength="2000" rows="3" placeholder="補足・手順など"></textarea>
-      <label class="pm-field-label" for="pm-task-due">納期</label>
-      <input type="date" id="pm-task-due" class="pm-field-input">
-      <label class="pm-field-label" for="pm-task-assignee">担当者</label>
-      <select id="pm-task-assignee" class="pm-field-select" required>
-        <option value="">選択してください</option>
-      </select>
-      <p class="pm-field-hint">親プロジェクトのメンバー（子プロジェクトの担当者）のみ選択できます。</p>
+  <dialog class="pm-dialog" id="pm-parent-members-dialog">
+    <form method="dialog" class="pm-dialog-form" id="pm-parent-members-form">
+      <h3 class="pm-dialog-title">担当者を設定</h3>
+      <p class="pm-dialog-sub" id="pm-parent-members-project-name"></p>
+      <label class="pm-field-label">担当者（複数可）</label>
+      <div class="pm-assignee-checks" id="pm-parent-members-checks"></div>
+      <p class="pm-field-hint">グループに所属するユーザーを親プロジェクトの担当者として追加できます。タスク発行時に選択できます。</p>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
-        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-task-save">追加</button>
+        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-parent-members-save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="pm-dialog" id="pm-task-dialog">
+    <form method="dialog" class="pm-dialog-form" id="pm-task-form">
+      <h3 class="pm-dialog-title">タスクを発行</h3>
+      <p class="pm-dialog-sub" id="pm-task-project-name"></p>
+      <label class="pm-field-label" for="pm-task-title">タスクの内容</label>
+      <input type="text" id="pm-task-title" class="pm-field-input" maxlength="200" required placeholder="やること">
+      <label class="pm-field-label" for="pm-task-child">割り当て子プロジェクト</label>
+      <select id="pm-task-child" class="pm-field-select" required>
+        <option value="">選択してください</option>
+      </select>
+      <label class="pm-field-label" for="pm-task-due">タスク納期</label>
+      <input type="date" id="pm-task-due" class="pm-field-input">
+      <label class="pm-field-label">担当者（複数可）</label>
+      <div class="pm-assignee-checks" id="pm-task-assignees"></div>
+      <p class="pm-field-hint">親プロジェクトの担当者から1人以上選択してください。</p>
+      <div class="pm-dialog-actions">
+        <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
+        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-task-save">発行</button>
       </div>
     </form>
   </dialog>
 
   <script src="/apps/project-management/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
 </body>
 </html>

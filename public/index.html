@@ -3,11 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <title>ScienceHUB — ダッシュボード</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/hub-icons.css">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
   <link rel="stylesheet" href="/css/dashboard.css">
 </head>
 <body class="hub-dashboard">
@@ -16,11 +24,7 @@
       <div class="hub-header-start">
         <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
           <span class="hub-logo" aria-hidden="true">
-            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/>
-              <ellipse cx="16" cy="16" rx="6" ry="14" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M2 16h28M6 10h20M6 22h20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
           </span>
           <span class="hub-brand-text">ScienceHUB</span>
         </a>
@@ -33,7 +37,7 @@
             aria-expanded="false"
             aria-controls="default-app-dropdown"
           >
-            Default App
+            <span class="hub-default-app-toggle-label">Default App</span>
           </button>
           <div class="hub-default-app-dropdown" id="default-app-dropdown" role="menu" hidden>
             <p class="hub-default-app-empty" id="default-app-empty">Default App が設定されていません</p>
@@ -47,7 +51,7 @@
           class="hub-header-text-btn hub-header-status"
           target="_blank"
           rel="noopener noreferrer"
-        >ステータス</a>
+        ><span class="hub-header-status-icon" aria-hidden="true">●</span><span class="hub-header-status-label">ステータス</span></a>
         <div class="hub-account-menu" id="account-menu">
         <button
           type="button"
@@ -129,8 +133,8 @@
             >+</button>
           </div>
           <div class="hub-schedule-scope" role="group" aria-label="表示範囲">
-            <button type="button" class="hub-schedule-scope-btn is-active" data-schedule-scope="mine" aria-pressed="true">自分のグループの予定</button>
-            <button type="button" class="hub-schedule-scope-btn" data-schedule-scope="all" aria-pressed="false">全グループの予定</button>
+            <button type="button" class="hub-schedule-scope-btn is-active" data-schedule-scope="mine" aria-pressed="true"><span class="hub-schedule-scope-label hub-schedule-scope-label--full">自分のグループの予定</span><span class="hub-schedule-scope-label hub-schedule-scope-label--short" aria-hidden="true">自分</span></button>
+            <button type="button" class="hub-schedule-scope-btn" data-schedule-scope="all" aria-pressed="false"><span class="hub-schedule-scope-label hub-schedule-scope-label--full">全グループの予定</span><span class="hub-schedule-scope-label hub-schedule-scope-label--short" aria-hidden="true">全体</span></button>
           </div>
         </div>
         <section class="hub-calendar-card" id="calendar-section">
@@ -201,6 +205,7 @@
           <tbody id="hub-storage-tbody"></tbody>
         </table>
       </div>
+      <ul class="hub-storage-cards app-card-list" id="hub-storage-cards" aria-label="クラウドストレージ使用量（カード表示）"></ul>
     </section>
 
     <!-- 下段: グループ別アプリ -->
@@ -443,5 +448,6 @@
   </div>
 
   <script src="/js/dashboard.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
 </body>
 </html>

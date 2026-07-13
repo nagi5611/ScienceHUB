@@ -75,9 +75,11 @@ body.hub-dashboard {
   color: var(--cf-orange);
 }
 
-.hub-logo svg {
+.hub-logo svg,
+.hub-logo img {
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 .hub-logout {
@@ -2231,5 +2233,152 @@ body.hub-modal-open {
     min-height: 7.5rem;
     font-size: 1rem;
     border-radius: 14px;
+  }
+}
+
+/* --- モバイル UI 強化 --- */
+
+.hub-schedule-scope-label--short {
+  display: none;
+}
+
+.hub-header-status-icon {
+  font-size: 0.625rem;
+  color: #22c55e;
+}
+
+.hub-storage-card-trash {
+  margin-top: 0.65rem;
+}
+
+.hub-storage-cards {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  body.hub-dashboard {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  .hub-header-inner {
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+    padding-bottom: 0.75rem;
+  }
+
+  .hub-header-start {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .hub-header-actions {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .hub-brand-text {
+    font-size: 1rem;
+  }
+
+  .hub-tasks-viewport {
+    min-height: 180px;
+    padding: 0.75rem;
+  }
+
+  .hub-task-item {
+    font-size: 0.9375rem;
+    padding: 0.7rem 0.85rem;
+    word-break: break-word;
+  }
+
+  .hub-calendar-card .calendar-month-chips {
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.25rem;
+  }
+
+  .hub-schedule-legend-name {
+    max-width: 6rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .hub-default-app-toggle-label {
+    font-size: 0;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    position: relative;
+  }
+
+  .hub-default-app-toggle-label::before {
+    content: "☆";
+    font-size: 1.125rem;
+    line-height: 1;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hub-header-status-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .hub-header-status {
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    position: relative;
+  }
+
+  .hub-header-status-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+  }
+
+  .hub-account-label,
+  .hub-account-caret {
+    display: none;
+  }
+
+  .hub-account-toggle {
+    padding: 0.25rem;
+  }
+
+  .hub-schedule-scope-label--full {
+    display: none;
+  }
+
+  .hub-schedule-scope-label--short {
+    display: inline;
+  }
+
+  .hub-schedule-scope-btn {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.6875rem;
+  }
+
+  .hub-storage-table-wrap {
+    display: none;
+  }
+
+  .hub-storage-cards {
+    display: flex;
   }
 }

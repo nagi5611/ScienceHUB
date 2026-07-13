@@ -238,15 +238,24 @@ function storageRatioClass(ratio) {
   return "hub-storage-ratio";
 }
 
+/** 使用率バーの警告クラス */
+function storageBarClass(ratio) {
+  if (ratio >= 95) return "is-danger";
+  if (ratio >= 80) return "is-warning";
+  return "";
+}
+
 /** クラウドストレージ使用量表を描画 */
 function renderStorageOverview(storage) {
   const section = document.getElementById("hub-storage-section");
   const tbody = document.getElementById("hub-storage-tbody");
+  const cards = document.getElementById("hub-storage-cards");
   if (!section || !tbody) return;
 
   if (!storage?.enabled || !storage.roots?.length) {
     section.hidden = true;
     tbody.innerHTML = "";
+    if (cards) cards.innerHTML = "";
     return;
   }
 
@@ -268,6 +277,24 @@ function renderStorageOverview(storage) {
       </tr>`;
     })
     .join("");
+
+  if (cards) {
+    cards.innerHTML = storage.roots
+      .map((row) => {
+        const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(row.path)}`;
+        const usageWidth = Math.min(100, Math.max(0, row.usage_ratio));
+        const trashWidth = Math.min(100, Math.max(0, row.trash_usage_ratio));
+        return `<li class="app-card hub-storage-card">
+          <p class="app-card-title"><a href="${escapeHtml(storageHref)}" class="hub-storage-path">${escapeHtml(row.group_label)}</a></p>
+          <p class="app-card-meta">${escapeHtml(row.path)}</p>
+          <p class="app-card-meta">使用: ${formatBytes(row.used_bytes)} / ${formatBytes(row.quota_bytes)}（${row.usage_ratio}%）</p>
+          <div class="app-card-bar" role="presentation"><div class="app-card-bar-fill ${storageBarClass(row.usage_ratio)}" style="width:${usageWidth}%"></div></div>
+          <p class="app-card-meta hub-storage-card-trash">ごみ箱: ${formatBytes(row.trash_used_bytes)} / ${formatBytes(row.trash_quota_bytes)}（${row.trash_usage_ratio}%）</p>
+          <div class="app-card-bar" role="presentation"><div class="app-card-bar-fill ${storageBarClass(row.trash_usage_ratio)}" style="width:${trashWidth}%"></div></div>
+        </li>`;
+      })
+      .join("");
+  }
 }
 
 /** ダッシュボード API を取得 */

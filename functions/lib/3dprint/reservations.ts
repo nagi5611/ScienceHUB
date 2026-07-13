@@ -13,6 +13,7 @@ export interface Reservation {
   summary: string | null;
   print_notes: string | null;
   print_scale: PrintScale;
+  printer_id: string | null;
   desired_date: string;
   stl_r2_key: string;
   stl_filename: string;
@@ -23,6 +24,10 @@ export interface Reservation {
   print_staff_member_id: string | null;
   delivery_staff: string | null;
   google_event_id: string | null;
+  request_print_video: number;
+  print_video_storage_path: string | null;
+  print_video_filename: string | null;
+  print_video_size_bytes: number | null;
   user_id: string;
   created_at: string;
 }
@@ -64,6 +69,37 @@ export interface UploadedPart {
   etag: string;
 }
 
+/** Counts applied (pending acceptance) reservations per printer. */
+export async function getAppliedReservationCountsByPrinter(
+  db: D1Database,
+  date?: string
+): Promise<Record<string, number>> {
+  let query = `
+    SELECT printer_id, COUNT(*) AS count
+    FROM print_reservations
+    WHERE status = 'applied' AND printer_id IS NOT NULL`;
+  const binds: string[] = [];
+
+  if (date) {
+    query += ` AND desired_date = ?`;
+    binds.push(date);
+  }
+
+  query += ` GROUP BY printer_id`;
+
+  const statement = db.prepare(query);
+  const result =
+    binds.length > 0
+      ? await statement.bind(...binds).all<{ printer_id: string; count: number }>()
+      : await statement.all<{ printer_id: string; count: number }>();
+
+  const counts: Record<string, number> = {};
+  for (const row of result.results ?? []) {
+    counts[row.printer_id] = row.count;
+  }
+  return counts;
+}
+
 /** Fetches active reservations for a given date. */
 export async function getReservationsByDate(db: D1Database, date: string): Promise<Reservation[]> {
   const result = await db
@@ -71,6 +107,23 @@ export async function getReservationsByDate(db: D1Database, date: string): Promi
       `SELECT * FROM print_reservations WHERE desired_date = ? AND status != 'cancelled' ORDER BY created_at`
     )
     .bind(date)
+    .all<Reservation>();
+  return result.results ?? [];
+}
+
+/** Fetches active reservations for a given date and printer. */
+export async function getReservationsByDateAndPrinter(
+  db: D1Database,
+  date: string,
+  printerId: string
+): Promise<Reservation[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM print_reservations
+       WHERE desired_date = ? AND printer_id = ? AND status != 'cancelled'
+       ORDER BY created_at`
+    )
+    .bind(date, printerId)
     .all<Reservation>();
   return result.results ?? [];
 }
@@ -210,9 +263,11 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
     .prepare(
       `INSERT INTO print_reservations (
         id, grade, homeroom, student_number, student_name, title,
-        purpose, purpose_other, summary, print_notes, print_scale, desired_date,
-        stl_r2_key, stl_filename, stl_size_bytes, status, user_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        purpose, purpose_other, summary, print_notes, print_scale, printer_id, desired_date,
+        stl_r2_key, stl_filename, stl_size_bytes, status,
+        request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
+        user_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -226,11 +281,16 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.summary ?? '',
       data.print_notes ?? '',
       data.print_scale,
+      data.printer_id,
       data.desired_date,
       data.stl_r2_key,
       data.stl_filename,
       data.stl_size_bytes,
       data.status,
+      data.request_print_video ? 1 : 0,
+      data.print_video_storage_path ?? null,
+      data.print_video_filename ?? null,
+      data.print_video_size_bytes ?? null,
       data.user_id,
       data.created_at
     )
@@ -252,7 +312,9 @@ export async function updateReservationContent(
     summary: string | null;
     print_notes: string | null;
     print_scale: PrintScale;
+    printer_id: string | null;
     desired_date: string;
+    request_print_video: boolean;
     stl_r2_key: string;
     stl_filename: string;
     stl_size_bytes: number;
@@ -263,7 +325,8 @@ export async function updateReservationContent(
       `UPDATE print_reservations SET
         grade = ?, homeroom = ?, student_number = ?, student_name = ?,
         title = ?, purpose = ?, purpose_other = ?, summary = ?, print_notes = ?,
-        print_scale = ?, desired_date = ?,
+        print_scale = ?, printer_id = ?, desired_date = ?,
+        request_print_video = ?,
         stl_r2_key = ?, stl_filename = ?, stl_size_bytes = ?,
         status = 'applied', print_staff_member_id = NULL, google_event_id = NULL,
         status_comment = NULL
@@ -280,13 +343,74 @@ export async function updateReservationContent(
       data.summary ?? '',
       data.print_notes ?? '',
       data.print_scale,
+      data.printer_id,
       data.desired_date,
+      data.request_print_video ? 1 : 0,
       data.stl_r2_key,
       data.stl_filename,
       data.stl_size_bytes,
       id
     )
     .run();
+}
+
+/** 印刷動画のメタデータを更新 */
+export async function updateReservationPrintVideo(
+  db: D1Database,
+  id: string,
+  data: {
+    print_video_storage_path: string;
+    print_video_filename: string;
+    print_video_size_bytes: number;
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE print_reservations SET
+        print_video_storage_path = ?,
+        print_video_filename = ?,
+        print_video_size_bytes = ?
+       WHERE id = ?`
+    )
+    .bind(
+      data.print_video_storage_path,
+      data.print_video_filename,
+      data.print_video_size_bytes,
+      id
+    )
+    .run();
+}
+
+/** 印刷動画のメタデータをクリア */
+export async function clearReservationPrintVideo(db: D1Database, id: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE print_reservations SET
+        print_video_storage_path = NULL,
+        print_video_filename = NULL,
+        print_video_size_bytes = NULL
+       WHERE id = ?`
+    )
+    .bind(id)
+    .run();
+}
+
+/** ユーザーのダウンロード可能な印刷動画一覧 */
+export async function getUserPrintVideos(
+  db: D1Database,
+  userId: string
+): Promise<Reservation[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM print_reservations
+       WHERE user_id = ?
+         AND status != 'cancelled'
+         AND print_video_storage_path IS NOT NULL
+       ORDER BY desired_date DESC, created_at DESC`
+    )
+    .bind(userId)
+    .all<Reservation>();
+  return result.results ?? [];
 }
 
 /** Updates admin fields on a reservation. */

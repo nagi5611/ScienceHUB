@@ -2,7 +2,7 @@
  * クラウドストレージ エクスプローラー
  */
 
-import { apiRequest, createShareLink, fetchDownloadBlob, moveStorageItems } from "./api.js";
+import { apiRequest, createShareLink, createShortcutLink, fetchDownloadBlob, moveStorageItems } from "./api.js";
 import { resolvePreviewBlob } from "./preview-cache.js";
 import {
   clearSessionPreviewCache,
@@ -11,6 +11,13 @@ import {
 } from "./preview-session-cache.js";
 import { uploadFiles } from "./upload.js";
 import { collectFilesFromDataTransfer, isFolderUpload } from "./folder-upload.js";
+import {
+  collectMediaFilesFromClipboard,
+  shouldIgnorePasteTarget,
+} from "./clipboard-paste.js";
+import { loadViewModeForPath, saveViewModeForPath, hasViewModeForPath } from "./view-mode.js";
+import { clearInactiveFileListRoot } from "./list-dom.js";
+import { ICON_THUMB_MAX_EDGE } from "./media-thumb.js";
 import { createUploadProgress } from "./upload-progress.js";
 import {
   classifyFile,
@@ -22,7 +29,7 @@ import {
   PREVIEW_LARGE_WARNING_BYTES,
   renderFileTypeIcon,
 } from "./file-icons.js";
-import { downloadItemsSequentially, downloadSingleFile } from "./download-zip.js";
+import { downloadItems, downloadSingleFile } from "./download-zip.js";
 import { scheduleFolderThumbnails } from "./folder-thumbnails.js";
 import { scheduleFileThumbnails } from "./file-thumbnails.js";
 import { resetThumbnailLoads } from "./thumbnail-session.js";
@@ -72,6 +79,7 @@ let searchUpdatedTo = "";
 let searchStatusText = "";
 let trashView = false;
 let trashQuota = { totalBytes: 0, quotaBytes: 50 * 1024 ** 3 };
+let viewMode = "list";
 
 const SEARCH_SCOPE_LABELS = {
   folder: "このフォルダ内",
@@ -80,6 +88,187 @@ const SEARCH_SCOPE_LABELS = {
 };
 
 const uploadProgress = createUploadProgress();
+
+const MOBILE_MEDIA = "(max-width: 768px)";
+
+function isMobileLayout() {
+  return window.matchMedia(MOBILE_MEDIA).matches;
+}
+
+function closeSidebarDrawer() {
+  const sidebar = document.getElementById("cs-sidebar");
+  const backdrop = document.getElementById("cs-drawer-backdrop");
+  const toggle = document.getElementById("cs-sidebar-toggle");
+  sidebar?.classList.remove("is-open");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.classList.remove("is-visible");
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  toggle?.setAttribute("aria-expanded", "false");
+}
+
+function openSidebarDrawer() {
+  if (!isMobileLayout()) return;
+  const sidebar = document.getElementById("cs-sidebar");
+  const backdrop = document.getElementById("cs-drawer-backdrop");
+  const toggle = document.getElementById("cs-sidebar-toggle");
+  sidebar?.classList.add("is-open");
+  if (backdrop) {
+    backdrop.hidden = false;
+    backdrop.classList.add("is-visible");
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  toggle?.setAttribute("aria-expanded", "true");
+}
+
+function toggleSidebarDrawer() {
+  const sidebar = document.getElementById("cs-sidebar");
+  if (sidebar?.classList.contains("is-open")) closeSidebarDrawer();
+  else openSidebarDrawer();
+}
+
+function closeToolbarMenu() {
+  const menu = document.getElementById("cs-toolbar-menu");
+  const more = document.getElementById("cs-toolbar-more");
+  const backdrop = document.getElementById("cs-toolbar-menu-backdrop");
+  const overflow = document.getElementById("cs-toolbar-overflow");
+  if (menu) menu.hidden = true;
+  more?.setAttribute("aria-expanded", "false");
+  overflow?.classList.remove("is-open");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openToolbarMenu() {
+  if (!isMobileLayout()) return;
+  const menu = document.getElementById("cs-toolbar-menu");
+  const more = document.getElementById("cs-toolbar-more");
+  const backdrop = document.getElementById("cs-toolbar-menu-backdrop");
+  const overflow = document.getElementById("cs-toolbar-overflow");
+  if (!menu || !more) return;
+  menu.hidden = false;
+  more.setAttribute("aria-expanded", "true");
+  overflow?.classList.add("is-open");
+  if (backdrop) {
+    backdrop.hidden = false;
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+}
+
+function toggleToolbarMenu() {
+  const menu = document.getElementById("cs-toolbar-menu");
+  if (!menu) return;
+  if (menu.hidden) openToolbarMenu();
+  else closeToolbarMenu();
+}
+
+function bindMobileShellControls() {
+  document.getElementById("cs-sidebar-toggle")?.addEventListener("click", toggleSidebarDrawer);
+  document.getElementById("cs-drawer-backdrop")?.addEventListener("click", closeSidebarDrawer);
+  document.getElementById("cs-toolbar-menu-backdrop")?.addEventListener("click", closeToolbarMenu);
+  document.getElementById("cs-toolbar-more")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleToolbarMenu();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!isMobileLayout()) return;
+    const menu = document.getElementById("cs-toolbar-menu");
+    const overflow = document.getElementById("cs-toolbar-overflow");
+    if (!menu || menu.hidden) return;
+    if (overflow?.contains(e.target)) return;
+    closeToolbarMenu();
+  });
+
+  document.getElementById("cs-toolbar-menu")?.addEventListener("click", (e) => {
+    if (e.target.closest(".cs-btn")) {
+      closeToolbarMenu();
+    }
+  });
+
+  document.getElementById("cs-sort-field")?.addEventListener("change", () => {
+    if (isMobileLayout()) closeToolbarMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    closeSidebarDrawer();
+    closeToolbarMenu();
+  });
+
+  window.matchMedia(MOBILE_MEDIA).addEventListener("change", () => {
+    closeSidebarDrawer();
+    closeToolbarMenu();
+  });
+}
+
+function resolveViewModeForPath(path) {
+  if (hasViewModeForPath(path)) {
+    return loadViewModeForPath(path);
+  }
+  if (isMobileLayout()) {
+    return "icons";
+  }
+  return "list";
+}
+
+function isIconViewMode() {
+  return viewMode === "icons" && !trashView;
+}
+
+function syncViewModeForCurrentPath() {
+  if (trashView) {
+    viewMode = "list";
+  } else if (currentPath) {
+    viewMode = resolveViewModeForPath(currentPath);
+  } else {
+    viewMode = "list";
+  }
+  updateViewModeUi();
+}
+
+function updateViewModeUi() {
+  const table = document.getElementById("cs-files-table");
+  const grid = document.getElementById("cs-icon-grid");
+  const viewModeBar = document.getElementById("cs-view-mode");
+  const icons = isIconViewMode();
+
+  if (table) table.hidden = icons;
+  if (grid) grid.hidden = !icons;
+  if (viewModeBar) viewModeBar.hidden = trashView;
+
+  document.querySelectorAll(".cs-view-mode-btn").forEach((btn) => {
+    const active = btn.dataset.viewMode === viewMode;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function handleViewModeChange(mode) {
+  if (trashView || !currentPath || mode === viewMode) return;
+  if (mode !== "list" && mode !== "icons") return;
+
+  viewMode = mode;
+  saveViewModeForPath(currentPath, mode);
+  updateViewModeUi();
+
+  if (listItems.length === 0) {
+    setFileListEmpty();
+    return;
+  }
+  renderFileList();
+}
+
+function bindViewModeControls() {
+  document.querySelectorAll(".cs-view-mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      handleViewModeChange(btn.dataset.viewMode ?? "list");
+    });
+  });
+}
 
 function getRootPath(path) {
   const parts = path.split("/").filter(Boolean);
@@ -93,6 +282,7 @@ function updateToolbarForView() {
     "cs-upload-folder-btn",
     "cs-mkdir-btn",
     "cs-download-btn",
+    "cs-shortcut-btn",
     "cs-rename-btn",
     "cs-delete-btn",
     "cs-sort-field",
@@ -132,6 +322,7 @@ function enterTrashView(rootPath = null) {
   selectionAnchorIndex = -1;
   updateSearchUi();
   updateToolbarForView();
+  updateViewModeUi();
   renderRoots();
   refreshListing();
 }
@@ -141,6 +332,7 @@ function exitTrashView() {
   selectedItems.clear();
   selectionAnchorIndex = -1;
   updateToolbarForView();
+  updateViewModeUi();
   renderRoots();
   refreshListing();
 }
@@ -298,12 +490,12 @@ async function handleStorageMoveDrop(items, destPath) {
   }
 }
 
-function syncRowDragState() {
+function syncEntryDragState() {
   const draggable = canDragMove();
-  document.querySelectorAll(".cs-file-row").forEach((row) => {
-    const isSelected = selectedItems.has(row.dataset.path);
-    row.draggable = draggable && isSelected;
-    row.classList.toggle("is-draggable", draggable && isSelected);
+  document.querySelectorAll(".cs-file-entry").forEach((entry) => {
+    const isSelected = selectedItems.has(entry.dataset.path);
+    entry.draggable = draggable && isSelected;
+    entry.classList.toggle("is-draggable", draggable && isSelected);
   });
 }
 
@@ -348,13 +540,13 @@ function canPreviewFile(item) {
 }
 
 function applySelectionToUi() {
-  document.querySelectorAll(".cs-file-row").forEach((row) => {
-    const selected = selectedItems.has(row.dataset.path);
-    row.classList.toggle("is-selected", selected);
-    const cb = row.querySelector(".cs-select");
+  document.querySelectorAll(".cs-file-entry").forEach((entry) => {
+    const selected = selectedItems.has(entry.dataset.path);
+    entry.classList.toggle("is-selected", selected);
+    const cb = entry.querySelector(".cs-select");
     if (cb) cb.checked = selected;
   });
-  syncRowDragState();
+  syncEntryDragState();
 }
 
 function getItemIndex(path) {
@@ -376,6 +568,23 @@ function selectSingleItem(path) {
   selectedItems.clear();
   if (path) selectedItems.add(path);
   selectionAnchorIndex = path ? getItemIndex(path) : -1;
+  applySelectionToUi();
+}
+
+/** チェックボックス用: 他の選択を維持したまま1件だけ切り替え */
+function toggleItemSelection(path) {
+  const index = getItemIndex(path);
+  if (index < 0) return;
+
+  if (selectedItems.has(path)) {
+    selectedItems.delete(path);
+    if (selectedItems.size === 0) {
+      selectionAnchorIndex = -1;
+    }
+  } else {
+    selectedItems.add(path);
+    selectionAnchorIndex = index;
+  }
   applySelectionToUi();
 }
 
@@ -424,7 +633,7 @@ function getMarqueeRect(x1, y1, x2, y2) {
   return { left, top, width, height, right: left + width, bottom: top + height };
 }
 
-function getRowsInMarquee(rect) {
+function getEntriesInMarquee(rect) {
   const domRect = {
     left: rect.left,
     top: rect.top,
@@ -432,29 +641,29 @@ function getRowsInMarquee(rect) {
     bottom: rect.bottom,
   };
   const paths = [];
-  document.querySelectorAll(".cs-file-row").forEach((row) => {
-    if (rectsIntersect(domRect, row.getBoundingClientRect())) {
-      paths.push(row.dataset.path);
+  document.querySelectorAll(".cs-file-entry").forEach((entry) => {
+    if (rectsIntersect(domRect, entry.getBoundingClientRect())) {
+      paths.push(entry.dataset.path);
     }
   });
   return paths;
 }
 
 function clearMarqueePreview() {
-  document.querySelectorAll(".cs-file-row.is-marquee-preview").forEach((row) => {
-    row.classList.remove("is-marquee-preview");
+  document.querySelectorAll(".cs-file-entry.is-marquee-preview").forEach((entry) => {
+    entry.classList.remove("is-marquee-preview");
   });
 }
 
 function previewMarqueeSelection(rect) {
-  const paths = new Set(getRowsInMarquee(rect));
-  document.querySelectorAll(".cs-file-row").forEach((row) => {
-    row.classList.toggle("is-marquee-preview", paths.has(row.dataset.path));
+  const paths = new Set(getEntriesInMarquee(rect));
+  document.querySelectorAll(".cs-file-entry").forEach((entry) => {
+    entry.classList.toggle("is-marquee-preview", paths.has(entry.dataset.path));
   });
 }
 
 function applyMarqueeSelection(rect, addToSelection) {
-  const paths = getRowsInMarquee(rect);
+  const paths = getEntriesInMarquee(rect);
   if (!addToSelection) {
     selectedItems.clear();
   }
@@ -529,17 +738,23 @@ function bindMarqueeSelection() {
     if (session) return;
 
     const tbody = document.getElementById("cs-files-body");
-    if (!tbody) return;
+    const iconGrid = document.getElementById("cs-icon-grid");
+    if (!tbody && !iconGrid) return;
 
-    const onRow = e.target.closest(".cs-file-row");
-    const onStatusRow = e.target.closest(".cs-list-status-row");
+    const onEntry = e.target.closest(".cs-file-entry");
+    const onStatusRow = e.target.closest(".cs-list-status-row, .cs-icon-grid-status");
     const onHeader = e.target.closest("thead");
     const onCheckbox = e.target.closest(".cs-select");
     const onWrapBackground = e.target === wrap;
+    const onGridBackground = iconGrid && e.target === iconGrid;
 
     if (onCheckbox || onStatusRow || onHeader) return;
-    if (onRow && canDragMove() && selectedItems.has(onRow.dataset.path)) return;
-    if (!onRow && !onWrapBackground && !tbody.contains(e.target)) return;
+    if (onEntry && canDragMove() && selectedItems.has(onEntry.dataset.path)) return;
+    if (!onEntry && !onWrapBackground && !onGridBackground) {
+      const inListArea =
+        (tbody && tbody.contains(e.target)) || (iconGrid && iconGrid.contains(e.target));
+      if (!inListArea) return;
+    }
 
     e.preventDefault();
 
@@ -579,6 +794,7 @@ function showContextMenu(clientX, clientY, item) {
 
   if (item.type === "folder") {
     actions.push({ id: "open", label: "開く" });
+    actions.push({ id: "shortcut", label: "ショートカットリンクを取得" });
   } else {
     if (canPreviewFile(item)) {
       if (isOfficePreviewableFilename(item.name)) {
@@ -596,6 +812,7 @@ function showContextMenu(clientX, clientY, item) {
     }
     actions.push({ id: "download", label: "ダウンロード" });
     actions.push({ id: "share", label: "共有リンクを作成" });
+    actions.push({ id: "shortcut", label: "ショートカットリンクを取得" });
   }
 
   actions.push({ id: "rename", label: "名称変更" });
@@ -628,6 +845,7 @@ function showMultiContextMenu(clientX, clientY) {
   if (fileCount > 0) {
     actions.push({ id: "share-selected", label: "共有リンクを作成" });
   }
+  actions.push({ id: "shortcut-selected", label: "ショートカットリンクを取得" });
   actions.push({ id: "download-selected", label: "選択項目をダウンロード" });
   actions.push({ id: "sep" });
   actions.push({ id: "delete-selected", label: "選択項目を削除", danger: true });
@@ -730,9 +948,28 @@ function renderContextMenuAction(action) {
 }
 
 function bindContextSubmenus(itemsEl) {
+  const mobile = isMobileLayout();
   itemsEl.querySelectorAll(".cs-context-menu-item.has-submenu").forEach((item) => {
     const trigger = item.querySelector(".cs-context-menu-submenu-trigger");
+    const submenu = item.querySelector(".cs-context-submenu");
     if (!trigger) return;
+
+    const positionSubmenu = () => {
+      if (!submenu || mobile) return;
+      submenu.style.left = "";
+      submenu.style.right = "";
+      submenu.style.top = "";
+      const submenuRect = submenu.getBoundingClientRect();
+      const padding = 8;
+      if (submenuRect.right > window.innerWidth - padding) {
+        submenu.style.left = "auto";
+        submenu.style.right = "calc(100% - 2px)";
+      }
+      if (submenuRect.bottom > window.innerHeight - padding) {
+        submenu.style.top = "auto";
+        submenu.style.bottom = "0";
+      }
+    };
 
     const open = () => {
       itemsEl.querySelectorAll(".cs-context-menu-item.has-submenu.is-open").forEach((other) => {
@@ -740,11 +977,18 @@ function bindContextSubmenus(itemsEl) {
       });
       item.classList.add("is-open");
       trigger.setAttribute("aria-expanded", "true");
+      requestAnimationFrame(positionSubmenu);
     };
 
     const close = () => {
       item.classList.remove("is-open");
       trigger.setAttribute("aria-expanded", "false");
+      if (submenu) {
+        submenu.style.left = "";
+        submenu.style.right = "";
+        submenu.style.top = "";
+        submenu.style.bottom = "";
+      }
     };
 
     trigger.addEventListener("click", (e) => {
@@ -753,8 +997,10 @@ function bindContextSubmenus(itemsEl) {
       else open();
     });
 
-    item.addEventListener("mouseenter", open);
-    item.addEventListener("mouseleave", close);
+    if (!mobile) {
+      item.addEventListener("mouseenter", open);
+      item.addEventListener("mouseleave", close);
+    }
   });
 }
 
@@ -795,6 +1041,9 @@ function handleMultiContextAction(action) {
     case "share-selected":
       openShareDialog(getSelectedFileItems());
       break;
+    case "shortcut-selected":
+      openShortcutDialogFromSelection();
+      break;
     case "download-selected":
       handleDownloadSelected();
       break;
@@ -825,6 +1074,9 @@ function handleContextAction(action, item) {
       break;
     case "share":
       openShareDialog([item]);
+      break;
+    case "shortcut":
+      openShortcutDialogForItem(item);
       break;
     case "rename":
       renameItem(item);
@@ -1279,6 +1531,7 @@ function clearSearch() {
 }
 
 function refreshListing() {
+  syncViewModeForCurrentPath();
   if (trashView) loadTrash();
   else if (searchActive) loadSearchResults();
   else loadDirectory();
@@ -1325,6 +1578,7 @@ function buildSearchRequestPath(pathSnapshot, offset) {
 async function loadSearchResults() {
   if (!currentPath) return;
 
+  syncViewModeForCurrentPath();
   readSearchForm();
   if (!hasSearchCriteria()) {
     clearSearch();
@@ -1482,12 +1736,14 @@ function renderRoots() {
       updateToolbarForView();
       refreshListing();
       renderRoots();
+      closeSidebarDrawer();
     });
   });
 
   list.querySelectorAll(".cs-root-trash").forEach((btn) => {
     btn.addEventListener("click", () => {
       enterTrashView(btn.dataset.rootPath);
+      closeSidebarDrawer();
     });
   });
 }
@@ -1545,7 +1801,7 @@ function buildFileRowHtml(item) {
   const locationCell = searchActive
     ? `<td class="cs-file-location" title="${escapeHtml(item.location ?? "/")}">${escapeHtml(item.location ?? "/")}</td>`
     : "";
-  return `<tr class="cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
+  return `<tr class="cs-file-entry cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
     <td><input type="checkbox" class="cs-select" ${selected ? "checked" : ""} aria-label="選択"></td>
     <td><span class="cs-file-name-cell">${renderFileTypeIcon(item)}<span class="cs-file-name">${escapeHtml(item.name)}</span></span></td>
     ${locationCell}
@@ -1555,42 +1811,54 @@ function buildFileRowHtml(item) {
   </tr>`;
 }
 
-function bindFileRowEvents(row) {
-  const item = getItemByPath(row.dataset.path);
+function buildFileIconTileHtml(item) {
+  const selected = selectedItems.has(item.path);
+  const locationMeta =
+    searchActive && item.location
+      ? `<p class="cs-icon-tile-meta" title="${escapeHtml(item.location)}">${escapeHtml(item.location)}</p>`
+      : "";
+  return `<div class="cs-file-entry cs-icon-tile cs-icon-tile--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}" role="button" tabindex="0">
+    <label class="cs-icon-tile-check">
+      <input type="checkbox" class="cs-select" ${selected ? "checked" : ""} aria-label="${escapeHtml(item.name)} を選択">
+    </label>
+    <div class="cs-icon-tile-preview">${renderFileTypeIcon(item)}</div>
+    <p class="cs-icon-tile-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</p>
+    ${locationMeta}
+  </div>`;
+}
 
-  row.addEventListener("click", (e) => {
-    if (e.target.closest(".cs-select")) return;
+function bindFileEntryEvents(entry) {
+  const item = getItemByPath(entry.dataset.path);
+
+  entry.addEventListener("click", (e) => {
+    if (e.target.closest(".cs-select, .cs-icon-tile-check")) return;
     if (suppressRowClick) return;
 
-    handleItemSelection(row.dataset.path, {
+    handleItemSelection(entry.dataset.path, {
       shiftKey: e.shiftKey,
       ctrlKey: e.ctrlKey,
       metaKey: e.metaKey,
     });
   });
 
-  const checkbox = row.querySelector(".cs-select");
+  const checkbox = entry.querySelector(".cs-select");
   checkbox?.addEventListener("click", (e) => {
     e.stopPropagation();
-    e.preventDefault();
-    const path = row.dataset.path;
+    const path = entry.dataset.path;
     const index = getItemIndex(path);
 
     if (e.shiftKey && selectionAnchorIndex >= 0) {
+      e.preventDefault();
       selectRange(selectionAnchorIndex, index);
       return;
     }
 
-    if (e.ctrlKey || e.metaKey) {
-      handleItemSelection(path, { ctrlKey: true, metaKey: true });
-      return;
-    }
-
-    handleItemSelection(path);
+    e.preventDefault();
+    toggleItemSelection(path);
   });
 
-  row.addEventListener("dblclick", (e) => {
-    const path = row.dataset.path;
+  entry.addEventListener("dblclick", (e) => {
+    const path = entry.dataset.path;
     const item = getItemByPath(path);
     if (!item) return;
 
@@ -1609,9 +1877,27 @@ function bindFileRowEvents(row) {
     else downloadSingleFile(item.path, item.name);
   });
 
-  row.addEventListener("contextmenu", (e) => {
+  entry.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target.closest(".cs-select")) return;
     e.preventDefault();
-    const item = getItemByPath(row.dataset.path);
+    const path = entry.dataset.path;
+    const item = getItemByPath(path);
+    if (!item || item.isTrash || trashView) return;
+    if (item.type === "folder") {
+      currentPath = path;
+      selectedItems.clear();
+      selectionAnchorIndex = -1;
+      refreshListing();
+      renderRoots();
+      return;
+    }
+    if (canPreviewFile(item)) previewFile(item);
+  });
+
+  entry.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const item = getItemByPath(entry.dataset.path);
     if (!item) return;
 
     if (!selectedItems.has(item.path)) {
@@ -1628,11 +1914,15 @@ function bindFileRowEvents(row) {
     showContextMenu(e.clientX, e.clientY, item);
   });
 
-  if (item && canDragMove()) bindRowMoveDrag(row, item);
+  if (item && canDragMove()) bindRowMoveDrag(entry, item);
 
   if (item?.type === "folder" && canDragMove()) {
-    bindStorageDropTarget(row, item.path);
+    bindStorageDropTarget(entry, item.path);
   }
+}
+
+function getIconGrid() {
+  return document.getElementById("cs-icon-grid");
 }
 
 function getFileListBody() {
@@ -1643,9 +1933,21 @@ function clearFileListStatusRows() {
   getFileListBody()
     ?.querySelectorAll(".cs-list-status-row")
     .forEach((row) => row.remove());
+  getIconGrid()
+    ?.querySelectorAll(".cs-icon-grid-status")
+    .forEach((node) => node.remove());
 }
 
 function setFileListLoading() {
+  clearInactiveFileListRoot();
+
+  if (isIconViewMode()) {
+    const grid = getIconGrid();
+    if (!grid) return;
+    grid.innerHTML = `<p class="cs-icon-grid-status">読み込み中…</p>`;
+    return;
+  }
+
   const tbody = getFileListBody();
   if (!tbody) return;
   tbody.innerHTML =
@@ -1653,31 +1955,50 @@ function setFileListLoading() {
 }
 
 function setFileListEmpty(message = "フォルダは空です") {
+  if (isIconViewMode()) {
+    const grid = getIconGrid();
+    if (!grid) return;
+    grid.innerHTML = `<p class="cs-icon-grid-status cs-empty">${escapeHtml(message)}</p>`;
+    return;
+  }
+
   const tbody = getFileListBody();
   if (!tbody) return;
   tbody.innerHTML = `<tr class="cs-list-status-row"><td colspan="${getTableColSpan()}" class="cs-empty">${escapeHtml(message)}</td></tr>`;
 }
 
 function setFileListLoadingMore(loaded, total) {
+  clearFileListStatusRows();
+  if (isIconViewMode()) {
+    getIconGrid()?.insertAdjacentHTML(
+      "beforeend",
+      `<p class="cs-icon-grid-status" id="cs-list-loading-more">さらに読み込み中… (${loaded}/${total})</p>`
+    );
+    return;
+  }
+
   const tbody = getFileListBody();
   if (!tbody) return;
-  clearFileListStatusRows();
   tbody.insertAdjacentHTML(
     "beforeend",
     `<tr class="cs-list-status-row" id="cs-list-loading-more"><td colspan="${getTableColSpan()}" class="cs-empty">さらに読み込み中… (${loaded}/${total})</td></tr>`
   );
 }
 
+function getThumbnailOptions() {
+  return isIconViewMode() ? { maxEdge: ICON_THUMB_MAX_EDGE } : {};
+}
+
 function enqueueFolderThumbnails(items, generation) {
   if (searchActive) return;
   const folders = items.filter((item) => item.type === "folder");
   if (folders.length === 0) return;
-  scheduleFolderThumbnails(folders, generation);
+  scheduleFolderThumbnails(folders, generation, getThumbnailOptions());
 }
 
 function enqueueFileThumbnails(items, generation) {
   if (searchActive) return;
-  scheduleFileThumbnails(items, generation);
+  scheduleFileThumbnails(items, generation, getThumbnailOptions());
 }
 
 function enqueueListThumbnails(items, generation) {
@@ -1686,42 +2007,66 @@ function enqueueListThumbnails(items, generation) {
 }
 
 function appendFileListRows(items) {
-  const tbody = getFileListBody();
-  if (!tbody || items.length === 0) return;
+  if (items.length === 0) return;
 
   clearFileListStatusRows();
-  const fragment = document.createDocumentFragment();
-  const template = document.createElement("template");
-  template.innerHTML = items.map((item) => buildFileRowHtml(item)).join("");
-  fragment.append(...template.content.children);
-  tbody.append(...fragment.children);
 
-  tbody.querySelectorAll(".cs-file-row--appear").forEach((row) => {
-    row.classList.remove("cs-file-row--appear");
-    bindFileRowEvents(row);
-  });
+  if (isIconViewMode()) {
+    const grid = getIconGrid();
+    if (!grid) return;
+    const template = document.createElement("template");
+    template.innerHTML = items.map((item) => buildFileIconTileHtml(item)).join("");
+    grid.append(...template.content.children);
+    grid.querySelectorAll(".cs-icon-tile--appear").forEach((tile) => {
+      tile.classList.remove("cs-icon-tile--appear");
+      bindFileEntryEvents(tile);
+    });
+  } else {
+    const tbody = getFileListBody();
+    if (!tbody) return;
+    const fragment = document.createDocumentFragment();
+    const template = document.createElement("template");
+    template.innerHTML = items.map((item) => buildFileRowHtml(item)).join("");
+    fragment.append(...template.content.children);
+    tbody.append(...fragment.children);
+    tbody.querySelectorAll(".cs-file-row--appear").forEach((row) => {
+      row.classList.remove("cs-file-row--appear");
+      bindFileEntryEvents(row);
+    });
+  }
 
   enqueueListThumbnails(items, listLoadGeneration);
-  syncRowDragState();
+  syncEntryDragState();
 }
 
 function renderFileList() {
-  const tbody = getFileListBody();
-  if (!tbody) return;
+  clearInactiveFileListRoot();
 
   if (listItems.length === 0) {
     setFileListEmpty();
     return;
   }
 
-  tbody.innerHTML = listItems.map((item) => buildFileRowHtml(item)).join("");
-  tbody.querySelectorAll(".cs-file-row").forEach((row) => {
-    row.classList.remove("cs-file-row--appear");
-    bindFileRowEvents(row);
-  });
+  if (isIconViewMode()) {
+    const grid = getIconGrid();
+    if (!grid) return;
+    grid.innerHTML = listItems.map((item) => buildFileIconTileHtml(item)).join("");
+    grid.querySelectorAll(".cs-icon-tile").forEach((tile) => {
+      tile.classList.remove("cs-icon-tile--appear");
+      bindFileEntryEvents(tile);
+    });
+  } else {
+    const tbody = getFileListBody();
+    if (!tbody) return;
+    tbody.innerHTML = listItems.map((item) => buildFileRowHtml(item)).join("");
+    tbody.querySelectorAll(".cs-file-row").forEach((row) => {
+      row.classList.remove("cs-file-row--appear");
+      bindFileEntryEvents(row);
+    });
+  }
 
   enqueueListThumbnails(listItems, listLoadGeneration);
-  syncRowDragState();
+  syncEntryDragState();
 }
 
 async function loadQuota() {
@@ -1793,7 +2138,7 @@ async function loadTrash() {
 
 function buildTrashRowHtml(item) {
   const selected = selectedItems.has(item.path);
-  return `<tr class="cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
+  return `<tr class="cs-file-entry cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
     <td><input type="checkbox" class="cs-select" ${selected ? "checked" : ""} aria-label="選択"></td>
     <td><span class="cs-file-name-cell">${renderFileTypeIcon(item)}<span class="cs-file-name">${escapeHtml(item.name)}</span></span></td>
     <td>${item.type === "folder" ? "—" : formatBytes(item.sizeBytes)}</td>
@@ -1825,7 +2170,7 @@ function renderTrashFileList() {
   tbody.innerHTML = listItems.map((item) => buildTrashRowHtml(item)).join("");
   tbody.querySelectorAll(".cs-file-row").forEach((row) => {
     row.classList.remove("cs-file-row--appear");
-    bindFileRowEvents(row);
+    bindFileEntryEvents(row);
   });
 }
 
@@ -1923,6 +2268,7 @@ function restoreExplorerTableHeader() {
 async function loadDirectory() {
   if (!currentPath) return;
 
+  syncViewModeForCurrentPath();
   restoreExplorerTableHeader();
 
   const generation = ++listLoadGeneration;
@@ -2000,6 +2346,7 @@ async function loadRoots() {
   if (!currentPath && roots.length > 0) {
     currentPath = roots[0].path;
   }
+  syncViewModeForCurrentPath();
   renderRoots();
   await loadDirectory();
 }
@@ -2014,14 +2361,20 @@ async function handleDownloadSelected() {
   const prog = document.getElementById("cs-upload-progress");
   try {
     showToast("ダウンロードを開始します…");
-    const result = await downloadItemsSequentially(items, {
+    const result = await downloadItems(items, {
       onProgress(done, total, filename) {
         if (!prog) return;
         prog.hidden = false;
         prog.textContent = `ダウンロード中… (${done}/${total}) ${filename}`;
       },
     });
-    showToast(`${result.count} 件のダウンロードを開始しました`);
+    if (result.mode === "zip") {
+      showToast(`${result.count} 件を ZIP でダウンロードしました`);
+    } else if (result.mode === "single") {
+      showToast("ダウンロードを開始しました");
+    } else {
+      showToast(`${result.count} 件のダウンロードを開始しました`);
+    }
   } catch (err) {
     showToast(err.message, true);
   } finally {
@@ -2283,6 +2636,163 @@ async function handleShareCreate() {
   }
 }
 
+/** 選択項目からショートカット先のフォルダパスを決定 */
+function resolveShortcutTargetPath(items, fallbackPath = currentPath) {
+  if (!items.length) {
+    return fallbackPath?.trim() ?? "";
+  }
+
+  const folderPaths = items.map((item) => {
+    if (item.type === "folder") return item.path;
+    const parts = item.path.split("/").filter(Boolean);
+    parts.pop();
+    if (parts.length < 2) return getRootPath(item.path);
+    return parts.join("/");
+  });
+
+  const uniquePaths = [...new Set(folderPaths.filter(Boolean))];
+  if (uniquePaths.length === 1) return uniquePaths[0];
+  return fallbackPath?.trim() ?? uniquePaths[0] ?? "";
+}
+
+function getShortcutLabelForPath(storagePath) {
+  const parts = storagePath.split("/").filter(Boolean);
+  if (parts.length <= 2) return parts[1] ?? storagePath;
+  return parts[parts.length - 1] ?? storagePath;
+}
+
+let shortcutDialogPath = "";
+let shortcutDialogLabel = "";
+
+function closeShortcutDialog() {
+  document.getElementById("cs-shortcut-dialog")?.close();
+  shortcutDialogPath = "";
+  shortcutDialogLabel = "";
+}
+
+function renderShortcutDialogForm(storagePath, label) {
+  const body = document.getElementById("cs-shortcut-dialog-body");
+  const footer = document.getElementById("cs-shortcut-dialog-footer");
+  const title = document.getElementById("cs-shortcut-dialog-title");
+  if (!body || !footer || !title) return;
+
+  title.textContent = "ショートカットリンクを作成";
+  footer.innerHTML = `
+    <button type="button" class="cs-btn" id="cs-shortcut-dialog-cancel">キャンセル</button>
+    <button type="button" class="cs-btn cs-btn-primary" id="cs-shortcut-dialog-create">リンクを作成</button>
+  `;
+
+  body.innerHTML = `
+    <p class="cs-share-dialog-lead">このリンクを開くには ScienceHUB へのログインと、フォルダの閲覧権限が必要です。</p>
+    <p class="cs-shortcut-path"><span class="cs-shortcut-path-label">フォルダ</span> ${escapeHtml(label)}</p>
+    <p class="cs-shortcut-path-note">${escapeHtml(storagePath)}</p>
+  `;
+
+  document.getElementById("cs-shortcut-dialog-cancel")?.addEventListener("click", closeShortcutDialog);
+  document.getElementById("cs-shortcut-dialog-create")?.addEventListener("click", () => {
+    handleShortcutCreate().catch((err) => showToast(err.message, true));
+  });
+}
+
+function renderShortcutDialogResult(result) {
+  const body = document.getElementById("cs-shortcut-dialog-body");
+  const footer = document.getElementById("cs-shortcut-dialog-footer");
+  const title = document.getElementById("cs-shortcut-dialog-title");
+  if (!body || !footer || !title) return;
+
+  title.textContent = "ショートカットリンクを作成しました";
+  footer.innerHTML = `
+    <button type="button" class="cs-btn cs-btn-primary" id="cs-shortcut-dialog-done">閉じる</button>
+  `;
+
+  body.innerHTML = `
+    <p class="cs-share-dialog-lead">以下のリンクを共有してください。閲覧権限のあるユーザーのみ開けます。</p>
+    <label class="cs-share-limit-label" for="cs-shortcut-url">ショートカット URL</label>
+    <div class="cs-share-result-row">
+      <input type="text" class="cs-share-result-input" id="cs-shortcut-url" readonly value="${escapeHtml(result.url)}">
+      <button type="button" class="cs-btn" id="cs-shortcut-copy">コピー</button>
+    </div>
+  `;
+
+  document.getElementById("cs-shortcut-dialog-done")?.addEventListener("click", closeShortcutDialog);
+  document.getElementById("cs-shortcut-copy")?.addEventListener("click", async () => {
+    const input = document.getElementById("cs-shortcut-url");
+    if (!input) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showToast("リンクをコピーしました");
+    } catch {
+      input.select();
+      document.execCommand("copy");
+      showToast("リンクをコピーしました");
+    }
+  });
+}
+
+function openShortcutDialog(storagePath, label) {
+  const dialog = document.getElementById("cs-shortcut-dialog");
+  const trimmedPath = storagePath?.trim() ?? "";
+  if (!dialog || !trimmedPath) {
+    showToast("ショートカットを作成するフォルダを選択してください", true);
+    return;
+  }
+
+  shortcutDialogPath = trimmedPath;
+  shortcutDialogLabel = label?.trim() || getShortcutLabelForPath(trimmedPath);
+  renderShortcutDialogForm(shortcutDialogPath, shortcutDialogLabel);
+  if (!dialog.open) dialog.showModal();
+}
+
+function openShortcutDialogForItem(item) {
+  const storagePath = resolveShortcutTargetPath([item], currentPath);
+  const label =
+    item.type === "folder"
+      ? item.name
+      : getShortcutLabelForPath(storagePath);
+  openShortcutDialog(storagePath, label);
+}
+
+function openShortcutDialogFromSelection() {
+  const items = getSelectedItems();
+  if (items.length === 0) {
+    showToast("ショートカットを作成する項目を選択してください", true);
+    return;
+  }
+
+  const storagePath = resolveShortcutTargetPath(items, currentPath);
+  if (!storagePath) {
+    showToast("ショートカット先のフォルダを特定できません", true);
+    return;
+  }
+
+  const label = getShortcutLabelForPath(storagePath);
+  openShortcutDialog(storagePath, label);
+}
+
+async function handleShortcutCreate() {
+  if (!shortcutDialogPath) {
+    showToast("ショートカット先のフォルダがありません", true);
+    return;
+  }
+
+  const createBtn = document.getElementById("cs-shortcut-dialog-create");
+  if (createBtn) {
+    createBtn.disabled = true;
+    createBtn.textContent = "作成中…";
+  }
+
+  try {
+    const result = await createShortcutLink(shortcutDialogPath, shortcutDialogLabel);
+    renderShortcutDialogResult(result);
+    showToast("ショートカットリンクを作成しました");
+  } finally {
+    if (createBtn) {
+      createBtn.disabled = false;
+      createBtn.textContent = "リンクを作成";
+    }
+  }
+}
+
 async function handleDelete() {
   if (selectedItems.size === 0) {
     showToast("削除する項目を選択してください", true);
@@ -2349,6 +2859,8 @@ function bindEvents() {
   bindMarqueeSelection();
   bindSortControls();
   bindSearchControls();
+  bindViewModeControls();
+  bindMobileShellControls();
 
   document.getElementById("cs-upload-input")?.addEventListener("change", (e) => {
     const files = [...(e.target.files ?? [])];
@@ -2374,6 +2886,7 @@ function bindEvents() {
   document.getElementById("cs-delete-btn")?.addEventListener("click", handleDelete);
   document.getElementById("cs-rename-btn")?.addEventListener("click", handleRename);
   document.getElementById("cs-download-btn")?.addEventListener("click", handleDownloadSelected);
+  document.getElementById("cs-shortcut-btn")?.addEventListener("click", openShortcutDialogFromSelection);
   document.getElementById("cs-trash-back-btn")?.addEventListener("click", exitTrashView);
   document.getElementById("cs-trash-restore-btn")?.addEventListener("click", handleTrashRestore);
   document.getElementById("cs-trash-purge-btn")?.addEventListener("click", handleTrashPurge);
@@ -2387,6 +2900,19 @@ function bindEvents() {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideContextMenu();
+  });
+
+  document.addEventListener("paste", (e) => {
+    if (shouldIgnorePasteTarget(e.target)) return;
+    if (trashView || !currentPath) return;
+
+    const files = collectMediaFilesFromClipboard(e.clipboardData);
+    if (files.length === 0) return;
+
+    e.preventDefault();
+    handleUpload(files).catch((err) => {
+      showToast(err?.message ?? "貼り付けのアップロードに失敗しました", true);
+    });
   });
 
   document.addEventListener("scroll", hideContextMenu, true);
@@ -2436,6 +2962,9 @@ function bindEvents() {
   document.getElementById("cs-share-dialog-close")?.addEventListener("click", closeShareDialog);
   document.getElementById("cs-share-dialog")?.addEventListener("cancel", closeShareDialog);
 
+  document.getElementById("cs-shortcut-dialog-close")?.addEventListener("click", closeShortcutDialog);
+  document.getElementById("cs-shortcut-dialog")?.addEventListener("cancel", closeShortcutDialog);
+
   const dropZone = document.getElementById("cs-drop-zone");
   dropZone?.addEventListener("dragover", (e) => {
     if (activeDragMoveItems?.length) return;
@@ -2465,6 +2994,7 @@ async function init() {
   bindEvents();
   updateSortUi();
   updateToolbarForView();
+  updateViewModeUi();
   await loadRoots();
 }
 

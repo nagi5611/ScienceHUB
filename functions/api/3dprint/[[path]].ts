@@ -11,12 +11,8 @@ import {
   getAdminEarliestBookableDate,
   getTodayJst,
   addDays,
-  canBookSlot,
   isDateBookable,
   isAdminDateBookable,
-  getRemainingCapacity,
-  getAvailableScales,
-  isDayFull,
   type PrintScale,
 } from "../../lib/3dprint/slots";
 import {
@@ -32,12 +28,12 @@ import {
   getAvailabilityInRange,
   getMemberById,
   getReservationById,
-  getReservationsByDate,
   getReservationsInRange,
   getUserUpcomingReservations,
   getUserRecentPastReservations,
   hasUserReservationsBeforeDate,
   getUserOlderReservations,
+  getAppliedReservationCountsByPrinter,
   type ReservationListCursor,
   hasStaffOnDate,
   setMemberAvailability,
@@ -47,6 +43,9 @@ import {
   updateReservationAdmin,
   updateReservationContent,
   deleteReservation,
+  updateReservationPrintVideo,
+  clearReservationPrintVideo,
+  getUserPrintVideos,
   type Member,
   type Reservation,
 } from "../../lib/3dprint/reservations";
@@ -92,7 +91,59 @@ import {
   verifyR2Key,
   streamPrintFile,
 } from "../../lib/3dprint/upload";
+import {
+  countReservationsByPrinterId,
+  createPrinter,
+  deletePrinter,
+  formatPrinterForApi,
+  getAllPrinters,
+  getPrinterById,
+  updatePrinterImage,
+  updatePrinterName,
+  updatePrinterCapabilities,
+  updatePrinterStatus,
+  updatePrinterDailyCapacity,
+  getPrinterBookingError,
+  validatePrinterDailyCapacityInput,
+  type Printer,
+} from "../../lib/3dprint/printers";
+import { validatePrinterCapabilitiesInput, parsePrinterCapabilities } from "../../lib/3dprint/printer-capabilities";
+import { validatePrinterStatusInput, type PrinterStatus } from "../../lib/3dprint/printer-status";
+import {
+  streamPrinterImage,
+  uploadPrinterImage,
+} from "../../lib/3dprint/printer-image";
+import {
+  getDateAvailability,
+  validatePrinterReservationSlot,
+} from "../../lib/3dprint/availability";
+import {
+  checkPrinterShiftRemovalBlocked,
+  checkPrinterShiftRemovalBlockedForDates,
+} from "../../lib/3dprint/printer-shift-guard";
+import {
+  getPrinterAvailabilityInRange,
+  isPrinterAvailableOnDate,
+  setPrinterAvailability,
+  togglePrinterAvailability,
+} from "../../lib/3dprint/printer-availability";
 import { error, json } from "../../lib/3dprint/response";
+import {
+  getPrintVideoStoragePath,
+  setPrintVideoStoragePath,
+  getManagementAccessibleGroupRoots,
+  validatePrintVideoStoragePathForUser,
+} from "../../lib/3dprint/print-app-settings";
+import {
+  deletePrintVideoFile,
+  resolveRequestPrintVideo,
+  uploadPrintVideoToStorage,
+  validatePrintVideoFilename,
+} from "../../lib/3dprint/print-video";
+import { parseLogicalPath } from "../../lib/storage/keys";
+import { streamStorageFile } from "../../lib/storage/operations";
+import { listDirectory } from "../../lib/storage/list";
+import { authorizeStoragePath } from "../../lib/storage/permissions";
 
 const RESERVATION_APP = "3dprint-reservation";
 const MANAGEMENT_APP = "3dprint-management";
@@ -140,10 +191,16 @@ function resolvePrintStaffLabel(
 }
 
 /** Formats reservation for public calendar API. */
-function publicCalendarReservation(r: Reservation, memberMap: Map<string, Member>) {
+function publicCalendarReservation(
+  r: Reservation,
+  memberMap: Map<string, Member>,
+  printerMap: Map<string, Printer>
+) {
   return {
     id: r.id,
     print_scale: r.print_scale,
+    printer_id: r.printer_id,
+    printer_name: resolvePrinterLabel(r, printerMap),
     desired_date: r.desired_date,
     status: r.status,
     title: r.title,
@@ -154,11 +211,18 @@ function publicCalendarReservation(r: Reservation, memberMap: Map<string, Member
 }
 
 /** Formats reservation for user detail API. */
-function userReservationDetail(r: Reservation, memberMap: Map<string, Member>) {
+function userReservationDetail(
+  r: Reservation,
+  memberMap: Map<string, Member>,
+  printerMap: Map<string, Printer>
+) {
   return {
     id: r.id,
     title: r.title,
     print_scale: r.print_scale,
+    printer_id: r.printer_id,
+    printer_name: resolvePrinterLabel(r, printerMap),
+    printer_capabilities: resolvePrinterCapabilities(r, printerMap),
     desired_date: r.desired_date,
     status: r.status,
     purpose: r.purpose,
@@ -169,12 +233,42 @@ function userReservationDetail(r: Reservation, memberMap: Map<string, Member>) {
     status_comment: r.status_comment || null,
     stl_filename: r.stl_filename,
     stl_size_bytes: r.stl_size_bytes,
+    request_print_video: Boolean(r.request_print_video),
+    has_print_video: Boolean(r.print_video_storage_path),
+    print_video_filename: r.print_video_filename || null,
     retryable: r.status === "failed",
     editable: canEditReservation(r) && r.status !== "failed",
     homeroom: r.homeroom,
     student_number: r.student_number,
     student_name: r.student_name,
   };
+}
+
+/** Builds a printer ID lookup map. */
+async function buildPrinterMap(db: D1Database): Promise<Map<string, Printer>> {
+  const printers = await getAllPrinters(db);
+  return new Map(printers.map((p) => [p.id, p]));
+}
+
+/** Resolves printer capabilities from ID map. */
+function resolvePrinterCapabilities(
+  r: Reservation,
+  printerMap: Map<string, Printer>
+): ReturnType<typeof parsePrinterCapabilities> | null {
+  if (!r.printer_id) return null;
+  const printer = printerMap.get(r.printer_id);
+  if (!printer) return null;
+  return parsePrinterCapabilities(printer.capabilities_json);
+}
+
+/** Resolves printer display name from ID map. */
+function resolvePrinterLabel(
+  r: Reservation,
+  printerMap: Map<string, Printer>
+): string | null {
+  if (!r.printer_id) return null;
+  const printer = printerMap.get(r.printer_id);
+  return printer?.name ?? null;
 }
 
 /** Builds a member ID lookup map. */
@@ -193,16 +287,62 @@ function shiftBlockError(date: string, reservations: ShiftBlockReservation[]): R
 }
 
 /** Enriches a reservation with print staff label for admin responses. */
-function enrichReservationForAdmin(r: Reservation, memberMap: Map<string, Member>) {
+function enrichReservationForAdmin(
+  r: Reservation,
+  memberMap: Map<string, Member>,
+  printerMap: Map<string, Printer>
+) {
   return {
     ...r,
     print_staff_label: resolvePrintStaffLabel(r, memberMap),
+    printer_name: resolvePrinterLabel(r, printerMap),
+    printer_capabilities: resolvePrinterCapabilities(r, printerMap),
   };
 }
 
-/** Checks if booking fails due to small/medium-large conflict. */
-function hasSmallConflict(existingScales: PrintScale[], newScale: PrintScale): boolean {
-  return existingScales.includes("small") && (newScale === "medium" || newScale === "large");
+/** Maps availability result to API JSON (camelCase). */
+function mapAvailabilityResponse(result: Awaited<ReturnType<typeof getDateAvailability>>) {
+  return {
+    date: result.date,
+    bookable: result.bookable,
+    remaining: result.remaining,
+    canBook: result.can_book,
+    isFull: result.is_full,
+    staffAvailable: result.staff_available,
+    printerAvailable: result.printer_available,
+    availableScales: result.available_scales,
+    count: result.count,
+    scales: result.scales,
+    printers: result.printers,
+  };
+}
+
+/** Returns 409 when printer shift removal is blocked by reservations. */
+function printerShiftBlockError(
+  date: string,
+  reservations: { id: string; title: string; print_scale: string; desired_date: string; status: string }[]
+): Response {
+  return error("この日のプリンター稼働を外すには、紐づく予約をリスケしてください", 409, {
+    code: "RESERVATIONS_ON_PRINTER_DATE",
+    date,
+    reservations,
+  });
+}
+
+/** Validates printer_id exists and is bookable for user reservations. */
+async function validatePrinterId(
+  db: D1Database,
+  printerId: string,
+  options: { requireBookable?: boolean } = {}
+): Promise<string | null> {
+  const requireBookable = options.requireBookable !== false;
+  if (!printerId?.trim()) return "印刷機種を選択してください";
+  const printer = await getPrinterById(db, printerId);
+  if (!printer) return "指定されたプリンターが見つかりません";
+  if (requireBookable) {
+    return getPrinterBookingError(printer);
+  }
+  return null;
 }
 
 /** Applies reservation content edit. */
@@ -230,11 +370,20 @@ async function applyReservationContentEdit(
     return error(`希望印刷日は ${minDate} 以降を選択してください`);
   }
 
+  const printerId = body.printer_id ?? reservation.printer_id;
+  if (!printerId) {
+    return error("印刷機種を選択してください");
+  }
+  const printerError = await validatePrinterId(db, printerId, { requireBookable: options.isUser });
+  if (printerError) return error(printerError);
+
   const slotError = await validateReservationSlot(
     db,
     body.desired_date,
     body.print_scale,
-    reservation.id
+    reservation.id,
+    printerId,
+    { isAdmin: !options.isUser }
   );
   if (slotError) return error(slotError);
 
@@ -263,6 +412,13 @@ async function applyReservationContentEdit(
     stlSizeBytes = Number(body.stl_size_bytes);
   }
 
+  const videoResolved = await resolveRequestPrintVideo(
+    db,
+    printerId,
+    body.request_print_video ?? reservation.request_print_video === 1
+  );
+  if (!videoResolved.ok) return error(videoResolved.error);
+
   await deleteCalendarEvent(env, reservation.google_event_id);
 
   await updateReservationContent(db, reservation.id, {
@@ -276,7 +432,9 @@ async function applyReservationContentEdit(
     summary: body.summary?.trim() || null,
     print_notes: body.print_notes?.trim() || null,
     print_scale: body.print_scale,
+    printer_id: printerId,
     desired_date: body.desired_date,
+    request_print_video: videoResolved.value,
     stl_r2_key: stlR2Key,
     stl_filename: stlFilename,
     stl_size_bytes: stlSizeBytes,
@@ -296,11 +454,12 @@ async function applyReservationContentEdit(
 
   const updated = await getReservationById(db, reservation.id);
   const memberMap = await buildMemberMap(db);
+  const printerMap = await buildPrinterMap(db);
   return json({
     reservation: updated
       ? options.isUser
-        ? userReservationDetail(updated, memberMap)
-        : enrichReservationForAdmin(updated, memberMap)
+        ? userReservationDetail(updated, memberMap, printerMap)
+        : enrichReservationForAdmin(updated, memberMap, printerMap)
       : null,
     message: "予約内容を修正しました。再承認をお待ちください",
   });
@@ -361,6 +520,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     } else if (
       segments[0] === "calendar" ||
       segments[0] === "reservations" ||
+      segments[0] === "printers" ||
+      segments[0] === "print-videos" ||
       segments.length === 0
     ) {
       const resAccess = await requireAppAccess(request, env, RESERVATION_APP);
@@ -411,6 +572,44 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: true });
     }
 
+    // GET /api/3dprint/printers
+    if (method === "GET" && segments[0] === "printers" && segments.length === 1) {
+      const date = url.searchParams.get("date");
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return error("date が不正です");
+      }
+
+      const printers = await getAllPrinters(db);
+      const waitingCounts = await getAppliedReservationCountsByPrinter(db, date ?? undefined);
+      const formatted = await Promise.all(
+        printers.map(async (printer) => {
+          const shiftAvailable = date
+            ? await isPrinterAvailableOnDate(db, printer.id, date)
+            : true;
+          return {
+            ...formatPrinterForApi(printer, waitingCounts[printer.id] ?? 0),
+            shift_available: shiftAvailable,
+          };
+        })
+      );
+      return json({ printers: formatted });
+    }
+
+    // GET /api/3dprint/printers/:id/image
+    if (
+      method === "GET" &&
+      segments[0] === "printers" &&
+      segments[2] === "image" &&
+      segments.length === 3
+    ) {
+      const printer = await getPrinterById(db, segments[1]);
+      if (!printer?.image_r2_key) {
+        return error("画像が見つかりません", 404);
+      }
+      const filename = printer.image_r2_key.split("/").pop() ?? "printer-image.png";
+      return streamPrinterImage(env.FILES, printer.image_r2_key, filename);
+    }
+
     // POST /api/3dprint/reservations
     if (method === "POST" && segments[0] === "reservations" && segments.length === 1) {
       const profile = await requireCompletePrintProfile(db, userId);
@@ -422,7 +621,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other?: string;
         summary?: string;
         print_notes?: string;
+        request_print_video?: boolean;
         print_scale: PrintScale;
+        printer_id: string;
         desired_date: string;
         stl_r2_key: string;
         stl_filename: string;
@@ -433,6 +634,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         "title",
         "purpose",
         "print_scale",
+        "printer_id",
         "desired_date",
         "stl_r2_key",
         "stl_filename",
@@ -444,6 +646,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return error(`${field} は必須です`);
         }
       }
+
+      const printerError = await validatePrinterId(db, body.printer_id);
+      if (printerError) return error(printerError);
 
       if (!["small", "medium", "large"].includes(body.print_scale)) {
         return error("印刷規模が不正です");
@@ -461,18 +666,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error(`希望印刷日は ${getEarliestBookableDate()} 以降を選択してください`);
       }
 
-      const existing = await getReservationsByDate(db, body.desired_date);
-      const existingScales = existing.map((r) => r.print_scale);
-      if (isDayFull(existingScales)) {
-        return error("この日はもう満杯です。別の日付を選んでください");
-      }
-
-      if (!canBookSlot(existingScales, body.print_scale)) {
-        if (hasSmallConflict(existingScales, body.print_scale)) {
-          return error("この日はスモール印刷が入っているため、ミディアム・ラージは選択できません");
-        }
-        return error("選択した日付の予約枠がいっぱいです。別の日付を選んでください");
-      }
+      const slotError = await validatePrinterReservationSlot(
+        db,
+        body.desired_date,
+        body.printer_id,
+        body.print_scale,
+        "",
+        { isAdmin: false }
+      );
+      if (slotError) return error(slotError);
 
       const staffAvailable = await hasStaffOnDate(db, body.desired_date);
       if (!staffAvailable) {
@@ -483,6 +685,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!keyExists) {
         return error("ファイルが見つかりません。再度アップロードしてください");
       }
+
+      const videoResolved = await resolveRequestPrintVideo(
+        db,
+        body.printer_id,
+        body.request_print_video
+      );
+      if (!videoResolved.ok) return error(videoResolved.error);
 
       const reservation: Reservation = {
         id: crypto.randomUUID(),
@@ -496,6 +705,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
         print_scale: body.print_scale,
+        printer_id: body.printer_id,
         desired_date: body.desired_date,
         stl_r2_key: body.stl_r2_key,
         stl_filename: body.stl_filename,
@@ -506,6 +716,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         print_staff_member_id: null,
         delivery_staff: null,
         google_event_id: null,
+        request_print_video: videoResolved.value ? 1 : 0,
+        print_video_storage_path: null,
+        print_video_filename: null,
+        print_video_size_bytes: null,
         user_id: userId,
         created_at: new Date().toISOString(),
       };
@@ -540,6 +754,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       const recentPastStart = addDays(today, -RECENT_PAST_DAYS);
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       const [upcoming, recentPast] = await Promise.all([
         getUserUpcomingReservations(db, userId, today),
         getUserRecentPastReservations(db, userId, recentPastStart, today),
@@ -547,7 +762,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const hasOlderPast = await hasUserReservationsBeforeDate(db, userId, recentPastStart);
 
       const mapOwned = (r: Reservation) => ({
-        ...publicCalendarReservation(r, memberMap),
+        ...publicCalendarReservation(r, memberMap, printerMap),
         owned: true,
       });
 
@@ -588,6 +803,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       const batch = await getUserOlderReservations(
         db,
         userId,
@@ -601,7 +817,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       return json({
         reservations: page.map((r) => ({
-          ...publicCalendarReservation(r, memberMap),
+          ...publicCalendarReservation(r, memberMap, printerMap),
           owned: true,
         })),
         hasMore,
@@ -624,10 +840,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const { start, end } = getMonthRange(year, month);
       const reservations = await getReservationsInRange(db, start, end);
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       const shiftAvailability = await getAvailabilityInRange(db, start, end);
+      const printerAvailability = await getPrinterAvailabilityInRange(db, start, end);
       const staffCountByDate: Record<string, number> = {};
+      const printerCountByDate: Record<string, number> = {};
       for (const row of shiftAvailability) {
         staffCountByDate[row.date] = (staffCountByDate[row.date] ?? 0) + 1;
+      }
+      for (const row of printerAvailability) {
+        printerCountByDate[row.date] = (printerCountByDate[row.date] ?? 0) + 1;
       }
       return json({
         year,
@@ -635,8 +857,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         earliestBookable: getEarliestBookableDate(),
         staffAvailableDates: Object.keys(staffCountByDate),
         staffCountByDate,
+        printerAvailableDates: Object.keys(printerCountByDate),
+        printerCountByDate,
         reservations: reservations.map((r) => ({
-          ...publicCalendarReservation(r, memberMap),
+          ...publicCalendarReservation(r, memberMap, printerMap),
           owned: r.user_id === userId,
         })),
       });
@@ -652,7 +876,55 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("この予約にアクセスする権限がありません", 403);
       }
       const memberMap = await buildMemberMap(db);
-      return json({ reservation: userReservationDetail(reservation, memberMap) });
+      const printerMap = await buildPrinterMap(db);
+      return json({ reservation: userReservationDetail(reservation, memberMap, printerMap) });
+    }
+
+    // GET /api/3dprint/reservations/:id/print-video/download
+    if (
+      method === "GET" &&
+      segments[0] === "reservations" &&
+      segments.length === 4 &&
+      segments[2] === "print-video" &&
+      segments[3] === "download"
+    ) {
+      const reservation = await getReservationById(db, segments[1]);
+      if (!reservation || reservation.status === "cancelled") {
+        return error("予約が見つかりません", 404);
+      }
+      if (reservation.user_id !== userId) {
+        return error("この予約にアクセスする権限がありません", 403);
+      }
+      if (!reservation.print_video_storage_path) {
+        return error("印刷動画はまだアップロードされていません", 404);
+      }
+
+      const parsed = parseLogicalPath(reservation.print_video_storage_path);
+      if (!parsed?.relativePath) {
+        return error("動画ファイルのパスが不正です", 500);
+      }
+
+      try {
+        return await streamStorageFile(env, parsed);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "ダウンロードに失敗しました";
+        return error(message, 404);
+      }
+    }
+
+    // GET /api/3dprint/print-videos
+    if (method === "GET" && segments[0] === "print-videos" && segments.length === 1) {
+      const videos = await getUserPrintVideos(db, userId);
+      return json({
+        videos: videos.map((r) => ({
+          id: r.id,
+          title: r.title,
+          desired_date: r.desired_date,
+          print_video_filename: r.print_video_filename,
+          print_video_size_bytes: r.print_video_size_bytes,
+          download_url: `/api/3dprint/reservations/${r.id}/print-video/download`,
+        })),
+      });
     }
 
     // PATCH /api/3dprint/reservations/:id
@@ -713,6 +985,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           student_name: profile.student_name,
         }, userId);
         const memberMap = await buildMemberMap(db);
+        const printerMap = await buildPrinterMap(db);
 
         context.waitUntil(
           notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
@@ -723,7 +996,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         );
 
         return json({
-          reservation: userReservationDetail(created, memberMap),
+          reservation: userReservationDetail(created, memberMap, printerMap),
           message: "再予約を申請しました。受領後に確定します。",
         });
       } catch (err) {
@@ -756,31 +1029,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[0] === "calendar" && segments[1] === "availability") {
       const date = url.searchParams.get("date");
       const scale = url.searchParams.get("scale") as PrintScale | null;
+      const printerId = url.searchParams.get("printer_id");
       const excludeId = url.searchParams.get("exclude_reservation_id");
       if (!date) return error("date が必要です");
 
-      const existing = await getReservationsByDate(db, date);
-      const filtered = excludeId ? existing.filter((r) => r.id !== excludeId) : existing;
-      const existingScales = filtered.map((r) => r.print_scale);
-      const remaining = getRemainingCapacity(existingScales);
-      const bookable = isDateBookable(date);
-      const availableScales = getAvailableScales(existingScales);
-      const full = isDayFull(existingScales);
-      const staffAvailable = await hasStaffOnDate(db, date);
-      const slotOk = scale ? canBookSlot(existingScales, scale) : !full;
-      const canBook = bookable && staffAvailable && slotOk;
-
-      return json({
-        date,
-        bookable,
-        remaining,
-        canBook,
-        isFull: full,
-        staffAvailable,
-        availableScales,
-        count: filtered.length,
-        scales: existingScales,
+      const result = await getDateAvailability(db, date, {
+        printerId,
+        scale,
+        excludeReservationId: excludeId,
+        isAdmin: false,
       });
+      return json(mapAvailabilityResponse(result));
     }
 
     // --- Admin routes (management app access already verified) ---
@@ -795,29 +1054,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     ) {
       const date = url.searchParams.get("date");
       const scale = url.searchParams.get("scale") as PrintScale | null;
+      const printerId = url.searchParams.get("printer_id");
       const excludeId = url.searchParams.get("exclude_reservation_id");
       if (!date) return error("date が必要です");
 
-      const existing = await getReservationsByDate(db, date);
-      const filtered = excludeId ? existing.filter((r) => r.id !== excludeId) : existing;
-      const existingScales = filtered.map((r) => r.print_scale);
-      const remaining = getRemainingCapacity(existingScales);
-      const bookable = isAdminDateBookable(date);
-      const availableScales = getAvailableScales(existingScales);
-      const full = isDayFull(existingScales);
-      const slotOk = scale ? canBookSlot(existingScales, scale) : !full;
-      const canBook = bookable && slotOk;
-
-      return json({
-        date,
-        bookable,
-        remaining,
-        canBook,
-        isFull: full,
-        availableScales,
-        count: filtered.length,
-        scales: existingScales,
+      const result = await getDateAvailability(db, date, {
+        printerId,
+        scale,
+        excludeReservationId: excludeId,
+        isAdmin: true,
       });
+      return json(mapAvailabilityResponse(result));
     }
 
     // POST /api/3dprint/admin/reservations
@@ -832,6 +1079,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         summary?: string | null;
         print_notes?: string | null;
         print_scale: PrintScale;
+        printer_id: string;
         desired_date: string;
         stl_r2_key: string;
         stl_filename: string;
@@ -846,6 +1094,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         "title",
         "purpose",
         "print_scale",
+        "printer_id",
         "desired_date",
         "stl_r2_key",
         "stl_filename",
@@ -862,24 +1111,36 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("ホームルームは 101〜109、201〜209、301〜309 から選択してください");
       }
 
+      const adminPrinterError = await validatePrinterId(db, body.printer_id, {
+        requireBookable: false,
+      });
+      if (adminPrinterError) return error(adminPrinterError);
+
       if (!isAdminDateBookable(body.desired_date)) {
         return error(`希望印刷日は ${getAdminEarliestBookableDate()} 以降を選択してください`);
       }
 
-      const existing = await getReservationsByDate(db, body.desired_date);
-      const existingScales = existing.map((r) => r.print_scale);
-      if (isDayFull(existingScales)) {
-        return error("この日はもう満杯です。別の日付を選んでください");
-      }
-
-      if (!canBookSlot(existingScales, body.print_scale)) {
-        return error("選択した日付の予約枠がいっぱいです。別の日付を選んでください");
-      }
+      const slotError = await validatePrinterReservationSlot(
+        db,
+        body.desired_date,
+        body.printer_id,
+        body.print_scale,
+        "",
+        { isAdmin: true }
+      );
+      if (slotError) return error(slotError);
 
       const keyExists = await verifyR2Key(env.FILES, body.stl_r2_key);
       if (!keyExists) {
         return error("ファイルが見つかりません。再度アップロードしてください");
       }
+
+      const adminVideoResolved = await resolveRequestPrintVideo(
+        db,
+        body.printer_id,
+        (body as { request_print_video?: boolean }).request_print_video
+      );
+      if (!adminVideoResolved.ok) return error(adminVideoResolved.error);
 
       const targetUserId = body.user_id?.trim() || userId;
 
@@ -895,6 +1156,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
         print_scale: body.print_scale,
+        printer_id: body.printer_id,
         desired_date: body.desired_date,
         stl_r2_key: body.stl_r2_key,
         stl_filename: body.stl_filename,
@@ -905,6 +1167,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         print_staff_member_id: null,
         delivery_staff: null,
         google_event_id: null,
+        request_print_video: adminVideoResolved.value ? 1 : 0,
+        print_video_storage_path: null,
+        print_video_filename: null,
+        print_video_size_bytes: null,
         user_id: targetUserId,
         created_at: new Date().toISOString(),
       };
@@ -920,18 +1186,85 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
 
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       return json(
-        { id: reservation.id, reservation: enrichReservationForAdmin(reservation, memberMap) },
+        { id: reservation.id, reservation: enrichReservationForAdmin(reservation, memberMap, printerMap) },
         201
       );
+    }
+
+    // GET /api/3dprint/admin/settings/print-video
+    if (method === "GET" && segments[1] === "settings" && segments[2] === "print-video") {
+      const storage_path = await getPrintVideoStoragePath(db);
+      const group_roots = await getManagementAccessibleGroupRoots(
+        db,
+        authUser.id,
+        authUser.is_admin
+      );
+      return json({ storage_path, group_roots });
+    }
+
+    // PATCH /api/3dprint/admin/settings/print-video
+    if (method === "PATCH" && segments[1] === "settings" && segments[2] === "print-video") {
+      const body = await request.json<{ storage_path?: string }>();
+      const storagePath = body.storage_path?.trim() ?? "";
+      const pathError = await validatePrintVideoStoragePathForUser(
+        db,
+        authUser.id,
+        authUser.is_admin,
+        storagePath
+      );
+      if (pathError) return error(pathError);
+      await setPrintVideoStoragePath(db, storagePath.replace(/^\/+|\/+$/g, ""));
+      return json({ storage_path: storagePath.replace(/^\/+|\/+$/g, "") });
+    }
+
+    // GET /api/3dprint/admin/settings/storage-list
+    if (method === "GET" && segments[1] === "settings" && segments[2] === "storage-list") {
+      const listPath = url.searchParams.get("path") ?? "";
+      const parsed = parseLogicalPath(listPath);
+      if (!parsed) return error("パスが不正です");
+
+      const pathError = await validatePrintVideoStoragePathForUser(
+        db,
+        authUser.id,
+        authUser.is_admin,
+        listPath
+      );
+      if (pathError) return error(pathError);
+
+      const authorized = await authorizeStoragePath(
+        env,
+        db,
+        authUser,
+        listPath,
+        "read",
+        true
+      );
+      if (typeof authorized === "string") {
+        return error(authorized, 403);
+      }
+
+      const result = await listDirectory(
+        env,
+        parsed.rootType,
+        parsed.rootKey,
+        parsed.relativePath,
+        { limit: 200 }
+      );
+      return json({
+        path: result.path,
+        items: result.items.filter((item) => item.type === "folder"),
+      });
     }
 
     // GET /api/3dprint/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
       const reservations = await getAllReservations(db);
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       return json({
-        reservations: reservations.map((r) => enrichReservationForAdmin(r, memberMap)),
+        reservations: reservations.map((r) => enrichReservationForAdmin(r, memberMap, printerMap)),
       });
     }
 
@@ -940,6 +1273,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const reservation = await getReservationById(db, segments[2]);
       if (!reservation) return error("予約が見つかりません", 404);
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       const availableIds = await getAvailableMemberIdsOnDate(db, reservation.desired_date);
       const members = await getAllMembers(db);
       const available_staff = members.filter(
@@ -947,7 +1281,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           availableIds.includes(m.id) || m.id === reservation.print_staff_member_id
       );
       return json({
-        reservation: enrichReservationForAdmin(reservation, memberMap),
+        reservation: enrichReservationForAdmin(reservation, memberMap, printerMap),
         available_staff,
       });
     }
@@ -1006,8 +1340,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
       const updated = await getReservationById(db, segments[2]);
       const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
       return json({
-        reservation: updated ? enrichReservationForAdmin(updated, memberMap) : null,
+        reservation: updated ? enrichReservationForAdmin(updated, memberMap, printerMap) : null,
       });
     }
 
@@ -1040,7 +1375,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       try {
         const updated = await adminRescheduleReservation(env, segments[2], body.desired_date);
         const memberMap = await buildMemberMap(db);
-        return json({ reservation: enrichReservationForAdmin(updated, memberMap) });
+        const printerMap = await buildPrinterMap(db);
+        return json({ reservation: enrichReservationForAdmin(updated, memberMap, printerMap) });
       } catch (err) {
         return error(err instanceof Error ? err.message : "リスケに失敗しました");
       }
@@ -1097,9 +1433,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const finalReservation = await getReservationById(db, segments[2]);
+      const printerMap = await buildPrinterMap(db);
       return json({
         reservation: finalReservation
-          ? enrichReservationForAdmin(finalReservation, memberMap)
+          ? enrichReservationForAdmin(finalReservation, memberMap, printerMap)
           : null,
         calendar,
       });
@@ -1207,7 +1544,68 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const { start, end } = getMonthRange(year, month);
       const members = await getAllMembers(db);
       const availability = await getAvailabilityInRange(db, start, end);
-      return json({ year, month, members, availability });
+      const printers = await getAllPrinters(db);
+      const printerAvailability = await getPrinterAvailabilityInRange(db, start, end);
+      return json({
+        year,
+        month,
+        members,
+        availability,
+        printers: printers.map((p) => formatPrinterForApi(p)),
+        printer_availability: printerAvailability,
+      });
+    }
+
+    // PUT /api/3dprint/admin/shifts/printer-availability
+    if (method === "PUT" && segments[1] === "shifts" && segments[2] === "printer-availability") {
+      const body = await request.json<{
+        printer_id: string;
+        dates: string[];
+        available: boolean;
+      }>();
+
+      if (!body.printer_id || !Array.isArray(body.dates)) {
+        return error("printer_id と dates が必要です");
+      }
+
+      const printer = await getPrinterById(db, body.printer_id);
+      if (!printer) return error("プリンターが見つかりません", 404);
+
+      const validDates = body.dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+      if (body.available === false) {
+        const block = await checkPrinterShiftRemovalBlockedForDates(
+          db,
+          body.printer_id,
+          validDates
+        );
+        if (block.blocked && block.date) {
+          return printerShiftBlockError(block.date, block.reservations);
+        }
+      }
+
+      await setPrinterAvailability(db, body.printer_id, validDates, body.available !== false);
+      return json({ ok: true });
+    }
+
+    // POST /api/3dprint/admin/shifts/printer-toggle
+    if (method === "POST" && segments[1] === "shifts" && segments[2] === "printer-toggle") {
+      const body = await request.json<{ printer_id: string; date: string }>();
+      if (!body.printer_id || !body.date) return error("printer_id と date が必要です");
+
+      const printer = await getPrinterById(db, body.printer_id);
+      if (!printer) return error("プリンターが見つかりません", 404);
+
+      const isCurrentlyAvailable = await isPrinterAvailableOnDate(db, body.printer_id, body.date);
+      if (isCurrentlyAvailable) {
+        const block = await checkPrinterShiftRemovalBlocked(db, body.printer_id, body.date);
+        if (block.blocked) {
+          return printerShiftBlockError(body.date, block.reservations);
+        }
+      }
+
+      const available = await togglePrinterAvailability(db, body.printer_id, body.date);
+      return json({ available });
     }
 
     // PUT /api/3dprint/admin/shifts/availability
@@ -1269,11 +1667,271 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: true, message: "予約を削除しました" });
     }
 
+    // GET /api/3dprint/admin/printers
+    if (method === "GET" && segments[1] === "printers" && segments.length === 2) {
+      const printers = await getAllPrinters(db);
+      return json({ printers: printers.map(formatPrinterForApi) });
+    }
+
+    // POST /api/3dprint/admin/printers
+    if (method === "POST" && segments[1] === "printers" && segments.length === 2) {
+      const contentType = request.headers.get("content-type") ?? "";
+      let name = "";
+      let imageFile: File | null = null;
+
+      if (contentType.includes("multipart/form-data")) {
+        const formData = await request.formData();
+        name = String(formData.get("name") ?? "").trim();
+        const image = formData.get("image");
+        imageFile = image instanceof File && image.size > 0 ? image : null;
+      } else {
+        const body = await request.json<{ name?: string }>();
+        name = body.name?.trim() ?? "";
+      }
+
+      if (!name) return error("プリンター名は必須です");
+
+      const printerId = crypto.randomUUID();
+      let imageR2Key: string | null = null;
+      if (imageFile) {
+        imageR2Key = await uploadPrinterImage(
+          env.FILES,
+          printerId,
+          imageFile.name,
+          await imageFile.arrayBuffer()
+        );
+      }
+
+      const printer = await createPrinter(db, {
+        id: printerId,
+        name,
+        image_r2_key: imageR2Key,
+      });
+      return json({ printer: formatPrinterForApi(printer) }, 201);
+    }
+
+    // PATCH /api/3dprint/admin/printers/:id
+    if (method === "PATCH" && segments[1] === "printers" && segments.length === 3) {
+      const body = await request.json<{
+        name?: string;
+        status?: string;
+        daily_capacity?: {
+          max_small?: number;
+          max_small_with_main?: number;
+          max_medium?: number;
+          max_large?: number;
+          allow_small_with_medium?: boolean;
+          allow_small_with_large?: boolean;
+        };
+        capabilities?: {
+          can_record_print_video?: boolean;
+          nozzle_sizes_mm?: string[];
+        };
+      }>();
+
+      const hasName = body.name !== undefined;
+      const hasCapabilities = body.capabilities !== undefined;
+      const hasStatus = body.status !== undefined;
+      const hasDailyCapacity = body.daily_capacity !== undefined;
+      if (!hasName && !hasCapabilities && !hasStatus && !hasDailyCapacity) {
+        return error("name、status、daily_capacity、または capabilities が必要です");
+      }
+
+      const printer = await getPrinterById(db, segments[2]);
+      if (!printer) return error("プリンターが見つかりません", 404);
+
+      if (hasName) {
+        const name = body.name?.trim() ?? "";
+        if (!name) return error("プリンター名は必須です");
+        await updatePrinterName(db, segments[2], name);
+      }
+
+      if (hasStatus) {
+        const statusError = validatePrinterStatusInput(body.status);
+        if (statusError) return error(statusError);
+        await updatePrinterStatus(db, segments[2], body.status as PrinterStatus);
+      }
+
+      if (hasCapabilities) {
+        const capabilityResult = validatePrinterCapabilitiesInput(body.capabilities);
+        if ("error" in capabilityResult) return error(capabilityResult.error);
+        await updatePrinterCapabilities(db, segments[2], capabilityResult.capabilities);
+      }
+
+      if (hasDailyCapacity) {
+        const capacityResult = validatePrinterDailyCapacityInput(body.daily_capacity);
+        if ("error" in capacityResult) return error(capacityResult.error);
+        await updatePrinterDailyCapacity(db, segments[2], capacityResult.capacity);
+      }
+
+      const updated = await getPrinterById(db, segments[2]);
+      return json({ printer: updated ? formatPrinterForApi(updated) : null });
+    }
+
+    // PUT /api/3dprint/admin/printers/:id/image
+    if (
+      method === "PUT" &&
+      segments[1] === "printers" &&
+      segments[3] === "image" &&
+      segments.length === 4
+    ) {
+      const printer = await getPrinterById(db, segments[2]);
+      if (!printer) return error("プリンターが見つかりません", 404);
+
+      const formData = await request.formData();
+      const image = formData.get("image");
+      if (!(image instanceof File) || image.size <= 0) {
+        return error("画像ファイルが必要です");
+      }
+
+      const imageR2Key = await uploadPrinterImage(
+        env.FILES,
+        printer.id,
+        image.name,
+        await image.arrayBuffer()
+      );
+
+      if (printer.image_r2_key) {
+        await env.FILES.delete(printer.image_r2_key);
+      }
+      await updatePrinterImage(db, printer.id, imageR2Key);
+
+      const updated = await getPrinterById(db, printer.id);
+      return json({ printer: updated ? formatPrinterForApi(updated) : null });
+    }
+
+    // DELETE /api/3dprint/admin/printers/:id
+    if (method === "DELETE" && segments[1] === "printers" && segments.length === 3) {
+      const printer = await getPrinterById(db, segments[2]);
+      if (!printer) return error("プリンターが見つかりません", 404);
+
+      const reservationCount = await countReservationsByPrinterId(db, segments[2]);
+      if (reservationCount > 0) {
+        return error("このプリンターを使用した予約があるため削除できません", 409);
+      }
+
+      if (printer.image_r2_key) {
+        await env.FILES.delete(printer.image_r2_key);
+      }
+
+      const deleted = await deletePrinter(db, segments[2]);
+      if (!deleted) return error("プリンターの削除に失敗しました", 400);
+      return json({ ok: true });
+    }
+
     // GET /api/3dprint/admin/stl/:id
     if (method === "GET" && segments[1] === "stl" && segments.length === 3) {
       const reservation = await getReservationById(db, segments[2]);
       if (!reservation) return error("予約が見つかりません", 404);
       return streamPrintFile(env.FILES, reservation.stl_r2_key, reservation.stl_filename);
+    }
+
+    // POST /api/3dprint/admin/reservations/:id/print-video
+    if (
+      method === "POST" &&
+      segments[1] === "reservations" &&
+      segments.length === 4 &&
+      segments[3] === "print-video"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const file = formData.get("file");
+      if (!(file instanceof File)) {
+        return error("file フィールドが必要です", 400);
+      }
+
+      const filenameError = validatePrintVideoFilename(file.name);
+      if (filenameError) return error(filenameError);
+
+      const body = await file.arrayBuffer();
+      const uploaded = await uploadPrintVideoToStorage(
+        env,
+        db,
+        authUser,
+        reservation,
+        file.name,
+        body
+      );
+
+      if (reservation.print_video_storage_path) {
+        context.waitUntil(
+          deletePrintVideoFile(env, db, reservation.print_video_storage_path)
+        );
+      }
+
+      await updateReservationPrintVideo(db, reservation.id, {
+        print_video_storage_path: uploaded.path,
+        print_video_filename: uploaded.filename,
+        print_video_size_bytes: uploaded.size,
+      });
+
+      const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
+      const updated = await getReservationById(db, reservation.id);
+      return json({
+        reservation: updated
+          ? enrichReservationForAdmin(updated, memberMap, printerMap)
+          : null,
+      });
+    }
+
+    // DELETE /api/3dprint/admin/reservations/:id/print-video
+    if (
+      method === "DELETE" &&
+      segments[1] === "reservations" &&
+      segments.length === 4 &&
+      segments[3] === "print-video"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+
+      if (reservation.print_video_storage_path) {
+        await deletePrintVideoFile(env, db, reservation.print_video_storage_path);
+      }
+      await clearReservationPrintVideo(db, reservation.id);
+
+      const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
+      const updated = await getReservationById(db, reservation.id);
+      return json({
+        reservation: updated
+          ? enrichReservationForAdmin(updated, memberMap, printerMap)
+          : null,
+      });
+    }
+
+    // GET /api/3dprint/admin/reservations/:id/print-video/download
+    if (
+      method === "GET" &&
+      segments[1] === "reservations" &&
+      segments.length === 5 &&
+      segments[3] === "print-video" &&
+      segments[4] === "download"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+      if (!reservation.print_video_storage_path) {
+        return error("印刷動画はまだアップロードされていません", 404);
+      }
+
+      const parsed = parseLogicalPath(reservation.print_video_storage_path);
+      if (!parsed?.relativePath) {
+        return error("動画ファイルのパスが不正です", 500);
+      }
+
+      try {
+        return await streamStorageFile(env, parsed);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "ダウンロードに失敗しました";
+        return error(message, 404);
+      }
     }
 
     return error("Not Found", 404);

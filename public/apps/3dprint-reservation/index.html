@@ -3,6 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <title>3D印刷予約 — ScienceHUB</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -92,18 +99,38 @@
         <p class="hint">読み込み中...</p>
       </div>
     </section>
+
+    <section class="card" id="print-videos-section">
+      <h2 class="section-heading">印刷動画</h2>
+      <p class="hint">印刷中の撮影を希望した予約で、動画がアップロードされたものをダウンロードできます。</p>
+      <div id="print-videos-mount">
+        <p class="hint">読み込み中...</p>
+      </div>
+    </section>
   </main>
 
   <div class="modal-overlay" id="form-modal">
-    <div class="modal modal-lg">
+    <div class="modal modal-lg" id="form-modal-dialog">
       <div class="modal-header">
         <h2 id="form-modal-title">予約フォーム</h2>
         <button class="modal-close" id="form-modal-close" type="button">&times;</button>
       </div>
       <div class="modal-body">
         <div id="form-alert"></div>
-        <form id="reservation-form">
+
+        <section id="form-step-printer" class="form-step">
+          <h3 class="form-section-title">印刷機種を選択</h3>
+          <p class="hint" id="form-step-printer-hint">使用する3Dプリンターの機種を選んでください。表示されている「予約待ち」は、選択した日の申請中（受領待ち）件数です。メンテナンス中・印刷不能の機種は選択できません。</p>
+          <div id="printer-picker" class="printer-picker" role="listbox" aria-label="印刷機種"></div>
+          <p class="hint hidden" id="printer-picker-empty">利用可能なプリンターが登録されていません。管理者にお問い合わせください。</p>
+          <p class="hint hidden" id="printer-picker-all-unavailable">現在、予約可能なプリンターがありません。しばらくしてから再度お試しください。</p>
+        </section>
+
+        <form id="reservation-form" class="form-step hidden">
           <input type="hidden" id="desired_date" name="desired_date" />
+          <input type="hidden" id="printer_id" name="printer_id" />
+
+          <div id="selected-printer-display" class="selected-printer-display"></div>
 
           <p class="selected-date-display" id="selected-date-display"></p>
           <p class="hint hidden" id="retry-identity-hint">再予約のため、ホームルーム・出席番号・名前を再入力してください。</p>
@@ -175,6 +202,14 @@
             <textarea id="print_notes" name="print_notes" rows="4" placeholder="高さ20cm未満&#10;長辺25cmに合わせる&#10;サポーター有・tree&#10;充填率60%"></textarea>
           </div>
 
+          <div class="form-group hidden" id="request-print-video-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="request_print_video" name="request_print_video" value="1" />
+              印刷中の撮影を希望する
+            </label>
+            <p class="hint">選択した機種が動画撮影に対応している場合のみ利用できます。撮影後、動画はこのページからダウンロードできます。</p>
+          </div>
+
           <div class="form-group">
             <label>ファイル（STL / g-code）</label>
             <div class="upload-zone" id="upload-zone">
@@ -190,9 +225,11 @@
           </div>
         </form>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" id="form-modal-footer">
+        <button class="btn btn-secondary hidden" id="form-back-btn" type="button">機種選択に戻る</button>
         <button class="btn btn-secondary" id="form-cancel-btn" type="button">キャンセル</button>
-        <button class="btn btn-primary" id="submit-btn" type="submit" form="reservation-form">予約を申請</button>
+        <button class="btn btn-primary hidden" id="form-next-btn" type="button" disabled>次へ</button>
+        <button class="btn btn-primary hidden" id="submit-btn" type="submit" form="reservation-form">予約を申請</button>
       </div>
     </div>
   </div>
@@ -206,6 +243,11 @@
       <div class="modal-body">
         <div id="edit-alert"></div>
         <form id="edit-reservation-form">
+          <div class="form-group" id="edit-printer-group">
+            <label for="edit-printer-select">印刷機種</label>
+            <select id="edit-printer-select" name="printer_id" required></select>
+          </div>
+
           <p class="hint">修正後は申請中に戻り、管理者の再承認が必要です。</p>
 
           <h3 class="form-section-title">本人確認</h3>
@@ -271,6 +313,13 @@
           <div class="form-group">
             <label for="edit-print-notes">印刷時の注意点（任意）</label>
             <textarea id="edit-print-notes" name="print_notes" rows="4"></textarea>
+          </div>
+
+          <div class="form-group hidden" id="edit-request-print-video-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="edit-request-print-video" name="request_print_video" value="1" />
+              印刷中の撮影を希望する
+            </label>
           </div>
 
           <div class="form-group">
@@ -343,5 +392,6 @@
   </div>
 
   <script type="module" src="./js/main.js"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
 </body>
 </html>

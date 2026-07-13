@@ -123,7 +123,7 @@ export interface PmParentProject {
   leader: PmAssignee | null;
   /** 親プロジェクトのリーダー（複数可） */
   leaders: PmAssignee[];
-  /** 子プロジェクトの担当者の集合（リーダーがタスクを振れる対象） */
+  /** 親プロジェクトの担当者（リーダーがグループメンバーから管理） */
   members: PmAssignee[];
   /** 現ユーザーがこの親のリーダーか */
   is_leader: boolean;
@@ -172,6 +172,12 @@ export interface PmAvailabilityEntry {
   status: PmAvailabilityStatus;
 }
 
+/** 日付ごとの活動可能メンバー（グループ閲覧用） */
+export interface PmGroupAvailabilityDay {
+  date: string;
+  members: PmMember[];
+}
+
 export interface PmDashboard {
   group: PmGroupSummary;
   groups: PmGroupSummary[];
@@ -180,6 +186,8 @@ export interface PmDashboard {
   projects: PmParentProject[];
   members: PmMember[];
   availability: PmAvailabilityEntry[];
+  /** 表示月のグループメンバー活動可能日（閲覧用） */
+  group_availability: PmGroupAvailabilityDay[];
   roles: PmGroupRole[];
   can_edit_admin_settings: boolean;
   current_user_id: string;
@@ -254,6 +262,13 @@ interface TaskRow {
 interface AvailabilityRow {
   avail_date: string;
   status: PmAvailabilityStatus;
+}
+
+interface GroupAvailabilityRow {
+  avail_date: string;
+  user_id: string;
+  display_name: string;
+  username: string;
 }
 
 interface AssigneeRow {
@@ -605,6 +620,38 @@ async function listLeadersByProjects(
   return map;
 }
 
+/** 親プロジェクトの担当者一覧 */
+async function listParentMembersByProjects(
+  db: D1Database,
+  parentProjectIds: string[]
+): Promise<Map<string, PmAssignee[]>> {
+  const map = new Map<string, PmAssignee[]>();
+  if (parentProjectIds.length === 0) return map;
+
+  const placeholders = parentProjectIds.map(() => "?").join(", ");
+  const result = await db
+    .prepare(
+      `SELECT m.parent_project_id, u.id AS user_id, u.display_name, u.username
+       FROM pm_parent_members m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.parent_project_id IN (${placeholders})
+       ORDER BY u.display_name COLLATE NOCASE, u.username`
+    )
+    .bind(...parentProjectIds)
+    .all<{ parent_project_id: string; user_id: string; display_name: string; username: string }>();
+
+  for (const row of result.results ?? []) {
+    const list = map.get(row.parent_project_id) ?? [];
+    list.push({
+      id: row.user_id,
+      display_name: row.display_name || row.username,
+      username: row.username,
+    });
+    map.set(row.parent_project_id, list);
+  }
+  return map;
+}
+
 /** 親プロジェクトのリーダー ID 集合 */
 async function listParentLeaderIds(
   db: D1Database,
@@ -617,25 +664,6 @@ async function listParentLeaderIds(
     .bind(parentProjectId)
     .all<{ user_id: string }>();
   return new Set((result.results ?? []).map((r) => r.user_id));
-}
-
-/**
- * 親プロジェクト配下の子プロジェクト担当者をユニークに集約する。
- * これが「親プロジェクトのメンバー」（タスク振付対象）。
- */
-function collectParentMembers(
-  childIds: string[],
-  assigneeMap: Map<string, PmAssignee[]>
-): PmAssignee[] {
-  const byId = new Map<string, PmAssignee>();
-  for (const childId of childIds) {
-    for (const a of assigneeMap.get(childId) ?? []) {
-      byId.set(a.id, a);
-    }
-  }
-  return [...byId.values()].sort((a, b) =>
-    a.display_name.localeCompare(b.display_name, "ja")
-  );
 }
 
 /** 子一覧から進捗率と最遅納期を算出 */
@@ -1071,6 +1099,10 @@ export async function listProjects(
     db,
     parents.map((p) => p.id)
   );
+  const parentMemberMap = await listParentMembersByProjects(
+    db,
+    parents.map((p) => p.id)
+  );
   const today = todayJst();
 
   const childById = new Map<string, PmChildProject>();
@@ -1087,10 +1119,7 @@ export async function listProjects(
     const kids = siblingChildren
       .map((c) => childById.get(c.id)!)
       .filter(Boolean);
-    const members = collectParentMembers(
-      siblingChildren.map((c) => c.id),
-      assigneeMap
-    );
+    const members = parentMemberMap.get(parent.id) ?? [];
     const leaders = leaderMap.get(parent.id) ?? [];
     const stats = parentProgressStats(kids);
     const override = parent.progress_override;
@@ -1680,7 +1709,7 @@ export async function setParentLeader(
 }
 
 /**
- * 親プロジェクト配下の担当者 ID 集合を取得（タスク振付対象）。
+ * 親プロジェクトの担当者 ID 集合を取得（タスク発行対象）。
  */
 async function listParentMemberIds(
   db: D1Database,
@@ -1688,10 +1717,7 @@ async function listParentMemberIds(
 ): Promise<Set<string>> {
   const result = await db
     .prepare(
-      `SELECT DISTINCT a.user_id
-       FROM pm_project_assignees a
-       JOIN pm_projects c ON c.id = a.project_id
-       WHERE c.parent_id = ?`
+      `SELECT user_id FROM pm_parent_members WHERE parent_project_id = ?`
     )
     .bind(parentProjectId)
     .all<{ user_id: string }>();
@@ -1700,8 +1726,76 @@ async function listParentMemberIds(
 }
 
 /**
+ * 親プロジェクトの担当者を設定（リーダーのみ）。
+ * memberUserIds が空配列の場合は全員解除。グループメンバーのみ指定可。
+ */
+export async function setParentMembers(
+  db: D1Database,
+  userId: string,
+  parentProjectId: string,
+  memberUserIds: string[]
+): Promise<PmParentProject[]> {
+  const project = await db
+    .prepare(
+      `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
+       FROM pm_projects WHERE id = ?`
+    )
+    .bind(parentProjectId)
+    .first<ProjectRow>();
+
+  if (!project) {
+    throw new Error("プロジェクトが見つかりません");
+  }
+  if (project.parent_id) {
+    throw new Error("親プロジェクトのみ担当者を設定できます");
+  }
+
+  await requireGroupMembership(db, userId, project.group_id);
+  const leaderIds = await listParentLeaderIds(db, parentProjectId);
+  if (!leaderIds.has(userId)) {
+    throw new Error("親プロジェクトのリーダーのみ担当者を設定できます");
+  }
+
+  const uniqueIds = [
+    ...new Set(
+      memberUserIds
+        .map((id) => String(id ?? "").trim())
+        .filter(Boolean)
+    ),
+  ];
+
+  if (uniqueIds.length > 0) {
+    const members = await listGroupMembers(db, project.group_id);
+    const memberSet = new Set(members.map((m) => m.id));
+    for (const id of uniqueIds) {
+      if (!memberSet.has(id)) {
+        throw new Error("グループ外のユーザーは担当者に指定できません");
+      }
+    }
+  }
+
+  const timestamp = now();
+  await db
+    .prepare(`DELETE FROM pm_parent_members WHERE parent_project_id = ?`)
+    .bind(parentProjectId)
+    .run();
+
+  for (const memberId of uniqueIds) {
+    await db
+      .prepare(
+        `INSERT INTO pm_parent_members (parent_project_id, user_id, assigned_at)
+         VALUES (?, ?, ?)`
+      )
+      .bind(parentProjectId, memberId, timestamp)
+      .run();
+  }
+
+  return listProjects(db, project.group_id, userId);
+}
+
+/**
  * タスクを作成する。
- * 自分への追加、管理者による他メンバーへの追加、リーダーによる親メンバーへの振付が可能。
+ * 自分への追加、管理者による他メンバーへの追加、リーダーによる親メンバーへの発行が可能。
  */
 export async function createTask(
   db: D1Database,
@@ -1714,7 +1808,8 @@ export async function createTask(
     description?: string;
     due_date?: string | null;
     status?: PmTaskStatus;
-    assignee_id: string;
+    assignee_id?: string;
+    assignee_ids?: string[];
   }
 ): Promise<{
   projects: PmParentProject[];
@@ -1796,60 +1891,86 @@ export async function createTask(
     membership.group_role_weight ?? 0
   );
 
-  await assertAssigneeInGroup(db, groupId, input.assignee_id);
+  const assigneeIds = [
+    ...new Set(
+      (input.assignee_ids?.length
+        ? input.assignee_ids
+        : input.assignee_id
+          ? [input.assignee_id]
+          : []
+      )
+        .map((id) => String(id ?? "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (assigneeIds.length === 0) {
+    throw new Error("担当者を1人以上選択してください");
+  }
 
-  const isSelf = input.assignee_id === userId;
   const leaderIds =
     parent != null ? await listParentLeaderIds(db, parent.id) : new Set<string>();
   const isLeader = leaderIds.has(userId);
 
-  if (!isSelf && !admin.isAdmin) {
-    if (!isLeader) {
-      throw new Error("自分または管理者のみ他メンバーにタスクを追加できます");
-    }
-    const memberIds = await listParentMemberIds(db, parent!.id);
-    if (!memberIds.has(input.assignee_id)) {
-      throw new Error(
-        "この親プロジェクトのメンバー（子プロジェクトの担当者）にのみタスクを振れます"
-      );
+  if (isLeader && parent && !childProjectId) {
+    throw new Error("割り当て子プロジェクトを選択してください");
+  }
+
+  const parentMemberIds =
+    parent != null ? await listParentMemberIds(db, parent.id) : new Set<string>();
+
+  for (const assigneeId of assigneeIds) {
+    await assertAssigneeInGroup(db, groupId, assigneeId);
+
+    const isSelf = assigneeId === userId;
+    if (!isSelf && !admin.isAdmin) {
+      if (!isLeader) {
+        throw new Error("自分または管理者のみ他メンバーにタスクを発行できます");
+      }
+      if (!parentMemberIds.has(assigneeId)) {
+        throw new Error(
+          "この親プロジェクトの担当者にのみタスクを発行できます"
+        );
+      }
     }
   }
 
   const timestamp = now();
-  const id = createId("pmtask");
 
-  await db
-    .prepare(
-      `INSERT INTO pm_tasks
-         (id, group_id, parent_project_id, child_project_id, title, description,
-          due_date, status, assignee_id, created_by, completed_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`
-    )
-    .bind(
-      id,
-      groupId,
-      parentProjectId,
-      childProjectId,
-      title,
-      description,
-      dueDate,
-      status,
-      input.assignee_id,
-      userId,
-      timestamp,
-      timestamp
-    )
-    .run();
+  for (const assigneeId of assigneeIds) {
+    const id = createId("pmtask");
+    await db
+      .prepare(
+        `INSERT INTO pm_tasks
+           (id, group_id, parent_project_id, child_project_id, title, description,
+            due_date, status, assignee_id, created_by, completed_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+      )
+      .bind(
+        id,
+        groupId,
+        parentProjectId,
+        childProjectId,
+        title,
+        description,
+        dueDate,
+        status,
+        assigneeId,
+        userId,
+        timestamp,
+        timestamp
+      )
+      .run();
 
-  await recordActivity(db, {
-    group_id: groupId,
-    parent_project_id: parentProjectId,
-    actor_user_id: userId,
-    action: "created_task",
-    target_type: "task",
-    target_id: id,
-    target_name: title,
-  });
+    await recordActivity(db, {
+      group_id: groupId,
+      parent_project_id: parentProjectId,
+      actor_user_id: userId,
+      action: "created_task",
+      target_type: "task",
+      target_id: id,
+      target_name: title,
+    });
+  }
 
   return taskMutationResult(db, groupId, userId);
 }
@@ -2089,6 +2210,46 @@ export async function completeTask(
   return taskMutationResult(db, task.group_id, userId);
 }
 
+/** グループ内の活動可能メンバーを日付ごとに取得 */
+export async function listGroupAvailability(
+  db: D1Database,
+  groupId: string,
+  from: string,
+  to: string
+): Promise<PmGroupAvailabilityDay[]> {
+  if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
+    throw new Error("日付形式が不正です");
+  }
+
+  const result = await db
+    .prepare(
+      `SELECT a.avail_date, u.id AS user_id, u.display_name, u.username
+       FROM pm_availability a
+       JOIN users u ON u.id = a.user_id
+       WHERE a.group_id = ?
+         AND a.status = 'available'
+         AND a.avail_date >= ? AND a.avail_date <= ?
+       ORDER BY a.avail_date ASC, u.display_name COLLATE NOCASE, u.username`
+    )
+    .bind(groupId, from, to)
+    .all<GroupAvailabilityRow>();
+
+  const byDate = new Map<string, PmMember[]>();
+  for (const row of result.results ?? []) {
+    const members = byDate.get(row.avail_date) ?? [];
+    members.push({
+      id: row.user_id,
+      display_name: row.display_name || row.username,
+      username: row.username,
+    });
+    byDate.set(row.avail_date, members);
+  }
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, members]) => ({ date, members }));
+}
+
 export async function listAvailability(
   db: D1Database,
   groupId: string,
@@ -2284,8 +2445,10 @@ export async function getProjectDashboard(
   const recentActivity = await listRecentActivity(db, selected.id, 30);
 
   let availability: PmAvailabilityEntry[] = [];
+  let group_availability: PmGroupAvailabilityDay[] = [];
   if (from && to && DATE_RE.test(from) && DATE_RE.test(to)) {
     availability = await listAvailability(db, selected.id, userId, from, to);
+    group_availability = await listGroupAvailability(db, selected.id, from, to);
   }
 
   return {
@@ -2295,6 +2458,7 @@ export async function getProjectDashboard(
     projects,
     members,
     availability,
+    group_availability,
     roles,
     can_edit_admin_settings: selected.is_admin,
     current_user_id: userId,

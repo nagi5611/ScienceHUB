@@ -19,10 +19,12 @@
     "types": "wrangler types",
     "admin:set-password": "node scripts/set-remote-admin-password.mjs admin",
     "worker:deploy": "wrangler deploy --config workers/sciencehub-worker/wrangler.jsonc",
-    "collab:deploy": "wrangler deploy --config workers/excalidraw-collab/wrangler.jsonc"
+    "collab:deploy": "wrangler deploy --config workers/excalidraw-collab/wrangler.jsonc",
+    "pwa:icons": "node scripts/generate-pwa-icons.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250701.0",
+    "sharp": "^0.34.3",
     "typescript": "^5.8.3",
     "wrangler": "^4.24.4"
   },
