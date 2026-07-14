@@ -64,6 +64,8 @@ export interface PmTask {
   assignee: PmAssignee;
   created_by: PmAssignee;
   is_completed: boolean;
+  /** 完了日時（Unix ms）。未完了なら null */
+  completed_at: number | null;
   due_urgency: PmDueUrgency;
   created_at: number;
 }
@@ -183,6 +185,8 @@ export interface PmDashboard {
   groups: PmGroupSummary[];
   /** 現ユーザーに振られた未完了タスク */
   tasks: PmTask[];
+  /** 現ユーザーに振られた達成済みタスク（直近） */
+  completed_tasks: PmTask[];
   projects: PmParentProject[];
   members: PmMember[];
   availability: PmAvailabilityEntry[];
@@ -797,6 +801,7 @@ function toPmTask(row: TaskRow, today: string): PmTask {
       username: row.creator_username,
     },
     is_completed: isCompleted,
+    completed_at: row.completed_at,
     due_urgency: dueUrgency(row.due_date, isCompleted, today),
     created_at: row.created_at,
   };
@@ -834,6 +839,29 @@ export async function listMyOpenTasks(
          t.created_at DESC`
     )
     .bind(groupId, userId)
+    .all<TaskRow>();
+
+  return (result.results ?? []).map((row) => toPmTask(row, today));
+}
+
+const MY_COMPLETED_TASKS_LIMIT = 50;
+
+/** 現ユーザーに振られた達成済みタスク一覧（直近） */
+export async function listMyCompletedTasks(
+  db: D1Database,
+  groupId: string,
+  userId: string,
+  limit = MY_COMPLETED_TASKS_LIMIT
+): Promise<PmTask[]> {
+  const today = todayJst();
+  const result = await db
+    .prepare(
+      `${TASK_SELECT_SQL}
+       WHERE t.group_id = ? AND t.assignee_id = ? AND t.completed_at IS NOT NULL
+       ORDER BY t.completed_at DESC, t.created_at DESC
+       LIMIT ?`
+    )
+    .bind(groupId, userId, limit)
     .all<TaskRow>();
 
   return (result.results ?? []).map((row) => toPmTask(row, today));
@@ -897,14 +925,16 @@ async function taskMutationResult(
 ): Promise<{
   projects: PmParentProject[];
   tasks: PmTask[];
+  completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
 }> {
-  const [projects, tasks, member_board] = await Promise.all([
+  const [projects, tasks, completed_tasks, member_board] = await Promise.all([
     listProjects(db, groupId, userId),
     listMyOpenTasks(db, groupId, userId),
+    listMyCompletedTasks(db, groupId, userId),
     buildMemberBoard(db, groupId, userId),
   ]);
-  return { projects, tasks, member_board };
+  return { projects, tasks, completed_tasks, member_board };
 }
 
 /** 担当者がグループメンバーか確認 */
@@ -1814,6 +1844,7 @@ export async function createTask(
 ): Promise<{
   projects: PmParentProject[];
   tasks: PmTask[];
+  completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
 }> {
   const title = input.title.trim();
@@ -1990,6 +2021,7 @@ export async function updateTask(
 ): Promise<{
   projects: PmParentProject[];
   tasks: PmTask[];
+  completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
 }> {
   const task = await db
@@ -2106,6 +2138,7 @@ export async function deleteTask(
 ): Promise<{
   projects: PmParentProject[];
   tasks: PmTask[];
+  completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
 }> {
   const task = await db
@@ -2141,6 +2174,7 @@ export async function completeTask(
 ): Promise<{
   projects: PmParentProject[];
   tasks: PmTask[];
+  completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
 }> {
   const task = await db
@@ -2440,9 +2474,12 @@ export async function getProjectDashboard(
   const roles = await listGroupRoles(db, selected.id);
   const projects = await listProjects(db, selected.id, userId);
   const members = await listGroupMembers(db, selected.id);
-  const tasks = await listMyOpenTasks(db, selected.id, userId);
-  const member_board = await buildMemberBoard(db, selected.id, userId);
-  const recentActivity = await listRecentActivity(db, selected.id, 30);
+  const [tasks, completed_tasks, member_board, recentActivity] = await Promise.all([
+    listMyOpenTasks(db, selected.id, userId),
+    listMyCompletedTasks(db, selected.id, userId),
+    buildMemberBoard(db, selected.id, userId),
+    listRecentActivity(db, selected.id, 30),
+  ]);
 
   let availability: PmAvailabilityEntry[] = [];
   let group_availability: PmGroupAvailabilityDay[] = [];
@@ -2455,6 +2492,7 @@ export async function getProjectDashboard(
     group: selected,
     groups: summaries.map((g) => (g.id === selected!.id ? selected! : g)),
     tasks,
+    completed_tasks,
     projects,
     members,
     availability,

@@ -32,9 +32,15 @@
     <div id="pm-list-view">
       <div class="pm-top-grid">
         <section class="pm-section" aria-labelledby="pm-tasks-heading">
+          <div class="pm-tasks-toolbar">
+            <button type="button" class="pm-btn pm-btn--ghost" id="pm-go-members">
+              メンバー全員のタスク一覧
+            </button>
+          </div>
           <h2 class="pm-section-title" id="pm-tasks-heading">自分のタスク</h2>
           <div class="pm-panel pm-panel--tasks">
             <ul class="pm-task-list" id="pm-task-list"></ul>
+            <div id="pm-completed-tasks-wrap"></div>
           </div>
         </section>
 
@@ -105,9 +111,6 @@
         <div class="pm-section-head">
           <h2 class="pm-section-title" id="pm-projects-heading">プロジェクト一覧</h2>
           <div class="pm-section-head-actions">
-            <button type="button" class="pm-btn pm-btn--ghost" id="pm-go-members">
-              担当プロジェクト一覧
-            </button>
             <button type="button" class="pm-btn pm-btn--primary" id="pm-add-parent" hidden>
               + 新規
             </button>
@@ -170,11 +173,11 @@
     <div id="pm-members-view" class="pm-members-view" hidden>
       <div class="pm-members-head">
         <div class="pm-members-head-text">
-          <h2 class="pm-section-title">担当プロジェクト一覧</h2>
-          <p class="pm-members-sub">各メンバーの進行中 / 未進行プロジェクトを確認します</p>
+          <h2 class="pm-section-title">メンバー全員のタスク一覧</h2>
+          <p class="pm-members-sub">各メンバーの進行中 / 未進行タスクを確認します</p>
         </div>
         <button type="button" class="pm-btn pm-btn--ghost" id="pm-back-from-members">
-          ← プロジェクト一覧
+          ← 一覧に戻る
         </button>
       </div>
       <div class="pm-member-grid" id="pm-member-grid"></div>
@@ -275,7 +278,7 @@
 
   <dialog class="pm-dialog" id="pm-member-task-dialog">
     <form method="dialog" class="pm-dialog-form" id="pm-member-task-form">
-      <h3 class="pm-dialog-title" id="pm-member-task-dialog-title">担当プロジェクトを追加</h3>
+      <h3 class="pm-dialog-title" id="pm-member-task-dialog-title">タスクを追加</h3>
       <p class="pm-dialog-sub" id="pm-member-task-assignee-label"></p>
       <label class="pm-field-label" for="pm-member-task-title">タイトル</label>
       <input type="text" id="pm-member-task-title" class="pm-field-input" maxlength="200" required>

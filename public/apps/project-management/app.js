@@ -127,7 +127,7 @@ function navigateToParent(parentId) {
   renderView();
 }
 
-/** 担当プロジェクト一覧へ遷移 */
+/** メンバー全員のタスク一覧へ遷移 */
 function navigateToMembers() {
   selectedParentId = null;
   location.hash = "view=members";
@@ -146,6 +146,7 @@ function applyTaskMutationResult(data) {
   if (!data || !dashboard) return;
   if (data.projects) dashboard.projects = data.projects;
   if (data.tasks) dashboard.tasks = data.tasks;
+  if (data.completed_tasks) dashboard.completed_tasks = data.completed_tasks;
   if (data.member_board) dashboard.member_board = data.member_board;
 }
 
@@ -393,51 +394,131 @@ function renderHeader() {
   badge.hidden = !dashboard.group?.is_admin;
 }
 
-/** 自分に振られたタスク一覧を描画 */
-function renderTasks() {
-  const listEl = document.getElementById("pm-task-list");
-  if (!listEl || !dashboard) return;
-
-  const items = Array.isArray(dashboard.tasks) ? dashboard.tasks : [];
-  if (items.length === 0) {
-    listEl.innerHTML = `<li class="pm-empty">振られたタスクはありません</li>`;
-    return;
-  }
-
-  listEl.innerHTML = items
-    .map((task) => {
-      const urgency = task.due_urgency ?? "ok";
-      const urgencyClass =
-        urgency === "overdue"
-          ? " pm-task-item--overdue"
-          : urgency === "warning"
-            ? " pm-task-item--warning"
-            : "";
-      const due = task.due_date
-        ? `納期 ${formatDate(task.due_date)}`
-        : "納期未設定";
-      const from = task.created_by?.display_name
-        ? `from ${task.created_by.display_name}`
+/** 未完了タスク1件の HTML */
+function renderOpenTaskItem(task) {
+  const urgency = task.due_urgency ?? "ok";
+  const urgencyClass =
+    urgency === "overdue"
+      ? " pm-task-item--overdue"
+      : urgency === "warning"
+        ? " pm-task-item--warning"
         : "";
-      const desc = task.description
-        ? `<span class="pm-task-desc">${escapeHtml(task.description)}</span>`
-        : "";
-      return `<li class="pm-task-item${urgencyClass}" data-task-id="${escapeHtml(task.id)}">
-        <div class="pm-task-main">
-          <span class="pm-task-title">${escapeHtml(task.title)}</span>
-          ${desc}
-          <span class="pm-task-meta">${escapeHtml(task.parent_name ?? "未設定")} · ${escapeHtml(due)}${from ? ` · ${escapeHtml(from)}` : ""}</span>
-        </div>
-        <button type="button" class="pm-btn pm-btn--primary pm-task-complete" data-complete-task="${escapeHtml(task.id)}">完了</button>
-      </li>`;
-    })
-    .join("");
+  const due = task.due_date
+    ? `納期 ${formatDate(task.due_date)}`
+    : "納期未設定";
+  const from = task.created_by?.display_name
+    ? `from ${task.created_by.display_name}`
+    : "";
+  const desc = task.description
+    ? `<span class="pm-task-desc">${escapeHtml(task.description)}</span>`
+    : "";
+  const clickableClass = task.parent_project_id
+    ? " pm-task-item--clickable"
+    : "";
+  const parentAttr = task.parent_project_id
+    ? ` data-open-parent="${escapeHtml(task.parent_project_id)}"`
+    : "";
+  return `<li class="pm-task-item${urgencyClass}${clickableClass}" data-task-id="${escapeHtml(task.id)}"${parentAttr}>
+    <div class="pm-task-main">
+      <span class="pm-task-title">${escapeHtml(task.title)}</span>
+      ${desc}
+      <span class="pm-task-meta">${escapeHtml(task.parent_name ?? "未設定")} · ${escapeHtml(due)}${from ? ` · ${escapeHtml(from)}` : ""}</span>
+    </div>
+    <button type="button" class="pm-btn pm-btn--primary pm-task-complete" data-complete-task="${escapeHtml(task.id)}">完了</button>
+  </li>`;
+}
 
-  listEl.querySelectorAll("[data-complete-task]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+/** 達成済みタスク1件の HTML */
+function renderCompletedTaskItem(task) {
+  const projectLabel = taskProjectLabel(task);
+  const due = task.due_date ? `納期 ${formatDate(task.due_date)}` : "";
+  const completed = task.completed_at
+    ? `達成 ${formatTimestampJa(task.completed_at)}`
+    : "達成日不明";
+  const from = task.created_by?.display_name
+    ? `from ${task.created_by.display_name}`
+    : "";
+  const desc = task.description
+    ? `<span class="pm-task-desc">${escapeHtml(task.description)}</span>`
+    : "";
+  const clickableClass = task.parent_project_id
+    ? " pm-task-item--clickable"
+    : "";
+  const parentAttr = task.parent_project_id
+    ? ` data-open-parent="${escapeHtml(task.parent_project_id)}"`
+    : "";
+  const metaParts = [projectLabel, due, completed, from].filter(Boolean);
+  return `<li class="pm-task-item pm-task-item--completed${clickableClass}" data-task-id="${escapeHtml(task.id)}"${parentAttr}>
+    <div class="pm-task-main">
+      <span class="pm-task-title">${escapeHtml(task.title)}</span>
+      ${desc}
+      <span class="pm-task-meta">${metaParts.map((part) => escapeHtml(part)).join(" · ")}</span>
+    </div>
+  </li>`;
+}
+
+/** タスク一覧のクリック操作をバインド */
+function bindTaskListInteractions(scope) {
+  scope.querySelectorAll("[data-open-parent]").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      if (e.target.closest("[data-complete-task]")) return;
+      navigateToParent(item.getAttribute("data-open-parent"));
+    });
+  });
+
+  scope.querySelectorAll("[data-complete-task]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
       handleCompleteTask(btn.getAttribute("data-complete-task"));
     });
   });
+}
+
+/** 自分に振られたタスク一覧を描画 */
+function renderTasks() {
+  const listEl = document.getElementById("pm-task-list");
+  const completedWrap = document.getElementById("pm-completed-tasks-wrap");
+  if (!listEl || !dashboard) return;
+
+  const items = Array.isArray(dashboard.tasks) ? dashboard.tasks : [];
+  const completedItems = Array.isArray(dashboard.completed_tasks)
+    ? dashboard.completed_tasks
+    : [];
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<li class="pm-empty">未完了のタスクはありません</li>`;
+  } else {
+    listEl.innerHTML = items.map(renderOpenTaskItem).join("");
+    bindTaskListInteractions(listEl);
+  }
+
+  if (!completedWrap) return;
+
+  if (completedItems.length === 0) {
+    completedWrap.innerHTML = "";
+    return;
+  }
+
+  completedWrap.innerHTML = `
+    <button type="button" class="pm-completed-toggle" data-toggle-completed-tasks aria-expanded="false">
+      <span class="pm-completed-caret" aria-hidden="true">▶</span>
+      達成済みのタスク（${completedItems.length}）
+    </button>
+    <ul class="pm-task-list pm-task-completed-list" id="pm-completed-task-list" hidden>
+      ${completedItems.map(renderCompletedTaskItem).join("")}
+    </ul>
+  `;
+
+  const toggleBtn = completedWrap.querySelector("[data-toggle-completed-tasks]");
+  const completedList = completedWrap.querySelector("#pm-completed-task-list");
+  if (toggleBtn && completedList) {
+    toggleBtn.addEventListener("click", () => {
+      const open = completedList.hidden;
+      completedList.hidden = !open;
+      toggleBtn.setAttribute("aria-expanded", String(open));
+    });
+    bindTaskListInteractions(completedList);
+  }
 }
 
 /** メンバー点の色（ユーザー ID から決定） */
@@ -997,7 +1078,7 @@ function renderMemberTaskRow(tasks, emptyLabel) {
   return `<div class="pm-member-task-row">${tasks.map(renderMemberTaskTile).join("")}</div>`;
 }
 
-/** 担当プロジェクト一覧（メンバーカードグリッド） */
+/** メンバー全員のタスク一覧（メンバーカードグリッド） */
 function renderMemberBoard() {
   const grid = document.getElementById("pm-member-grid");
   if (!grid || !dashboard) return;
@@ -1097,7 +1178,7 @@ function openMemberTaskDialog(assigneeId) {
   const clearChildBtn = document.getElementById("pm-member-task-child-clear");
   if (!dialog || !inputTitle || !inputDue || !inputStatus) return;
 
-  if (titleEl) titleEl.textContent = "担当プロジェクトを追加";
+  if (titleEl) titleEl.textContent = "タスクを追加";
   if (assigneeEl) {
     assigneeEl.textContent = `担当: ${board.member.display_name}`;
   }
@@ -1136,7 +1217,7 @@ function openMemberTaskEditDialog(taskId) {
   const clearChildBtn = document.getElementById("pm-member-task-child-clear");
   if (!dialog || !inputTitle || !inputDue || !inputStatus) return;
 
-  if (titleEl) titleEl.textContent = "担当プロジェクトを編集";
+  if (titleEl) titleEl.textContent = "タスクを編集";
   if (assigneeEl) {
     assigneeEl.textContent = `担当: ${task.assignee.display_name}`;
   }
@@ -2414,6 +2495,7 @@ async function handleCompleteTask(taskId) {
     }
     if (data.projects) dashboard.projects = data.projects;
     if (data.tasks) dashboard.tasks = data.tasks;
+    if (data.completed_tasks) dashboard.completed_tasks = data.completed_tasks;
     applyTaskMutationResult(data);
     renderTasks();
     renderView();

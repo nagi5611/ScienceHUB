@@ -133,6 +133,15 @@ body.pm-app {
   min-width: 0;
 }
 
+.pm-tasks-toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.pm-tasks-toolbar .pm-btn {
+  font-size: 0.8125rem;
+}
+
 .pm-section-title {
   margin: 0;
   font-size: 1rem;
@@ -206,6 +215,30 @@ body.pm-app {
   border-radius: var(--pm-radius-sm);
   background: var(--pm-surface);
   border-left: 3px solid transparent;
+}
+
+.pm-task-item--clickable {
+  cursor: pointer;
+}
+
+.pm-task-item--clickable:hover {
+  background: var(--cf-orange-soft);
+}
+
+.pm-task-item--completed {
+  opacity: 0.88;
+  background: #f8fafc;
+  border-left-color: #94a3b8;
+}
+
+.pm-task-item--completed .pm-task-title {
+  color: var(--pm-muted);
+  text-decoration: line-through;
+  text-decoration-color: #cbd5e1;
+}
+
+.pm-task-completed-list {
+  margin-top: 0.5rem;
 }
 
 .pm-task-main {

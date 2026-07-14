@@ -310,6 +310,14 @@ async function fetchDashboard() {
   return response.json();
 }
 
+/** ダッシュボード用アプリタイル HTML */
+function renderAppTileHtml(app) {
+  return `<a href="${escapeHtml(app.href)}" class="hub-app-tile" style="--app-color:${escapeHtml(app.color)}">
+    <span class="hub-app-tile-icon" aria-hidden="true">${appIconHtml(app, "hub-icon hub-icon--lg")}</span>
+    <span class="hub-app-tile-label">${escapeHtml(app.display_name)}</span>
+  </a>`;
+}
+
 /** グループセクションを描画（API から取得） */
 async function renderGroups(dashboardData) {
   const section = document.getElementById("groups-section");
@@ -322,32 +330,42 @@ async function renderGroups(dashboardData) {
     if (!data) return;
 
     const groups = data.groups ?? [];
+    const defaultApps = data.default_apps ?? [];
+    const defaultSlugs = new Set(defaultApps.map((app) => app.slug));
     renderStorageOverview(data.storage);
 
-    if (groups.length === 0) {
+    if (groups.length === 0 && defaultApps.length === 0) {
       section.innerHTML = `<p class="hub-groups-empty">利用可能なアプリがありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>`;
       return;
     }
 
-    section.innerHTML = groups
-      .map((group) => {
-        const tiles = group.apps
-          .map(
-            (app) => `
-          <a href="${escapeHtml(app.href)}" class="hub-app-tile" style="--app-color:${escapeHtml(app.color)}">
-            <span class="hub-app-tile-icon" aria-hidden="true">${appIconHtml(app, "hub-icon hub-icon--lg")}</span>
-            <span class="hub-app-tile-label">${escapeHtml(app.display_name)}</span>
-          </a>`
-          )
-          .join("");
+    const defaultSection =
+      defaultApps.length > 0
+        ? `<div class="hub-group hub-group--default" style="--group-color:var(--cf-orange)">
+          <h2 class="hub-group-title">Default App</h2>
+          <div class="hub-app-grid">${defaultApps.map(renderAppTileHtml).join("")}</div>
+        </div>`
+        : "";
 
-        return `
-        <div class="hub-group" style="--group-color:${escapeHtml(group.color)}">
+    const groupSections = groups
+      .map((group) => {
+        const apps = group.apps.filter((app) => !defaultSlugs.has(app.slug));
+        if (apps.length === 0) return "";
+
+        return `<div class="hub-group" style="--group-color:${escapeHtml(group.color)}">
           <h2 class="hub-group-title">${escapeHtml(group.display_name)}</h2>
-          <div class="hub-app-grid">${tiles}</div>
+          <div class="hub-app-grid">${apps.map(renderAppTileHtml).join("")}</div>
         </div>`;
       })
+      .filter(Boolean)
       .join("");
+
+    if (!defaultSection && !groupSections) {
+      section.innerHTML = `<p class="hub-groups-empty">利用可能なアプリがありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>`;
+      return;
+    }
+
+    section.innerHTML = defaultSection + groupSections;
   } catch {
     section.innerHTML = `<p class="hub-groups-empty">アプリの読み込みに失敗しました。</p>`;
   }
