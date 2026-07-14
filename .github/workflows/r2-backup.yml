@@ -29,13 +29,13 @@ jobs:
       contents: read
 
     env:
-      R2_SOURCE_BUCKET: sciencehub-files
-      R2_BACKUP_BUCKET: sciencehub-files-backup
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      D1_SOURCE_DATABASE_NAME: sciencehub-db
-      D1_SOURCE_DATABASE_ID: 1cce62b0-51f4-4619-9207-6a808557984c
-      D1_BACKUP_DATABASE_NAME: sciencehub-db-backup
-      D1_BACKUP_DATABASE_ID: 9f81acc1-11f9-4147-99ec-b22274c8abf5
+      #R2_SOURCE_BUCKET: sciencehub-files
+      #R2_BACKUP_BUCKET: sciencehub-files-backup
+      #CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #D1_SOURCE_DATABASE_NAME: sciencehub-db
+      #D1_SOURCE_DATABASE_ID: 1cce62b0-51f4-4619-9207-6a808557984c
+      #D1_BACKUP_DATABASE_NAME: sciencehub-db-backup
+      #D1_BACKUP_DATABASE_ID: 9f81acc1-11f9-4147-99ec-b22274c8abf5
 
     steps:
       - name: Checkout
