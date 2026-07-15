@@ -1534,6 +1534,167 @@ body.pm-app {
   align-items: start;
 }
 
+.pm-detail-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.pm-issued-task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pm-issued-task-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  background: var(--pm-surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.pm-issued-task-row:hover {
+  border-color: var(--cf-orange);
+  background: var(--cf-orange-soft);
+}
+
+.pm-issued-task-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.pm-issued-task-row-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.pm-issued-task-row-meta {
+  font-size: 0.8125rem;
+  color: var(--pm-muted);
+}
+
+.pm-issued-task-row-caret {
+  flex-shrink: 0;
+  color: var(--pm-muted);
+  font-size: 1.1rem;
+}
+
+.pm-issued-detail-section {
+  margin-top: 0.5rem;
+}
+
+.pm-issued-detail-assignments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pm-issued-task-card {
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  background: var(--pm-surface);
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pm-issued-task-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pm-issued-task-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.pm-issued-task-meta {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--pm-muted);
+}
+
+.pm-issued-task-summary {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--pm-text);
+}
+
+.pm-issued-assignments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pm-issued-assignment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.pm-issued-assignment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-issued-assignment-status {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-bg);
+}
+
+.pm-issued-assignment-status--pending {
+  color: #6b7280;
+  background: #f9fafb;
+}
+
+.pm-issued-assignment-status--active {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.pm-issued-assignment-status--done {
+  color: #15803d;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
 .pm-detail-section-head {
   display: flex;
   align-items: center;

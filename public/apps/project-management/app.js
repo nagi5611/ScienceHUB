@@ -222,6 +222,171 @@ function listChildProjectsForParent(parentId) {
   return items;
 }
 
+/** 発行タスクの担当者ステータス表示 */
+function issuedAssignmentStatusLabel(assignment) {
+  if (assignment.is_completed) return "完了";
+  return assignment.status === "active" ? "進行中" : "未進行";
+}
+
+/** 発行タスクの担当者ステータス CSS クラス */
+function issuedAssignmentStatusClass(assignment) {
+  if (assignment.is_completed) return "pm-issued-assignment-status--done";
+  return assignment.status === "active"
+    ? "pm-issued-assignment-status--active"
+    : "pm-issued-assignment-status--pending";
+}
+
+/** 発行タスクバッチを検索 */
+function findIssuedBatch(parentId, issuedTaskId) {
+  const parent = findParentProject(parentId);
+  return (
+    parent?.issued_tasks?.find((batch) => batch.issued_task_id === issuedTaskId) ??
+    null
+  );
+}
+
+/** 発行タスク ID の短縮表示 */
+function formatIssuedTaskId(issuedTaskId) {
+  if (!issuedTaskId) return "";
+  if (issuedTaskId.length <= 12) return issuedTaskId;
+  return `${issuedTaskId.slice(0, 8)}…`;
+}
+
+/** 発行タスク一覧の1行 */
+function renderIssuedTaskRow(batch, parentId) {
+  const assignments = batch.assignments ?? [];
+  const completedCount = assignments.filter((a) => a.is_completed).length;
+  const childLabel = batch.child_name ?? "未設定";
+  const dueLabel = batch.due_date
+    ? formatDate(batch.due_date)
+    : "納期未設定";
+
+  return `<li>
+    <button type="button" class="pm-issued-task-row" data-open-issued-detail="${escapeHtml(batch.issued_task_id)}" data-issued-parent="${escapeHtml(parentId)}">
+      <span class="pm-issued-task-row-main">
+        <span class="pm-issued-task-row-title">${escapeHtml(batch.title)}</span>
+        <span class="pm-issued-task-row-meta">${escapeHtml(childLabel)} · 納期 ${escapeHtml(dueLabel)} · 担当 ${assignments.length}名 · ${completedCount}/${assignments.length} 完了</span>
+      </span>
+      <span class="pm-issued-task-row-caret" aria-hidden="true">›</span>
+    </button>
+  </li>`;
+}
+
+/** 発行タスク一覧を描画 */
+function renderIssuedTasks(parent) {
+  const section = document.getElementById("pm-detail-issued-section");
+  const listEl = document.getElementById("pm-detail-issued-list");
+  if (!section || !listEl) return;
+
+  const batches = parent.is_leader ? (parent.issued_tasks ?? []) : [];
+  section.hidden = !parent.is_leader;
+
+  if (!parent.is_leader) {
+    listEl.innerHTML = "";
+    return;
+  }
+
+  if (batches.length === 0) {
+    listEl.innerHTML = `<li class="pm-empty">発行したタスクはありません</li>`;
+    return;
+  }
+
+  listEl.innerHTML = batches
+    .map((batch) => renderIssuedTaskRow(batch, parent.id))
+    .join("");
+
+  listEl.querySelectorAll("[data-open-issued-detail]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openIssuedTaskDetailDialog(
+        btn.getAttribute("data-issued-parent"),
+        btn.getAttribute("data-open-issued-detail")
+      );
+    });
+  });
+}
+
+/** 発行タスク詳細ダイアログを開く */
+function openIssuedTaskDetailDialog(parentId, batchId) {
+  if (!parentId || !batchId) return;
+  const parent = findParentProject(parentId);
+  const batch = findIssuedBatch(parentId, batchId);
+  if (!parent || !batch || !parent.is_leader) return;
+
+  viewingIssuedParentId = parentId;
+  viewingIssuedBatchId = batchId;
+
+  const titleEl = document.getElementById("pm-issued-detail-title");
+  const metaEl = document.getElementById("pm-issued-detail-meta");
+  const listEl = document.getElementById("pm-issued-detail-assignments");
+  const dialog = document.getElementById("pm-issued-task-detail-dialog");
+  if (!titleEl || !metaEl || !listEl || !dialog) return;
+
+  const childLabel = batch.child_name ?? "未設定";
+  const dueLabel = batch.due_date
+    ? formatDate(batch.due_date)
+    : "納期未設定";
+  const completedCount = batch.assignments.filter((a) => a.is_completed).length;
+
+  titleEl.textContent = batch.title;
+  metaEl.textContent = `発行ID: ${formatIssuedTaskId(batch.issued_task_id)} · 子: ${childLabel} · 納期 ${dueLabel} · 担当 ${batch.assignments.length}名 · 進捗 ${completedCount}/${batch.assignments.length} 完了`;
+
+  listEl.innerHTML = batch.assignments
+    .map((assignment) => {
+      const statusLabel = issuedAssignmentStatusLabel(assignment);
+      const statusClass = issuedAssignmentStatusClass(assignment);
+      return `<li class="pm-issued-assignment">
+        <span class="pm-issued-assignment-name">${escapeHtml(assignment.assignee.display_name)}</span>
+        <span class="pm-issued-assignment-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+      </li>`;
+    })
+    .join("");
+
+  dialog.showModal();
+}
+
+/** 発行タスク詳細ダイアログを閉じる */
+function closeIssuedTaskDetailDialog() {
+  document.getElementById("pm-issued-task-detail-dialog")?.close();
+  viewingIssuedBatchId = null;
+  viewingIssuedParentId = null;
+}
+
+/** 発行タスクを削除 */
+async function handleDeleteIssuedTask() {
+  if (!viewingIssuedBatchId) return;
+  const batch = findIssuedBatch(viewingIssuedParentId, viewingIssuedBatchId);
+  if (!batch) return;
+
+  const ok = window.confirm(
+    `「${batch.title}」を削除しますか？\n割り当てられた全メンバーのタスクが削除されます。`
+  );
+  if (!ok) return;
+
+  const batchId = viewingIssuedBatchId;
+  closeIssuedTaskDetailDialog();
+
+  try {
+    const response = await fetch(
+      `/api/project-management/task-batches/${encodeURIComponent(batchId)}`,
+      {
+        method: "DELETE",
+        credentials: "same-origin",
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(data.error || "発行タスクの削除に失敗しました", true);
+      return;
+    }
+    applyTaskMutationResult(data);
+    renderTasks();
+    renderView();
+    showToast("発行タスクを削除しました");
+  } catch {
+    showToast("発行タスクの削除に失敗しました", true);
+  }
+}
+
 /** タスク操作権限（担当者または管理者） */
 function canManageMemberTask(task) {
   if (!task || !dashboard) return false;
@@ -999,6 +1164,14 @@ let editingParentMembersId = null;
 let editingProgressParentId = null;
 /** @type {string | null} */
 let creatingTaskParentId = null;
+/** @type {string | null} */
+let editingIssuedBatchId = null;
+/** @type {string | null} */
+let editingIssuedParentId = null;
+/** @type {string | null} */
+let viewingIssuedBatchId = null;
+/** @type {string | null} */
+let viewingIssuedParentId = null;
 /** @type {string} */
 let storagePickerPath = "";
 /** @type {string} */
@@ -1696,6 +1869,8 @@ function renderDetailView(parent) {
     activities,
     "このプロジェクトの履歴はありません"
   );
+
+  renderIssuedTasks(parent);
 }
 
 /** 子プロジェクト1件の HTML */
@@ -2477,6 +2652,169 @@ async function handleCreateTask() {
   }
 }
 
+/** 発行タスク編集ダイアログを開く */
+function openIssuedTaskEditDialog(parentId, batchId) {
+  if (!parentId || !batchId) return;
+  const parent = findParentProject(parentId);
+  const batch = findIssuedBatch(parentId, batchId);
+  if (!parent || !batch || !parent.is_leader) return;
+
+  editingIssuedParentId = parentId;
+  editingIssuedBatchId = batchId;
+
+  const nameEl = document.getElementById("pm-issued-task-project-name");
+  const titleEl = document.getElementById("pm-issued-task-title");
+  const childEl = document.getElementById("pm-issued-task-child");
+  const dueEl = document.getElementById("pm-issued-task-due");
+  const statusEl = document.getElementById("pm-issued-task-status");
+  const assigneesEl = document.getElementById("pm-issued-task-assignees");
+  const dialog = document.getElementById("pm-issued-task-dialog");
+  if (
+    !nameEl ||
+    !titleEl ||
+    !childEl ||
+    !dueEl ||
+    !statusEl ||
+    !assigneesEl ||
+    !dialog
+  ) {
+    return;
+  }
+
+  nameEl.textContent = parent.name;
+  titleEl.value = batch.title;
+  dueEl.value = batch.due_date ?? "";
+
+  const openAssignments = batch.assignments.filter((a) => !a.is_completed);
+  const batchStatus =
+    openAssignments.some((a) => a.status === "active") ? "active" : "pending";
+  statusEl.value = batchStatus;
+
+  const children = listChildProjectsForParent(parentId);
+  if (children.length === 0) {
+    childEl.innerHTML = `<option value="">子プロジェクトがありません</option>`;
+    childEl.disabled = true;
+  } else {
+    childEl.disabled = false;
+    childEl.innerHTML =
+      `<option value="">選択してください</option>` +
+      children
+        .map(
+          (child) =>
+            `<option value="${escapeHtml(child.id)}" ${
+              child.id === batch.child_project_id ? "selected" : ""
+            }>${escapeHtml(child.label)}</option>`
+        )
+        .join("");
+  }
+
+  const selectedIds = new Set(
+    batch.assignments.map((assignment) => assignment.assignee.id)
+  );
+  const completedIds = new Set(
+    batch.assignments
+      .filter((assignment) => assignment.is_completed)
+      .map((assignment) => assignment.assignee.id)
+  );
+  const members = parent.members ?? [];
+
+  if (members.length === 0) {
+    assigneesEl.innerHTML =
+      `<p class="pm-empty">担当者がいません。「担当者」から追加してください。</p>`;
+  } else {
+    assigneesEl.innerHTML = members
+      .map((member) => {
+        const checked = selectedIds.has(member.id);
+        const locked = completedIds.has(member.id);
+        return `<label class="pm-assignee-check">
+          <input type="checkbox" value="${escapeHtml(member.id)}" ${
+            checked ? "checked" : ""
+          } ${locked ? "disabled" : ""}>
+          <span>${escapeHtml(member.display_name)}${
+            locked ? "（完了済み）" : ""
+          }</span>
+        </label>`;
+      })
+      .join("");
+  }
+
+  dialog.showModal();
+  titleEl.focus();
+}
+
+/** 発行タスクを保存 */
+async function handleSaveIssuedTask() {
+  if (!editingIssuedBatchId) return;
+
+  const titleEl = document.getElementById("pm-issued-task-title");
+  const childEl = document.getElementById("pm-issued-task-child");
+  const dueEl = document.getElementById("pm-issued-task-due");
+  const statusEl = document.getElementById("pm-issued-task-status");
+  if (!titleEl || !childEl || !statusEl) return;
+
+  const title = titleEl.value.trim();
+  const childProjectId = childEl.value;
+  const assigneeIds = [
+    ...document.querySelectorAll(
+      "#pm-issued-task-assignees input[type=checkbox]:checked"
+    ),
+    ...document.querySelectorAll(
+      "#pm-issued-task-assignees input[type=checkbox]:disabled:checked"
+    ),
+  ].map((el) => el.value);
+
+  if (!title) {
+    showToast("タスクの内容を入力してください", true);
+    return;
+  }
+  if (!childProjectId) {
+    showToast("割り当て子プロジェクトを選択してください", true);
+    return;
+  }
+  if (assigneeIds.length === 0) {
+    showToast("担当者を1人以上選択してください", true);
+    return;
+  }
+
+  const savedParentId = editingIssuedParentId;
+  const savedBatchId = editingIssuedBatchId;
+
+  try {
+    const response = await fetch(
+      `/api/project-management/task-batches/${encodeURIComponent(savedBatchId)}`,
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          child_project_id: childProjectId,
+          due_date: dueEl?.value || null,
+          status: statusEl.value === "active" ? "active" : "pending",
+          assignee_ids: assigneeIds,
+        }),
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(data.error || "発行タスクの更新に失敗しました", true);
+      return;
+    }
+    applyTaskMutationResult(data);
+    renderTasks();
+    renderView();
+    showToast("発行タスクを更新しました");
+    if (savedParentId && savedBatchId) {
+      openIssuedTaskDetailDialog(savedParentId, savedBatchId);
+    }
+  } catch {
+    showToast("発行タスクの更新に失敗しました", true);
+  } finally {
+    editingIssuedBatchId = null;
+    editingIssuedParentId = null;
+  }
+}
+
 /** タスクを完了 */
 async function handleCompleteTask(taskId) {
   if (!taskId) return;
@@ -2907,6 +3245,38 @@ function bindEvents() {
     }
   });
 
+  const issuedTaskForm = document.getElementById("pm-issued-task-form");
+  issuedTaskForm?.addEventListener("submit", (e) => {
+    const submitter = e.submitter;
+    if (submitter?.value === "save") {
+      e.preventDefault();
+      document.getElementById("pm-issued-task-dialog")?.close();
+      handleSaveIssuedTask();
+    } else {
+      editingIssuedBatchId = null;
+      editingIssuedParentId = null;
+    }
+  });
+
+  document.getElementById("pm-issued-detail-close")?.addEventListener("click", () => {
+    closeIssuedTaskDetailDialog();
+  });
+
+  document.getElementById("pm-issued-detail-edit")?.addEventListener("click", () => {
+    const parentId = viewingIssuedParentId;
+    const batchId = viewingIssuedBatchId;
+    document.getElementById("pm-issued-task-detail-dialog")?.close();
+    viewingIssuedBatchId = null;
+    viewingIssuedParentId = null;
+    if (parentId && batchId) {
+      openIssuedTaskEditDialog(parentId, batchId);
+    }
+  });
+
+  document.getElementById("pm-issued-detail-delete")?.addEventListener("click", () => {
+    handleDeleteIssuedTask();
+  });
+
   /** 背景クリックでダイアログを閉じる */
   const dialogCloseHandlers = {
     "pm-member-task-dialog": clearMemberTaskDialogState,
@@ -2922,6 +3292,14 @@ function bindEvents() {
     },
     "pm-task-dialog": () => {
       creatingTaskParentId = null;
+    },
+    "pm-issued-task-dialog": () => {
+      editingIssuedBatchId = null;
+      editingIssuedParentId = null;
+    },
+    "pm-issued-task-detail-dialog": () => {
+      viewingIssuedBatchId = null;
+      viewingIssuedParentId = null;
     },
   };
 

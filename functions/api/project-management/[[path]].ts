@@ -32,6 +32,8 @@ import {
   createTask,
   completeTask,
   updateTask,
+  updateIssuedTaskBatch,
+  deleteIssuedTaskBatch,
   deleteTask,
   getGroupStorageRootPath,
   previewEffort,
@@ -124,6 +126,14 @@ interface UpdateTaskBody {
   due_date?: string | null;
   status?: "pending" | "active";
   child_project_id?: string | null;
+}
+
+interface UpdateIssuedTaskBatchBody {
+  title?: string;
+  due_date?: string | null;
+  status?: "pending" | "active";
+  child_project_id?: string | null;
+  assignee_ids?: string[];
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -364,6 +374,27 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     }
   }
 
+  // PUT /api/project-management/task-batches/:id
+  if (parts.length === 2 && parts[0] === "task-batches") {
+    const batchId = parts[1] ?? "";
+    if (!batchId) {
+      return jsonError("バッチ ID が不正です", 400);
+    }
+    let body: UpdateIssuedTaskBatchBody;
+    try {
+      body = await context.request.json<UpdateIssuedTaskBatchBody>();
+    } catch {
+      return jsonError("リクエスト形式が不正です", 400);
+    }
+
+    try {
+      const result = await updateIssuedTaskBatch(db, auth.id, batchId, body);
+      return Response.json(result);
+    } catch (error) {
+      return toErrorResponse(error, "発行タスクの更新に失敗しました");
+    }
+  }
+
   // PUT /api/project-management/tasks/:id
   if (parts.length === 2 && parts[0] === "tasks") {
     const taskId = parts[1] ?? "";
@@ -503,6 +534,19 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
 
   const parts = pathParts(context.params.path);
   const db = getDb(context.env);
+
+  if (parts.length === 2 && parts[0] === "task-batches") {
+    const batchId = parts[1] ?? "";
+    if (!batchId) {
+      return jsonError("バッチ ID が不正です", 400);
+    }
+    try {
+      const result = await deleteIssuedTaskBatch(db, auth.id, batchId);
+      return Response.json(result);
+    } catch (error) {
+      return toErrorResponse(error, "発行タスクの削除に失敗しました");
+    }
+  }
 
   if (parts.length === 2 && parts[0] === "tasks") {
     const taskId = parts[1] ?? "";

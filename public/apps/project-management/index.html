@@ -154,14 +154,23 @@
       <div class="pm-detail-header pm-panel" id="pm-detail-header"></div>
 
       <div class="pm-detail-body">
-        <section class="pm-detail-children" aria-labelledby="pm-detail-children-heading">
-          <div class="pm-detail-section-head">
-            <h2 class="pm-section-title" id="pm-detail-children-heading">子プロジェクト</h2>
-            <button type="button" class="pm-btn pm-btn--primary" id="pm-detail-add-child" hidden>+ 追加</button>
-          </div>
-          <ul class="pm-detail-child-list" id="pm-detail-child-list"></ul>
-          <div id="pm-detail-completed-wrap"></div>
-        </section>
+        <div class="pm-detail-primary">
+          <section class="pm-detail-children" aria-labelledby="pm-detail-children-heading">
+            <div class="pm-detail-section-head">
+              <h2 class="pm-section-title" id="pm-detail-children-heading">子プロジェクト</h2>
+              <button type="button" class="pm-btn pm-btn--primary" id="pm-detail-add-child" hidden>+ 追加</button>
+            </div>
+            <ul class="pm-detail-child-list" id="pm-detail-child-list"></ul>
+            <div id="pm-detail-completed-wrap"></div>
+          </section>
+
+          <section class="pm-detail-issued" id="pm-detail-issued-section" hidden aria-labelledby="pm-detail-issued-heading">
+            <div class="pm-detail-section-head">
+              <h2 class="pm-section-title" id="pm-detail-issued-heading">発行済みタスク</h2>
+            </div>
+            <ul class="pm-issued-task-list" id="pm-detail-issued-list"></ul>
+          </section>
+        </div>
 
         <aside class="pm-detail-timeline" aria-labelledby="pm-detail-timeline-heading">
           <h2 class="pm-section-title" id="pm-detail-timeline-heading">タイムライン</h2>
@@ -322,6 +331,49 @@
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
         <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-parent-members-save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-issued-task-detail-dialog">
+    <div class="pm-dialog-form">
+      <h3 class="pm-dialog-title" id="pm-issued-detail-title"></h3>
+      <p class="pm-dialog-sub" id="pm-issued-detail-meta"></p>
+      <section class="pm-issued-detail-section" aria-labelledby="pm-issued-detail-members-heading">
+        <h4 class="pm-edit-section-title" id="pm-issued-detail-members-heading">割り当てメンバー</h4>
+        <ul class="pm-issued-detail-assignments" id="pm-issued-detail-assignments"></ul>
+      </section>
+      <div class="pm-dialog-actions">
+        <button type="button" class="pm-btn pm-btn--primary" id="pm-issued-detail-edit">編集</button>
+        <button type="button" class="pm-btn pm-btn--danger" id="pm-issued-detail-delete">削除</button>
+        <button type="button" class="pm-btn pm-btn--ghost" id="pm-issued-detail-close">閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-issued-task-dialog">
+    <form method="dialog" class="pm-dialog-form" id="pm-issued-task-form">
+      <h3 class="pm-dialog-title">発行タスクを編集</h3>
+      <p class="pm-dialog-sub" id="pm-issued-task-project-name"></p>
+      <label class="pm-field-label" for="pm-issued-task-title">タスクの内容</label>
+      <input type="text" id="pm-issued-task-title" class="pm-field-input" maxlength="200" required>
+      <label class="pm-field-label" for="pm-issued-task-child">割り当て子プロジェクト</label>
+      <select id="pm-issued-task-child" class="pm-field-select" required>
+        <option value="">選択してください</option>
+      </select>
+      <label class="pm-field-label" for="pm-issued-task-due">タスク納期</label>
+      <input type="date" id="pm-issued-task-due" class="pm-field-input">
+      <label class="pm-field-label" for="pm-issued-task-status">ステータス（未完了分）</label>
+      <select id="pm-issued-task-status" class="pm-field-select">
+        <option value="pending">未進行</option>
+        <option value="active">進行中</option>
+      </select>
+      <label class="pm-field-label">担当者（複数可）</label>
+      <div class="pm-assignee-checks" id="pm-issued-task-assignees"></div>
+      <p class="pm-field-hint">完了済みの担当者は変更できません。未完了の担当者のみ解除できます。</p>
+      <div class="pm-dialog-actions">
+        <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
+        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-issued-task-save">保存</button>
       </div>
     </form>
   </dialog>

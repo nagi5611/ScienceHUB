@@ -68,6 +68,30 @@ export interface PmTask {
   completed_at: number | null;
   due_urgency: PmDueUrgency;
   created_at: number;
+  /** 発行タスク ID（同一発行の担当者行で共有） */
+  issued_task_id: string | null;
+}
+
+/** 発行タスクの担当者ごとの進捗 */
+export interface PmIssuedTaskAssignment {
+  task_id: string;
+  assignee: PmAssignee;
+  status: PmTaskStatus;
+  is_completed: boolean;
+  completed_at: number | null;
+}
+
+/** 一括発行されたタスク（リーダー閲覧用） */
+export interface PmIssuedTaskBatch {
+  /** 発行タスク ID（複数担当者で共有） */
+  issued_task_id: string;
+  title: string;
+  description: string;
+  child_project_id: string | null;
+  child_name: string | null;
+  due_date: string | null;
+  created_at: number;
+  assignments: PmIssuedTaskAssignment[];
 }
 
 export interface PmMemberBoard {
@@ -143,6 +167,8 @@ export interface PmParentProject {
   latest_due_date: string | null;
   /** プロジェクト用 Excalidraw ノート ID */
   excalidraw_note_id: string | null;
+  /** リーダー向け発行タスク一覧（非リーダーは空配列） */
+  issued_tasks: PmIssuedTaskBatch[];
 }
 
 export type PmActivityAction =
@@ -255,6 +281,7 @@ interface TaskRow {
   completed_at: number | null;
   created_at: number;
   updated_at: number;
+  issue_batch_id: string | null;
   parent_name: string | null;
   child_name: string | null;
   assignee_display_name: string;
@@ -804,12 +831,13 @@ function toPmTask(row: TaskRow, today: string): PmTask {
     completed_at: row.completed_at,
     due_urgency: dueUrgency(row.due_date, isCompleted, today),
     created_at: row.created_at,
+    issued_task_id: row.issue_batch_id ?? null,
   };
 }
 
 const TASK_SELECT_SQL = `SELECT t.id, t.group_id, t.parent_project_id, t.child_project_id,
               t.title, t.description, t.due_date, t.status, t.assignee_id, t.created_by,
-              t.completed_at, t.created_at, t.updated_at,
+              t.completed_at, t.created_at, t.updated_at, t.issue_batch_id,
               p.name AS parent_name,
               c.name AS child_name,
               ua.display_name AS assignee_display_name,
@@ -888,6 +916,94 @@ export async function listGroupOpenTasks(
     .all<TaskRow>();
 
   return (result.results ?? []).map((row) => toPmTask(row, today));
+}
+
+/** 親プロジェクトごとの発行タスクをバッチ単位で取得 */
+async function listIssuedTasksByParents(
+  db: D1Database,
+  parentIds: string[]
+): Promise<Map<string, PmIssuedTaskBatch[]>> {
+  const map = new Map<string, PmIssuedTaskBatch[]>();
+  if (parentIds.length === 0) return map;
+
+  const placeholders = parentIds.map(() => "?").join(", ");
+  const today = todayJst();
+  const result = await db
+    .prepare(
+      `${TASK_SELECT_SQL}
+       WHERE t.parent_project_id IN (${placeholders})
+       ORDER BY t.created_at DESC, t.id ASC`
+    )
+    .bind(...parentIds)
+    .all<TaskRow>();
+
+  const batchMap = new Map<string, PmIssuedTaskBatch>();
+  for (const row of result.results ?? []) {
+    const parentId = row.parent_project_id;
+    if (!parentId) continue;
+
+    const batchId = row.issue_batch_id?.trim() || row.id;
+    const batchKey = `${parentId}:${batchId}`;
+    let batch = batchMap.get(batchKey);
+    if (!batch) {
+      batch = {
+        issued_task_id: batchId,
+        title: row.title,
+        description: row.description ?? "",
+        child_project_id: row.child_project_id,
+        child_name: row.child_name,
+        due_date: row.due_date,
+        created_at: row.created_at,
+        assignments: [],
+      };
+      batchMap.set(batchKey, batch);
+    }
+
+    const task = toPmTask(row, today);
+    batch.assignments.push({
+      task_id: task.id,
+      assignee: task.assignee,
+      status: task.status,
+      is_completed: task.is_completed,
+      completed_at: task.completed_at,
+    });
+  }
+
+  for (const [batchKey, batch] of batchMap) {
+    const parentId = batchKey.split(":")[0]!;
+    const list = map.get(parentId) ?? [];
+    list.push(batch);
+    map.set(parentId, list);
+  }
+
+  for (const [parentId, list] of map) {
+    list.sort((a, b) => b.created_at - a.created_at);
+    map.set(parentId, list);
+  }
+
+  return map;
+}
+
+/** 発行タスクバッチの管理権限（親リーダーまたは管理者） */
+async function assertCanManageIssuedBatch(
+  db: D1Database,
+  userId: string,
+  parentProjectId: string,
+  groupId: string
+): Promise<void> {
+  const membership = await requireGroupMembership(db, userId, groupId);
+  const admin = await resolveProjectAdmin(
+    db,
+    userId,
+    groupId,
+    membership.group_role_weight ?? 0
+  );
+  if (admin.isAdmin) return;
+
+  const leaderIds = await listParentLeaderIds(db, parentProjectId);
+  if (!leaderIds.has(userId)) {
+    throw new Error("親プロジェクトのリーダーのみ発行タスクを編集できます");
+  }
 }
 
 /** メンバー別タスクボードを組み立てる */
@@ -1144,6 +1260,16 @@ export async function listProjects(
     );
   }
 
+  const leaderParentIds = parents
+    .filter((p) => {
+      const leaders = leaderMap.get(p.id) ?? [];
+      return Boolean(
+        currentUserId && leaders.some((l) => l.id === currentUserId)
+      );
+    })
+    .map((p) => p.id);
+  const issuedMap = await listIssuedTasksByParents(db, leaderParentIds);
+
   return parents.map((parent) => {
     const siblingChildren = children.filter((c) => c.parent_id === parent.id);
     const kids = siblingChildren
@@ -1151,6 +1277,9 @@ export async function listProjects(
       .filter(Boolean);
     const members = parentMemberMap.get(parent.id) ?? [];
     const leaders = leaderMap.get(parent.id) ?? [];
+    const isLeader = Boolean(
+      currentUserId && leaders.some((l) => l.id === currentUserId)
+    );
     const stats = parentProgressStats(kids);
     const override = parent.progress_override;
     const progressManual =
@@ -1169,9 +1298,7 @@ export async function listProjects(
       leader: leaders[0] ?? null,
       leaders,
       members,
-      is_leader: Boolean(
-        currentUserId && leaders.some((l) => l.id === currentUserId)
-      ),
+      is_leader: isLeader,
       children: kids.filter((c) => !c.is_completed),
       completed_children: kids.filter((c) => c.is_completed),
       progress_percent: progressPercent,
@@ -1181,6 +1308,7 @@ export async function listProjects(
       updated_at: parent.updated_at ?? parent.created_at,
       latest_due_date: stats.latest_due_date,
       excalidraw_note_id: parent.excalidraw_note_id ?? null,
+      issued_tasks: isLeader ? (issuedMap.get(parent.id) ?? []) : [],
     };
   });
 }
@@ -1966,15 +2094,18 @@ export async function createTask(
   }
 
   const timestamp = now();
+  const issuedTaskId =
+    isLeader && parent ? createId("pmissue") : null;
 
   for (const assigneeId of assigneeIds) {
     const id = createId("pmtask");
+    const batchId = issuedTaskId ?? id;
     await db
       .prepare(
         `INSERT INTO pm_tasks
            (id, group_id, parent_project_id, child_project_id, title, description,
-            due_date, status, assignee_id, created_by, completed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+            due_date, status, assignee_id, created_by, completed_at, created_at, updated_at, issue_batch_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
       )
       .bind(
         id,
@@ -1988,7 +2119,8 @@ export async function createTask(
         assigneeId,
         userId,
         timestamp,
-        timestamp
+        timestamp,
+        batchId
       )
       .run();
 
@@ -2004,6 +2136,275 @@ export async function createTask(
   }
 
   return taskMutationResult(db, groupId, userId);
+}
+
+/** 発行タスクを更新（親リーダーまたは管理者） */
+export async function updateIssuedTaskBatch(
+  db: D1Database,
+  userId: string,
+  issuedTaskId: string,
+  input: {
+    title?: string;
+    due_date?: string | null;
+    status?: PmTaskStatus;
+    child_project_id?: string | null;
+    assignee_ids?: string[];
+  }
+): Promise<{
+  projects: PmParentProject[];
+  tasks: PmTask[];
+  completed_tasks: PmTask[];
+  member_board: PmMemberBoard[];
+}> {
+  const batchId = issuedTaskId.trim();
+  if (!batchId) {
+    throw new Error("発行タスク ID が不正です");
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT id, group_id, parent_project_id, child_project_id, title, description,
+              due_date, status, assignee_id, created_by, completed_at, issue_batch_id
+       FROM pm_tasks
+       WHERE issue_batch_id = ? OR id = ?`
+    )
+    .bind(batchId, batchId)
+    .all<{
+      id: string;
+      group_id: string;
+      parent_project_id: string | null;
+      child_project_id: string | null;
+      title: string;
+      description: string;
+      due_date: string | null;
+      status: string;
+      assignee_id: string;
+      created_by: string;
+      completed_at: number | null;
+      issue_batch_id: string | null;
+    }>();
+
+  const tasks = rows.results ?? [];
+  if (tasks.length === 0) {
+    throw new Error("発行タスクが見つかりません");
+  }
+
+  const parentProjectId = tasks[0]!.parent_project_id;
+  if (!parentProjectId) {
+    throw new Error("親プロジェクトに紐づいていないタスクは編集できません");
+  }
+
+  const groupId = tasks[0]!.group_id;
+  await assertCanManageIssuedBatch(db, userId, parentProjectId, groupId);
+
+  const parentMemberIds = await listParentMemberIds(db, parentProjectId);
+  const timestamp = now();
+
+  let title = tasks[0]!.title;
+  if (input.title !== undefined) {
+    title = input.title.trim();
+    if (!title) throw new Error("タスクの内容を入力してください");
+    if (title.length > 200) {
+      throw new Error("タスクの内容は200文字以内にしてください");
+    }
+  }
+
+  let dueDate: string | null = tasks[0]!.due_date;
+  if (input.due_date !== undefined) {
+    dueDate = null;
+    if (input.due_date != null && String(input.due_date).trim()) {
+      dueDate = String(input.due_date).trim();
+      if (!DATE_RE.test(dueDate)) {
+        throw new Error("納期の形式が不正です");
+      }
+    }
+  }
+
+  let childProjectId: string | null = tasks[0]!.child_project_id;
+  let resolvedParentId = parentProjectId;
+  if (input.child_project_id !== undefined) {
+    childProjectId = input.child_project_id?.trim() || null;
+    if (childProjectId) {
+      const child = await db
+        .prepare(`SELECT id, parent_id, group_id FROM pm_projects WHERE id = ?`)
+        .bind(childProjectId)
+        .first<{
+          id: string;
+          parent_id: string | null;
+          group_id: string;
+        }>();
+      if (!child || !child.parent_id) {
+        throw new Error("子プロジェクトが見つかりません");
+      }
+      if (child.parent_id !== parentProjectId) {
+        throw new Error("この親プロジェクトの子のみ指定できます");
+      }
+      resolvedParentId = child.parent_id;
+    }
+  }
+
+  const status =
+    input.status !== undefined
+      ? parseTaskStatus(input.status)
+      : parseTaskStatus(tasks[0]!.status);
+
+  for (const task of tasks) {
+    if (task.completed_at != null) {
+      await db
+        .prepare(
+          `UPDATE pm_tasks
+           SET title = ?, due_date = ?, child_project_id = ?,
+               parent_project_id = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          title,
+          dueDate,
+          childProjectId,
+          resolvedParentId,
+          timestamp,
+          task.id
+        )
+        .run();
+      continue;
+    }
+    await db
+      .prepare(
+        `UPDATE pm_tasks
+         SET title = ?, due_date = ?, status = ?, child_project_id = ?,
+             parent_project_id = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(
+        title,
+        dueDate,
+        status,
+        childProjectId,
+        resolvedParentId,
+        timestamp,
+        task.id
+      )
+      .run();
+  }
+
+  if (input.assignee_ids !== undefined) {
+    const desiredIds = [
+      ...new Set(
+        input.assignee_ids
+          .map((id) => String(id ?? "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    if (desiredIds.length === 0) {
+      throw new Error("担当者を1人以上選択してください");
+    }
+    for (const assigneeId of desiredIds) {
+      await assertAssigneeInGroup(db, groupId, assigneeId);
+      if (!parentMemberIds.has(assigneeId)) {
+        throw new Error("親プロジェクトの担当者のみ割り当てできます");
+      }
+    }
+
+    const openTasks = tasks.filter((t) => t.completed_at == null);
+    const openAssigneeIds = new Set(openTasks.map((t) => t.assignee_id));
+    const completedAssigneeIds = new Set(
+      tasks.filter((t) => t.completed_at != null).map((t) => t.assignee_id)
+    );
+
+    for (const task of openTasks) {
+      if (!desiredIds.includes(task.assignee_id)) {
+        await db.prepare(`DELETE FROM pm_tasks WHERE id = ?`).bind(task.id).run();
+      }
+    }
+
+    const template = tasks[0]!;
+    const resolvedBatchId = template.issue_batch_id ?? template.id;
+    for (const assigneeId of desiredIds) {
+      if (openAssigneeIds.has(assigneeId) || completedAssigneeIds.has(assigneeId)) {
+        continue;
+      }
+      const id = createId("pmtask");
+      await db
+        .prepare(
+          `INSERT INTO pm_tasks
+             (id, group_id, parent_project_id, child_project_id, title, description,
+              due_date, status, assignee_id, created_by, completed_at, created_at, updated_at, issue_batch_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          groupId,
+          resolvedParentId,
+          childProjectId,
+          title,
+          template.description ?? "",
+          dueDate,
+          status,
+          assigneeId,
+          template.created_by,
+          timestamp,
+          timestamp,
+          resolvedBatchId
+        )
+        .run();
+    }
+  }
+
+  return taskMutationResult(db, groupId, userId);
+}
+
+/** 発行タスクを削除（親リーダーまたは管理者） */
+export async function deleteIssuedTaskBatch(
+  db: D1Database,
+  userId: string,
+  issuedTaskId: string
+): Promise<{
+  projects: PmParentProject[];
+  tasks: PmTask[];
+  completed_tasks: PmTask[];
+  member_board: PmMemberBoard[];
+}> {
+  const batchId = issuedTaskId.trim();
+  if (!batchId) {
+    throw new Error("発行タスク ID が不正です");
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT id, group_id, parent_project_id
+       FROM pm_tasks
+       WHERE issue_batch_id = ? OR id = ?`
+    )
+    .bind(batchId, batchId)
+    .all<{
+      id: string;
+      group_id: string;
+      parent_project_id: string | null;
+    }>();
+
+  const tasks = rows.results ?? [];
+  if (tasks.length === 0) {
+    throw new Error("発行タスクが見つかりません");
+  }
+
+  const parentProjectId = tasks[0]!.parent_project_id;
+  if (!parentProjectId) {
+    throw new Error("親プロジェクトに紐づいていないタスクは削除できません");
+  }
+
+  await assertCanManageIssuedBatch(
+    db,
+    userId,
+    parentProjectId,
+    tasks[0]!.group_id
+  );
+
+  await db
+    .prepare(`DELETE FROM pm_tasks WHERE issue_batch_id = ? OR id = ?`)
+    .bind(batchId, batchId)
+    .run();
+
+  return taskMutationResult(db, tasks[0]!.group_id, userId);
 }
 
 /** タスクを更新（担当者または管理者） */

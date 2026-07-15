@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <title>プライバシーポリシー | ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/privacy.css">
+</head>
+<body>
+  <header class="privacy-header">
+    <div class="privacy-header-inner">
+      <a href="/" class="privacy-brand">Science<span>HUB</span></a>
+    </div>
+  </header>
+
+  <main class="privacy-main">
+    <h1>プライバシーポリシー</h1>
+    <p class="privacy-updated">最終更新日: 2026年7月15日</p>
+
+    <p>
+      ScienceHUB（以下「本サービス」）は、MMH Virtual が運営する科学研究向けのファイル共有・プロジェクト管理・スケジュール管理プラットフォームです。
+      本ポリシーは、本サービス（<a href="https://s.mmh-virtual.jp/">https://s.mmh-virtual.jp/</a>）における個人情報等の取り扱いについて定めます。
+    </p>
+
+    <h2>1. 運営者</h2>
+    <ul>
+      <li>サービス名: ScienceHUB</li>
+      <li>運営: MMH Virtual</li>
+      <li>お問い合わせ: <a href="mailto:harumacci94@gmail.com">harumacci94@gmail.com</a></li>
+    </ul>
+
+    <h2>2. 取得する情報</h2>
+    <p>本サービスでは、次の情報を取得・保存する場合があります。</p>
+    <ul>
+      <li><strong>アカウント情報</strong>: ユーザー名、表示名、メールアドレス、パスワード（ハッシュ化して保存）、プロフィール画像、ロール（権限）</li>
+      <li><strong>OAuth 連携情報</strong>: Google または Microsoft アカウント連携時の識別子、メールアドレス、表示名（ログイン認証に必要な範囲）</li>
+      <li><strong>利用データ</strong>: グループ所属、プロジェクト・タスク、スケジュール予定、お知らせ、3D 印刷予約など本サービスの機能利用に伴うデータ</li>
+      <li><strong>ファイル</strong>: クラウドストレージ等にアップロードされたファイルのメタデータおよび内容</li>
+      <li><strong>技術情報</strong>: セッション Cookie、IP アドレス、ブラウザ種別、アクセス日時などのログ（障害対応・セキュリティのため）</li>
+    </ul>
+
+    <h2>3. 利用目的</h2>
+    <ul>
+      <li>ユーザー認証、アカウント管理、権限に基づく機能の提供</li>
+      <li>ファイル共有、プロジェクト管理、スケジュール管理など本サービス各機能の提供</li>
+      <li>Google カレンダーとの予定同期（管理者が設定した組織用カレンダーへの反映）</li>
+      <li>お知らせ・通知（設定に応じた Discord 連携等を含む）</li>
+      <li>不正利用の防止、セキュリティ維持、障害対応</li>
+      <li>サービス改善のための統計・分析（個人を特定しない形での利用を原則とします）</li>
+    </ul>
+
+    <h2>4. Google ユーザー情報の取り扱い</h2>
+    <p>本サービスは Google API から受け取った情報を、次の目的にのみ使用します。</p>
+    <ul>
+      <li><strong>ログイン（openid / email / profile）</strong>: アカウントの作成・認証、プロフィール表示</li>
+      <li><strong>Google カレンダー連携（calendar スコープ）</strong>: ScienceHUB 上の予定を、管理者が指定した Google カレンダーに作成・更新・削除するため</li>
+    </ul>
+    <div class="privacy-box">
+      <p>
+        Google API から受け取った情報の利用は、
+        <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>
+        （Limited Use 要件を含む）に従います。
+        当該情報を第三者への販売、広告配信、信用調査等の目的には使用しません。
+      </p>
+    </div>
+
+    <h2>5. 第三者への提供・委託</h2>
+    <p>本サービスは次の外部サービスを利用します。必要な範囲でデータが処理される場合があります。</p>
+    <ul>
+      <li><strong>Cloudflare</strong>: ホスティング、データベース（D1）、ファイルストレージ（R2）、CDN</li>
+      <li><strong>Google</strong>: OAuth ログイン、Google カレンダー API</li>
+      <li><strong>Microsoft</strong>: OAuth ログイン（利用時）</li>
+      <li><strong>Discord</strong>: 3D 印刷予約等の通知 Webhook（管理者設定時）</li>
+    </ul>
+    <p>法令に基づく場合を除き、本人の同意なく個人情報を第三者に提供することはありません。</p>
+
+    <h2>6. 保存期間</h2>
+    <p>
+      データは、本サービスの提供に必要な期間保存します。
+      アカウント削除または管理者による削除後は、合理的な期間内に削除または匿名化します。
+      バックアップ等に短期間残存する場合があります。
+    </p>
+
+    <h2>7. セキュリティ</h2>
+    <p>
+      パスワードのハッシュ化、HTTPS 通信、セッション管理、アクセス権限の制御など、
+      合理的な安全管理措置を講じます。
+    </p>
+
+    <h2>8. ユーザーの権利</h2>
+    <p>
+      プロフィール画面から表示名等の変更が可能です。
+      アカウント情報の開示・訂正・削除を希望する場合は、上記お問い合わせ先までご連絡ください。
+    </p>
+
+    <h2>9. Cookie</h2>
+    <p>
+      本サービスはログイン状態の維持のため Cookie を使用します。
+      ブラウザ設定で Cookie を無効にすると、一部機能が利用できなくなる場合があります。
+    </p>
+
+    <h2>10. 未成年者</h2>
+    <p>
+      本サービスは学校・研究活動向けに提供されています。
+      未成年者が利用する場合は、保護者または指導者の同意のもとでご利用ください。
+    </p>
+
+    <h2>11. ポリシーの変更</h2>
+    <p>
+      本ポリシーは必要に応じて改定します。
+      重要な変更がある場合は、本ページの更新日を変更するなどしてお知らせします。
+    </p>
+
+    <footer class="privacy-footer">
+      <p><a href="/">ScienceHUB トップへ戻る</a> · <a href="/login/">ログイン</a></p>
+    </footer>
+  </main>
+</body>
+</html>

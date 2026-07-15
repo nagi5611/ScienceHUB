@@ -37,10 +37,40 @@ ScienceHUB 予定作成
 
 | スコープ | 用途 |
 |---------|------|
+| `openid` `email` `profile` | ログイン（ScienceHUB-OAuth） |
 | `https://www.googleapis.com/auth/calendar` | カレンダーの作成・イベントの読み書き（推奨） |
 | または `https://www.googleapis.com/auth/calendar.events` | イベントのみ（カレンダー作成は不可） |
 
 > **注意:** ログイン用 OAuth（`openid email profile`）とは **別のスコープ** です。カレンダー連携用に **専用のリフレッシュトークン** を取得してください。
+
+#### 本番公開（リフレッシュトークンの定期再取得を避ける）
+
+同意画面が **「テスト中」** のままだと、リフレッシュトークンは **約 7 日で失効** します。長期運用する場合は本番公開してください。
+
+1. **プライバシーポリシーを公開**（必須）
+   - URL: `https://s.mmh-virtual.jp/privacy/`
+   - リポジトリ: `public/privacy/index.html`
+   - デプロイ後、ブラウザで表示できることを確認
+
+2. **OAuth 同意画面のブランディングを入力**
+   - [OAuth 同意画面](https://console.cloud.google.com/auth/branding) を開く
+   - **アプリケーションのホームページ**: `https://s.mmh-virtual.jp`
+   - **プライバシーポリシー**: `https://s.mmh-virtual.jp/privacy/`
+   - **承認済みドメイン**: `mmh-virtual.jp`（設定済みであること）
+   - **ユーザーサポートメール**: 問い合わせ先メール
+
+3. **公開ステータスを「本番」に変更**
+   - [対象ユーザー](https://console.cloud.google.com/auth/audience) → **アプリを公開**
+   - カレンダースコープは **センシティブ** のため、Google の **アプリ検証** を求められる場合があります（審査には数日〜数週間）
+   - 検証待ちでも、本番公開後に取得したリフレッシュトークンは **7 日制限の対象外** になります
+
+4. **本番公開後にリフレッシュトークンを再取得**（重要）
+   - テスト中に取得したトークンは本番移行後も古い制限が残ることがあるため、**本番公開後** に Playground で `refresh_token` を取り直す
+   - `GOOGLE_CALENDAR_REFRESH_TOKEN` を Cloudflare シークレットに再登録
+
+5. **管理画面で接続テスト**を実行し、同期が成功することを確認
+
+> **利用規約**リンクは必須ではありません（任意）。プライバシーポリシーがあれば本番公開の最低要件は満たせます。
 
 ### 2.3 OAuth クライアント（ログイン用とカレンダー用は別）
 
@@ -362,7 +392,9 @@ Google → ScienceHUB の取り込みには以下のいずれか:
 - [ ] Google Calendar API を有効化
 - [ ] カレンダー用 OAuth クライアント（`scienceHUBcalendar` 等）を作成
 - [ ] `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` をシークレットに登録
-- [ ] カレンダースコープ付きリフレッシュトークンを取得（カレンダー用クライアントで）
+- [ ] プライバシーポリシーを `https://s.mmh-virtual.jp/privacy/` に公開
+- [ ] OAuth 同意画面を **本番公開**（テストのままだと refresh_token が約 7 日で失効）
+- [ ] カレンダースコープ付きリフレッシュトークンを取得（**本番公開後**・カレンダー用クライアントで）
 - [ ] `GOOGLE_CALENDAR_REFRESH_TOKEN` をシークレットに登録
 - [ ] 「自然科学部」カレンダーを作成し `GOOGLE_CALENDAR_ALL_GROUPS_ID` を設定
 - [ ] 各グループの `hub_groups.google_calendar_id` を設定（管理画面または SQL）
