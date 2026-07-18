@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>設計 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/design.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+</head>
+<body class="design-app">
+  <div class="design-loading" id="app-loading">
+    <p>読み込み中…</p>
+  </div>
+
+  <div class="design-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="design-btn design-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <!-- プロジェクト一覧 -->
+  <section class="design-list" id="list-view" hidden>
+    <header class="design-header">
+      <a href="/" class="design-back">← ダッシュボード</a>
+      <h1 class="design-title">設計</h1>
+      <div class="design-header-actions">
+        <button type="button" class="design-btn" id="import-local-btn">ローカルから開く</button>
+        <input type="file" id="import-local-input" accept=".design.json,application/json" hidden>
+        <button type="button" class="design-btn design-btn--primary" id="new-project-btn">新規設計</button>
+      </div>
+    </header>
+    <div class="design-list-body" id="list-body">
+      <div class="design-list-empty" id="list-empty" hidden>
+        <p>設計プロジェクトがありません</p>
+        <button type="button" class="design-btn design-btn--primary design-btn--lg" id="empty-new-btn">新規設計を作成</button>
+      </div>
+      <ul class="design-project-list" id="project-list"></ul>
+    </div>
+  </section>
+
+  <!-- エディタ -->
+  <section class="design-editor" id="editor-view" hidden>
+    <header class="design-header">
+      <button type="button" class="design-back design-back-btn" id="back-to-list">← 一覧</button>
+      <input type="text" class="design-title-input" id="project-title" maxlength="120" aria-label="設計タイトル">
+      <div class="design-header-actions">
+        <span class="design-status" id="save-status" aria-live="polite"></span>
+        <button type="button" class="design-btn design-btn--ghost" id="cloud-dest-btn" title="クラウド保存先を指定">保存先…</button>
+        <span class="design-cloud-dest" id="cloud-dest-label" hidden></span>
+        <button type="button" class="design-btn" id="versions-btn">履歴</button>
+        <button type="button" class="design-btn" id="local-save-btn">ローカル</button>
+        <button type="button" class="design-btn design-btn--primary" id="cloud-save-btn">保存</button>
+        <button type="button" class="design-btn" id="checkpoint-btn">版を確定</button>
+      </div>
+    </header>
+
+    <div class="design-workspace">
+      <aside class="design-toolbar" aria-label="描画ツール">
+        <p class="design-toolbar-label">ツール</p>
+        <div class="design-tool-group" role="toolbar" aria-label="描画ツール">
+          <button type="button" class="design-tool-btn design-tool-btn--active" data-tool="select" title="選択（範囲選択可）">↖</button>
+          <button type="button" class="design-tool-btn" data-tool="line" title="直線">／</button>
+          <button type="button" class="design-tool-btn" data-tool="rect" title="四角形">▢</button>
+          <button type="button" class="design-tool-btn" data-tool="text" title="テキスト">T</button>
+        </div>
+
+        <p class="design-toolbar-label">補正（Shiftで無効）</p>
+        <p class="design-constraint-hint" id="constraint-hint">直線: 0°/45°/90°（±3°） · 四角: 正方形/1:2</p>
+
+        <label class="design-field">
+          <span>線の色</span>
+          <input type="color" id="stroke-color" value="#1e293b">
+        </label>
+
+        <p class="design-toolbar-label">表示</p>
+        <div class="design-zoom-controls">
+          <button type="button" class="design-btn design-btn--icon" id="zoom-out-btn" title="縮小">−</button>
+          <span class="design-zoom-label" id="zoom-label">100%</span>
+          <button type="button" class="design-btn design-btn--icon" id="zoom-in-btn" title="拡大">＋</button>
+          <button type="button" class="design-btn" id="zoom-reset-btn">全体</button>
+        </div>
+
+        <div class="design-toolbar-actions">
+          <button type="button" class="design-btn" id="delete-btn" disabled>削除</button>
+          <button type="button" class="design-btn" id="clear-btn">全消去</button>
+        </div>
+
+        <p class="design-hint">Ctrl+Z/Y で元に戻す/やり直し · Ctrl+S で保存 · Delete で削除。ホイール拡大、中ボタンで移動。</p>
+      </aside>
+
+      <main class="design-canvas-wrap" aria-label="設計キャンバス">
+        <div class="design-canvas-scroll" id="canvas-scroll">
+          <canvas id="design-canvas" width="2000" height="1500"></canvas>
+        </div>
+        <textarea id="design-text-input" class="design-text-input" hidden rows="1" spellcheck="false" aria-label="テキスト入力"></textarea>
+      </main>
+
+      <aside class="design-properties-panel" id="properties-panel" hidden aria-label="プロパティ">
+        <div class="design-properties-header">
+          <h2>プロパティ</h2>
+        </div>
+        <div class="design-properties-body" id="properties-body"></div>
+      </aside>
+
+      <aside class="design-versions-panel" id="versions-panel" hidden aria-label="バージョン履歴">
+        <div class="design-versions-header">
+          <h2>バージョン履歴</h2>
+          <button type="button" class="design-btn design-btn--icon" id="close-versions-btn" aria-label="閉じる">×</button>
+        </div>
+        <ul class="design-version-list" id="version-list"></ul>
+      </aside>
+    </div>
+  </section>
+
+  <!-- クラウド保存ダイアログ -->
+  <dialog class="cloud-save-dialog" id="design-cloud-save-dialog" aria-labelledby="design-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="design-cloud-save-title">クラウド保存先を指定</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="design-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="design-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="design-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="design-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="design-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="design-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="design-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="design-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="design-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="design-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="design-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="design-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <script src="/apps/design/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

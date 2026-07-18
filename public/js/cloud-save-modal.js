@@ -39,6 +39,11 @@ export function createCloudSaveModal(dialogEl, options = {}) {
   let currentPath = "";
   let accessOk = false;
   let uploading = false;
+  let pickMode = false;
+  /** @type {((dest: { folderPath: string, filename: string }) => void) | null} */
+  let onDestinationPicked = null;
+  const submitLabelSave = options.submitLabelSave ?? "保存する";
+  const submitLabelPick = options.submitLabelPick ?? "この保存先を使う";
 
   const els = {
     alert: dialogEl.querySelector(`#${idPrefix}-alert`),
@@ -229,13 +234,21 @@ export function createCloudSaveModal(dialogEl, options = {}) {
     if (uploading) return;
     dialogEl.close();
     pending = null;
+    pickMode = false;
+    onDestinationPicked = null;
     setProgress(false);
     setAlert("");
   }
 
-  async function open({ blob, filename }) {
+  async function open({ blob, filename, mode = "save", onDestinationPicked: onPick }) {
+    pickMode = mode === "pick";
+    onDestinationPicked = onPick ?? null;
     pending = { blob, filename };
     if (els.filename) els.filename.value = filename;
+    if (els.submit) {
+      els.submit.textContent = pickMode ? submitLabelPick : submitLabelSave;
+      els.submit.disabled = false;
+    }
     setProgress(false);
     setBusy(false);
 
@@ -254,13 +267,21 @@ export function createCloudSaveModal(dialogEl, options = {}) {
   }
 
   async function submit() {
-    if (!pending || !currentPath || uploading) return;
+    if (!currentPath || uploading) return;
 
-    const name = els.filename?.value?.trim() || pending.filename;
+    const name = els.filename?.value?.trim() || pending?.filename;
     if (!name) {
       setAlert("ファイル名を入力してください");
       return;
     }
+
+    if (pickMode) {
+      onDestinationPicked?.({ folderPath: currentPath, filename: name });
+      close();
+      return;
+    }
+
+    if (!pending) return;
 
     const file = new File([pending.blob], name, {
       type: pending.blob.type || "application/octet-stream",
@@ -297,6 +318,23 @@ export function createCloudSaveModal(dialogEl, options = {}) {
     }
   }
 
+  /**
+   * 保存先フォルダに直接アップロード
+   * @param {string} folderPath
+   * @param {Blob} blob
+   * @param {string} filename
+   * @param {{ onProgress?: (detail: object) => void }} [callbacks]
+   */
+  async function uploadTo(folderPath, blob, filename, callbacks = {}) {
+    const file = new File([blob], filename, {
+      type: blob.type || "application/octet-stream",
+    });
+    return uploadFile(folderPath, file, {
+      filename,
+      onProgress: callbacks.onProgress,
+    });
+  }
+
   els.submit?.addEventListener("click", () => {
     submit().catch((err) => setAlert(err.message));
   });
@@ -317,5 +355,5 @@ export function createCloudSaveModal(dialogEl, options = {}) {
     window.open("/apps/cloud-storage/", "_blank", "noopener,noreferrer");
   });
 
-  return { open, close };
+  return { open, close, uploadTo };
 }

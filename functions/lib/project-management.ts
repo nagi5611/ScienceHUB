@@ -91,6 +91,8 @@ export interface PmIssuedTaskBatch {
   child_name: string | null;
   due_date: string | null;
   created_at: number;
+  /** タスクの活動日（YYYY-MM-DD、バッチ内で共有） */
+  activity_dates: string[];
   assignments: PmIssuedTaskAssignment[];
 }
 
@@ -309,6 +311,72 @@ interface AssigneeRow {
   username: string;
 }
 
+/** アプリで有効なグループの Hub 管理者用仮想所属を取得 */
+async function listPmAppGroupMembershipsForHubAdmin(
+  db: D1Database,
+  enabledGroupIds: Set<string>
+): Promise<UserGroupMembership[]> {
+  if (enabledGroupIds.size === 0) return [];
+
+  const placeholders = [...enabledGroupIds].map(() => "?").join(", ");
+  const result = await db
+    .prepare(
+      `SELECT
+         g.id AS group_id,
+         g.slug AS group_slug,
+         g.display_name AS group_display_name,
+         g.color AS group_color,
+         gr.id AS group_role_id,
+         gr.slug AS group_role_slug,
+         gr.display_name AS group_role_display_name,
+         gr.color AS group_role_color,
+         gr.position AS group_role_position,
+         gr.weight AS group_role_weight
+       FROM hub_groups g
+       JOIN group_roles gr ON gr.group_id = g.id
+       WHERE g.id IN (${placeholders})
+         AND gr.weight = (
+           SELECT MAX(gr2.weight) FROM group_roles gr2 WHERE gr2.group_id = g.id
+         )
+       ORDER BY g.position ASC, g.display_name ASC, gr.position ASC`
+    )
+    .bind(...enabledGroupIds)
+    .all<UserGroupMembership>();
+
+  const byGroup = new Map<string, UserGroupMembership>();
+  for (const row of result.results ?? []) {
+    if (!byGroup.has(row.group_id)) {
+      byGroup.set(row.group_id, row);
+    }
+  }
+  return [...byGroup.values()];
+}
+
+/** Hub 管理者向けにアプリ有効グループの所属をマージ（実所属を優先） */
+function mergeHubAdminMemberships(
+  realMemberships: UserGroupMembership[],
+  virtualMemberships: UserGroupMembership[]
+): UserGroupMembership[] {
+  const byGroupId = new Map<string, UserGroupMembership>();
+  for (const membership of virtualMemberships) {
+    byGroupId.set(membership.group_id, membership);
+  }
+  for (const membership of realMemberships) {
+    if (byGroupId.has(membership.group_id)) {
+      byGroupId.set(membership.group_id, membership);
+    }
+  }
+  return [...byGroupId.values()].sort((a, b) => {
+    const nameCmp = a.group_display_name.localeCompare(
+      b.group_display_name,
+      "ja",
+      { sensitivity: "base" }
+    );
+    if (nameCmp !== 0) return nameCmp;
+    return a.group_id.localeCompare(b.group_id);
+  });
+}
+
 /** アプリアクセス可能な所属のみ返す */
 export async function getAccessibleMemberships(
   db: D1Database,
@@ -328,7 +396,14 @@ export async function getAccessibleMemberships(
     if (enabledGroupIds.size === 0) {
       return memberships;
     }
-    return memberships.filter((m) => enabledGroupIds.has(m.group_id));
+    const virtualMemberships = await listPmAppGroupMembershipsForHubAdmin(
+      db,
+      enabledGroupIds
+    );
+    return mergeHubAdminMemberships(
+      memberships.filter((m) => enabledGroupIds.has(m.group_id)),
+      virtualMemberships
+    );
   }
 
   if (enabledGroupIds.size === 0) return [];
@@ -350,6 +425,11 @@ async function requireGroupMembership(
     throw new Error("グループに所属していないか、アクセス権限がありません");
   }
   return membership;
+}
+
+/** Hub 管理者（サイト全体の管理者ロール）か */
+async function isHubAdminUser(db: D1Database, userId: string): Promise<boolean> {
+  return userHasAdminRole(db, userId);
 }
 
 /** グループの管理者資格の最低 weight を取得 */
@@ -398,12 +478,19 @@ export async function resolveProjectAdmin(
   const minEligibleWeight = await getMinEligibleWeight(db, groupId);
   const members = await listMemberWeights(db, groupId);
   const eligible = members.filter((m) => m.weight >= minEligibleWeight);
+  const maxWeight =
+    eligible.length > 0
+      ? Math.max(...eligible.map((m) => m.weight))
+      : 0;
+
+  if (await isHubAdminUser(db, userId)) {
+    return { isAdmin: true, maxWeight, minEligibleWeight };
+  }
 
   if (eligible.length === 0) {
     return { isAdmin: false, maxWeight: 0, minEligibleWeight };
   }
 
-  const maxWeight = Math.max(...eligible.map((m) => m.weight));
   const isAdmin =
     eligible.some((m) => m.user_id === userId) && userWeight === maxWeight;
 
@@ -938,10 +1025,12 @@ async function listIssuedTasksByParents(
     .all<TaskRow>();
 
   const batchMap = new Map<string, PmIssuedTaskBatch>();
+  const allTaskIds: string[] = [];
   for (const row of result.results ?? []) {
     const parentId = row.parent_project_id;
     if (!parentId) continue;
 
+    allTaskIds.push(row.id);
     const batchId = row.issue_batch_id?.trim() || row.id;
     const batchKey = `${parentId}:${batchId}`;
     let batch = batchMap.get(batchKey);
@@ -954,6 +1043,7 @@ async function listIssuedTasksByParents(
         child_name: row.child_name,
         due_date: row.due_date,
         created_at: row.created_at,
+        activity_dates: [],
         assignments: [],
       };
       batchMap.set(batchKey, batch);
@@ -967,6 +1057,14 @@ async function listIssuedTasksByParents(
       is_completed: task.is_completed,
       completed_at: task.completed_at,
     });
+  }
+
+  const activityMap = await listActivityDatesByTaskIds(db, allTaskIds);
+  for (const batch of batchMap.values()) {
+    const firstTaskId = batch.assignments[0]?.task_id;
+    batch.activity_dates = firstTaskId
+      ? (activityMap.get(firstTaskId) ?? [])
+      : [];
   }
 
   for (const [batchKey, batch] of batchMap) {
@@ -1126,6 +1224,194 @@ export async function calculateEffortDaysBetween(
   return row?.cnt ?? 0;
 }
 
+/** 活動日文字列を正規化（昇順・重複除去） */
+function normalizeActivityDates(dates: string[]): string[] {
+  const unique = [
+    ...new Set(
+      dates
+        .map((d) => String(d ?? "").trim())
+        .filter((d) => DATE_RE.test(d))
+    ),
+  ];
+  unique.sort();
+  return unique;
+}
+
+/** 選択活動日における担当者の活動可能日合計（人日） */
+export async function calculateEffortForActivityDates(
+  db: D1Database,
+  groupId: string,
+  assigneeIds: string[],
+  dates: string[]
+): Promise<number> {
+  const normalizedDates = normalizeActivityDates(dates);
+  const uniqueAssignees = [
+    ...new Set(
+      assigneeIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+    ),
+  ];
+  if (normalizedDates.length === 0 || uniqueAssignees.length === 0) {
+    return 0;
+  }
+
+  const assigneePlaceholders = uniqueAssignees.map(() => "?").join(", ");
+  const datePlaceholders = normalizedDates.map(() => "?").join(", ");
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS cnt
+       FROM pm_availability
+       WHERE group_id = ?
+         AND user_id IN (${assigneePlaceholders})
+         AND status = 'available'
+         AND avail_date IN (${datePlaceholders})`
+    )
+    .bind(groupId, ...uniqueAssignees, ...normalizedDates)
+    .first<{ cnt: number }>();
+
+  return row?.cnt ?? 0;
+}
+
+/** タスク ID ごとの活動日一覧 */
+async function listActivityDatesByTaskIds(
+  db: D1Database,
+  taskIds: string[]
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (taskIds.length === 0) return map;
+
+  const placeholders = taskIds.map(() => "?").join(", ");
+  const result = await db
+    .prepare(
+      `SELECT task_id, activity_date
+       FROM pm_task_activity_days
+       WHERE task_id IN (${placeholders})
+       ORDER BY activity_date ASC`
+    )
+    .bind(...taskIds)
+    .all<{ task_id: string; activity_date: string }>();
+
+  for (const row of result.results ?? []) {
+    const list = map.get(row.task_id) ?? [];
+    list.push(row.activity_date);
+    map.set(row.task_id, list);
+  }
+  return map;
+}
+
+/** 複数タスクの活動日を置き換え */
+async function replaceTaskActivityDays(
+  db: D1Database,
+  taskIds: string[],
+  dates: string[]
+): Promise<void> {
+  const normalized = normalizeActivityDates(dates);
+  if (taskIds.length === 0) return;
+
+  const placeholders = taskIds.map(() => "?").join(", ");
+  await db
+    .prepare(
+      `DELETE FROM pm_task_activity_days WHERE task_id IN (${placeholders})`
+    )
+    .bind(...taskIds)
+    .run();
+
+  for (const taskId of taskIds) {
+    for (const date of normalized) {
+      await db
+        .prepare(
+          `INSERT INTO pm_task_activity_days (task_id, activity_date)
+           VALUES (?, ?)`
+        )
+        .bind(taskId, date)
+        .run();
+    }
+  }
+}
+
+/** タスク発行時の合計割り当て工数プレビュー（活動日・選択担当者） */
+export async function previewTaskIssueEffort(
+  db: D1Database,
+  userId: string,
+  groupId: string,
+  dueDate: string | null,
+  assigneeIds: string[],
+  activityDates: string[] = []
+): Promise<{
+  effort_days: number | null;
+  assignee_count: number;
+  activity_day_count: number;
+}> {
+  const gid = groupId.trim();
+  if (!gid) {
+    throw new Error("group_id を指定してください");
+  }
+
+  await requireGroupMembership(db, userId, gid);
+
+  const normalizedActivityDates = normalizeActivityDates(activityDates);
+  const uniqueIds = [
+    ...new Set(
+      assigneeIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+    ),
+  ];
+
+  if (uniqueIds.length === 0) {
+    return {
+      effort_days: null,
+      assignee_count: 0,
+      activity_day_count: normalizedActivityDates.length,
+    };
+  }
+
+  for (const assigneeId of uniqueIds) {
+    await assertAssigneeInGroup(db, gid, assigneeId);
+  }
+
+  if (normalizedActivityDates.length > 0) {
+    const effortDays = await calculateEffortForActivityDates(
+      db,
+      gid,
+      uniqueIds,
+      normalizedActivityDates
+    );
+    return {
+      effort_days: effortDays,
+      assignee_count: uniqueIds.length,
+      activity_day_count: normalizedActivityDates.length,
+    };
+  }
+
+  const normalizedDue =
+    dueDate && dueDate.trim() && DATE_RE.test(dueDate.trim())
+      ? dueDate.trim()
+      : null;
+  if (dueDate && dueDate.trim() && !normalizedDue) {
+    throw new Error("納期の形式が不正です");
+  }
+
+  if (!normalizedDue) {
+    return {
+      effort_days: null,
+      assignee_count: uniqueIds.length,
+      activity_day_count: 0,
+    };
+  }
+
+  const effortDays = await calculateEffortDaysBetween(
+    db,
+    gid,
+    uniqueIds,
+    todayJst(),
+    normalizedDue
+  );
+
+  return {
+    effort_days: effortDays,
+    assignee_count: uniqueIds.length,
+    activity_day_count: 0,
+  };
+}
+
 /** 今日〜納期の工数（互換） */
 export async function calculateEffortDays(
   db: D1Database,
@@ -1250,6 +1536,10 @@ export async function listProjects(
     parents.map((p) => p.id)
   );
   const today = todayJst();
+  const hubAdmin =
+    currentUserId != null
+      ? await isHubAdminUser(db, currentUserId)
+      : false;
 
   const childById = new Map<string, PmChildProject>();
   for (const c of children) {
@@ -1260,14 +1550,16 @@ export async function listProjects(
     );
   }
 
-  const leaderParentIds = parents
-    .filter((p) => {
-      const leaders = leaderMap.get(p.id) ?? [];
-      return Boolean(
-        currentUserId && leaders.some((l) => l.id === currentUserId)
-      );
-    })
-    .map((p) => p.id);
+  const leaderParentIds = hubAdmin
+    ? parents.map((p) => p.id)
+    : parents
+        .filter((p) => {
+          const leaders = leaderMap.get(p.id) ?? [];
+          return Boolean(
+            currentUserId && leaders.some((l) => l.id === currentUserId)
+          );
+        })
+        .map((p) => p.id);
   const issuedMap = await listIssuedTasksByParents(db, leaderParentIds);
 
   return parents.map((parent) => {
@@ -1277,9 +1569,11 @@ export async function listProjects(
       .filter(Boolean);
     const members = parentMemberMap.get(parent.id) ?? [];
     const leaders = leaderMap.get(parent.id) ?? [];
-    const isLeader = Boolean(
-      currentUserId && leaders.some((l) => l.id === currentUserId)
-    );
+    const isLeader =
+      hubAdmin ||
+      Boolean(
+        currentUserId && leaders.some((l) => l.id === currentUserId)
+      );
     const stats = parentProgressStats(kids);
     const override = parent.progress_override;
     const progressManual =
@@ -1908,9 +2202,15 @@ export async function setParentMembers(
     throw new Error("親プロジェクトのみ担当者を設定できます");
   }
 
-  await requireGroupMembership(db, userId, project.group_id);
+  const membership = await requireGroupMembership(db, userId, project.group_id);
+  const admin = await resolveProjectAdmin(
+    db,
+    userId,
+    project.group_id,
+    membership.group_role_weight ?? 0
+  );
   const leaderIds = await listParentLeaderIds(db, parentProjectId);
-  if (!leaderIds.has(userId)) {
+  if (!admin.isAdmin && !leaderIds.has(userId)) {
     throw new Error("親プロジェクトのリーダーのみ担当者を設定できます");
   }
 
@@ -1968,6 +2268,7 @@ export async function createTask(
     status?: PmTaskStatus;
     assignee_id?: string;
     assignee_ids?: string[];
+    activity_dates?: string[];
   }
 ): Promise<{
   projects: PmParentProject[];
@@ -2070,7 +2371,7 @@ export async function createTask(
     parent != null ? await listParentLeaderIds(db, parent.id) : new Set<string>();
   const isLeader = leaderIds.has(userId);
 
-  if (isLeader && parent && !childProjectId) {
+  if ((isLeader || admin.isAdmin) && parent && !childProjectId) {
     throw new Error("割り当て子プロジェクトを選択してください");
   }
 
@@ -2095,11 +2396,17 @@ export async function createTask(
 
   const timestamp = now();
   const issuedTaskId =
-    isLeader && parent ? createId("pmissue") : null;
+    (isLeader || admin.isAdmin) && parent && childProjectId
+      ? createId("pmissue")
+      : null;
+
+  const activityDates = normalizeActivityDates(input.activity_dates ?? []);
+  const createdTaskIds: string[] = [];
 
   for (const assigneeId of assigneeIds) {
     const id = createId("pmtask");
     const batchId = issuedTaskId ?? id;
+    createdTaskIds.push(id);
     await db
       .prepare(
         `INSERT INTO pm_tasks
@@ -2135,6 +2442,10 @@ export async function createTask(
     });
   }
 
+  if (activityDates.length > 0) {
+    await replaceTaskActivityDays(db, createdTaskIds, activityDates);
+  }
+
   return taskMutationResult(db, groupId, userId);
 }
 
@@ -2149,6 +2460,7 @@ export async function updateIssuedTaskBatch(
     status?: PmTaskStatus;
     child_project_id?: string | null;
     assignee_ids?: string[];
+    activity_dates?: string[];
   }
 ): Promise<{
   projects: PmParentProject[];
@@ -2347,7 +2659,26 @@ export async function updateIssuedTaskBatch(
           resolvedBatchId
         )
         .run();
+
+      const existingDates =
+        (await listActivityDatesByTaskIds(db, [template.id])).get(
+          template.id
+        ) ?? [];
+      if (existingDates.length > 0) {
+        await replaceTaskActivityDays(db, [id], existingDates);
+      }
     }
+  }
+
+  if (input.activity_dates !== undefined) {
+    const remaining = await db
+      .prepare(
+        `SELECT id FROM pm_tasks WHERE issue_batch_id = ? OR id = ?`
+      )
+      .bind(batchId, batchId)
+      .all<{ id: string }>();
+    const taskIds = (remaining.results ?? []).map((row) => row.id);
+    await replaceTaskActivityDays(db, taskIds, input.activity_dates);
   }
 
   return taskMutationResult(db, groupId, userId);

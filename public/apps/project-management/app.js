@@ -1177,6 +1177,21 @@ let storagePickerPath = "";
 /** @type {string} */
 let storageGroupRoot = "";
 let effortPreviewTimer = null;
+let taskIssueEffortTimer = null;
+
+/** @type {'task' | 'issued'} */
+let taskActivityCalContext = "task";
+let taskActivityCalYear = 2026;
+let taskActivityCalMonth = 7;
+/** @type {Set<string>} */
+let taskActivitySelectedDates = new Set();
+let taskActivityIsDragging = false;
+/** @type {Set<string>} */
+let taskActivityDragTouched = new Set();
+let taskActivityPaintSelect = true;
+/** @type {'task' | 'issued'} */
+let taskActivityPaintContext = "task";
+let taskActivitySkipClick = false;
 
 /** 一覧／詳細／担当一覧の表示切替 */
 function renderView() {
@@ -2094,6 +2109,326 @@ async function updateDueEffortPreview() {
   }
 }
 
+/** タスク発行ダイアログの選択担当者 ID */
+function getTaskDialogAssigneeIds(containerSelector) {
+  return [
+    ...document.querySelectorAll(
+      `${containerSelector} input[type=checkbox]:checked`
+    ),
+  ].map((el) => el.value);
+}
+
+/** 活動日カレンダーの要素 ID プレフィックス */
+function taskActivityCalPrefix() {
+  return taskActivityCalContext === "issued" ? "pm-issued-task" : "pm-task";
+}
+
+/** 活動日カレンダーの月ラベル更新 */
+function updateTaskActivityMonthLabel() {
+  const label = document.getElementById(`${taskActivityCalPrefix()}-cal-month-text`);
+  if (label) {
+    label.textContent = `${taskActivityCalYear}年${taskActivityCalMonth}月`;
+  }
+}
+
+/** 活動日カレンダーの曜日ヘッダー */
+function renderTaskActivityWeekdays() {
+  const row = document.getElementById(`${taskActivityCalPrefix()}-cal-weekdays`);
+  if (!row) return;
+  row.innerHTML = WEEKDAYS.map(
+    (d) => `<span class="pm-cal-weekday pm-cal-weekday--static">${d}</span>`
+  ).join("");
+}
+
+/** 活動日の選択状態を反映 */
+function applyTaskActivityCellState(cell, selected) {
+  const dateStr = cell.dataset.date;
+  if (!dateStr) return;
+  if (selected) {
+    taskActivitySelectedDates.add(dateStr);
+    cell.classList.add("pm-cal-day--task-selected");
+    cell.setAttribute("aria-pressed", "true");
+  } else {
+    taskActivitySelectedDates.delete(dateStr);
+    cell.classList.remove("pm-cal-day--task-selected");
+    cell.setAttribute("aria-pressed", "false");
+  }
+}
+
+/** 活動日カレンダーの日セル */
+function createTaskActivityDayCell(dayNum, otherMonth, todayStr, dateStr) {
+  const cell = document.createElement("button");
+  cell.type = "button";
+  cell.className = "pm-cal-day";
+  if (otherMonth) {
+    cell.classList.add("other-month");
+    cell.disabled = true;
+    cell.tabIndex = -1;
+  }
+  if (dateStr === todayStr) cell.classList.add("today");
+
+  const num = document.createElement("div");
+  num.className = "pm-cal-day-num";
+  num.textContent = String(dayNum);
+  cell.appendChild(num);
+
+  if (!dateStr || otherMonth) return cell;
+
+  cell.dataset.date = dateStr;
+  cell.setAttribute("aria-pressed", taskActivitySelectedDates.has(dateStr) ? "true" : "false");
+  if (taskActivitySelectedDates.has(dateStr)) {
+    cell.classList.add("pm-cal-day--task-selected");
+  }
+
+  return cell;
+}
+
+/** 活動日カレンダーのグリッド操作をバインド */
+function bindTaskActivityCalendarGrid(prefix, context) {
+  const grid = document.getElementById(`${prefix}-cal-grid`);
+  if (!grid || grid.dataset.activityBound === "1") return;
+  grid.dataset.activityBound = "1";
+
+  grid.addEventListener("click", (e) => {
+    if (taskActivitySkipClick) {
+      taskActivitySkipClick = false;
+      return;
+    }
+    const cell = e.target.closest("button[data-date]");
+    if (!cell || cell.disabled || taskActivityIsDragging) return;
+    e.preventDefault();
+    e.stopPropagation();
+    taskActivityCalContext = context;
+    const selected = !taskActivitySelectedDates.has(cell.dataset.date);
+    applyTaskActivityCellState(cell, selected);
+    scheduleTaskIssueEffortPreview(getTaskIssueEffortPreviewOptions());
+  });
+
+  grid.addEventListener("pointerdown", (e) => {
+    const cell = e.target.closest("button[data-date]");
+    if (!cell || cell.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    taskActivitySkipClick = true;
+    taskActivityCalContext = context;
+    taskActivityPaintContext = context;
+    taskActivityIsDragging = true;
+    taskActivityDragTouched = new Set([cell.dataset.date]);
+    taskActivityPaintSelect = !taskActivitySelectedDates.has(cell.dataset.date);
+    applyTaskActivityCellState(cell, taskActivityPaintSelect);
+    cell.classList.add("pm-cal-day--task-painting");
+    try {
+      grid.setPointerCapture(e.pointerId);
+    } catch {
+      /* noop */
+    }
+  });
+
+  grid.addEventListener("pointermove", (e) => {
+    if (!taskActivityIsDragging) return;
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const cell = hit?.closest?.(`#${prefix}-cal-grid button[data-date]`);
+    if (!cell || cell.disabled) return;
+    const dateStr = cell.dataset.date;
+    if (taskActivityDragTouched.has(dateStr)) return;
+    taskActivityDragTouched.add(dateStr);
+    applyTaskActivityCellState(cell, taskActivityPaintSelect);
+    cell.classList.add("pm-cal-day--task-painting");
+  });
+
+  const endPaint = (e) => {
+    if (!taskActivityIsDragging) return;
+    taskActivityIsDragging = false;
+    taskActivityDragTouched = new Set();
+    grid
+      .querySelectorAll(".pm-cal-day--task-painting")
+      .forEach((el) => el.classList.remove("pm-cal-day--task-painting"));
+    try {
+      if (e?.pointerId != null) {
+        grid.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      /* noop */
+    }
+    taskActivityCalContext = taskActivityPaintContext;
+    scheduleTaskIssueEffortPreview(getTaskIssueEffortPreviewOptions());
+  };
+
+  grid.addEventListener("pointerup", endPaint);
+  grid.addEventListener("pointercancel", endPaint);
+}
+
+/** 活動日カレンダー描画 */
+function renderTaskActivityCalendar(context, initialDates = []) {
+  taskActivityCalContext = context;
+  taskActivitySelectedDates = new Set(initialDates);
+
+  const today = todayJst();
+  const todayParts = today.split("-").map(Number);
+  if (initialDates.length === 0 && !taskActivityCalYear) {
+    taskActivityCalYear = todayParts[0];
+    taskActivityCalMonth = todayParts[1];
+  }
+
+  updateTaskActivityMonthLabel();
+  renderTaskActivityWeekdays();
+
+  const grid = document.getElementById(`${taskActivityCalPrefix()}-cal-grid`);
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  const firstDay = new Date(taskActivityCalYear, taskActivityCalMonth - 1, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(taskActivityCalYear, taskActivityCalMonth, 0).getDate();
+  const prevMonthDays = new Date(taskActivityCalYear, taskActivityCalMonth - 1, 0).getDate();
+
+  for (let i = 0; i < startWeekday; i++) {
+    const dayNum = prevMonthDays - startWeekday + i + 1;
+    grid.appendChild(createTaskActivityDayCell(dayNum, true, today, null));
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${taskActivityCalYear}-${String(taskActivityCalMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    grid.appendChild(createTaskActivityDayCell(day, false, today, dateStr));
+  }
+
+  const totalCells = startWeekday + daysInMonth;
+  const trailing = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let day = 1; day <= trailing; day++) {
+    grid.appendChild(createTaskActivityDayCell(day, true, today, null));
+  }
+}
+
+/** 活動日ドラッグ終了（グリッド外で離した場合） */
+function handleTaskActivityDragEnd() {
+  if (!taskActivityIsDragging) return;
+  taskActivityIsDragging = false;
+  taskActivityDragTouched = new Set();
+  document
+    .querySelectorAll(".pm-cal-day--task-painting")
+    .forEach((el) => el.classList.remove("pm-cal-day--task-painting"));
+  scheduleTaskIssueEffortPreview(getTaskIssueEffortPreviewOptions());
+}
+
+/** 活動日カレンダーの月移動をバインド */
+function bindTaskActivityCalNav(prefix, context) {
+  document.getElementById(`${prefix}-cal-prev`)?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    taskActivityCalContext = context;
+    taskActivityCalMonth -= 1;
+    if (taskActivityCalMonth < 1) {
+      taskActivityCalMonth = 12;
+      taskActivityCalYear -= 1;
+    }
+    renderTaskActivityCalendar(context, [...taskActivitySelectedDates]);
+  });
+
+  document.getElementById(`${prefix}-cal-next`)?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    taskActivityCalContext = context;
+    taskActivityCalMonth += 1;
+    if (taskActivityCalMonth > 12) {
+      taskActivityCalMonth = 1;
+      taskActivityCalYear += 1;
+    }
+    renderTaskActivityCalendar(context, [...taskActivitySelectedDates]);
+  });
+
+  document.getElementById(`${prefix}-cal-today`)?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    taskActivityCalContext = context;
+    const parts = todayJst().split("-").map(Number);
+    taskActivityCalYear = parts[0];
+    taskActivityCalMonth = parts[1];
+    renderTaskActivityCalendar(context, [...taskActivitySelectedDates]);
+  });
+
+  bindTaskActivityCalendarGrid(prefix, context);
+}
+
+function getTaskIssueEffortPreviewOptions() {
+  if (taskActivityCalContext === "issued") {
+    return {
+      effortElId: "pm-issued-task-effort",
+      dueInputId: "pm-issued-task-due",
+      assigneesSelector: "#pm-issued-task-assignees",
+    };
+  }
+  return {
+    effortElId: "pm-task-effort",
+    dueInputId: "pm-task-due",
+    assigneesSelector: "#pm-task-assignees",
+  };
+}
+
+/** タスク発行時の合計割り当て工数プレビュー */
+async function updateTaskIssueEffortPreview({
+  effortElId = "pm-task-effort",
+  dueInputId = "pm-task-due",
+  assigneesSelector = "#pm-task-assignees",
+} = {}) {
+  const effortEl = document.getElementById(effortElId);
+  const dueInput = document.getElementById(dueInputId);
+  if (!effortEl || !selectedGroupId) return;
+
+  const dueDate = dueInput?.value || null;
+  const assigneeIds = getTaskDialogAssigneeIds(assigneesSelector);
+  const activityDates = [...taskActivitySelectedDates].sort();
+
+  if (activityDates.length === 0) {
+    effortEl.textContent = "合計割り当て工数: —（活動日未選択）";
+    return;
+  }
+  if (assigneeIds.length === 0) {
+    effortEl.textContent = "合計割り当て工数: —（担当者未選択）";
+    return;
+  }
+
+  effortEl.textContent = "合計割り当て工数: 計算中…";
+  try {
+    const params = new URLSearchParams({
+      group_id: selectedGroupId,
+    });
+    if (dueDate) params.set("due_date", dueDate);
+    for (const id of assigneeIds) {
+      params.append("assignee_ids", id);
+    }
+    for (const date of activityDates) {
+      params.append("activity_dates", date);
+    }
+    const response = await fetch(
+      `/api/project-management/task-effort?${params}`,
+      { credentials: "same-origin" }
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      effortEl.textContent = "合計割り当て工数: 取得失敗";
+      return;
+    }
+    const days = data.effort_days;
+    const count = data.assignee_count ?? assigneeIds.length;
+    const activityCount = data.activity_day_count ?? activityDates.length;
+    effortEl.textContent =
+      days === null
+        ? "合計割り当て工数: —"
+        : `合計割り当て工数: ${days}日（活動 ${activityCount} 日 · 担当 ${count} 名の活動可能日合計）`;
+  } catch {
+    effortEl.textContent = "合計割り当て工数: 取得失敗";
+  }
+}
+
+/** タスク発行工数プレビューをデバウンス */
+function scheduleTaskIssueEffortPreview(options) {
+  clearTimeout(taskIssueEffortTimer);
+  taskIssueEffortTimer = setTimeout(
+    () => updateTaskIssueEffortPreview(options),
+    200
+  );
+}
+
 /** 子プロジェクト編集を一括保存 */
 async function handleSaveEditChild() {
   if (!editingChildProjectId) return;
@@ -2588,7 +2923,17 @@ function openTaskDialog(parentId) {
       .join("");
   }
 
+  const effortEl = document.getElementById("pm-task-effort");
+  if (effortEl) {
+    effortEl.textContent = "合計割り当て工数: —";
+  }
+
+  taskActivityCalYear = currentYear;
+  taskActivityCalMonth = currentMonth;
+
   dialog.showModal();
+  renderTaskActivityCalendar("task", []);
+  updateTaskIssueEffortPreview();
   titleEl.focus();
 }
 
@@ -2630,6 +2975,7 @@ async function handleCreateTask() {
         title,
         due_date: dueEl?.value || null,
         assignee_ids: assigneeIds,
+        activity_dates: [...taskActivitySelectedDates].sort(),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -2738,11 +3084,23 @@ function openIssuedTaskEditDialog(parentId, batchId) {
       .join("");
   }
 
+  const effortEl = document.getElementById("pm-issued-task-effort");
+  if (effortEl) {
+    effortEl.textContent = "合計割り当て工数: —";
+  }
+
+  taskActivityCalYear = currentYear;
+  taskActivityCalMonth = currentMonth;
+
   dialog.showModal();
+  renderTaskActivityCalendar("issued", batch.activity_dates ?? []);
+  updateTaskIssueEffortPreview({
+    effortElId: "pm-issued-task-effort",
+    dueInputId: "pm-issued-task-due",
+    assigneesSelector: "#pm-issued-task-assignees",
+  });
   titleEl.focus();
 }
-
-/** 発行タスクを保存 */
 async function handleSaveIssuedTask() {
   if (!editingIssuedBatchId) return;
 
@@ -2792,6 +3150,7 @@ async function handleSaveIssuedTask() {
           due_date: dueEl?.value || null,
           status: statusEl.value === "active" ? "active" : "pending",
           assignee_ids: assigneeIds,
+          activity_dates: [...taskActivitySelectedDates].sort(),
         }),
       }
     );
@@ -3188,6 +3547,28 @@ function bindEvents() {
   };
   document.getElementById("pm-due-input")?.addEventListener("input", schedulePreview);
   document.getElementById("pm-start-input")?.addEventListener("input", schedulePreview);
+
+  bindTaskActivityCalNav("pm-task", "task");
+  bindTaskActivityCalNav("pm-issued-task", "issued");
+  document.addEventListener("mouseup", handleTaskActivityDragEnd);
+
+  document.getElementById("pm-task-assignees")?.addEventListener("change", (e) => {
+    if (e.target?.matches("input[type=checkbox]")) {
+      scheduleTaskIssueEffortPreview(getTaskIssueEffortPreviewOptions());
+    }
+  });
+
+  document
+    .getElementById("pm-issued-task-assignees")
+    ?.addEventListener("change", (e) => {
+      if (e.target?.matches("input[type=checkbox]")) {
+        scheduleTaskIssueEffortPreview({
+          effortElId: "pm-issued-task-effort",
+          dueInputId: "pm-issued-task-due",
+          assigneesSelector: "#pm-issued-task-assignees",
+        });
+      }
+    });
 
   const parentMembersForm = document.getElementById("pm-parent-members-form");
   parentMembersForm?.addEventListener("submit", (e) => {

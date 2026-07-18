@@ -8,6 +8,7 @@
  * POST   /api/project-management/projects/:id/note — Excalidraw ノート取得/作成
  * PUT    /api/project-management/availability
  * GET    /api/project-management/projects/:id/effort?due_date=
+ * GET    /api/project-management/task-effort?group_id=&due_date=&assignee_ids=
  */
 
 import type { Env } from "../../lib/types";
@@ -37,6 +38,7 @@ import {
   deleteTask,
   getGroupStorageRootPath,
   previewEffort,
+  previewTaskIssueEffort,
   getOrCreateProjectNote,
   PROJECT_APP_SLUG,
 } from "../../lib/project-management";
@@ -118,6 +120,7 @@ interface CreateTaskBody {
   status?: "pending" | "active";
   assignee_id?: string;
   assignee_ids?: string[];
+  activity_dates?: string[];
 }
 
 interface UpdateTaskBody {
@@ -134,6 +137,7 @@ interface UpdateIssuedTaskBatchBody {
   status?: "pending" | "active";
   child_project_id?: string | null;
   assignee_ids?: string[];
+  activity_dates?: string[];
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -155,6 +159,28 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       return Response.json({ path });
     } catch (error) {
       return toErrorResponse(error, "ストレージルートの取得に失敗しました");
+    }
+  }
+
+  // GET /api/project-management/task-effort?group_id=&due_date=&assignee_ids=
+  if (parts.length === 1 && parts[0] === "task-effort") {
+    const url = new URL(context.request.url);
+    const groupId = url.searchParams.get("group_id")?.trim() ?? "";
+    const dueDate = url.searchParams.get("due_date");
+    const assigneeIds = url.searchParams.getAll("assignee_ids");
+    const activityDates = url.searchParams.getAll("activity_dates");
+    try {
+      const data = await previewTaskIssueEffort(
+        db,
+        auth.id,
+        groupId,
+        dueDate,
+        assigneeIds,
+        activityDates
+      );
+      return Response.json(data);
+    } catch (error) {
+      return toErrorResponse(error, "工数の取得に失敗しました");
     }
   }
 
@@ -475,6 +501,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         due_date: body.due_date,
         status: body.status,
         assignee_ids: assigneeIds,
+        activity_dates: body.activity_dates,
       });
       return Response.json(result);
     } catch (error) {

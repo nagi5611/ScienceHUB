@@ -271,8 +271,8 @@
     </form>
   </dialog>
 
-  <dialog class="pm-dialog" id="pm-leader-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-leader-form">
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-leader-dialog">
+    <form method="dialog" class="pm-dialog-form pm-dialog-form--tall" id="pm-leader-form">
       <h3 class="pm-dialog-title">プロジェクトリーダーを指定</h3>
       <p class="pm-dialog-sub" id="pm-leader-project-name"></p>
       <label class="pm-field-label">リーダー（複数可）</label>
@@ -321,8 +321,8 @@
     </form>
   </dialog>
 
-  <dialog class="pm-dialog" id="pm-parent-members-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-parent-members-form">
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-parent-members-dialog">
+    <form method="dialog" class="pm-dialog-form pm-dialog-form--tall" id="pm-parent-members-form">
       <h3 class="pm-dialog-title">担当者を設定</h3>
       <p class="pm-dialog-sub" id="pm-parent-members-project-name"></p>
       <label class="pm-field-label">担当者（複数可）</label>
@@ -352,7 +352,7 @@
   </dialog>
 
   <dialog class="pm-dialog pm-dialog--wide" id="pm-issued-task-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-issued-task-form">
+    <form method="dialog" class="pm-dialog-form pm-dialog-form--tall" id="pm-issued-task-form">
       <h3 class="pm-dialog-title">発行タスクを編集</h3>
       <p class="pm-dialog-sub" id="pm-issued-task-project-name"></p>
       <label class="pm-field-label" for="pm-issued-task-title">タスクの内容</label>
@@ -363,6 +363,18 @@
       </select>
       <label class="pm-field-label" for="pm-issued-task-due">タスク納期</label>
       <input type="date" id="pm-issued-task-due" class="pm-field-input">
+      <label class="pm-field-label">タスクの活動日</label>
+      <div class="pm-task-activity-cal" id="pm-issued-task-activity-cal">
+        <div class="pm-cal-toolbar pm-task-activity-cal-toolbar">
+          <button type="button" class="pm-cal-nav" id="pm-issued-task-cal-prev" aria-label="前月">‹</button>
+          <span class="pm-cal-month-label" id="pm-issued-task-cal-month-text"></span>
+          <button type="button" class="pm-cal-nav" id="pm-issued-task-cal-next" aria-label="次月">›</button>
+          <button type="button" class="pm-cal-today" id="pm-issued-task-cal-today">今月</button>
+        </div>
+        <div class="pm-cal-weekdays pm-task-activity-weekdays" id="pm-issued-task-cal-weekdays"></div>
+        <div class="pm-cal-grid pm-task-activity-grid" id="pm-issued-task-cal-grid"></div>
+      </div>
+      <p class="pm-field-hint">クリック／ドラッグで活動日を選択。選択日における担当者の活動可能日合計が工数です。</p>
       <label class="pm-field-label" for="pm-issued-task-status">ステータス（未完了分）</label>
       <select id="pm-issued-task-status" class="pm-field-select">
         <option value="pending">未進行</option>
@@ -370,6 +382,7 @@
       </select>
       <label class="pm-field-label">担当者（複数可）</label>
       <div class="pm-assignee-checks" id="pm-issued-task-assignees"></div>
+      <p class="pm-field-meta" id="pm-issued-task-effort">合計割り当て工数: —</p>
       <p class="pm-field-hint">完了済みの担当者は変更できません。未完了の担当者のみ解除できます。</p>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
@@ -378,8 +391,8 @@
     </form>
   </dialog>
 
-  <dialog class="pm-dialog" id="pm-task-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-task-form">
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-task-dialog">
+    <form method="dialog" class="pm-dialog-form pm-dialog-form--tall" id="pm-task-form">
       <h3 class="pm-dialog-title">タスクを発行</h3>
       <p class="pm-dialog-sub" id="pm-task-project-name"></p>
       <label class="pm-field-label" for="pm-task-title">タスクの内容</label>
@@ -390,8 +403,21 @@
       </select>
       <label class="pm-field-label" for="pm-task-due">タスク納期</label>
       <input type="date" id="pm-task-due" class="pm-field-input">
+      <label class="pm-field-label">タスクの活動日</label>
+      <div class="pm-task-activity-cal" id="pm-task-activity-cal">
+        <div class="pm-cal-toolbar pm-task-activity-cal-toolbar">
+          <button type="button" class="pm-cal-nav" id="pm-task-cal-prev" aria-label="前月">‹</button>
+          <span class="pm-cal-month-label" id="pm-task-cal-month-text"></span>
+          <button type="button" class="pm-cal-nav" id="pm-task-cal-next" aria-label="次月">›</button>
+          <button type="button" class="pm-cal-today" id="pm-task-cal-today">今月</button>
+        </div>
+        <div class="pm-cal-weekdays pm-task-activity-weekdays" id="pm-task-cal-weekdays"></div>
+        <div class="pm-cal-grid pm-task-activity-grid" id="pm-task-cal-grid"></div>
+      </div>
+      <p class="pm-field-hint">クリック／ドラッグで活動日を選択。選択日における担当者の活動可能日合計が工数です。</p>
       <label class="pm-field-label">担当者（複数可）</label>
       <div class="pm-assignee-checks" id="pm-task-assignees"></div>
+      <p class="pm-field-meta" id="pm-task-effort">合計割り当て工数: —</p>
       <p class="pm-field-hint">親プロジェクトの担当者から1人以上選択してください。</p>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
