@@ -9,6 +9,10 @@
  * GET    /api/design/projects/:id/versions
  * GET    /api/design/projects/:id/versions/:versionId
  * POST   /api/design/projects/:id/restore/:versionId
+ * POST   /api/design/projects/:id/share
+ * DELETE /api/design/projects/:id/share
+ * GET    /api/design/share/info?token=
+ * PUT    /api/design/share/scene
  */
 
 import type { Env, SessionUser } from "../../lib/types";
@@ -19,12 +23,16 @@ import { canUserAccessApp } from "../../lib/apps";
 import {
   DESIGN_APP_SLUG,
   createProject,
+  createOrGetShareLink,
   deleteProject,
   getProject,
+  getPublicShareInfo,
   getVersionScene,
   listProjects,
   listVersions,
   restoreVersion,
+  revokeShareLink,
+  saveSharedProjectScene,
   saveVersion,
   updateProject,
 } from "../../lib/design";
@@ -45,6 +53,11 @@ function projectParts(
   const parts = pathParts(params);
   if (parts[0] !== "projects") return null;
   return parts.slice(1);
+}
+
+/** 公開共有 API か */
+function isPublicShareRoute(parts: string[]): boolean {
+  return parts[0] === "share";
 }
 
 /** アプリ権限チェック */
@@ -69,21 +82,31 @@ function toErrorResponse(error: unknown, fallback: string): Response {
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
+  const parts = pathParts(context.params.path);
+  const db = getDb(context.env);
+
+  if (isPublicShareRoute(parts) && parts[1] === "info") {
+    const token =
+      new URL(context.request.url).searchParams.get("token")?.trim() ?? "";
+    if (!token) return jsonError("token が必要です", 400);
+    const info = await getPublicShareInfo(db, token, context.request);
+    if (!info) return jsonError("共有リンクが見つかりません", 404);
+    return Response.json(info);
+  }
+
   const auth = await requireDesignAccess(context.request, context.env);
   if (auth instanceof Response) return auth;
 
-  const parts = projectParts(context.params.path);
-  if (!parts) return jsonError("不正なリクエストです", 404);
-
-  const db = getDb(context.env);
+  const projectPath = projectParts(context.params.path);
+  if (!projectPath) return jsonError("不正なリクエストです", 404);
 
   try {
-    if (parts.length === 0) {
-      const projects = await listProjects(db, auth.id);
+    if (projectPath.length === 0) {
+      const projects = await listProjects(db, auth.id, context.request);
       return Response.json({ projects });
     }
 
-    const [projectId, sub, subId] = parts;
+    const [projectId, sub, subId] = projectPath;
 
     if (sub === "versions" && subId) {
       const data = await getVersionScene(db, auth.id, projectId, subId);
@@ -99,7 +122,12 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     if (sub) return jsonError("不正なリクエストです", 404);
 
-    const project = await getProject(db, auth.id, projectId);
+    const project = await getProject(
+      db,
+      auth.id,
+      projectId,
+      context.request
+    );
     if (!project) return jsonError("プロジェクトが見つかりません", 404);
     return Response.json({ project });
   } catch (error) {
@@ -160,6 +188,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ version }, { status: 201 });
     }
 
+    if (sub === "share") {
+      try {
+        const share = await createOrGetShareLink(
+          db,
+          auth,
+          projectId,
+          context.request
+        );
+        return Response.json(share);
+      } catch (error) {
+        return toErrorResponse(error, "共有リンクの作成に失敗しました");
+      }
+    }
+
     return jsonError("不正なリクエストです", 404);
   } catch (error) {
     return toErrorResponse(error, "作成に失敗しました");
@@ -198,17 +240,43 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
   if (auth instanceof Response) return auth;
 
   const parts = projectParts(context.params.path);
-  if (!parts || parts.length !== 1) {
-    return jsonError("不正なリクエストです", 404);
-  }
+  if (!parts) return jsonError("不正なリクエストです", 404);
 
   const db = getDb(context.env);
 
   try {
+    if (parts.length === 2 && parts[1] === "share") {
+      const ok = await revokeShareLink(db, auth.id, parts[0]);
+      if (!ok) return jsonError("プロジェクトが見つかりません", 404);
+      return Response.json({ ok: true });
+    }
+
+    if (parts.length !== 1) {
+      return jsonError("不正なリクエストです", 404);
+    }
+
     const ok = await deleteProject(db, auth.id, parts[0]);
     if (!ok) return jsonError("プロジェクトが見つかりません", 404);
     return Response.json({ ok: true });
   } catch (error) {
     return toErrorResponse(error, "削除に失敗しました");
   }
+};
+
+export const onRequestPut: PagesFunction<Env> = async (context) => {
+  const parts = pathParts(context.params.path);
+  const db = getDb(context.env);
+
+  if (isPublicShareRoute(parts) && parts[1] === "scene") {
+    const body = (await context.request.json().catch(() => null)) as {
+      token?: string;
+      scene?: unknown;
+    } | null;
+    if (!body?.token) return jsonError("token が必要です", 400);
+    const saved = await saveSharedProjectScene(db, body.token, body.scene);
+    if (!saved) return jsonError("共有リンクが無効です", 404);
+    return Response.json({ ok: true, project_id: saved.project_id });
+  }
+
+  return jsonError("Not Found", 404);
 };

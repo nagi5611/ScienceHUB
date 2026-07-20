@@ -1,12 +1,11 @@
 /**
- * Excalidraw ノート共同編集 Durable Object
- * 出典: https://developers.cloudflare.com/durable-objects/best-practices/websockets/
+ * 設計アプリ共同編集 Durable Object
  */
 
 import { DurableObject } from "cloudflare:workers";
 
-export interface CollabEnv {
-  EXCALIDRAW_COLLAB: DurableObjectNamespace;
+export interface DesignCollabEnv {
+  DESIGN_COLLAB: DurableObjectNamespace;
 }
 
 interface PeerAttachment {
@@ -16,10 +15,11 @@ interface PeerAttachment {
   clientId: string;
 }
 
-interface SceneState {
+interface DesignSceneState {
+  version: number;
+  width: number;
+  height: number;
   elements: unknown[];
-  appState: Record<string, unknown>;
-  files: Record<string, unknown>;
 }
 
 const COLORS = [
@@ -33,8 +33,8 @@ const COLORS = [
   "#5c7cfa",
 ];
 
-function emptyScene(): SceneState {
-  return { elements: [], appState: {}, files: {} };
+function emptyScene(): DesignSceneState {
+  return { version: 2, width: 2000, height: 1500, elements: [] };
 }
 
 function colorFor(userId: string): string {
@@ -45,78 +45,63 @@ function colorFor(userId: string): string {
   return COLORS[hash % COLORS.length]!;
 }
 
-function pickSyncAppState(appState: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (!appState) return {};
-  const picked: Record<string, unknown> = {};
-  if (appState.viewBackgroundColor !== undefined) {
-    picked.viewBackgroundColor = appState.viewBackgroundColor;
+/** 要素 ID でマージ（リモート優先） */
+function reconcileElements(local: unknown[], remote: unknown[]): unknown[] {
+  if (!Array.isArray(remote)) return local;
+  if (remote.length === 0 && local.length > 0) {
+    return remote;
   }
-  if (appState.gridSize !== undefined) {
-    picked.gridSize = appState.gridSize;
-  }
-  return picked;
-}
-
-/** 要素を version/versionNonce でマージ */
-function reconcileElements(
-  local: unknown[],
-  remote: unknown[]
-): unknown[] {
-  const map = new Map<string, Record<string, unknown>>();
-
+  const map = new Map<string, unknown>();
   for (const el of local) {
     if (!el || typeof el !== "object") continue;
     const item = el as Record<string, unknown>;
     if (typeof item.id === "string") map.set(item.id, item);
   }
-
   for (const el of remote) {
     if (!el || typeof el !== "object") continue;
     const item = el as Record<string, unknown>;
-    if (typeof item.id !== "string") continue;
-    const existing = map.get(item.id);
-    if (!existing) {
-      map.set(item.id, item);
-      continue;
-    }
-    const ev = Number(existing.version ?? 0);
-    const rv = Number(item.version ?? 0);
-    if (rv > ev) {
-      map.set(item.id, item);
-    } else if (rv === ev) {
-      const en = Number(existing.versionNonce ?? 0);
-      const rn = Number(item.versionNonce ?? 0);
-      if (rn > en) map.set(item.id, item);
-    }
+    if (typeof item.id === "string") map.set(item.id, item);
   }
-
-  return [...map.values()].filter((el) => !el.isDeleted);
+  const remoteIds = new Set(
+    remote
+      .filter((el) => el && typeof el === "object")
+      .map((el) => (el as Record<string, unknown>).id)
+      .filter((id): id is string => typeof id === "string")
+  );
+  return [...map.values()].filter((el) => {
+    if (!el || typeof el !== "object") return false;
+    const id = (el as Record<string, unknown>).id;
+    return typeof id === "string" && remoteIds.has(id);
+  });
 }
 
-export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
-  private scene: SceneState = emptyScene();
+function normalizeScene(input: Partial<DesignSceneState> | undefined): DesignSceneState {
+  if (!input) return emptyScene();
+  return {
+    version: typeof input.version === "number" ? input.version : 2,
+    width: typeof input.width === "number" ? input.width : 2000,
+    height: typeof input.height === "number" ? input.height : 1500,
+    elements: Array.isArray(input.elements) ? input.elements : [],
+  };
+}
+
+export class DesignCollabRoom extends DurableObject<DesignCollabEnv> {
+  private scene: DesignSceneState = emptyScene();
   private loaded = false;
 
-  /** ストレージからシーンを読み込む */
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    const stored = await this.ctx.storage.get<SceneState>("scene");
+    const stored = await this.ctx.storage.get<DesignSceneState>("scene");
     if (stored && Array.isArray(stored.elements)) {
-      this.scene = {
-        elements: stored.elements,
-        appState: stored.appState ?? {},
-        files: stored.files ?? {},
-      };
+      this.scene = normalizeScene(stored);
     }
     this.loaded = true;
   }
 
-  /** シーンを永続化 */
   private async persistScene(): Promise<void> {
     await this.ctx.storage.put("scene", this.scene);
   }
 
-  /** 接続中ピア一覧 */
   private listPeers(exclude?: WebSocket): Array<{
     clientId: string;
     userId: string;
@@ -143,7 +128,6 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
     return peers;
   }
 
-  /** ブロードキャスト */
   private broadcast(message: string, except?: WebSocket): void {
     for (const ws of this.ctx.getWebSockets()) {
       if (except && ws === except) continue;
@@ -155,13 +139,8 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
     }
   }
 
-  /** プレゼンス通知 */
   private broadcastPresence(): void {
-    const payload = JSON.stringify({
-      type: "presence",
-      peers: this.listPeers(),
-    });
-    this.broadcast(payload);
+    this.broadcast(JSON.stringify({ type: "presence", peers: this.listPeers() }));
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -173,36 +152,23 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
       request.method === "POST"
     ) {
       const body = (await request.json().catch(() => null)) as {
-        scene?: Partial<SceneState>;
+        scene?: Partial<DesignSceneState>;
       } | null;
       if (body?.scene) {
-        const incoming = body.scene;
+        const incoming = normalizeScene(body.scene);
         const isSeed = url.pathname === "/seed";
-        // seed: DO が空のときだけ D1 から埋める
         if (isSeed && this.scene.elements.length > 0) {
           return Response.json({ ok: true, skipped: true });
         }
         this.scene = {
-          elements: Array.isArray(incoming.elements)
-            ? isSeed
-              ? incoming.elements
-              : reconcileElements(this.scene.elements, incoming.elements)
-            : this.scene.elements,
-          appState: isSeed
-            ? pickSyncAppState(incoming.appState as Record<string, unknown>)
-            : {
-                ...this.scene.appState,
-                ...pickSyncAppState(incoming.appState as Record<string, unknown>),
-              },
-          files:
-            incoming.files && typeof incoming.files === "object"
-              ? isSeed
-                ? incoming.files
-                : { ...this.scene.files, ...incoming.files }
-              : this.scene.files,
+          version: incoming.version,
+          width: incoming.width,
+          height: incoming.height,
+          elements: isSeed
+            ? incoming.elements
+            : reconcileElements(this.scene.elements, incoming.elements),
         };
         await this.persistScene();
-        // persist/seed は永続化のみ。リアルタイム同期は WebSocket scene に一本化
       }
       return Response.json({ ok: true });
     }
@@ -220,13 +186,12 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
       const [client, server] = Object.values(pair);
 
       this.ctx.acceptWebSocket(server);
-      const attachment: PeerAttachment = {
+      server.serializeAttachment({
         userId,
         username,
         color: colorFor(userId),
         clientId,
-      };
-      server.serializeAttachment(attachment);
+      } satisfies PeerAttachment);
 
       server.send(
         JSON.stringify({
@@ -244,20 +209,16 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
     return new Response("Not found", { status: 404 });
   }
 
-  async webSocketMessage(
-    ws: WebSocket,
-    message: string | ArrayBuffer
-  ): Promise<void> {
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     await this.ensureLoaded();
     const text =
       typeof message === "string" ? message : new TextDecoder().decode(message);
 
     let data: {
       type?: string;
-      scene?: Partial<SceneState>;
-      pointer?: unknown;
-      button?: string;
-      selectedElementIds?: Record<string, boolean>;
+      scene?: Partial<DesignSceneState>;
+      pointer?: { x: number; y: number };
+      selectedIds?: string[];
     };
     try {
       data = JSON.parse(text);
@@ -269,19 +230,12 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
     if (!att) return;
 
     if (data.type === "scene" && data.scene) {
-      const incoming = data.scene;
+      const incoming = normalizeScene(data.scene);
       this.scene = {
-        elements: Array.isArray(incoming.elements)
-          ? reconcileElements(this.scene.elements, incoming.elements)
-          : this.scene.elements,
-        appState: {
-          ...this.scene.appState,
-          ...pickSyncAppState(incoming.appState as Record<string, unknown>),
-        },
-        files:
-          incoming.files && typeof incoming.files === "object"
-            ? { ...this.scene.files, ...incoming.files }
-            : this.scene.files,
+        version: incoming.version,
+        width: incoming.width,
+        height: incoming.height,
+        elements: reconcileElements(this.scene.elements, incoming.elements),
       };
       await this.persistScene();
       this.broadcast(
@@ -303,19 +257,14 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
           username: att.username,
           color: att.color,
           pointer: data.pointer,
-          button: data.button ?? "up",
-          selectedElementIds: data.selectedElementIds ?? {},
+          selectedIds: data.selectedIds ?? [],
         }),
         ws
       );
     }
   }
 
-  async webSocketClose(
-    ws: WebSocket,
-    code: number,
-    reason: string
-  ): Promise<void> {
+  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     ws.close(code, reason);
     this.broadcastPresence();
   }
@@ -332,6 +281,6 @@ export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {
 
 export default {
   async fetch(): Promise<Response> {
-    return new Response("Excalidraw collab worker", { status: 200 });
+    return new Response("Design collab worker", { status: 200 });
   },
 };

@@ -19,6 +19,7 @@ const ICONS = {
   bell: `<path d="M12 4a4 4 0 0 0-4 4v2.5L6 13.5V15h12v-1.5l-2-3V8a4 4 0 0 0-4-4z" ${STROKE}/><path d="M10 17a2 2 0 0 0 4 0" ${STROKE}/>`,
   calendar: `<rect x="3" y="5" width="18" height="16" rx="2" ${STROKE}/><path d="M3 10h18M8 3v4M16 3v4" ${STROKE}/>`,
   clipboard: `<rect x="6" y="4" width="12" height="17" rx="2" ${STROKE}/><path d="M9 4.5h6v2H9z" ${STROKE}/><path d="M9 11h6M9 15h4" ${STROKE}/>`,
+  chart: `<path d="M4 19V5M4 19h16M8 17V11M12 17V7M16 17v-4" ${STROKE}/>`,
 };
 
 const SLUG_ICON = {
@@ -26,6 +27,7 @@ const SLUG_ICON = {
   uvcreator: "layout",
   "project-management": "clipboard",
   excalidraw: "edit",
+  "tennis-motion": "chart",
 };
 
 const EMOJI_ICON = {
@@ -41,6 +43,7 @@ const EMOJI_ICON = {
   "🛡️": "shield",
   "📁": "folder",
   "👤": "user",
+  "🎾": "chart",
 };
 
 /** 指定アイコンの SVG 文字列を返す */

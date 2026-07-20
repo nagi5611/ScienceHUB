@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>共有設計 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/design.css">
+</head>
+<body class="design-app design-app--share">
+  <div class="design-loading" id="app-loading">
+    <p>読み込み中…</p>
+  </div>
+
+  <div class="design-denied" id="share-error" hidden>
+    <h2>共有リンクが無効です</h2>
+    <p id="share-error-msg">リンクが見つからないか、無効化されています。</p>
+  </div>
+
+  <section class="design-editor" id="editor-view" hidden>
+    <header class="design-header">
+      <h1 class="design-title design-title--share" id="project-title">共有設計</h1>
+      <div class="design-header-actions">
+        <span class="design-status" id="save-status" aria-live="polite"></span>
+        <span class="design-share-badge">共有リンク</span>
+      </div>
+    </header>
+
+    <div class="design-workspace">
+      <aside class="design-toolbar" aria-label="描画ツール">
+        <p class="design-toolbar-label">ツール</p>
+        <div class="design-tool-group" role="toolbar" aria-label="描画ツール">
+          <button type="button" class="design-tool-btn design-tool-btn--active" data-tool="select" title="選択（1）">↖</button>
+          <button type="button" class="design-tool-btn" data-tool="line" title="直線（2）">／</button>
+          <button type="button" class="design-tool-btn" data-tool="rect" title="四角形（3）">▢</button>
+          <button type="button" class="design-tool-btn" data-tool="text" title="テキスト（4）">T</button>
+        </div>
+
+        <p class="design-constraint-hint" id="constraint-hint" hidden></p>
+
+        <label class="design-field">
+          <span>線の色</span>
+          <input type="color" id="stroke-color" value="#1e293b">
+          <label class="design-field design-stroke-opacity-field">
+            <span>不透明度</span>
+            <input type="range" id="stroke-opacity" min="0" max="100" step="1" value="100">
+            <span class="design-prop-range-value" id="stroke-opacity-label">100%</span>
+          </label>
+          <label class="design-field design-stroke-hex-field">
+            <span>16進数</span>
+            <input type="text" id="stroke-hex" class="design-stroke-hex-input" value="#1e293bff" spellcheck="false" autocomplete="off" maxlength="9" placeholder="#333333">
+          </label>
+          <div class="design-recent-colors" id="recent-colors" hidden aria-label="最近使った色"></div>
+        </label>
+
+        <p class="design-toolbar-label">表示</p>
+        <label class="design-field design-field--check">
+          <input type="checkbox" id="show-dimensions-toggle">
+          <span>寸法表示</span>
+        </label>
+        <label class="design-field" id="dimension-label-size-field">
+          <span>寸法文字サイズ</span>
+          <input type="range" id="dimension-label-size" min="8" max="24" step="1" value="11">
+          <span class="design-prop-range-value" id="dimension-label-size-label">11px</span>
+        </label>
+        <div class="design-zoom-controls">
+          <button type="button" class="design-btn design-btn--icon" id="zoom-out-btn" title="縮小">−</button>
+          <span class="design-zoom-label" id="zoom-label">100%</span>
+          <button type="button" class="design-btn design-btn--icon" id="zoom-in-btn" title="拡大">＋</button>
+          <button type="button" class="design-btn" id="zoom-reset-btn">全体</button>
+        </div>
+
+        <div class="design-toolbar-actions">
+          <button type="button" class="design-btn" id="delete-btn" disabled>削除</button>
+          <button type="button" class="design-btn" id="clear-btn">全消去</button>
+        </div>
+      </aside>
+
+      <main class="design-canvas-wrap" aria-label="設計キャンバス">
+        <div class="design-measure-overlay" id="measure-overlay" hidden aria-live="polite"></div>
+        <div class="design-canvas-scroll" id="canvas-scroll">
+          <canvas id="design-canvas" width="2000" height="1500"></canvas>
+        </div>
+        <textarea id="design-text-input" class="design-text-input" hidden rows="1" spellcheck="false" aria-label="テキスト入力"></textarea>
+      </main>
+
+      <aside class="design-properties-panel" id="properties-panel" hidden aria-label="プロパティ">
+        <div class="design-properties-header">
+          <h2>プロパティ</h2>
+        </div>
+        <div class="design-properties-body" id="properties-body"></div>
+      </aside>
+    </div>
+  </section>
+
+  <script>
+    window.__DESIGN_SHARE__ = {
+      token: new URL(location.href).searchParams.get("t")?.trim() ?? "",
+    };
+  </script>
+  <script src="/apps/design/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

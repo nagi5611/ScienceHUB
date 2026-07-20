@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>テニスボール運動解析 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/tennis-motion.css">
+</head>
+<body class="tm-app">
+  <header class="tm-header">
+    <a href="/" class="tm-back">← ダッシュボード</a>
+    <h1 class="tm-title">テニスボール運動解析</h1>
+  </header>
+
+  <div class="tm-layout" id="app-main" hidden>
+    <aside class="tm-card tm-sidebar">
+      <h2 class="tm-section-title">動画</h2>
+      <div id="drop" class="tm-drop" tabindex="0" role="button" aria-label="動画を選択">
+        <strong>動画をドラッグ＆ドロップ</strong>
+        <span class="tm-hint">またはクリックして選択</span>
+        <input id="file" type="file" accept="video/*" hidden>
+      </div>
+      <p id="info" class="tm-meta">未読込</p>
+
+      <label class="tm-field" for="fps">
+        <span>解析用フレームレート (fps)</span>
+        <input id="fps" type="number" min="1" step="0.001" value="30">
+      </label>
+      <label class="tm-field" for="step">
+        <span>クリック後に進むフレーム数</span>
+        <input id="step" type="number" min="1" value="1">
+      </label>
+      <label class="tm-field" for="scaleLen">
+        <span>縮尺線の実際の長さ (m)</span>
+        <input id="scaleLen" type="number" min="0.0001" step="0.001" value="1">
+      </label>
+      <label class="tm-field" for="mode">
+        <span>操作モード</span>
+        <select id="mode">
+          <option value="track">ボールを追跡</option>
+          <option value="origin">原点を設定</option>
+          <option value="scaleA">縮尺点A</option>
+          <option value="scaleB">縮尺点B</option>
+          <option value="horizA">水平基準点A</option>
+          <option value="horizB">水平基準点B</option>
+        </select>
+      </label>
+
+      <div class="tm-metrics">
+        <div class="tm-metric">
+          <span class="tm-metric-label">追跡点</span>
+          <b id="count">0</b>
+        </div>
+        <div class="tm-metric">
+          <span class="tm-metric-label">現在時刻</span>
+          <b id="tm">0.000 s</b>
+        </div>
+      </div>
+
+      <div class="tm-sidebar-actions">
+        <button id="clearPts" class="tm-btn tm-btn--danger tm-btn--block" type="button">追跡点を消去</button>
+        <button id="clearAll" class="tm-btn tm-btn--block" type="button">較正も含めて消去</button>
+      </div>
+    </aside>
+
+    <main class="tm-workspace">
+      <nav class="tm-tabs" aria-label="機能切替">
+        <button type="button" class="tm-tab is-active" data-tab="trackTab">① 追跡・較正</button>
+        <button type="button" class="tm-tab" data-tab="graphTab">② グラフ・解析</button>
+        <button type="button" class="tm-tab" data-tab="strobeTab">③ ストロボ画像</button>
+        <button type="button" class="tm-tab" data-tab="saveTab">④ 保存・読込</button>
+      </nav>
+
+      <div class="tm-card tm-panel-wrap">
+        <section id="trackTab" class="tm-panel is-active">
+          <p id="status" class="tm-alert">動画を読み込んでください。</p>
+          <div class="tm-stagewrap">
+            <div class="tm-stage">
+              <video id="video" playsinline preload="metadata"></video>
+              <canvas id="overlay"></canvas>
+            </div>
+          </div>
+          <div class="tm-actions">
+            <button id="prev" class="tm-btn" type="button">◀ 戻る</button>
+            <button id="play" class="tm-btn tm-btn--primary" type="button">▶ 再生</button>
+            <button id="next" class="tm-btn" type="button">進む ▶</button>
+            <button id="del" class="tm-btn tm-btn--danger" type="button">現在の点を削除</button>
+          </div>
+          <label class="tm-field tm-field--range" for="seek">
+            <span>動画位置</span>
+            <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+          </label>
+          <div class="tm-range-meta">
+            <span id="now">0.000 s</span>
+            <span id="dur">0.000 s</span>
+          </div>
+          <p class="tm-hint">原点と縮尺点A/Bを設定後、各フレームでボール中心をクリックします。</p>
+        </section>
+
+        <section id="graphTab" class="tm-panel">
+          <p id="analysisStatus" class="tm-alert">較正と3点以上の追跡が必要です。</p>
+          <div class="tm-row">
+            <label class="tm-field tm-field--grow" for="smooth">
+              <span>移動平均幅（奇数）</span>
+              <input id="smooth" type="number" min="1" max="21" step="2" value="3">
+            </label>
+            <div class="tm-row-action">
+              <button id="analyze" class="tm-btn tm-btn--primary tm-btn--block" type="button">再解析</button>
+            </div>
+          </div>
+          <div class="tm-kpis">
+            <div class="tm-kpi"><span>初速度</span><b id="v0">—</b></div>
+            <div class="tm-kpi"><span>投射角</span><b id="ang">—</b></div>
+            <div class="tm-kpi"><span>ax</span><b id="axfit">—</b></div>
+            <div class="tm-kpi"><span>ay</span><b id="ayfit">—</b></div>
+          </div>
+          <div class="tm-grid2">
+            <canvas id="px" class="tm-plot"></canvas>
+            <canvas id="py" class="tm-plot"></canvas>
+            <canvas id="pv" class="tm-plot"></canvas>
+            <canvas id="pa" class="tm-plot"></canvas>
+          </div>
+          <h3 class="tm-subheading">数値データ</h3>
+          <div class="tm-tablewrap">
+            <table id="table"></table>
+          </div>
+        </section>
+
+        <section id="strobeTab" class="tm-panel">
+          <div class="tm-row">
+            <label class="tm-field" for="every">
+              <span>何点おきに表示</span>
+              <input id="every" type="number" min="1" value="1">
+            </label>
+            <label class="tm-field" for="showPath">
+              <span>軌跡線</span>
+              <select id="showPath">
+                <option value="yes">表示</option>
+                <option value="no">非表示</option>
+              </select>
+            </label>
+            <label class="tm-field" for="showTime">
+              <span>時刻</span>
+              <select id="showTime">
+                <option value="yes">表示</option>
+                <option value="no">非表示</option>
+              </select>
+            </label>
+          </div>
+          <div class="tm-actions">
+            <button id="mkStrobe" class="tm-btn tm-btn--primary" type="button">ストロボ画像を作成</button>
+            <button id="saveStrobe" class="tm-btn" type="button" disabled>PNG保存</button>
+          </div>
+          <canvas id="strobe" class="tm-strobe"></canvas>
+          <p class="tm-hint">背景画像上へボール位置を重ねるマーカー型です。</p>
+        </section>
+
+        <section id="saveTab" class="tm-panel">
+          <h3 class="tm-subheading">書き出し</h3>
+          <div class="tm-actions">
+            <button id="csv" class="tm-btn" type="button">CSV保存</button>
+            <button id="project" class="tm-btn tm-btn--primary" type="button">プロジェクトJSON保存</button>
+          </div>
+          <h3 class="tm-subheading">プロジェクト読込</h3>
+          <label class="tm-field" for="projectIn">
+            <span>JSONファイル</span>
+            <input id="projectIn" type="file" accept=".json,application/json">
+          </label>
+          <p class="tm-hint">JSONに動画本体は含まれません。先に元動画を読み込んでください。</p>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="tm-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="tm-btn tm-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <script src="/apps/tennis-motion/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "design-collab",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-06",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DESIGN_COLLAB",
+        "class_name": "DesignCollabRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DesignCollabRoom"]
+    }
+  ]
+}

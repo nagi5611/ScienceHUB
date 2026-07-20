@@ -6,8 +6,16 @@ import { createCloudSaveModal } from "../../js/cloud-save-modal.js";
 import { apiRequest, fetchDownloadBlob } from "../cloud-storage/js/api.js";
 
 const APP_SLUG = "design";
+const shareConfig = window.__DESIGN_SHARE__;
+const shareToken = shareConfig?.token?.trim() || null;
+const isShareMode = Boolean(shareToken);
 const AUTOSAVE_MS = 1500;
+const RECENT_STROKE_COLOR_LIMIT = 5;
+const RECENT_STROKE_COLORS_KEY = "design-recent-stroke-colors";
 const GRID_SIZE = 20;
+const DEFAULT_STROKE_COLOR = "rgba(30, 41, 59, 1)";
+/** 内部座標から表示用長さへの倍率（1グリッド目盛り = GRID_SIZE × この値） */
+const LENGTH_DISPLAY_SCALE = 0.5;
 const ANGLE_SNAP = Math.PI / 4; // 45°
 /** 角度スナップの許容範囲（±度） */
 const ANGLE_SNAP_TOLERANCE_DEG = 3;
@@ -24,6 +32,9 @@ const ENDPOINT_SNAP_SCREEN_PX = 12;
 const TEXT_SCREEN_PX = 14;
 const TEXT_SIZE_MIN = 8;
 const TEXT_SIZE_MAX = 48;
+const DIMENSION_LABEL_SIZE_MIN = 8;
+const DIMENSION_LABEL_SIZE_MAX = 24;
+const DIMENSION_LABEL_SIZE_DEFAULT = 11;
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 20;
 
@@ -31,6 +42,13 @@ const constraintHintEl = document.getElementById("constraint-hint");
 const zoomLabelEl = document.getElementById("zoom-label");
 
 /** ビュー変換（図面座標 ↔ 画面） */
+/** ツール切替の数字キー（1:選択, 2:直線, 3:四角, 4:テキスト） */
+const TOOL_SHORTCUT_KEYS = {
+  1: "select",
+  2: "line",
+  3: "rect",
+  4: "text",
+};
 let viewScale = 1;
 let viewPanX = 0;
 let viewPanY = 0;
@@ -42,11 +60,32 @@ const ctx = canvas.getContext("2d");
 
 const loadingEl = document.getElementById("app-loading");
 const deniedEl = document.getElementById("access-denied");
+const shareErrorEl = document.getElementById("share-error");
+const shareErrorMsgEl = document.getElementById("share-error-msg");
 const listView = document.getElementById("list-view");
 const editorView = document.getElementById("editor-view");
 const projectListEl = document.getElementById("project-list");
 const listEmptyEl = document.getElementById("list-empty");
 const titleInput = document.getElementById("project-title");
+
+/** プロジェクトタイトルを取得 */
+function getProjectTitle() {
+  if (!titleInput) return currentProject?.title || "設計";
+  if (titleInput instanceof HTMLInputElement) {
+    return titleInput.value || currentProject?.title || "設計";
+  }
+  return titleInput.textContent?.trim() || currentProject?.title || "設計";
+}
+
+/** プロジェクトタイトルを表示 */
+function setProjectTitle(title) {
+  if (!titleInput) return;
+  if (titleInput instanceof HTMLInputElement) {
+    titleInput.value = title;
+    return;
+  }
+  titleInput.textContent = title;
+}
 const saveStatusEl = document.getElementById("save-status");
 const versionsPanel = document.getElementById("versions-panel");
 const versionListEl = document.getElementById("version-list");
@@ -54,18 +93,27 @@ const propertiesPanel = document.getElementById("properties-panel");
 const propertiesBody = document.getElementById("properties-body");
 const cloudDestLabelEl = document.getElementById("cloud-dest-label");
 const textInputEl = document.getElementById("design-text-input");
+const measureOverlayEl = document.getElementById("measure-overlay");
+const recentColorsEl = document.getElementById("recent-colors");
 
 /** @type {{ id: string, title: string, scene: object, current_version_id: string | null } | null} */
 let currentProject = null;
 /** @type {Array<object>} */
 let elements = [];
 let selectedIds = new Set();
+/** @type {object[] | null} */
+let clipboardElements = null;
 let currentTool = "select";
 let isDirty = false;
 let autosaveTimer = null;
 let isSaving = false;
 
 let dragState = null;
+let measureOverlayText = "";
+let showDimensions = false;
+let dimensionLabelSizePx = DIMENSION_LABEL_SIZE_DEFAULT;
+/** @type {string[]} */
+let recentStrokeColors = [];
 const MAX_UNDO = 60;
 /** @type {Array<object[]>} */
 let undoStack = [];
@@ -77,9 +125,11 @@ let hoverSnap = null;
 /** @type {{ elementId: string | null, x: number, y: number, isNew: boolean } | null} */
 let textEditState = null;
 let suppressTextBlurCommit = false;
+let fontSizeSliderEditing = false;
 
 /** アクセス権を確認 */
 async function checkAccess() {
+  if (isShareMode) return true;
   const response = await fetch(`/api/apps/${APP_SLUG}/access`, {
     credentials: "same-origin",
   });
@@ -180,6 +230,14 @@ function screenToWorld(screenX, screenY) {
   return {
     x: (screenX - viewPanX) / viewScale,
     y: (screenY - viewPanY) / viewScale,
+  };
+}
+
+/** 図面座標 → キャンバス画面座標 */
+function worldToScreen(worldX, worldY) {
+  return {
+    x: viewPanX + worldX * viewScale,
+    y: viewPanY + worldY * viewScale,
   };
 }
 
@@ -296,6 +354,7 @@ function stripStrokeWidth(el) {
   if (!el || typeof el !== "object") return el;
   const next = { ...el };
   delete next.strokeWidth;
+  if (next.stroke) next.stroke = resolveStrokeColor(next.stroke);
   return next;
 }
 
@@ -423,22 +482,22 @@ function constrainRectCorners(x1, y1, x2, y2) {
 function updateConstraintHint(shiftKey, mode = "") {
   if (!constraintHintEl) return;
   if (shiftKey) {
-    constraintHintEl.textContent = "Shift: 補正なし（自由描画）";
+    const text = mode ? `Shift: 補正なし · ${mode}` : "Shift: 補正なし（自由描画）";
+    constraintHintEl.textContent = text;
+    constraintHintEl.hidden = false;
     constraintHintEl.classList.add("design-constraint-hint--free");
     return;
   }
   constraintHintEl.classList.remove("design-constraint-hint--free");
-  if (mode) {
-    constraintHintEl.textContent = `補正: ${mode}`;
-    return;
-  }
   const hints = {
-    line: "直線: 端点スナップ · 0°/45°/90°（±3°）",
-    rect: "四角: 正方形 / 1:2 長方形を自動判定",
+    line: "直線: 端点スナップ · 0°/45°/90°（±3°） · Ctrlでグリッド交点",
+    rect: "四角: 正方形 / 1:2 長方形を自動判定 · Ctrlでグリッド交点",
     text: "クリックで文字を配置 · 既存テキストをクリックで編集",
-    select: "クリックで選択 · ドラッグで範囲選択 · Shiftで複数選択",
+    select: "",
   };
-  constraintHintEl.textContent = hints[currentTool] || hints.select;
+  const text = mode ? `補正: ${mode}` : hints[currentTool] ?? "";
+  constraintHintEl.textContent = text;
+  constraintHintEl.hidden = !text;
 }
 
 /** 履歴用スナップショット */
@@ -565,6 +624,46 @@ function deleteSelected() {
   markDirty();
 }
 
+/** 選択中の要素をコピー */
+function copySelected() {
+  const selected = getSelectedElements();
+  if (!selected.length) return;
+  clipboardElements = structuredClone(selected);
+}
+
+/** 選択中の要素をカット */
+function cutSelected() {
+  const selected = getSelectedElements();
+  if (!selected.length) return;
+  clipboardElements = structuredClone(selected);
+  deleteSelected();
+}
+
+/** クリップボードの要素を画面中央に貼り付け */
+function pasteClipboard() {
+  if (!clipboardElements?.length) return;
+  pushHistory();
+  const clones = structuredClone(clipboardElements);
+  const newIds = [];
+  for (const el of clones) {
+    el.id = uid();
+    newIds.push(el.id);
+  }
+  const bounds = getElementsBounds(clones);
+  const center = screenToWorld(canvas.width / 2, canvas.height / 2);
+  if (bounds) {
+    const dx = center.x - bounds.cx;
+    const dy = center.y - bounds.cy;
+    for (const el of clones) {
+      translateElementFromBase(el, structuredClone(el), dx, dy);
+    }
+  }
+  elements.push(...clones);
+  setSelection(newIds);
+  render();
+  markDirty();
+}
+
 /** Ctrl+S 保存 */
 async function handleSaveShortcut() {
   if (!currentProject) return;
@@ -584,23 +683,74 @@ function isEditorShortcutTarget(target) {
   return tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT";
 }
 
-/** グリッドを描画（図面座標、線幅は画面一定） */
+/** 現在見えている図面範囲を取得 */
+function getVisibleWorldBounds() {
+  const topLeft = screenToWorld(0, 0);
+  const bottomRight = screenToWorld(canvas.width, canvas.height);
+  return {
+    minX: Math.min(topLeft.x, bottomRight.x),
+    minY: Math.min(topLeft.y, bottomRight.y),
+    maxX: Math.max(topLeft.x, bottomRight.x),
+    maxY: Math.max(topLeft.y, bottomRight.y),
+  };
+}
+
+/** グリッドを描画（表示範囲に合わせて無限に伸ばす） */
 function drawGrid() {
+  const bounds = getVisibleWorldBounds();
+  const pad = GRID_SIZE * 2;
+  const minX = Math.floor((bounds.minX - pad) / GRID_SIZE) * GRID_SIZE;
+  const maxX = Math.ceil((bounds.maxX + pad) / GRID_SIZE) * GRID_SIZE;
+  const minY = Math.floor((bounds.minY - pad) / GRID_SIZE) * GRID_SIZE;
+  const maxY = Math.ceil((bounds.maxY + pad) / GRID_SIZE) * GRID_SIZE;
+
   ctx.save();
   ctx.strokeStyle = "#e2e8f0";
   ctx.lineWidth = screenPxToWorld(1);
-  for (let x = 0; x <= canvas.width; x += GRID_SIZE) {
+
+  for (let x = minX; x <= maxX; x += GRID_SIZE) {
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
+    ctx.moveTo(x, minY);
+    ctx.lineTo(x, maxY);
     ctx.stroke();
   }
-  for (let y = 0; y <= canvas.height; y += GRID_SIZE) {
+  for (let y = minY; y <= maxY; y += GRID_SIZE) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
+    ctx.moveTo(minX, y);
+    ctx.lineTo(maxX, y);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+/** 座標軸を描画（原点 0,0 · X軸=赤 · Y軸=緑） */
+function drawAxes() {
+  const bounds = getVisibleWorldBounds();
+  const pad = GRID_SIZE * 2;
+  const minX = bounds.minX - pad;
+  const maxX = bounds.maxX + pad;
+  const minY = bounds.minY - pad;
+  const maxY = bounds.maxY + pad;
+
+  ctx.save();
+  ctx.lineWidth = screenPxToWorld(1.5);
+
+  if (minY <= 0 && maxY >= 0) {
+    ctx.strokeStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.moveTo(minX, 0);
+    ctx.lineTo(maxX, 0);
+    ctx.stroke();
+  }
+
+  if (minX <= 0 && maxX >= 0) {
+    ctx.strokeStyle = "#22c55e";
+    ctx.beginPath();
+    ctx.moveTo(0, minY);
+    ctx.lineTo(0, maxY);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -626,7 +776,7 @@ function applyTextFont(el, c = ctx) {
 /** テキストを描画 */
 function drawTextContent(c, el, viewScaleForStroke = viewScale) {
   applyTextFont(el, c);
-  c.fillStyle = el.stroke || "#1e293b";
+  c.fillStyle = resolveStrokeColor(el.stroke);
   const fontSizeWorld =
     viewScaleForStroke === viewScale
       ? screenPxToWorld(getTextFontSize(el))
@@ -704,7 +854,7 @@ function getTextDraftElement() {
     x: textEditState.x,
     y: textEditState.y,
     text,
-    stroke: existing?.stroke || document.getElementById("stroke-color").value,
+    stroke: existing?.stroke ? resolveStrokeColor(existing.stroke) : getToolbarStrokeColor(),
     fontSize: existing ? getTextFontSize(existing) : TEXT_SCREEN_PX,
     writingMode: existing ? getTextWritingMode(existing) : "horizontal",
   };
@@ -739,10 +889,10 @@ function autoResizeTextInput() {
 /** テキスト入力欄の位置を更新 */
 function updateTextInputPosition() {
   if (!textEditState || !textInputEl || textInputEl.hidden) return;
-  const stroke =
-    (textEditState.elementId &&
-      elements.find((e) => e.id === textEditState.elementId)?.stroke) ||
-    document.getElementById("stroke-color").value;
+  const existing = textEditState.elementId
+    ? elements.find((e) => e.id === textEditState.elementId)
+    : null;
+  const stroke = existing?.stroke ? resolveStrokeColor(existing.stroke) : getToolbarStrokeColor();
   const pos = worldToClient(textEditState.x, textEditState.y);
   textInputEl.style.left = `${pos.left}px`;
   textInputEl.style.top = `${pos.top}px`;
@@ -773,7 +923,7 @@ function commitTextEditor() {
     return;
   }
 
-  const stroke = document.getElementById("stroke-color").value;
+  const stroke = getToolbarStrokeColor();
   pushHistory();
 
   if (state.isNew) {
@@ -831,7 +981,7 @@ function openTextEditorAt(x, y, existingEl = null) {
   textInputEl.hidden = false;
   textInputEl.value = existingEl?.text ?? "";
   if (existingEl?.stroke) {
-    document.getElementById("stroke-color").value = existingEl.stroke;
+    setToolbarStrokeColor(existingEl.stroke);
   }
   updateTextInputPosition();
   textInputEl.focus();
@@ -862,7 +1012,7 @@ function drawElement(el, highlight = false) {
   if (el.type === "text") {
     drawTextContent(ctx, el);
   } else {
-  ctx.strokeStyle = el.stroke || "#1e293b";
+  ctx.strokeStyle = resolveStrokeColor(el.stroke);
   ctx.lineWidth = screenPxToWorld(STROKE_SCREEN_PX);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -932,6 +1082,31 @@ function getElementBounds(el) {
   return null;
 }
 
+/** 複数要素の結合バウンディングボックス */
+function getElementsBounds(els) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const el of els) {
+    const b = getElementBounds(el);
+    if (!b) continue;
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
+  }
+  if (!Number.isFinite(minX)) return null;
+  return {
+    x: minX,
+    y: minY,
+    w: maxX - minX,
+    h: maxY - minY,
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2,
+  };
+}
+
 /** 点と線分の距離 */
 function distToSegment(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
@@ -984,6 +1159,7 @@ function render() {
   ctx.save();
   applyViewTransform();
   drawGrid();
+  drawAxes();
   for (const el of elements) {
     drawElement(el, selectedIds.has(el.id));
   }
@@ -1000,8 +1176,10 @@ function render() {
   if (hoverSnap) drawEndpointSnapMarker(hoverSnap.x, hoverSnap.y);
   ctx.restore();
 
+  renderDimensionLabels();
   updateTextInputPosition();
   updateZoomUI();
+  updateMeasureOverlay(dragState?.type === "draw" ? measureOverlayText : "");
 }
 
 /** サムネイル用 data URL を生成 */
@@ -1027,7 +1205,7 @@ function generateThumbnail() {
 /** 指定コンテキストに要素を描画 */
 function drawElementOn(c, el, viewScaleForStroke = 1) {
   c.save();
-  c.strokeStyle = el.stroke || "#1e293b";
+  c.strokeStyle = resolveStrokeColor(el.stroke);
   c.lineWidth = STROKE_SCREEN_PX / viewScaleForStroke;
   c.lineCap = "round";
   c.lineJoin = "round";
@@ -1101,6 +1279,19 @@ function snapToEndpoint(x, y) {
   return { x, y, snapped: false };
 }
 
+/** 最寄りのグリッド交点にスナップ */
+function snapToGrid(x, y) {
+  return {
+    x: Math.round(x / GRID_SIZE) * GRID_SIZE,
+    y: Math.round(y / GRID_SIZE) * GRID_SIZE,
+  };
+}
+
+/** 移動量をグリッド1マス単位に丸める */
+function quantizeDeltaToGrid(delta) {
+  return Math.round(delta / GRID_SIZE) * GRID_SIZE;
+}
+
 /** 端点スナップ位置のマーカー */
 function drawEndpointSnapMarker(x, y) {
   ctx.save();
@@ -1137,16 +1328,313 @@ function hitTest(x, y) {
   return null;
 }
 
-/** ツール設定を取得 */
-function getToolStyle() {
+/** 0〜255 に丸める */
+function clampColorChannel(value) {
+  return Math.min(255, Math.max(0, Math.round(Number(value))));
+}
+
+/** 0〜1 に丸める */
+function clampAlpha(value) {
+  return Math.min(1, Math.max(0, Number(value)));
+}
+
+/** RGB を #rrggbb に変換 */
+function rgbToHex(r, g, b) {
+  const toHex = (n) => clampColorChannel(n).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+/** #rrggbb を RGB に変換 */
+function parseHexColor(hex) {
+  const value = String(hex || "").trim().toLowerCase();
+  const match = /^#([0-9a-f]{6})$/.exec(value);
+  if (!match) return null;
+  const raw = match[1];
   return {
-    stroke: document.getElementById("stroke-color").value,
+    r: parseInt(raw.slice(0, 2), 16),
+    g: parseInt(raw.slice(2, 4), 16),
+    b: parseInt(raw.slice(4, 6), 16),
   };
 }
 
+/** 16進数入力を RGBA に変換（6桁は alpha=0、8桁は末尾2桁を alpha） */
+function parseHexInputColor(value) {
+  let text = String(value || "").trim().toLowerCase();
+  if (!text) return null;
+  if (!text.startsWith("#")) text = `#${text}`;
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(text);
+  if (!match) return null;
+
+  let raw = match[1].toLowerCase();
+  if (raw.length === 3) {
+    raw = raw
+      .split("")
+      .map((ch) => ch + ch)
+      .join("");
+  }
+
+  if (raw.length === 6) {
+    return {
+      r: parseInt(raw.slice(0, 2), 16),
+      g: parseInt(raw.slice(2, 4), 16),
+      b: parseInt(raw.slice(4, 6), 16),
+      a: 1,
+    };
+  }
+
+  if (raw.length === 8) {
+    return {
+      r: parseInt(raw.slice(0, 2), 16),
+      g: parseInt(raw.slice(2, 4), 16),
+      b: parseInt(raw.slice(4, 6), 16),
+      a: clampAlpha(parseInt(raw.slice(6, 8), 16) / 255),
+    };
+  }
+
+  return null;
+}
+
+/** 16進数入力欄用の文字列を生成 */
+function formatHexInputColor(parsed) {
+  const base = rgbToHex(parsed.r, parsed.g, parsed.b);
+  if (parsed.a <= 0) return base;
+  const alphaByte = clampColorChannel(parsed.a * 255).toString(16).padStart(2, "0");
+  return `${base}${alphaByte}`;
+}
+
+/** 色文字列を RGBA に変換 */
+function parseStrokeColor(color) {
+  const value = String(color || "").trim();
+  if (!value) return null;
+
+  const rgbaMatch = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(
+    value
+  );
+  if (rgbaMatch) {
+    return {
+      r: clampColorChannel(rgbaMatch[1]),
+      g: clampColorChannel(rgbaMatch[2]),
+      b: clampColorChannel(rgbaMatch[3]),
+      a: clampAlpha(rgbaMatch[4] !== undefined ? rgbaMatch[4] : 1),
+    };
+  }
+
+  const hexMatch = /^#([0-9a-f]{3,8})$/i.exec(value);
+  if (hexMatch) {
+    let raw = hexMatch[1].toLowerCase();
+    if (raw.length === 3) {
+      raw = raw
+        .split("")
+        .map((ch) => ch + ch)
+        .join("");
+    }
+    if (raw.length === 6 || raw.length === 8) {
+      const parsed = {
+        r: parseInt(raw.slice(0, 2), 16),
+        g: parseInt(raw.slice(2, 4), 16),
+        b: parseInt(raw.slice(4, 6), 16),
+        a: 1,
+      };
+      if (raw.length === 8) {
+        parsed.a = clampAlpha(parseInt(raw.slice(6, 8), 16) / 255);
+      }
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+/** RGBA 文字列を生成 */
+function formatStrokeColor(r, g, b, a) {
+  const alpha = Math.round(clampAlpha(a) * 1000) / 1000;
+  return `rgba(${clampColorChannel(r)}, ${clampColorChannel(g)}, ${clampColorChannel(b)}, ${alpha})`;
+}
+
+/** 色を rgba(...) 形式に正規化 */
+function normalizeStrokeColor(color) {
+  const parsed = parseStrokeColor(color);
+  if (!parsed) return null;
+  return formatStrokeColor(parsed.r, parsed.g, parsed.b, parsed.a);
+}
+
+/** 描画用の色を取得（未設定・旧形式は rgba に変換） */
+function resolveStrokeColor(color) {
+  return normalizeStrokeColor(color) || DEFAULT_STROKE_COLOR;
+}
+
+/** ツールバーの色入力から RGBA を取得 */
+function getToolbarStrokeColor() {
+  const hex = document.getElementById("stroke-color")?.value || "#1e293b";
+  const opacity = Number(document.getElementById("stroke-opacity")?.value ?? 100);
+  const rgb = parseHexColor(hex);
+  if (!rgb) return DEFAULT_STROKE_COLOR;
+  return formatStrokeColor(rgb.r, rgb.g, rgb.b, opacity / 100);
+}
+
+/** プロパティパネルの色入力から RGBA を取得 */
+function getPropertyStrokeColor() {
+  const hex = document.getElementById("prop-stroke-color")?.value || "#1e293b";
+  const opacity = Number(document.getElementById("prop-stroke-opacity")?.value ?? 100);
+  const rgb = parseHexColor(hex);
+  if (!rgb) return DEFAULT_STROKE_COLOR;
+  return formatStrokeColor(rgb.r, rgb.g, rgb.b, opacity / 100);
+}
+
+/** 不透明度ラベルを更新 */
+function updateStrokeOpacityLabel(opacityId, labelId) {
+  const opacity = document.getElementById(opacityId);
+  const label = document.getElementById(labelId);
+  if (opacity instanceof HTMLInputElement && label) {
+    label.textContent = `${opacity.value}%`;
+  }
+}
+
+/** 色入力 UI を同期 */
+function setStrokeColorInputs(parsed, ids) {
+  const colorInput = document.getElementById(ids.colorId);
+  const opacityInput = document.getElementById(ids.opacityId);
+  const hexInput = document.getElementById(ids.hexId);
+  if (colorInput) colorInput.value = rgbToHex(parsed.r, parsed.g, parsed.b);
+  if (opacityInput) opacityInput.value = String(Math.round(parsed.a * 100));
+  if (ids.opacityLabelId) updateStrokeOpacityLabel(ids.opacityId, ids.opacityLabelId);
+  if (hexInput) hexInput.value = formatHexInputColor(parsed);
+}
+
+const TOOLBAR_STROKE_INPUT_IDS = {
+  colorId: "stroke-color",
+  opacityId: "stroke-opacity",
+  opacityLabelId: "stroke-opacity-label",
+  hexId: "stroke-hex",
+};
+
+const PROPERTY_STROKE_INPUT_IDS = {
+  colorId: "prop-stroke-color",
+  opacityId: "prop-stroke-opacity",
+  opacityLabelId: "prop-stroke-opacity-label",
+  hexId: "prop-stroke-hex",
+};
+
+/** 色を各入力欄に反映 */
+function applyStrokeColorToInputs(color, inputIdsList) {
+  const parsed = parseStrokeColor(resolveStrokeColor(color));
+  if (!parsed) return null;
+  const rgba = formatStrokeColor(parsed.r, parsed.g, parsed.b, parsed.a);
+  for (const ids of inputIdsList) {
+    setStrokeColorInputs(parsed, ids);
+  }
+  return rgba;
+}
+
+/** 16進数入力から色を適用 */
+function applyStrokeColorFromHexInput(inputIds, { recordRecent = false } = {}) {
+  const hexInput = document.getElementById(inputIds.hexId);
+  if (!(hexInput instanceof HTMLInputElement)) return null;
+  const parsed = parseHexInputColor(hexInput.value);
+  if (!parsed) return null;
+  const rgba = formatStrokeColor(parsed.r, parsed.g, parsed.b, parsed.a);
+  setStrokeColorInputs(parsed, inputIds);
+  if (recordRecent) addRecentStrokeColor(rgba);
+  return rgba;
+}
+
+/** 色・不透明度入力の HTML を生成 */
+function buildStrokeColorFieldsHtml(color) {
+  const normalized = resolveStrokeColor(color);
+  const parsed = parseStrokeColor(normalized);
+  if (!parsed) return "";
+  const hex = rgbToHex(parsed.r, parsed.g, parsed.b);
+  const opacity = Math.round(parsed.a * 100);
+  const hexInput = formatHexInputColor(parsed);
+  return `
+    <label class="design-prop-field">
+      <span>色</span>
+      <input type="color" id="prop-stroke-color" value="${escapeHtml(hex)}">
+    </label>
+    <label class="design-prop-field">
+      <span>不透明度</span>
+      <input type="range" id="prop-stroke-opacity" min="0" max="100" step="1" value="${opacity}">
+      <span class="design-prop-range-value" id="prop-stroke-opacity-label">${opacity}%</span>
+    </label>
+    <label class="design-prop-field">
+      <span>16進数</span>
+      <input type="text" id="prop-stroke-hex" class="design-stroke-hex-input" value="${escapeHtml(hexInput)}" spellcheck="false" autocomplete="off" maxlength="9" placeholder="#333333">
+    </label>
+  `;
+}
+
+/** ツール設定を取得 */
+function getToolStyle() {
+  return {
+    stroke: getToolbarStrokeColor(),
+  };
+}
+
+/** 最近使った線の色を読み込む */
+function loadRecentStrokeColors() {
+  try {
+    const raw = localStorage.getItem(RECENT_STROKE_COLORS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeStrokeColor).filter(Boolean).slice(0, RECENT_STROKE_COLOR_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+/** 最近使った線の色を保存 */
+function saveRecentStrokeColors() {
+  try {
+    localStorage.setItem(RECENT_STROKE_COLORS_KEY, JSON.stringify(recentStrokeColors));
+  } catch {
+    /* localStorage 不可時は無視 */
+  }
+}
+
+/** 最近使った色の一覧を描画 */
+function renderRecentStrokeColors() {
+  if (!recentColorsEl) return;
+  if (!recentStrokeColors.length) {
+    recentColorsEl.hidden = true;
+    recentColorsEl.innerHTML = "";
+    return;
+  }
+  recentColorsEl.hidden = false;
+  recentColorsEl.innerHTML = recentStrokeColors
+    .map(
+      (color) =>
+        `<button type="button" class="design-recent-color" data-color="${escapeHtml(color)}" title="${escapeHtml(color)}" aria-label="色 ${escapeHtml(color)}"><span class="design-recent-color-swatch" style="background:${escapeHtml(color)}"></span></button>`
+    )
+    .join("");
+}
+
+/** 最近使った色に追加 */
+function addRecentStrokeColor(color) {
+  const normalized = normalizeStrokeColor(color);
+  if (!normalized) return;
+  recentStrokeColors = [
+    normalized,
+    ...recentStrokeColors.filter((item) => item !== normalized),
+  ].slice(0, RECENT_STROKE_COLOR_LIMIT);
+  saveRecentStrokeColors();
+  renderRecentStrokeColors();
+}
+
+/** ツールバーの線の色を設定 */
+function setToolbarStrokeColor(color, { recordRecent = false } = {}) {
+  const rgba = applyStrokeColorToInputs(color, [TOOLBAR_STROKE_INPUT_IDS]);
+  if (rgba && recordRecent) addRecentStrokeColor(rgba);
+}
+
 /** ドラッグからプレビュー要素を生成 */
-function buildShapePreview(tool, startX, startY, endX, endY, style, shiftKey) {
+function buildShapePreview(tool, startX, startY, endX, endY, style, shiftKey, gridSnap = false) {
   if (tool === "line") {
+    if (gridSnap) {
+      const end = snapToGrid(endX, endY);
+      updateConstraintHint(shiftKey, "グリッド交点");
+      return { type: "line", ...style, x1: startX, y1: startY, x2: end.x, y2: end.y };
+    }
     const ep = snapToEndpoint(endX, endY);
     const end = shiftKey
       ? { x: ep.x, y: ep.y }
@@ -1156,13 +1644,14 @@ function buildShapePreview(tool, startX, startY, endX, endY, style, shiftKey) {
   }
 
   if (tool === "rect") {
+    const end = gridSnap ? snapToGrid(endX, endY) : { x: endX, y: endY };
     if (shiftKey) {
-      updateConstraintHint(true);
-      const pts = rectPoints(startX, startY, endX - startX, endY - startY);
+      updateConstraintHint(true, gridSnap ? "グリッド交点" : "");
+      const pts = rectPoints(startX, startY, end.x - startX, end.y - startY);
       return { type: "polyline", ...style, closed: true, points: pts };
     }
-    const { points, mode } = constrainRectCorners(startX, startY, endX, endY);
-    updateConstraintHint(false, mode);
+    const { points, mode } = constrainRectCorners(startX, startY, end.x, end.y);
+    updateConstraintHint(false, gridSnap ? `${mode} · グリッド交点` : mode);
     return { type: "polyline", ...style, closed: true, points };
   }
 
@@ -1175,14 +1664,105 @@ function buildShapeElement(preview) {
   return { id: uid(), ...structuredClone(preview) };
 }
 
+/** 寸法表示を更新 */
+function updateMeasureOverlay(text = measureOverlayText) {
+  if (!measureOverlayEl) return;
+  if (!text) {
+    measureOverlayEl.hidden = true;
+    measureOverlayEl.textContent = "";
+    return;
+  }
+  measureOverlayEl.hidden = false;
+  measureOverlayEl.textContent = text;
+}
+
+/** 内部座標の距離を表示用長さに変換 */
+function formatDisplayLength(worldDistance) {
+  return (worldDistance * LENGTH_DISPLAY_SCALE).toFixed(1);
+}
+
+/** 線分の寸法ラベルを描画 */
+function drawSegmentDimensionLabel(x1, y1, x2, y2) {
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  if (len < screenPxToWorld(2)) return;
+
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const offset = screenPxToWorld(10);
+  const screen = worldToScreen(mx + nx * offset, my + ny * offset);
+  const label = formatDisplayLength(len);
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.font = `600 ${dimensionLabelSizePx}px Inter, system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const metrics = ctx.measureText(label);
+  const padX = 3;
+  const padY = 2;
+  const boxW = metrics.width + padX * 2;
+  const boxH = dimensionLabelSizePx + padY * 2;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.fillRect(screen.x - boxW / 2, screen.y - boxH / 2, boxW, boxH);
+  ctx.fillStyle = "#334155";
+  ctx.fillText(label, screen.x, screen.y);
+  ctx.restore();
+}
+
+/** 要素の各辺に寸法ラベルを描画 */
+function drawElementDimensionLabels(el) {
+  if (!el || el.type === "text") return;
+  for (const [x1, y1, x2, y2] of getElementSegments(el)) {
+    drawSegmentDimensionLabel(x1, y1, x2, y2);
+  }
+}
+
+/** 寸法ラベルをまとめて描画 */
+function renderDimensionLabels(extraElements = []) {
+  if (!showDimensions) return;
+  for (const el of elements) {
+    if (textEditState?.elementId === el.id && el.type === "text") continue;
+    drawElementDimensionLabels(el);
+  }
+  for (const el of extraElements) {
+    drawElementDimensionLabels(el);
+  }
+}
+
+/** プレビュー要素から寸法テキストを生成 */
+function getPreviewMeasureText(preview) {
+  if (!preview) return "";
+
+  if (preview.type === "line") {
+    const length = Math.hypot(preview.x2 - preview.x1, preview.y2 - preview.y1);
+    return `長さ ${formatDisplayLength(length)}`;
+  }
+
+  if (preview.type === "polyline" && preview.closed && Array.isArray(preview.points) && preview.points.length >= 2) {
+    const xs = preview.points.map((p) => p.x);
+    const ys = preview.points.map((p) => p.y);
+    const width = Math.max(...xs) - Math.min(...xs);
+    const height = Math.max(...ys) - Math.min(...ys);
+    return `幅 ${formatDisplayLength(width)} × 高さ ${formatDisplayLength(height)}`;
+  }
+
+  return "";
+}
+
 /** 描画プレビュー */
 function drawPreview(preview) {
+  measureOverlayText = getPreviewMeasureText(preview);
   render();
   if (!preview) return;
   ctx.save();
   applyViewTransform();
   drawElement(preview);
   ctx.restore();
+  renderDimensionLabels(preview ? [preview] : []);
 }
 
 /** 変更をマークして自動保存をスケジュール */
@@ -1203,6 +1783,24 @@ async function saveVersion(isAutosave = true) {
   saveStatusEl.textContent = "保存中…";
 
   try {
+    if (isShareMode && shareToken) {
+      const response = await fetch("/api/design/share/scene", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: shareToken,
+          scene: getScene(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "保存に失敗しました");
+      }
+      isDirty = false;
+      saveStatusEl.textContent = "保存済み";
+      return;
+    }
+
     const thumbnail = generateThumbnail();
     const { version } = await api(`/projects/${currentProject.id}/versions`, {
       method: "POST",
@@ -1228,6 +1826,56 @@ async function saveVersion(isAutosave = true) {
   }
 }
 
+/** 共有モーダル */
+const shareModal = document.getElementById("share-modal");
+const shareUrlInput = document.getElementById("share-url");
+
+async function openShareModal() {
+  if (!currentProject) return;
+  const share = await api(`/projects/${currentProject.id}/share`, { method: "POST" });
+  currentProject.share_url = share.url;
+  currentProject.share_token = share.token;
+  if (shareUrlInput) shareUrlInput.value = share.url;
+  if (shareModal) shareModal.hidden = false;
+}
+
+function closeShareModal() {
+  if (shareModal) shareModal.hidden = true;
+}
+
+/** 共有リンクから設計図を開く */
+async function openSharedProject() {
+  const response = await fetch(
+    `/api/design/share/info?token=${encodeURIComponent(shareToken)}`
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error ?? "共有リンクが見つかりません");
+  }
+
+  currentProject = {
+    id: data.project_id,
+    title: data.title,
+    scene: data.scene,
+    current_version_id: null,
+    share_url: data.share_url,
+    share_token: shareToken,
+  };
+  if (titleInput) {
+    setProjectTitle(data.title || "共有設計");
+    if (titleInput instanceof HTMLInputElement) {
+      titleInput.readOnly = true;
+    }
+  }
+  loadScene(data.scene, { silent: true });
+  isDirty = false;
+  if (saveStatusEl) saveStatusEl.textContent = "";
+  if (listView) listView.hidden = true;
+  if (editorView) editorView.hidden = false;
+  document.title = `${data.title || "共有設計"} — 設計 — ScienceHUB`;
+  requestAnimationFrame(() => render());
+}
+
 /** プロジェクト一覧を描画 */
 function renderProjectList(projects) {
   projectListEl.innerHTML = "";
@@ -1251,7 +1899,7 @@ function renderProjectList(projects) {
       </div>
       <div class="design-project-meta">
         <h3>${escapeHtml(p.title)}</h3>
-        <p>${formatDate(p.updated_at)} · ${p.version_count} 版</p>
+        <p>${formatDate(p.updated_at)} · ${p.version_count} 版${p.share_url ? " · 共有中" : ""}</p>
         <button type="button" class="design-project-delete" data-id="${p.id}">削除</button>
       </div>
     `;
@@ -1280,13 +1928,13 @@ async function loadProjectList() {
 async function openProject(projectId) {
   const { project } = await api(`/projects/${projectId}`);
   currentProject = project;
-  titleInput.value = project.title;
+  setProjectTitle(project.title);
   loadScene(project.scene, { silent: true });
   isDirty = false;
   saveStatusEl.textContent = "";
   listView.hidden = true;
   editorView.hidden = false;
-  versionsPanel.hidden = true;
+  closeVersionsPanel();
   updateCloudDestUI();
   document.title = `${project.title} — 設計 — ScienceHUB`;
   requestAnimationFrame(() => render());
@@ -1308,7 +1956,7 @@ function backToList() {
   redoStack = [];
   closeTextEditor(false);
   editorView.hidden = true;
-  versionsPanel.hidden = true;
+  closeVersionsPanel();
   listView.hidden = false;
   document.title = "設計 — ScienceHUB";
   void loadProjectList();
@@ -1403,7 +2051,7 @@ function escapeHtml(str) {
 /** .design.json のデフォルトファイル名 */
 function getDefaultCloudFilename() {
   const base =
-    (titleInput?.value || currentProject?.title || "設計")
+    getProjectTitle()
       .trim()
       .replace(/[\\/:*?"<>|]+/g, "_") || "設計";
   return base.toLowerCase().endsWith(".design.json") ? base : `${base}.design.json`;
@@ -1545,7 +2193,7 @@ function buildDesignBlob() {
   const payload = {
     type: "sciencehub-design",
     version: 1,
-    title: titleInput.value || currentProject?.title || "設計",
+    title: getProjectTitle(),
     scene: getScene(),
     exported_at: Date.now(),
   };
@@ -1642,7 +2290,7 @@ function getElementTypeLabel(el) {
 
 /** 選択要素の共通色（異なれば null） */
 function getCommonStrokeColor(selected) {
-  const colors = new Set(selected.map((el) => el.stroke || "#1e293b"));
+  const colors = new Set(selected.map((el) => resolveStrokeColor(el.stroke)));
   return colors.size === 1 ? [...colors][0] : null;
 }
 
@@ -1652,6 +2300,13 @@ function applyPropertyChange(mutator) {
   mutator();
   markDirty();
   render();
+  updatePropertiesPanel();
+}
+
+/** バージョン履歴パネルを閉じる */
+function closeVersionsPanel() {
+  if (!versionsPanel) return;
+  versionsPanel.hidden = true;
   updatePropertiesPanel();
 }
 
@@ -1675,31 +2330,25 @@ function updatePropertiesPanel() {
 /** プロパティパネルの HTML を生成 */
 function buildPropertiesPanelHtml(selected) {
   if (selected.length > 1) {
-    const color = getCommonStrokeColor(selected) || "#1e293b";
+    const color = getCommonStrokeColor(selected) || DEFAULT_STROKE_COLOR;
     return `
       <div class="design-prop-section">
         <p class="design-prop-label">選択</p>
         <p class="design-prop-type">${selected.length} 個の要素</p>
         <p class="design-prop-hint">色を変更すると選択中のすべての要素に適用されます。</p>
       </div>
-      <label class="design-prop-field">
-        <span>色</span>
-        <input type="color" id="prop-stroke-color" value="${escapeHtml(color)}">
-      </label>
+      ${buildStrokeColorFieldsHtml(color)}
     `;
   }
 
   const el = selected[0];
-  const color = el.stroke || "#1e293b";
+  const color = resolveStrokeColor(el.stroke);
   let html = `
     <div class="design-prop-section">
       <p class="design-prop-label">種類</p>
       <p class="design-prop-type">${escapeHtml(getElementTypeLabel(el))}</p>
     </div>
-    <label class="design-prop-field">
-      <span>色</span>
-      <input type="color" id="prop-stroke-color" value="${escapeHtml(color)}">
-    </label>
+    ${buildStrokeColorFieldsHtml(color)}
   `;
 
   if (el.type === "text") {
@@ -1728,6 +2377,7 @@ function setTool(tool) {
   if (tool !== currentTool) closeTextEditor(true);
   currentTool = tool;
   hoverSnap = null;
+  measureOverlayText = "";
   document.querySelectorAll(".design-tool-btn").forEach((btn) => {
     btn.classList.toggle("design-tool-btn--active", btn.dataset.tool === tool);
   });
@@ -1798,7 +2448,14 @@ canvas.addEventListener("mousedown", (evt) => {
 
   let startX = pt.x;
   let startY = pt.y;
-  if (currentTool === "line") {
+  const gridSnap = evt.ctrlKey;
+
+  if (gridSnap) {
+    const snapped = snapToGrid(pt.x, pt.y);
+    startX = snapped.x;
+    startY = snapped.y;
+    hoverSnap = null;
+  } else if (currentTool === "line") {
     const snapped = snapToEndpoint(pt.x, pt.y);
     startX = snapped.x;
     startY = snapped.y;
@@ -1812,6 +2469,7 @@ canvas.addEventListener("mousedown", (evt) => {
     startY,
     style,
     shiftKey: evt.shiftKey,
+    gridSnap,
   };
 });
 
@@ -1845,8 +2503,12 @@ canvas.addEventListener("mousemove", (evt) => {
   }
 
   if (dragState.type === "move" && dragState.bases) {
-    const dx = pt.x - dragState.startX;
-    const dy = pt.y - dragState.startY;
+    let dx = pt.x - dragState.startX;
+    let dy = pt.y - dragState.startY;
+    if (evt.ctrlKey) {
+      dx = quantizeDeltaToGrid(dx);
+      dy = quantizeDeltaToGrid(dy);
+    }
     if (Math.hypot(dx, dy) > screenPxToWorld(1)) dragState.moved = true;
     for (const [id, base] of Object.entries(dragState.bases)) {
       const el = elements.find((e) => e.id === id);
@@ -1865,7 +2527,8 @@ canvas.addEventListener("mousemove", (evt) => {
       pt.x,
       pt.y,
       dragState.style,
-      shiftKey
+      shiftKey,
+      evt.ctrlKey
     );
     drawPreview(preview);
   }
@@ -1893,6 +2556,7 @@ function finishDrag(evt) {
       }
     }
     dragState = null;
+    measureOverlayText = "";
     render();
     return;
   }
@@ -1912,11 +2576,12 @@ function finishDrag(evt) {
     const { startX, startY, tool, style } = dragState;
     if (Math.hypot(pt.x - startX, pt.y - startY) < screenPxToWorld(4)) {
       dragState = null;
+      measureOverlayText = "";
       render();
       return;
     }
 
-    const preview = buildShapePreview(tool, startX, startY, pt.x, pt.y, style, shiftKey);
+    const preview = buildShapePreview(tool, startX, startY, pt.x, pt.y, style, shiftKey, evt.ctrlKey);
     const el = buildShapeElement(preview);
     if (el) {
       pushHistory();
@@ -1924,6 +2589,7 @@ function finishDrag(evt) {
       setSelection([el.id]);
     }
     dragState = null;
+    measureOverlayText = "";
     render();
     markDirty();
   }
@@ -1998,11 +2664,61 @@ document.getElementById("zoom-reset-btn")?.addEventListener("click", () => {
   render();
 });
 
-document.getElementById("delete-btn").addEventListener("click", () => {
+document.getElementById("show-dimensions-toggle")?.addEventListener("change", (evt) => {
+  showDimensions = evt.target.checked;
+  render();
+});
+
+document.getElementById("dimension-label-size")?.addEventListener("input", (evt) => {
+  const target = evt.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  dimensionLabelSizePx = Math.min(
+    DIMENSION_LABEL_SIZE_MAX,
+    Math.max(DIMENSION_LABEL_SIZE_MIN, Number(target.value) || DIMENSION_LABEL_SIZE_DEFAULT)
+  );
+  const label = document.getElementById("dimension-label-size-label");
+  if (label) label.textContent = `${dimensionLabelSizePx}px`;
+  if (showDimensions) render();
+});
+
+document.getElementById("stroke-color")?.addEventListener("change", () => {
+  applyStrokeColorToInputs(getToolbarStrokeColor(), [TOOLBAR_STROKE_INPUT_IDS]);
+  addRecentStrokeColor(getToolbarStrokeColor());
+});
+
+document.getElementById("stroke-opacity")?.addEventListener("input", () => {
+  updateStrokeOpacityLabel("stroke-opacity", "stroke-opacity-label");
+  const parsed = parseStrokeColor(getToolbarStrokeColor());
+  if (parsed) {
+    const hexInput = document.getElementById("stroke-hex");
+    if (hexInput instanceof HTMLInputElement) {
+      hexInput.value = formatHexInputColor(parsed);
+    }
+  }
+});
+
+document.getElementById("stroke-opacity")?.addEventListener("change", () => {
+  applyStrokeColorToInputs(getToolbarStrokeColor(), [TOOLBAR_STROKE_INPUT_IDS]);
+  addRecentStrokeColor(getToolbarStrokeColor());
+});
+
+document.getElementById("stroke-hex")?.addEventListener("change", () => {
+  applyStrokeColorFromHexInput(TOOLBAR_STROKE_INPUT_IDS, { recordRecent: true });
+});
+
+recentColorsEl?.addEventListener("click", (evt) => {
+  const btn = evt.target.closest("[data-color]");
+  if (!(btn instanceof HTMLButtonElement)) return;
+  const color = btn.dataset.color;
+  if (!color) return;
+  setToolbarStrokeColor(color, { recordRecent: true });
+});
+
+document.getElementById("delete-btn")?.addEventListener("click", () => {
   deleteSelected();
 });
 
-document.getElementById("clear-btn").addEventListener("click", () => {
+document.getElementById("clear-btn")?.addEventListener("click", () => {
   if (!elements.length) return;
   if (!confirm("すべての図形を消去しますか？")) return;
   pushHistory();
@@ -2014,6 +2730,12 @@ document.getElementById("clear-btn").addEventListener("click", () => {
 
 document.addEventListener("keydown", (evt) => {
   if (!isEditorShortcutTarget(evt.target)) return;
+
+  if (evt.key === "Escape" && versionsPanel && !versionsPanel.hidden) {
+    evt.preventDefault();
+    closeVersionsPanel();
+    return;
+  }
 
   const mod = evt.ctrlKey || evt.metaKey;
   if (mod && evt.key.toLowerCase() === "z" && !evt.shiftKey) {
@@ -2031,68 +2753,162 @@ document.addEventListener("keydown", (evt) => {
     void handleSaveShortcut();
     return;
   }
+  if (mod && evt.key.toLowerCase() === "c") {
+    if (currentTool === "select" && selectedIds.size) {
+      evt.preventDefault();
+      copySelected();
+    }
+    return;
+  }
+  if (mod && evt.key.toLowerCase() === "x") {
+    if (currentTool === "select" && selectedIds.size) {
+      evt.preventDefault();
+      cutSelected();
+    }
+    return;
+  }
+  if (mod && evt.key.toLowerCase() === "v") {
+    if (clipboardElements?.length) {
+      evt.preventDefault();
+      pasteClipboard();
+    }
+    return;
+  }
+  if (!mod && !evt.altKey) {
+    const tool = TOOL_SHORTCUT_KEYS[evt.key];
+    if (tool) {
+      evt.preventDefault();
+      setTool(tool);
+      return;
+    }
+  }
   if (evt.key === "Delete" || evt.key === "Backspace") {
     evt.preventDefault();
     deleteSelected();
   }
 });
 
-document.getElementById("new-project-btn").addEventListener("click", () => void createProject());
-document.getElementById("empty-new-btn").addEventListener("click", () => void createProject());
-document.getElementById("back-to-list").addEventListener("click", backToList);
+document.getElementById("new-project-btn")?.addEventListener("click", () => void createProject());
+document.getElementById("empty-new-btn")?.addEventListener("click", () => void createProject());
+document.getElementById("back-to-list")?.addEventListener("click", backToList);
 
-document.getElementById("local-save-btn").addEventListener("click", downloadLocal);
+document.getElementById("local-save-btn")?.addEventListener("click", downloadLocal);
 
-document.getElementById("import-local-btn").addEventListener("click", () => {
-  document.getElementById("import-local-input").click();
+document.getElementById("import-local-btn")?.addEventListener("click", () => {
+  document.getElementById("import-local-input")?.click();
 });
-document.getElementById("import-local-input").addEventListener("change", (e) => {
+document.getElementById("import-local-input")?.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (file) void importLocalFile(file);
   e.target.value = "";
 });
 
-document.getElementById("checkpoint-btn").addEventListener("click", () => void saveVersion(false));
+document.getElementById("checkpoint-btn")?.addEventListener("click", () => void saveVersion(false));
 
-document.getElementById("versions-btn").addEventListener("click", async () => {
-  versionsPanel.hidden = !versionsPanel.hidden;
-  if (!versionsPanel.hidden) await loadVersionList();
+document.getElementById("versions-btn")?.addEventListener("click", async () => {
+  if (!versionsPanel.hidden) {
+    closeVersionsPanel();
+    return;
+  }
+  versionsPanel.hidden = false;
+  await loadVersionList();
   updatePropertiesPanel();
 });
-document.getElementById("close-versions-btn").addEventListener("click", () => {
-  versionsPanel.hidden = true;
-  updatePropertiesPanel();
+document.getElementById("close-versions-btn")?.addEventListener("click", () => {
+  closeVersionsPanel();
+});
+
+document.getElementById("share-btn")?.addEventListener("click", () => {
+  openShareModal().catch((e) => alert(e.message));
+});
+document.getElementById("copy-share-btn")?.addEventListener("click", async () => {
+  if (!shareUrlInput) return;
+  try {
+    await navigator.clipboard.writeText(shareUrlInput.value);
+    if (saveStatusEl) saveStatusEl.textContent = "リンクをコピーしました";
+  } catch {
+    shareUrlInput.select();
+  }
+});
+document.getElementById("revoke-share-btn")?.addEventListener("click", async () => {
+  if (!currentProject) return;
+  if (!window.confirm("共有リンクを無効化しますか？")) return;
+  await api(`/projects/${currentProject.id}/share`, { method: "DELETE" });
+  currentProject.share_url = null;
+  currentProject.share_token = null;
+  closeShareModal();
+  if (saveStatusEl) saveStatusEl.textContent = "共有を解除しました";
+});
+shareModal?.querySelectorAll("[data-close-modal]").forEach((el) => {
+  el.addEventListener("click", closeShareModal);
+});
+
+propertiesBody?.addEventListener("pointerdown", (evt) => {
+  const target = evt.target;
+  if (!(target instanceof HTMLInputElement) || target.id !== "prop-font-size") return;
+  if (!fontSizeSliderEditing) {
+    pushHistory();
+    fontSizeSliderEditing = true;
+  }
 });
 
 propertiesBody?.addEventListener("input", (evt) => {
   const target = evt.target;
   if (!(target instanceof HTMLInputElement)) return;
+  if (target.id === "prop-stroke-opacity") {
+    updateStrokeOpacityLabel("prop-stroke-opacity", "prop-stroke-opacity-label");
+    const parsed = parseStrokeColor(getPropertyStrokeColor());
+    const hexInput = document.getElementById("prop-stroke-hex");
+    if (parsed && hexInput instanceof HTMLInputElement) {
+      hexInput.value = formatHexInputColor(parsed);
+    }
+  }
   if (target.id === "prop-font-size") {
+    const selected = getSelectedElements();
+    if (selected.length !== 1 || selected[0].type !== "text") return;
+    if (!fontSizeSliderEditing) {
+      pushHistory();
+      fontSizeSliderEditing = true;
+    }
+    selected[0].fontSize = Number(target.value);
     const label = document.getElementById("prop-font-size-label");
     if (label) label.textContent = `${target.value}px`;
+    markDirty();
+    render();
   }
 });
 
 propertiesBody?.addEventListener("change", (evt) => {
   const target = evt.target;
   if (!(target instanceof HTMLInputElement)) return;
+  if (target.id === "prop-font-size") {
+    fontSizeSliderEditing = false;
+    return;
+  }
   const selected = getSelectedElements();
   if (!selected.length) return;
 
-  if (target.id === "prop-stroke-color") {
-    const color = target.value;
+  if (target.id === "prop-stroke-color" || target.id === "prop-stroke-opacity") {
+    const color = getPropertyStrokeColor();
     applyPropertyChange(() => {
       for (const el of selected) el.stroke = color;
-      document.getElementById("stroke-color").value = color;
+      applyStrokeColorToInputs(color, [TOOLBAR_STROKE_INPUT_IDS, PROPERTY_STROKE_INPUT_IDS]);
     });
+    addRecentStrokeColor(color);
     return;
   }
 
-  if (target.id === "prop-font-size" && selected.length === 1 && selected[0].type === "text") {
+  if (target.id === "prop-stroke-hex") {
+    const color = applyStrokeColorFromHexInput(PROPERTY_STROKE_INPUT_IDS);
+    if (!color) return;
     applyPropertyChange(() => {
-      selected[0].fontSize = Number(target.value);
+      for (const el of selected) el.stroke = color;
+      applyStrokeColorToInputs(color, [TOOLBAR_STROKE_INPUT_IDS, PROPERTY_STROKE_INPUT_IDS]);
     });
+    addRecentStrokeColor(color);
+    return;
   }
+
 });
 
 propertiesBody?.addEventListener("click", (evt) => {
@@ -2108,16 +2924,16 @@ propertiesBody?.addEventListener("click", (evt) => {
 });
 
 let titleSaveTimer = null;
-titleInput.addEventListener("input", () => {
-  if (!currentProject) return;
+titleInput?.addEventListener("input", () => {
+  if (!currentProject || isShareMode) return;
   if (titleSaveTimer) clearTimeout(titleSaveTimer);
   titleSaveTimer = setTimeout(async () => {
     try {
       await api(`/projects/${currentProject.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ title: titleInput.value }),
+        body: JSON.stringify({ title: getProjectTitle() }),
       });
-      currentProject.title = titleInput.value;
+      currentProject.title = getProjectTitle();
     } catch (err) {
       console.error(err);
     }
@@ -2134,18 +2950,40 @@ if (cloudDialog) {
     loginNext: `/apps/${APP_SLUG}/`,
   });
 }
-document.getElementById("cloud-save-btn").addEventListener("click", () => {
+document.getElementById("cloud-save-btn")?.addEventListener("click", () => {
   void saveToCloud();
 });
-document.getElementById("cloud-dest-btn").addEventListener("click", () => {
+document.getElementById("cloud-dest-btn")?.addEventListener("click", () => {
   openCloudDestinationPicker();
 });
 
 // --- 初期化 ---
 async function initApp() {
   try {
+    if (isShareMode) {
+      if (!shareToken) {
+        throw new Error("共有トークンがありません");
+      }
+
+      recentStrokeColors = loadRecentStrokeColors();
+      renderRecentStrokeColors();
+
+      if (canvasWrapEl) {
+        new ResizeObserver(() => {
+          if (!editorView.hidden) render();
+        }).observe(canvasWrapEl);
+      }
+
+      await openSharedProject();
+      loadingEl.hidden = true;
+      return;
+    }
+
     const allowed = await checkAccess();
     if (!allowed) return;
+
+    recentStrokeColors = loadRecentStrokeColors();
+    renderRecentStrokeColors();
 
     if (canvasWrapEl) {
       new ResizeObserver(() => {
@@ -2183,9 +3021,17 @@ async function initApp() {
     render();
   } catch (err) {
     console.error(err);
-    listView.hidden = false;
-    listEmptyEl.hidden = false;
-    alert("設計アプリの起動に失敗しました。ページを再読み込みしてください。");
+    if (isShareMode) {
+      if (shareErrorEl) shareErrorEl.hidden = false;
+      if (shareErrorMsgEl) {
+        shareErrorMsgEl.textContent =
+          err instanceof Error ? err.message : "共有リンクが無効です";
+      }
+    } else {
+      if (listView) listView.hidden = false;
+      if (listEmptyEl) listEmptyEl.hidden = false;
+      alert("設計アプリの起動に失敗しました。ページを再読み込みしてください。");
+    }
   } finally {
     loadingEl.hidden = true;
   }

@@ -61,6 +61,7 @@
         <button type="button" class="design-btn" id="local-save-btn">ローカル</button>
         <button type="button" class="design-btn design-btn--primary" id="cloud-save-btn">保存</button>
         <button type="button" class="design-btn" id="checkpoint-btn">版を確定</button>
+        <button type="button" class="design-btn" id="share-btn">共有</button>
       </div>
     </header>
 
@@ -68,21 +69,39 @@
       <aside class="design-toolbar" aria-label="描画ツール">
         <p class="design-toolbar-label">ツール</p>
         <div class="design-tool-group" role="toolbar" aria-label="描画ツール">
-          <button type="button" class="design-tool-btn design-tool-btn--active" data-tool="select" title="選択（範囲選択可）">↖</button>
-          <button type="button" class="design-tool-btn" data-tool="line" title="直線">／</button>
-          <button type="button" class="design-tool-btn" data-tool="rect" title="四角形">▢</button>
-          <button type="button" class="design-tool-btn" data-tool="text" title="テキスト">T</button>
+          <button type="button" class="design-tool-btn design-tool-btn--active" data-tool="select" title="選択（1）">↖</button>
+          <button type="button" class="design-tool-btn" data-tool="line" title="直線（2）">／</button>
+          <button type="button" class="design-tool-btn" data-tool="rect" title="四角形（3）">▢</button>
+          <button type="button" class="design-tool-btn" data-tool="text" title="テキスト（4）">T</button>
         </div>
 
-        <p class="design-toolbar-label">補正（Shiftで無効）</p>
-        <p class="design-constraint-hint" id="constraint-hint">直線: 0°/45°/90°（±3°） · 四角: 正方形/1:2</p>
+        <p class="design-constraint-hint" id="constraint-hint" hidden></p>
 
         <label class="design-field">
           <span>線の色</span>
           <input type="color" id="stroke-color" value="#1e293b">
+          <label class="design-field design-stroke-opacity-field">
+            <span>不透明度</span>
+            <input type="range" id="stroke-opacity" min="0" max="100" step="1" value="100">
+            <span class="design-prop-range-value" id="stroke-opacity-label">100%</span>
+          </label>
+          <label class="design-field design-stroke-hex-field">
+            <span>16進数</span>
+            <input type="text" id="stroke-hex" class="design-stroke-hex-input" value="#1e293bff" spellcheck="false" autocomplete="off" maxlength="9" placeholder="#333333">
+          </label>
+          <div class="design-recent-colors" id="recent-colors" hidden aria-label="最近使った色"></div>
         </label>
 
         <p class="design-toolbar-label">表示</p>
+        <label class="design-field design-field--check">
+          <input type="checkbox" id="show-dimensions-toggle">
+          <span>寸法表示</span>
+        </label>
+        <label class="design-field" id="dimension-label-size-field">
+          <span>寸法文字サイズ</span>
+          <input type="range" id="dimension-label-size" min="8" max="24" step="1" value="11">
+          <span class="design-prop-range-value" id="dimension-label-size-label">11px</span>
+        </label>
         <div class="design-zoom-controls">
           <button type="button" class="design-btn design-btn--icon" id="zoom-out-btn" title="縮小">−</button>
           <span class="design-zoom-label" id="zoom-label">100%</span>
@@ -94,11 +113,10 @@
           <button type="button" class="design-btn" id="delete-btn" disabled>削除</button>
           <button type="button" class="design-btn" id="clear-btn">全消去</button>
         </div>
-
-        <p class="design-hint">Ctrl+Z/Y で元に戻す/やり直し · Ctrl+S で保存 · Delete で削除。ホイール拡大、中ボタンで移動。</p>
       </aside>
 
       <main class="design-canvas-wrap" aria-label="設計キャンバス">
+        <div class="design-measure-overlay" id="measure-overlay" hidden aria-live="polite"></div>
         <div class="design-canvas-scroll" id="canvas-scroll">
           <canvas id="design-canvas" width="2000" height="1500"></canvas>
         </div>
@@ -115,7 +133,7 @@
       <aside class="design-versions-panel" id="versions-panel" hidden aria-label="バージョン履歴">
         <div class="design-versions-header">
           <h2>バージョン履歴</h2>
-          <button type="button" class="design-btn design-btn--icon" id="close-versions-btn" aria-label="閉じる">×</button>
+          <button type="button" class="design-btn design-btn--icon design-panel-close" id="close-versions-btn" aria-label="バージョン履歴を閉じる">×</button>
         </div>
         <ul class="design-version-list" id="version-list"></ul>
       </aside>
@@ -166,6 +184,23 @@
       </div>
     </footer>
   </dialog>
+
+  <!-- 共有モーダル -->
+  <div class="design-modal" id="share-modal" hidden>
+    <div class="design-modal-backdrop" data-close-modal></div>
+    <div class="design-modal-panel" role="dialog" aria-labelledby="share-modal-title">
+      <h2 id="share-modal-title">共有リンク</h2>
+      <p class="design-modal-desc">リンクを知っている人はログインなしで設計図を閲覧・編集できます。</p>
+      <div class="design-share-row">
+        <input type="text" class="design-share-url" id="share-url" readonly>
+        <button type="button" class="design-btn design-btn--primary" id="copy-share-btn">コピー</button>
+      </div>
+      <div class="design-modal-actions">
+        <button type="button" class="design-btn" id="revoke-share-btn">リンクを無効化</button>
+        <button type="button" class="design-btn" data-close-modal>閉じる</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/apps/design/app.js" type="module"></script>
   <script src="/js/pwa-register.js" type="module"></script>

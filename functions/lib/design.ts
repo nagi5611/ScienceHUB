@@ -60,6 +60,8 @@ export interface DesignProjectSummary {
   version_count: number;
   thumbnail_data: string | null;
   cloud_storage_path: string | null;
+  share_url: string | null;
+  share_token: string | null;
 }
 
 export interface DesignProjectDetail extends DesignProjectSummary {
@@ -88,6 +90,14 @@ interface VersionRow {
   created_at: number;
 }
 
+interface ShareRow {
+  id: string;
+  project_id: string;
+  token: string;
+  revoked_at: number | null;
+  created_at: number;
+}
+
 const DEFAULT_SCENE: DesignScene = {
   version: 1,
   width: 2000,
@@ -96,6 +106,27 @@ const DEFAULT_SCENE: DesignScene = {
 };
 
 const MAX_AUTOSAVE_VERSIONS = 80;
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+/** 共有トークンを生成 */
+function generateShareToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+/** 共有ページ URL */
+export function buildDesignShareUrl(request: Request, token: string): string {
+  const origin = new URL(request.url).origin;
+  return `${origin}/design-share/?t=${encodeURIComponent(token)}`;
+}
 
 /** 空のシーン */
 export function emptyScene(): DesignScene {
@@ -236,10 +267,42 @@ async function pruneAutosaveVersions(
   }
 }
 
+/** プロジェクトの有効な共有リンクを取得 */
+async function getActiveShare(
+  db: D1Database,
+  projectId: string
+): Promise<ShareRow | null> {
+  return (
+    (await db
+      .prepare(
+        `SELECT id, project_id, token, revoked_at, created_at
+         FROM design_share_links
+         WHERE project_id = ? AND revoked_at IS NULL
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+      .bind(projectId)
+      .first<ShareRow>()) ?? null
+  );
+}
+
+function withShareFields(
+  summary: Omit<DesignProjectSummary, "share_url" | "share_token">,
+  request: Request | null,
+  share: ShareRow | null
+): DesignProjectSummary {
+  return {
+    ...summary,
+    share_token: share?.token ?? null,
+    share_url: share && request ? buildDesignShareUrl(request, share.token) : null,
+  };
+}
+
 /** プロジェクト一覧 */
 export async function listProjects(
   db: D1Database,
-  userId: string
+  userId: string,
+  request: Request | null = null
 ): Promise<DesignProjectSummary[]> {
   const rows = await db
     .prepare(
@@ -252,12 +315,20 @@ export async function listProjects(
        ORDER BY p.updated_at DESC`
     )
     .bind(userId)
-    .all<DesignProjectSummary>();
+    .all<Omit<DesignProjectSummary, "share_url" | "share_token">>();
 
-  return (rows.results ?? []).map((r) => ({
-    ...r,
-    version_count: Number(r.version_count) || 0,
-  }));
+  const summaries: DesignProjectSummary[] = [];
+  for (const row of rows.results ?? []) {
+    const share = await getActiveShare(db, row.id);
+    summaries.push(
+      withShareFields(
+        { ...row, version_count: Number(row.version_count) || 0 },
+        request,
+        share
+      )
+    );
+  }
+  return summaries;
 }
 
 /** プロジェクト作成 */
@@ -312,6 +383,8 @@ export async function createProject(
     scene,
     current_version_id: versionId,
     cloud_storage_path: null,
+    share_url: null,
+    share_token: null,
   };
 }
 
@@ -319,7 +392,8 @@ export async function createProject(
 export async function getProject(
   db: D1Database,
   userId: string,
-  projectId: string
+  projectId: string,
+  request: Request | null = null
 ): Promise<DesignProjectDetail | null> {
   const project = await getOwnedProject(db, projectId, userId);
   if (!project) return null;
@@ -345,16 +419,23 @@ export async function getProject(
     .bind(projectId)
     .first<{ c: number }>();
 
+  const share = await getActiveShare(db, projectId);
   return {
-    id: project.id,
-    title: project.title,
-    created_at: project.created_at,
-    updated_at: project.updated_at,
-    version_count: Number(countRow?.c) || 0,
-    thumbnail_data: thumbnail,
+    ...withShareFields(
+      {
+        id: project.id,
+        title: project.title,
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        version_count: Number(countRow?.c) || 0,
+        thumbnail_data: thumbnail,
+        cloud_storage_path: project.cloud_storage_path,
+      },
+      request,
+      share
+    ),
     scene,
     current_version_id: project.current_version_id,
-    cloud_storage_path: project.cloud_storage_path,
   };
 }
 
@@ -571,4 +652,151 @@ export async function restoreVersion(
     is_autosave: false,
     change_action: "restore",
   });
+}
+
+/** 共有リンク作成（既存があれば返す） */
+export async function createOrGetShareLink(
+  db: D1Database,
+  user: SessionUser,
+  projectId: string,
+  request: Request
+): Promise<{ token: string; url: string }> {
+  const project = await getOwnedProject(db, projectId, user.id);
+  if (!project) throw new Error("プロジェクトが見つかりません");
+
+  const existing = await getActiveShare(db, projectId);
+  if (existing) {
+    return {
+      token: existing.token,
+      url: buildDesignShareUrl(request, existing.token),
+    };
+  }
+
+  const id = createId("dsh");
+  const token = generateShareToken();
+  const ts = now();
+  await db
+    .prepare(
+      `INSERT INTO design_share_links
+         (id, project_id, token, created_by_user_id, revoked_at, created_at)
+       VALUES (?, ?, ?, ?, NULL, ?)`
+    )
+    .bind(id, projectId, token, user.id, ts)
+    .run();
+
+  return { token, url: buildDesignShareUrl(request, token) };
+}
+
+/** 共有リンク無効化 */
+export async function revokeShareLink(
+  db: D1Database,
+  userId: string,
+  projectId: string
+): Promise<boolean> {
+  const project = await getOwnedProject(db, projectId, userId);
+  if (!project) return false;
+
+  const ts = now();
+  const result = await db
+    .prepare(
+      `UPDATE design_share_links
+       SET revoked_at = ?
+       WHERE project_id = ? AND revoked_at IS NULL`
+    )
+    .bind(ts, projectId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+/** トークンから共有情報 */
+export async function getShareByToken(
+  db: D1Database,
+  token: string
+): Promise<(ShareRow & { title: string }) | null> {
+  return (
+    (await db
+      .prepare(
+        `SELECT s.id, s.project_id, s.token, s.revoked_at, s.created_at,
+                p.title
+         FROM design_share_links s
+         JOIN design_projects p ON p.id = s.project_id
+         WHERE s.token = ? AND s.revoked_at IS NULL`
+      )
+      .bind(token)
+      .first<ShareRow & { title: string }>()) ?? null
+  );
+}
+
+/** 公開共有情報 */
+export async function getPublicShareInfo(
+  db: D1Database,
+  token: string,
+  request: Request
+): Promise<{
+  project_id: string;
+  title: string;
+  scene: DesignScene;
+  share_url: string;
+} | null> {
+  const share = await getShareByToken(db, token);
+  if (!share) return null;
+
+  const project = await db
+    .prepare(
+      "SELECT id, title, current_version_id FROM design_projects WHERE id = ?"
+    )
+    .bind(share.project_id)
+    .first<{
+      id: string;
+      title: string;
+      current_version_id: string | null;
+    }>();
+  if (!project) return null;
+
+  let scene = emptyScene();
+  if (project.current_version_id) {
+    const ver = await db
+      .prepare("SELECT scene_json FROM design_versions WHERE id = ?")
+      .bind(project.current_version_id)
+      .first<{ scene_json: string }>();
+    if (ver) scene = parseScene(ver.scene_json);
+  }
+
+  return {
+    project_id: project.id,
+    title: project.title,
+    scene,
+    share_url: buildDesignShareUrl(request, token),
+  };
+}
+
+/** 共有トークン経由でシーン保存（現在版を上書き） */
+export async function saveSharedProjectScene(
+  db: D1Database,
+  token: string,
+  sceneInput: unknown
+): Promise<{ project_id: string } | null> {
+  const share = await getShareByToken(db, token);
+  if (!share) return null;
+
+  const project = await db
+    .prepare(
+      "SELECT current_version_id FROM design_projects WHERE id = ?"
+    )
+    .bind(share.project_id)
+    .first<{ current_version_id: string | null }>();
+  if (!project?.current_version_id) return null;
+
+  const sceneJson = serializeScene(normalizeScene(sceneInput));
+  const ts = now();
+  await db
+    .prepare("UPDATE design_versions SET scene_json = ? WHERE id = ?")
+    .bind(sceneJson, project.current_version_id)
+    .run();
+  await db
+    .prepare("UPDATE design_projects SET updated_at = ? WHERE id = ?")
+    .bind(ts, share.project_id)
+    .run();
+
+  return { project_id: share.project_id };
 }

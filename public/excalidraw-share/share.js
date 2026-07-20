@@ -6,6 +6,12 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import { createExcalidrawMainMenu } from "../js/excalidraw-menu.js";
+import {
+  buildCollaboratorsFromPeers,
+  createCollabConnection,
+  pickPersistAppState,
+  sceneSyncFingerprint,
+} from "../js/excalidraw-collab-utils.js";
 
 const SAVE_DEBOUNCE_MS = 800;
 const SCENE_BROADCAST_MS = 200;
@@ -20,37 +26,17 @@ const peersEl = document.getElementById("peers-status");
 
 let token = "";
 let excalidrawAPI = null;
-let socket = null;
-let clientId = null;
+let collab = null;
 let applyingRemote = false;
 let saveTimer = null;
 let broadcastTimer = null;
 let latestElements = [];
 let latestAppState = {};
 let latestFiles = {};
+let lastSyncFingerprint = "";
 
 function getToken() {
   return new URL(location.href).searchParams.get("t")?.trim() ?? "";
-}
-
-function pickAppState(appState) {
-  if (!appState) return {};
-  return {
-    viewBackgroundColor: appState.viewBackgroundColor,
-    currentItemStrokeColor: appState.currentItemStrokeColor,
-    currentItemBackgroundColor: appState.currentItemBackgroundColor,
-    currentItemFillStyle: appState.currentItemFillStyle,
-    currentItemStrokeWidth: appState.currentItemStrokeWidth,
-    currentItemRoughness: appState.currentItemRoughness,
-    currentItemOpacity: appState.currentItemOpacity,
-    currentItemFontFamily: appState.currentItemFontFamily,
-    currentItemFontSize: appState.currentItemFontSize,
-    currentItemTextAlign: appState.currentItemTextAlign,
-    scrollX: appState.scrollX,
-    scrollY: appState.scrollY,
-    zoom: appState.zoom,
-    gridSize: appState.gridSize,
-  };
 }
 
 async function loadShareInfo() {
@@ -70,6 +56,11 @@ function mountEditor(scene) {
   latestElements = scene?.elements ?? [];
   latestAppState = scene?.appState ?? {};
   latestFiles = scene?.files ?? {};
+  lastSyncFingerprint = sceneSyncFingerprint(
+    latestElements,
+    latestAppState,
+    latestFiles
+  );
 
   const uiOptions = {
     welcomeScreen: false,
@@ -111,6 +102,14 @@ function handleLocalChange(elements, appState, files) {
   latestAppState = appState;
   latestFiles = files ?? {};
 
+  const fingerprint = sceneSyncFingerprint(
+    latestElements,
+    latestAppState,
+    latestFiles
+  );
+  if (fingerprint === lastSyncFingerprint) return;
+  lastSyncFingerprint = fingerprint;
+
   statusEl.textContent = "保存中…";
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(persistScene, SAVE_DEBOUNCE_MS);
@@ -128,7 +127,7 @@ async function persistScene() {
         token,
         scene: {
           elements: latestElements,
-          appState: pickAppState(latestAppState),
+          appState: pickPersistAppState(latestAppState),
           files: latestFiles,
         },
       }),
@@ -140,106 +139,11 @@ async function persistScene() {
   }
 }
 
-function connectCollab() {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const params = new URLSearchParams({ token });
-  const guestName = localStorage.getItem("excal-guest-name");
-  if (guestName) params.set("name", guestName);
-
-  const ws = new WebSocket(
-    `${proto}//${location.host}/api/excalidraw/collab?${params}`
-  );
-  socket = ws;
-
-  ws.addEventListener("open", () => {
-    peersEl.textContent = "接続中";
-  });
-
-  ws.addEventListener("message", (event) => {
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (data.type === "init") {
-      clientId = data.clientId;
-      applyRemoteScene(data.scene);
-      updatePeers(data.peers ?? []);
-      return;
-    }
-    if (data.type === "scene" && data.from !== clientId) {
-      applyRemoteScene(data.scene);
-      return;
-    }
-    if (data.type === "presence") {
-      updatePeers(data.peers ?? []);
-      return;
-    }
-    if (data.type === "pointer" && data.from !== clientId && excalidrawAPI) {
-      const collaborators = new Map(
-        excalidrawAPI.getAppState().collaborators ?? []
-      );
-      collaborators.set(data.from, {
-        username: data.username,
-        color: data.color,
-        pointer: data.pointer,
-        button: data.button,
-        selectedElementIds: data.selectedElementIds,
-      });
-      applyingRemote = true;
-      excalidrawAPI.updateScene({ collaborators });
-      applyingRemote = false;
-    }
-  });
-
-  ws.addEventListener("close", () => {
-    peersEl.textContent = "切断";
-  });
+function getCollabState() {
+  return { latestElements, latestFiles, lastSyncFingerprint };
 }
 
-function broadcastScene() {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(
-    JSON.stringify({
-      type: "scene",
-      scene: {
-        elements: latestElements,
-        appState: pickAppState(latestAppState),
-        files: latestFiles,
-      },
-    })
-  );
-}
-
-function handlePointerUpdate(payload) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(
-    JSON.stringify({
-      type: "pointer",
-      pointer: payload.pointer,
-      button: payload.button,
-      selectedElementIds: payload.selectedElementIds,
-    })
-  );
-}
-
-function applyRemoteScene(scene) {
-  if (!excalidrawAPI || !scene) return;
-  applyingRemote = true;
-  latestElements = scene.elements ?? [];
-  latestFiles = scene.files ?? {};
-  excalidrawAPI.updateScene({
-    elements: latestElements,
-    appState: scene.appState ?? {},
-  });
-  if (scene.files && Object.keys(scene.files).length) {
-    excalidrawAPI.addFiles(Object.values(scene.files));
-  }
-  applyingRemote = false;
-}
-
-function updatePeers(peers) {
+function updatePeers(peers, clientId) {
   const others = (peers ?? []).filter((p) => p.clientId !== clientId);
   peersEl.textContent =
     others.length === 0
@@ -247,16 +151,55 @@ function updatePeers(peers) {
       : `共同編集: ${others.map((p) => p.username).join(", ")}`;
 
   if (!excalidrawAPI) return;
-  const collaborators = new Map();
-  for (const p of others) {
-    collaborators.set(p.clientId, {
-      username: p.username,
-      color: p.color,
-    });
-  }
+  const collaborators = buildCollaboratorsFromPeers(
+    excalidrawAPI,
+    peers,
+    clientId
+  );
   applyingRemote = true;
   excalidrawAPI.updateScene({ collaborators });
   applyingRemote = false;
+}
+
+function connectCollab() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  collab = createCollabConnection({
+    buildUrl: () => {
+      const params = new URLSearchParams({ token });
+      const guestName = localStorage.getItem("excal-guest-name");
+      if (guestName) params.set("name", guestName);
+      return `${proto}//${location.host}/api/excalidraw/collab?${params}`;
+    },
+    getApi: () => excalidrawAPI,
+    getState: getCollabState,
+    setApplyingRemote: (value) => {
+      applyingRemote = value;
+    },
+    onOpen: () => {
+      peersEl.textContent = "接続中";
+    },
+    onClose: () => {
+      peersEl.textContent = "再接続中…";
+    },
+    onError: () => {
+      peersEl.textContent = "接続エラー";
+    },
+    onPeersChange: updatePeers,
+  });
+  collab.connect();
+}
+
+function broadcastScene() {
+  if (!collab) return;
+  collab.broadcastScene({
+    elements: latestElements,
+    appState: pickPersistAppState(latestAppState),
+    files: latestFiles,
+  });
+}
+
+function handlePointerUpdate(payload) {
+  collab?.sendPointer(payload);
 }
 
 try {
