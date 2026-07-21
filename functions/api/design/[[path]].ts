@@ -13,12 +13,13 @@
  * DELETE /api/design/projects/:id/share
  * GET    /api/design/share/info?token=
  * PUT    /api/design/share/scene
+ * GET|WS /api/design/collab?projectId=|&token=
  */
 
-import type { Env, SessionUser } from "../../lib/types";
+import type { Env } from "../../lib/types";
 import { jsonError } from "../../lib/types";
 import { getDb } from "../../lib/db";
-import { requireUser } from "../../lib/auth";
+import { getSessionUser, requireUser } from "../../lib/auth";
 import { canUserAccessApp } from "../../lib/apps";
 import {
   DESIGN_APP_SLUG,
@@ -30,12 +31,17 @@ import {
   getVersionScene,
   listProjects,
   listVersions,
+  normalizeScene,
   restoreVersion,
   revokeShareLink,
   saveSharedProjectScene,
   saveVersion,
   updateProject,
 } from "../../lib/design";
+
+type ExtendedEnv = Env & {
+  DESIGN_COLLAB?: DurableObjectNamespace;
+};
 
 function pathParts(params: string | string[] | undefined): string[] {
   if (!params) return [];
@@ -64,7 +70,7 @@ function isPublicShareRoute(parts: string[]): boolean {
 async function requireDesignAccess(
   request: Request,
   env: Env
-): Promise<SessionUser | Response> {
+): Promise<Awaited<ReturnType<typeof requireUser>> | Response> {
   const auth = await requireUser(request, env);
   if (auth instanceof Response) return auth;
 
@@ -81,8 +87,108 @@ function toErrorResponse(error: unknown, fallback: string): Response {
   return jsonError(message, 400);
 }
 
-export const onRequestGet: PagesFunction<Env> = async (context) => {
+/** DO にシーン永続化を通知 */
+async function notifyDesignCollabPersist(
+  env: ExtendedEnv,
+  projectId: string,
+  scene: unknown
+): Promise<void> {
+  if (!env.DESIGN_COLLAB) return;
+  try {
+    const stub = env.DESIGN_COLLAB.getByName(projectId);
+    await stub.fetch("https://do/persist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scene: normalizeScene(scene) }),
+    });
+  } catch {
+    /* DO 未起動時は無視 */
+  }
+}
+
+/** WebSocket を DO にプロキシ */
+async function handleCollab(
+  request: Request,
+  env: ExtendedEnv
+): Promise<Response> {
+  if (!env.DESIGN_COLLAB) {
+    return jsonError("共同編集サービスが未設定です", 503);
+  }
+
+  const url = new URL(request.url);
+  const projectId = url.searchParams.get("projectId")?.trim() ?? "";
+  const token = url.searchParams.get("token")?.trim() ?? "";
+  const db = getDb(env);
+
+  let roomProjectId = "";
+  let displayName = "ゲスト";
+  let userId = "guest";
+  let seedScene: unknown = null;
+
+  if (token) {
+    const info = await getPublicShareInfo(db, token, request);
+    if (!info) return jsonError("共有リンクが無効です", 404);
+    roomProjectId = info.project_id;
+    seedScene = info.scene;
+    const session = await getSessionUser(request, env);
+    if (session) {
+      displayName = session.display_name || session.username;
+      userId = session.id;
+    } else {
+      displayName =
+        url.searchParams.get("name")?.trim().slice(0, 40) || "ゲスト";
+      userId = `guest_${crypto.randomUUID().slice(0, 8)}`;
+    }
+  } else if (projectId) {
+    const auth = await requireDesignAccess(request, env);
+    if (auth instanceof Response) return auth;
+    const project = await getProject(db, auth.id, projectId, request);
+    if (!project) return jsonError("プロジェクトが見つかりません", 404);
+    roomProjectId = project.id;
+    seedScene = project.scene;
+    displayName = auth.display_name || auth.username;
+    userId = auth.id;
+  } else {
+    return jsonError("projectId または token が必要です", 400);
+  }
+
+  if (request.headers.get("Upgrade") !== "websocket") {
+    return jsonError("WebSocket が必要です", 426);
+  }
+
+  const stub = env.DESIGN_COLLAB.getByName(roomProjectId);
+
+  if (seedScene) {
+    try {
+      await stub.fetch("https://do/seed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scene: normalizeScene(seedScene) }),
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const doUrl = new URL("https://do/websocket");
+  doUrl.searchParams.set("projectId", roomProjectId);
+  doUrl.searchParams.set("userId", userId);
+  doUrl.searchParams.set("username", displayName);
+
+  return stub.fetch(
+    new Request(doUrl.toString(), {
+      headers: request.headers,
+    })
+  );
+}
+
+export const onRequestGet: PagesFunction<ExtendedEnv> = async (context) => {
   const parts = pathParts(context.params.path);
+
+  if (parts[0] === "collab") {
+    return handleCollab(context.request, context.env);
+  }
+
   const db = getDb(context.env);
 
   if (isPublicShareRoute(parts) && parts[1] === "info") {
@@ -135,7 +241,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 };
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+export const onRequestPost: PagesFunction<ExtendedEnv> = async (context) => {
   const auth = await requireDesignAccess(context.request, context.env);
   if (auth instanceof Response) return auth;
 
@@ -185,6 +291,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         change_action: body.change_action,
       });
       if (!version) return jsonError("保存に失敗しました", 404);
+      await notifyDesignCollabPersist(
+        context.env,
+        projectId,
+        body.scene
+      );
       return Response.json({ version }, { status: 201 });
     }
 
@@ -263,7 +374,7 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
   }
 };
 
-export const onRequestPut: PagesFunction<Env> = async (context) => {
+export const onRequestPut: PagesFunction<ExtendedEnv> = async (context) => {
   const parts = pathParts(context.params.path);
   const db = getDb(context.env);
 
@@ -275,6 +386,11 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     if (!body?.token) return jsonError("token が必要です", 400);
     const saved = await saveSharedProjectScene(db, body.token, body.scene);
     if (!saved) return jsonError("共有リンクが無効です", 404);
+    await notifyDesignCollabPersist(
+      context.env,
+      saved.project_id,
+      body.scene
+    );
     return Response.json({ ok: true, project_id: saved.project_id });
   }
 

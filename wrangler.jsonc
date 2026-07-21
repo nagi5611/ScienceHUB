@@ -38,6 +38,11 @@
 				"name": "EXCALIDRAW_COLLAB",
 				"class_name": "ExcalidrawCollabRoom",
 				"script_name": "excalidraw-collab"
+			},
+			{
+				"name": "DESIGN_COLLAB",
+				"class_name": "DesignCollabRoom",
+				"script_name": "design-collab"
 			}
 		]
 	}

@@ -4,6 +4,12 @@
 
 import { createCloudSaveModal } from "../../js/cloud-save-modal.js";
 import { apiRequest, fetchDownloadBlob } from "../cloud-storage/js/api.js";
+import {
+  createDesignCollabConnection,
+  designSceneFingerprint,
+  pickCollabScene,
+  reconcileDesignElements,
+} from "../../js/design-collab-utils.js";
 
 const APP_SLUG = "design";
 const shareConfig = window.__DESIGN_SHARE__;
@@ -16,6 +22,14 @@ const GRID_SIZE = 20;
 const DEFAULT_STROKE_COLOR = "rgba(30, 41, 59, 1)";
 /** 内部座標から表示用長さへの倍率（1グリッド目盛り = GRID_SIZE × この値） */
 const LENGTH_DISPLAY_SCALE = 0.5;
+/** 寸法表示の刻み（表示長さ） */
+const DISPLAY_LENGTH_STEP = 0.1;
+/** Alt押下時の寸法刻み（表示長さ） */
+const DISPLAY_LENGTH_STEP_ALT = 0.5;
+/** 矢印キー移動の刻み（表示長さ） */
+const ARROW_NUDGE_DISPLAY = 1.0;
+/** 寸法0.1刻みに対応する内部座標の刻み */
+const WORLD_LENGTH_STEP = DISPLAY_LENGTH_STEP / LENGTH_DISPLAY_SCALE;
 const ANGLE_SNAP = Math.PI / 4; // 45°
 /** 角度スナップの許容範囲（±度） */
 const ANGLE_SNAP_TOLERANCE_DEG = 3;
@@ -28,6 +42,14 @@ const STROKE_SCREEN_PX = 1.5;
 const HIT_SCREEN_PX = 10;
 /** 端点スナップの許容距離（画面上の px） */
 const ENDPOINT_SNAP_SCREEN_PX = 12;
+/** 選択線の端点ハンドル当たり判定（画面上の px） */
+const ENDPOINT_HANDLE_SCREEN_PX = 12;
+/** 連結確認の頂点一致許容（内部座標・寸法スナップより十分小さい） */
+const CONNECT_VERTEX_EPS = WORLD_LENGTH_STEP * 0.01;
+/** 連結確認のハイライト線幅（画面上の px） */
+const CONNECT_HIGHLIGHT_STROKE_PX = 3.5;
+/** 連結確認の開放端点マーカー（画面上の px） */
+const CONNECT_OPEN_ENDPOINT_SCREEN_PX = 7;
 /** 画面上の文字サイズ（px）— ズームしても一定 */
 const TEXT_SCREEN_PX = 14;
 const TEXT_SIZE_MIN = 8;
@@ -36,7 +58,7 @@ const DIMENSION_LABEL_SIZE_MIN = 8;
 const DIMENSION_LABEL_SIZE_MAX = 24;
 const DIMENSION_LABEL_SIZE_DEFAULT = 11;
 const MIN_VIEW_SCALE = 0.1;
-const MAX_VIEW_SCALE = 20;
+const MAX_VIEW_SCALE = 100;
 
 const constraintHintEl = document.getElementById("constraint-hint");
 const zoomLabelEl = document.getElementById("zoom-label");
@@ -49,6 +71,8 @@ const TOOL_SHORTCUT_KEYS = {
   3: "rect",
   4: "text",
 };
+/** @type {{ seedLineId: string, lineIds: Set<string>, openEnds: { x: number, y: number }[] } | null} */
+let lineConnectionInspect = null;
 let viewScale = 1;
 let viewPanX = 0;
 let viewPanY = 0;
@@ -87,6 +111,7 @@ function setProjectTitle(title) {
   titleInput.textContent = title;
 }
 const saveStatusEl = document.getElementById("save-status");
+const peersStatusEl = document.getElementById("peers-status");
 const versionsPanel = document.getElementById("versions-panel");
 const versionListEl = document.getElementById("version-list");
 const propertiesPanel = document.getElementById("properties-panel");
@@ -126,6 +151,23 @@ let hoverSnap = null;
 let textEditState = null;
 let suppressTextBlurCommit = false;
 let fontSizeSliderEditing = false;
+
+/** @type {ReturnType<typeof createDesignCollabConnection> | null} */
+let collab = null;
+let applyingRemote = false;
+let collabBroadcastTimer = null;
+/** @type {ReturnType<typeof pickCollabScene> | null} */
+let pendingRemoteScene = null;
+let lastCollabFingerprint = "";
+const COLLAB_BROADCAST_MS = 200;
+/** 線描画時の端オートパン（画面端からの距離・px） */
+const AUTO_PAN_EDGE_PX = 48;
+/** 線描画時の端オートパン最大速度（キャンバス座標 / フレーム） */
+const AUTO_PAN_MAX_SPEED_PX = 16;
+/** @type {{ x: number, y: number } | null} */
+let lastDrawPointerClient = null;
+/** @type {number | null} */
+let lineDrawAutoPanRaf = null;
 
 /** アクセス権を確認 */
 async function checkAccess() {
@@ -208,6 +250,27 @@ function resetView() {
   viewPanY = 0;
 }
 
+/** 描画内容が画面内に収まるようビューを調整 */
+function fitViewToContent(paddingPx = 48) {
+  const bounds = getElementsBounds(elements);
+  if (!bounds) {
+    resetView();
+    updateZoomUI();
+    return;
+  }
+
+  const contentW = Math.max(bounds.w, GRID_SIZE * 2);
+  const contentH = Math.max(bounds.h, GRID_SIZE * 2);
+  const availW = Math.max(canvas.width - paddingPx * 2, 1);
+  const availH = Math.max(canvas.height - paddingPx * 2, 1);
+  const fitScale = Math.min(availW / contentW, availH / contentH, 4);
+
+  viewScale = clampViewScale(fitScale);
+  viewPanX = canvas.width / 2 - bounds.cx * viewScale;
+  viewPanY = canvas.height / 2 - bounds.cy * viewScale;
+  updateZoomUI();
+}
+
 /** ズーム表示を更新 */
 function updateZoomUI() {
   if (zoomLabelEl) {
@@ -241,11 +304,6 @@ function worldToScreen(worldX, worldY) {
   };
 }
 
-/** カーソル位置の画面座標 */
-function screenPoint(evt) {
-  return screenPointFromClient(evt.clientX, evt.clientY);
-}
-
 /** client 座標からキャンバス上の画面座標へ */
 function screenPointFromClient(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
@@ -258,6 +316,129 @@ function screenPointFromClient(clientX, clientY) {
     x: (clientX - rect.left) * scaleX,
     y: (clientY - rect.top) * scaleY,
   };
+}
+
+/** client 座標から図面座標へ */
+function worldPointFromClient(clientX, clientY) {
+  const screen = screenPointFromClient(clientX, clientY);
+  return screenToWorld(screen.x, screen.y);
+}
+
+/** 画面端付近でのオートパン速度（キャンバス座標） */
+function getEdgePanVelocity(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return { vx: 0, vy: 0 };
+
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  let vx = 0;
+  let vy = 0;
+
+  const distLeft = clientX - rect.left;
+  const distRight = rect.right - clientX;
+  const distTop = clientY - rect.top;
+  const distBottom = rect.bottom - clientY;
+
+  if (distLeft < AUTO_PAN_EDGE_PX) {
+    vx = -AUTO_PAN_MAX_SPEED_PX * (1 - Math.max(0, distLeft) / AUTO_PAN_EDGE_PX);
+  } else if (distRight < AUTO_PAN_EDGE_PX) {
+    vx = AUTO_PAN_MAX_SPEED_PX * (1 - Math.max(0, distRight) / AUTO_PAN_EDGE_PX);
+  }
+
+  if (distTop < AUTO_PAN_EDGE_PX) {
+    vy = AUTO_PAN_MAX_SPEED_PX * (1 - Math.max(0, distTop) / AUTO_PAN_EDGE_PX);
+  } else if (distBottom < AUTO_PAN_EDGE_PX) {
+    vy = -AUTO_PAN_MAX_SPEED_PX * (1 - Math.max(0, distBottom) / AUTO_PAN_EDGE_PX);
+  }
+
+  return { vx: vx * scaleX, vy: vy * scaleY };
+}
+
+/** 線描画ドラッグのプレビューを更新 */
+function updateLineDrawDragPreview(clientX, clientY, shiftKey, ctrlKey, altKey = false) {
+  if (!dragState || dragState.type !== "draw" || dragState.tool !== "line") return;
+  const pt = worldPointFromClient(clientX, clientY);
+  const preview = buildShapePreview(
+    dragState.tool,
+    dragState.startX,
+    dragState.startY,
+    pt.x,
+    pt.y,
+    dragState.style,
+    shiftKey,
+    ctrlKey,
+    altKey
+  );
+  drawPreview(preview);
+}
+
+/** 線描画時の端オートパンを1フレーム進める */
+function tickLineDrawAutoPan() {
+  lineDrawAutoPanRaf = null;
+  if (
+    !dragState ||
+    dragState.type !== "draw" ||
+    dragState.tool !== "line" ||
+    !lastDrawPointerClient
+  ) {
+    return;
+  }
+
+  const { vx, vy } = getEdgePanVelocity(
+    lastDrawPointerClient.x,
+    lastDrawPointerClient.y
+  );
+  if (vx === 0 && vy === 0) return;
+
+  viewPanX += vx;
+  viewPanY += vy;
+  updateLineDrawDragPreview(
+    lastDrawPointerClient.x,
+    lastDrawPointerClient.y,
+    dragState.lastShiftKey ?? false,
+    dragState.lastCtrlKey ?? false,
+    dragState.lastAltKey ?? false
+  );
+  lineDrawAutoPanRaf = requestAnimationFrame(tickLineDrawAutoPan);
+}
+
+/** 線描画時の端オートパンを開始 */
+function scheduleLineDrawAutoPan() {
+  if (lineDrawAutoPanRaf == null) {
+    lineDrawAutoPanRaf = requestAnimationFrame(tickLineDrawAutoPan);
+  }
+}
+
+/** 線描画時の端オートパンループを停止 */
+function stopLineDrawAutoPanLoop() {
+  if (lineDrawAutoPanRaf != null) {
+    cancelAnimationFrame(lineDrawAutoPanRaf);
+    lineDrawAutoPanRaf = null;
+  }
+}
+
+/** 線描画時の端オートパンを停止 */
+function stopLineDrawAutoPan() {
+  stopLineDrawAutoPanLoop();
+  lastDrawPointerClient = null;
+}
+
+/** 線描画ドラッグ中のポインタ移動 */
+function handleLineDrawPointerMove(clientX, clientY, shiftKey, ctrlKey, altKey = false) {
+  lastDrawPointerClient = { x: clientX, y: clientY };
+  dragState.lastShiftKey = shiftKey;
+  dragState.lastCtrlKey = ctrlKey;
+  dragState.lastAltKey = altKey;
+  updateLineDrawDragPreview(clientX, clientY, shiftKey, ctrlKey, altKey);
+
+  const { vx, vy } = getEdgePanVelocity(clientX, clientY);
+  if (vx !== 0 || vy !== 0) scheduleLineDrawAutoPan();
+  else stopLineDrawAutoPanLoop();
+}
+
+/** カーソル位置の画面座標 */
+function screenPoint(evt) {
+  return screenPointFromClient(evt.clientX, evt.clientY);
 }
 
 /** 中ボタンドラッグでビューを移動 */
@@ -433,6 +614,66 @@ function snapLineEnd(x1, y1, x2, y2) {
   };
 }
 
+/** 内部座標を寸法グリッドにスナップ */
+function snapToLengthGrid(x, y, displayStep = DISPLAY_LENGTH_STEP) {
+  const worldStep = displayStep / LENGTH_DISPLAY_SCALE;
+  return {
+    x: Math.round(x / worldStep) * worldStep,
+    y: Math.round(y / worldStep) * worldStep,
+  };
+}
+
+/** 内部座標の長さを指定寸法刻みに量子化 */
+function quantizeWorldLength(worldLength, displayStep = DISPLAY_LENGTH_STEP) {
+  const displayLen = worldLength * LENGTH_DISPLAY_SCALE;
+  const quantized =
+    Math.round(displayLen / displayStep) * displayStep;
+  const worldStep = displayStep / LENGTH_DISPLAY_SCALE;
+  if (quantized <= 0) return worldStep;
+  return quantized / LENGTH_DISPLAY_SCALE;
+}
+
+/** 角度スナップ後に線の長さを寸法刻みに合わせる */
+function snapLineEndWithLength(
+  x1,
+  y1,
+  x2,
+  y2,
+  displayStep = DISPLAY_LENGTH_STEP
+) {
+  const end = snapLineEnd(x1, y1, x2, y2);
+  const dx = end.x - x1;
+  const dy = end.y - y1;
+  const len = Math.hypot(dx, dy);
+  const worldStep = displayStep / LENGTH_DISPLAY_SCALE;
+  if (len < worldStep / 2) return end;
+  const qLen = quantizeWorldLength(len, displayStep);
+  return {
+    x: x1 + (dx / len) * qLen,
+    y: y1 + (dy / len) * qLen,
+  };
+}
+
+/** 直線のドラッグ先座標を解決（描画時と同じスナップ） */
+function resolveLineDragPoint(
+  anchorX,
+  anchorY,
+  cursorX,
+  cursorY,
+  shiftKey,
+  gridSnap,
+  excludeElementId = null,
+  altKey = false
+) {
+  if (gridSnap) {
+    return snapToGrid(cursorX, cursorY);
+  }
+  const ep = snapToEndpoint(cursorX, cursorY, excludeElementId);
+  const displayStep = altKey ? DISPLAY_LENGTH_STEP_ALT : DISPLAY_LENGTH_STEP;
+  if (shiftKey) return { x: ep.x, y: ep.y };
+  return snapLineEndWithLength(anchorX, anchorY, ep.x, ep.y, displayStep);
+}
+
 /** 軸平行四角形の4頂点 */
 function rectPoints(x1, y1, w, h) {
   return [
@@ -490,10 +731,10 @@ function updateConstraintHint(shiftKey, mode = "") {
   }
   constraintHintEl.classList.remove("design-constraint-hint--free");
   const hints = {
-    line: "直線: 端点スナップ · 0°/45°/90°（±3°） · Ctrlでグリッド交点",
+    line: "直線: 端点スナップ · 0°/45°/90°（±3°） · 寸法0.1刻み · Altで0.5刻み · Ctrlでグリッド交点",
     rect: "四角: 正方形 / 1:2 長方形を自動判定 · Ctrlでグリッド交点",
     text: "クリックで文字を配置 · 既存テキストをクリックで編集",
-    select: "",
+    select: "直線: 端点をドラッグして編集 · 移動時に端点同士を自動接続 · 連結確認 · 矢印キーで1.0移動 · Ctrlでグリッド移動",
   };
   const text = mode ? `補正: ${mode}` : hints[currentTool] ?? "";
   constraintHintEl.textContent = text;
@@ -542,6 +783,7 @@ function redo() {
 /** 選択をクリア */
 function clearSelection() {
   selectedIds.clear();
+  lineConnectionInspect = null;
   updateDeleteBtn();
   updatePropertiesPanel();
 }
@@ -549,6 +791,12 @@ function clearSelection() {
 /** 選択を設定 */
 function setSelection(ids) {
   selectedIds = new Set(ids);
+  if (lineConnectionInspect) {
+    const selected = [...selectedIds];
+    if (selected.length !== 1 || selected[0] !== lineConnectionInspect.seedLineId) {
+      lineConnectionInspect = null;
+    }
+  }
   updateDeleteBtn();
   updatePropertiesPanel();
 }
@@ -612,6 +860,19 @@ function drawSelectionBox(x1, y1, x2, y2) {
   ctx.strokeRect(x, y, w, h);
   ctx.setLineDash([]);
   ctx.restore();
+}
+
+/** 選択中の要素を平行移動 */
+function nudgeSelectedElements(dx, dy) {
+  if (!selectedIds.size) return;
+  pushHistory();
+  for (const el of getSelectedElements()) {
+    const base = structuredClone(el);
+    translateElementFromBase(el, base, dx, dy);
+  }
+  refreshLineConnectionInspect();
+  render();
+  markDirty();
 }
 
 /** 選択中の要素を削除 */
@@ -920,6 +1181,7 @@ function commitTextEditor() {
       markDirty();
     }
     render();
+    flushPendingRemoteScene();
     return;
   }
 
@@ -949,6 +1211,7 @@ function commitTextEditor() {
 
   markDirty();
   render();
+  flushPendingRemoteScene();
 }
 
 /** テキスト編集を閉じる */
@@ -966,6 +1229,7 @@ function closeTextEditor(commit = true) {
     textInputEl.hidden = true;
     textInputEl.value = "";
     render();
+    flushPendingRemoteScene();
   }
 }
 
@@ -1163,6 +1427,10 @@ function render() {
   for (const el of elements) {
     drawElement(el, selectedIds.has(el.id));
   }
+  for (const id of selectedIds) {
+    const el = elements.find((e) => e.id === id);
+    if (el) drawLineEndpointHandles(el);
+  }
   const textDraft = getTextDraftElement();
   if (textDraft) drawTextContent(ctx, textDraft);
   if (dragState?.type === "boxSelect") {
@@ -1174,12 +1442,20 @@ function render() {
     );
   }
   if (hoverSnap) drawEndpointSnapMarker(hoverSnap.x, hoverSnap.y);
+  else if (dragState?.moveSnapTarget) {
+    drawEndpointSnapMarker(dragState.moveSnapTarget.x, dragState.moveSnapTarget.y);
+  }
+  drawLineConnectionInspect();
   ctx.restore();
 
   renderDimensionLabels();
   updateTextInputPosition();
   updateZoomUI();
-  updateMeasureOverlay(dragState?.type === "draw" ? measureOverlayText : "");
+  updateMeasureOverlay(
+    dragState?.type === "draw" || dragState?.type === "lineEndpoint"
+      ? measureOverlayText
+      : ""
+  );
 }
 
 /** サムネイル用 data URL を生成 */
@@ -1190,10 +1466,34 @@ function generateThumbnail() {
   off.width = thumbW;
   off.height = thumbH;
   const tctx = off.getContext("2d");
-  const scale = Math.min(thumbW / canvas.width, thumbH / canvas.height);
+  if (!tctx) return null;
+
   tctx.fillStyle = "#fff";
   tctx.fillRect(0, 0, thumbW, thumbH);
+
+  if (!elements.length) {
+    return off.toDataURL("image/png", 0.85);
+  }
+
+  const bounds = getElementsBounds(elements);
+  if (!bounds) {
+    return off.toDataURL("image/png", 0.85);
+  }
+
+  const minSize = screenPxToWorld(24);
+  const contentW = Math.max(bounds.w, minSize);
+  const contentH = Math.max(bounds.h, minSize);
+  const pad = Math.max(contentW, contentH) * 0.12 + screenPxToWorld(12);
+  const scale = Math.min(
+    (thumbW - 8) / (contentW + pad * 2),
+    (thumbH - 8) / (contentH + pad * 2)
+  );
+
   tctx.save();
+  tctx.translate(
+    thumbW / 2 - bounds.cx * scale,
+    thumbH / 2 - bounds.cy * scale
+  );
   tctx.scale(scale, scale);
   for (const el of elements) {
     drawElementOn(tctx, el, scale);
@@ -1260,12 +1560,13 @@ function getElementEndpoints(el) {
 }
 
 /** 近くの既存端点にスナップ（なければそのまま） */
-function snapToEndpoint(x, y) {
+function snapToEndpoint(x, y, excludeElementId = null) {
   const threshold = screenPxToWorld(ENDPOINT_SNAP_SCREEN_PX);
   let best = null;
   let bestDist = threshold;
 
   for (const el of elements) {
+    if (excludeElementId && el.id === excludeElementId) continue;
     for (const p of getElementEndpoints(el)) {
       const d = Math.hypot(x - p.x, y - p.y);
       if (d <= bestDist) {
@@ -1277,6 +1578,47 @@ function snapToEndpoint(x, y) {
 
   if (best) return { x: best.x, y: best.y, snapped: true };
   return { x, y, snapped: false };
+}
+
+/** 線移動時に端点同士が近い場合の平行移動補正を求める */
+function resolveMoveLineEndpointSnap(dx, dy, bases, excludeIds) {
+  const exclude = new Set(excludeIds);
+  const threshold = screenPxToWorld(ENDPOINT_SNAP_SCREEN_PX);
+  let best = null;
+
+  for (const base of Object.values(bases)) {
+    if (base.type !== "line") continue;
+    const endpoints = [
+      { x: base.x1 + dx, y: base.y1 + dy },
+      { x: base.x2 + dx, y: base.y2 + dy },
+    ];
+    for (const ep of endpoints) {
+      for (const el of elements) {
+        if (exclude.has(el.id) || el.type !== "line") continue;
+        for (const target of getElementEndpoints(el)) {
+          const dist = Math.hypot(ep.x - target.x, ep.y - target.y);
+          if (dist <= threshold && (!best || dist < best.dist)) {
+            best = {
+              dx: dx + (target.x - ep.x),
+              dy: dy + (target.y - ep.y),
+              dist,
+              snapTarget: { x: target.x, y: target.y },
+            };
+          }
+        }
+      }
+    }
+  }
+
+  if (best) {
+    return {
+      dx: best.dx,
+      dy: best.dy,
+      snapped: true,
+      snapTarget: best.snapTarget,
+    };
+  }
+  return { dx, dy, snapped: false, snapTarget: null };
 }
 
 /** 最寄りのグリッド交点にスナップ */
@@ -1304,6 +1646,206 @@ function drawEndpointSnapMarker(x, y) {
   ctx.fill();
   ctx.stroke();
   ctx.restore();
+}
+
+/** 選択中の直線の端点ハンドルを描画 */
+function drawLineEndpointHandles(el) {
+  if (el.type !== "line") return;
+  const points = [
+    { x: el.x1, y: el.y1 },
+    { x: el.x2, y: el.y2 },
+  ];
+  const r = screenPxToWorld(5);
+  for (const p of points) {
+    ctx.save();
+    ctx.strokeStyle = "#2563eb";
+    ctx.fillStyle = "#ffffff";
+    ctx.lineWidth = screenPxToWorld(1.5);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/** 選択中の直線端点にヒットしたか */
+function hitTestLineEndpoint(x, y) {
+  const threshold = screenPxToWorld(ENDPOINT_HANDLE_SCREEN_PX);
+  let best = null;
+  let bestDist = threshold;
+
+  for (const id of selectedIds) {
+    const el = elements.find((e) => e.id === id);
+    if (!el || el.type !== "line") continue;
+    const ends = [
+      { endpoint: "start", x: el.x1, y: el.y1 },
+      { endpoint: "end", x: el.x2, y: el.y2 },
+    ];
+    for (const end of ends) {
+      const d = Math.hypot(x - end.x, y - end.y);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = { elementId: id, endpoint: end.endpoint };
+      }
+    }
+  }
+
+  return best;
+}
+
+/** 2点が連結確認上で同一頂点か */
+function connectVerticesEqual(x1, y1, x2, y2, eps = CONNECT_VERTEX_EPS) {
+  return Math.hypot(x1 - x2, y1 - y2) <= eps;
+}
+
+/** 点が線分上（端点含む）に厳密にあるか */
+function pointOnLineSegmentStrict(px, py, x1, y1, x2, y2, eps = CONNECT_VERTEX_EPS) {
+  return distToSegment(px, py, x1, y1, x2, y2) <= eps;
+}
+
+/** 直線の端点一覧 */
+function getLineEndpoints(line) {
+  return [
+    { x: line.x1, y: line.y1 },
+    { x: line.x2, y: line.y2 },
+  ];
+}
+
+/** 2本の直線が厳密に連結しているか（頂点一致 or 頂点が他線の線分上） */
+function linesAreStrictlyConnected(lineA, lineB, eps = CONNECT_VERTEX_EPS) {
+  if (lineA.id === lineB.id) return false;
+
+  const aEnds = getLineEndpoints(lineA);
+  const bEnds = getLineEndpoints(lineB);
+
+  for (const a of aEnds) {
+    for (const b of bEnds) {
+      if (connectVerticesEqual(a.x, a.y, b.x, b.y, eps)) return true;
+    }
+  }
+
+  for (const a of aEnds) {
+    if (pointOnLineSegmentStrict(a.x, a.y, lineB.x1, lineB.y1, lineB.x2, lineB.y2, eps)) {
+      return true;
+    }
+  }
+
+  for (const b of bEnds) {
+    if (pointOnLineSegmentStrict(b.x, b.y, lineA.x1, lineA.y1, lineA.x2, lineA.y2, eps)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** 端点が他のいずれかの直線と厳密に連結しているか */
+function endpointConnectsToOtherLine(x, y, lineId, lines, eps = CONNECT_VERTEX_EPS) {
+  for (const other of lines) {
+    if (other.id === lineId) continue;
+
+    if (
+      connectVerticesEqual(x, y, other.x1, other.y1, eps) ||
+      connectVerticesEqual(x, y, other.x2, other.y2, eps)
+    ) {
+      return true;
+    }
+
+    if (pointOnLineSegmentStrict(x, y, other.x1, other.y1, other.x2, other.y2, eps)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 直線の連結グループを解析 */
+function analyzeLineConnection(seedLineId) {
+  const lines = elements.filter((el) => el.type === "line");
+  const seed = lines.find((el) => el.id === seedLineId);
+  if (!seed) return null;
+
+  const adjacency = new Map(lines.map((line) => [line.id, new Set()]));
+  for (let i = 0; i < lines.length; i++) {
+    for (let j = i + 1; j < lines.length; j++) {
+      if (!linesAreStrictlyConnected(lines[i], lines[j])) continue;
+      adjacency.get(lines[i].id).add(lines[j].id);
+      adjacency.get(lines[j].id).add(lines[i].id);
+    }
+  }
+
+  const lineIds = new Set([seedLineId]);
+  const queue = [seedLineId];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const nextId of adjacency.get(id) ?? []) {
+      if (lineIds.has(nextId)) continue;
+      lineIds.add(nextId);
+      queue.push(nextId);
+    }
+  }
+
+  const openEnds = [];
+  for (const id of lineIds) {
+    const line = lines.find((item) => item.id === id);
+    if (!line) continue;
+    for (const ep of getLineEndpoints(line)) {
+      if (!endpointConnectsToOtherLine(ep.x, ep.y, line.id, lines)) {
+        openEnds.push(ep);
+      }
+    }
+  }
+
+  return { seedLineId, lineIds, openEnds };
+}
+
+/** 連結確認表示を更新 */
+function refreshLineConnectionInspect() {
+  if (!lineConnectionInspect) return;
+  lineConnectionInspect = analyzeLineConnection(lineConnectionInspect.seedLineId);
+}
+
+/** 連結確認の表示を切り替え */
+function toggleLineConnectionInspect(lineId) {
+  if (lineConnectionInspect?.seedLineId === lineId) {
+    lineConnectionInspect = null;
+  } else {
+    lineConnectionInspect = analyzeLineConnection(lineId);
+  }
+  render();
+  updatePropertiesPanel();
+}
+
+/** 連結確認のハイライトを描画 */
+function drawLineConnectionInspect() {
+  if (!lineConnectionInspect) return;
+
+  for (const id of lineConnectionInspect.lineIds) {
+    const el = elements.find((item) => item.id === id);
+    if (!el || el.type !== "line") continue;
+    ctx.save();
+    ctx.strokeStyle = "#eab308";
+    ctx.lineWidth = screenPxToWorld(CONNECT_HIGHLIGHT_STROKE_PX);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(el.x1, el.y1);
+    ctx.lineTo(el.x2, el.y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const markerR = screenPxToWorld(CONNECT_OPEN_ENDPOINT_SCREEN_PX);
+  for (const point of lineConnectionInspect.openEnds) {
+    ctx.save();
+    ctx.fillStyle = "#ef4444";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = screenPxToWorld(1.5);
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, markerR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /** 点が要素の線分上か判定 */
@@ -1628,18 +2170,19 @@ function setToolbarStrokeColor(color, { recordRecent = false } = {}) {
 }
 
 /** ドラッグからプレビュー要素を生成 */
-function buildShapePreview(tool, startX, startY, endX, endY, style, shiftKey, gridSnap = false) {
+function buildShapePreview(tool, startX, startY, endX, endY, style, shiftKey, gridSnap = false, altKey = false) {
   if (tool === "line") {
     if (gridSnap) {
       const end = snapToGrid(endX, endY);
       updateConstraintHint(shiftKey, "グリッド交点");
       return { type: "line", ...style, x1: startX, y1: startY, x2: end.x, y2: end.y };
     }
-    const ep = snapToEndpoint(endX, endY);
-    const end = shiftKey
-      ? { x: ep.x, y: ep.y }
-      : snapLineEnd(startX, startY, ep.x, ep.y);
-    updateConstraintHint(shiftKey, shiftKey ? "" : "端点スナップ · 0°/45°/90°（±3°）");
+    const end = resolveLineDragPoint(startX, startY, endX, endY, shiftKey, false, null, altKey);
+    const lengthHint = altKey ? "寸法0.5刻み" : "寸法0.1刻み";
+    updateConstraintHint(
+      shiftKey,
+      shiftKey ? "" : `端点スナップ · 0°/45°/90° · ${lengthHint}`
+    );
     return { type: "line", ...style, x1: startX, y1: startY, x2: end.x, y2: end.y };
   }
 
@@ -1768,12 +2311,179 @@ function drawPreview(preview) {
 /** 変更をマークして自動保存をスケジュール */
 function markDirty() {
   isDirty = true;
-  saveStatusEl.textContent = "未保存";
+  if (saveStatusEl) saveStatusEl.textContent = "未保存";
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     autosaveTimer = null;
     if (isDirty) void saveVersion(true);
   }, AUTOSAVE_MS);
+  scheduleCollabBroadcast();
+}
+
+/** 共同編集のリモートシーンをマージ適用（選択・Undoは維持） */
+function mergeRemoteCollabScene(scene) {
+  const remote = pickCollabScene(scene);
+  const merged = reconcileDesignElements(elements, remote.elements).map(
+    normalizeLegacyElement
+  );
+  const nextFingerprint = designSceneFingerprint({ ...remote, elements: merged });
+  if (nextFingerprint === designSceneFingerprint(pickCollabScene(getScene()))) {
+    lastCollabFingerprint = nextFingerprint;
+    return false;
+  }
+
+  const prevSelected = [...selectedIds];
+  const inspectSeed = lineConnectionInspect?.seedLineId;
+  const editingId = textEditState?.elementId ?? null;
+
+  elements = merged;
+  lastCollabFingerprint = nextFingerprint;
+
+  selectedIds = new Set(
+    prevSelected.filter((id) => elements.some((el) => el.id === id))
+  );
+
+  if (editingId && !elements.some((el) => el.id === editingId)) {
+    closeTextEditor(false);
+  }
+
+  if (lineConnectionInspect) {
+    if (
+      !inspectSeed ||
+      !elements.some((el) => el.id === inspectSeed) ||
+      !selectedIds.has(inspectSeed)
+    ) {
+      lineConnectionInspect = null;
+    } else {
+      refreshLineConnectionInspect();
+    }
+  }
+
+  updateDeleteBtn();
+  updatePropertiesPanel();
+  render();
+  return true;
+}
+
+/** ドラッグ中に保留したリモート更新を適用 */
+function flushPendingRemoteScene() {
+  if (!pendingRemoteScene || dragState) return;
+  const scene = pendingRemoteScene;
+  pendingRemoteScene = null;
+  applyingRemote = true;
+  try {
+    const changed = mergeRemoteCollabScene(scene);
+    if (changed) {
+      isDirty = true;
+      if (saveStatusEl) saveStatusEl.textContent = "未保存";
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => {
+        autosaveTimer = null;
+        if (isDirty) void saveVersion(true);
+      }, AUTOSAVE_MS);
+    }
+  } finally {
+    applyingRemote = false;
+  }
+}
+
+/** 共同編集のリモートシーンを適用 */
+function applyCollabRemoteScene(scene) {
+  if (dragState || textEditState) {
+    pendingRemoteScene = pickCollabScene(scene);
+    return;
+  }
+
+  applyingRemote = true;
+  try {
+    const changed = mergeRemoteCollabScene(scene);
+    if (!changed) return;
+    isDirty = true;
+    if (saveStatusEl) saveStatusEl.textContent = "未保存";
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = null;
+      if (isDirty) void saveVersion(true);
+    }, AUTOSAVE_MS);
+  } finally {
+    applyingRemote = false;
+  }
+}
+
+/** 参加者表示を更新 */
+function updateCollabPeers(peers, clientId) {
+  const others = (peers ?? []).filter((p) => p.clientId !== clientId);
+  if (!peersStatusEl) return;
+  peersStatusEl.textContent =
+    others.length === 0
+      ? "自分のみ"
+      : `共同編集: ${others.map((p) => p.username).join(", ")}`;
+}
+
+/** 共同編集 WebSocket を切断 */
+function disconnectCollab() {
+  if (collab) {
+    collab.disconnect();
+    collab = null;
+  }
+  if (collabBroadcastTimer) {
+    clearTimeout(collabBroadcastTimer);
+    collabBroadcastTimer = null;
+  }
+  pendingRemoteScene = null;
+  if (peersStatusEl) peersStatusEl.textContent = "";
+}
+
+/** 共同編集 WebSocket に接続 */
+function connectCollab({ projectId, token } = {}) {
+  disconnectCollab();
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+
+  collab = createDesignCollabConnection({
+    buildUrl: () => {
+      const params = new URLSearchParams();
+      if (token) params.set("token", token);
+      else if (projectId) params.set("projectId", projectId);
+      const guestName = localStorage.getItem("design-guest-name");
+      if (guestName && (token || isShareMode)) params.set("name", guestName);
+      return `${proto}//${location.host}/api/design/collab?${params}`;
+    },
+    setApplyingRemote: (value) => {
+      applyingRemote = value;
+    },
+    onApplyRemoteScene: applyCollabRemoteScene,
+    onOpen: () => {
+      if (peersStatusEl) peersStatusEl.textContent = "接続中";
+    },
+    onClose: () => {
+      if (peersStatusEl) peersStatusEl.textContent = "再接続中…";
+    },
+    onError: () => {
+      if (peersStatusEl) peersStatusEl.textContent = "接続エラー";
+    },
+    onPeersChange: updateCollabPeers,
+  });
+  collab.connect();
+}
+
+/** 共同編集へシーンを送信 */
+function broadcastCollabScene() {
+  if (!collab || applyingRemote) return;
+  const scene = pickCollabScene(getScene());
+  const fingerprint = designSceneFingerprint(scene);
+  if (fingerprint === lastCollabFingerprint) return;
+  lastCollabFingerprint = fingerprint;
+  collab.broadcastScene(scene);
+}
+
+/** 共同編集ブロードキャストをスケジュール */
+function scheduleCollabBroadcast() {
+  if (applyingRemote || !collab) return;
+  if (collabBroadcastTimer) clearTimeout(collabBroadcastTimer);
+  collabBroadcastTimer = setTimeout(() => {
+    collabBroadcastTimer = null;
+    broadcastCollabScene();
+  }, COLLAB_BROADCAST_MS);
 }
 
 /** バージョンをサーバーに保存 */
@@ -1868,11 +2578,14 @@ async function openSharedProject() {
     }
   }
   loadScene(data.scene, { silent: true });
+  fitViewToContent();
   isDirty = false;
   if (saveStatusEl) saveStatusEl.textContent = "";
   if (listView) listView.hidden = true;
   if (editorView) editorView.hidden = false;
   document.title = `${data.title || "共有設計"} — 設計 — ScienceHUB`;
+  lastCollabFingerprint = designSceneFingerprint(pickCollabScene(data.scene));
+  connectCollab({ token: shareToken });
   requestAnimationFrame(() => render());
 }
 
@@ -1930,6 +2643,7 @@ async function openProject(projectId) {
   currentProject = project;
   setProjectTitle(project.title);
   loadScene(project.scene, { silent: true });
+  fitViewToContent();
   isDirty = false;
   saveStatusEl.textContent = "";
   listView.hidden = true;
@@ -1937,11 +2651,14 @@ async function openProject(projectId) {
   closeVersionsPanel();
   updateCloudDestUI();
   document.title = `${project.title} — 設計 — ScienceHUB`;
+  lastCollabFingerprint = designSceneFingerprint(pickCollabScene(project.scene));
+  connectCollab({ projectId: project.id });
   requestAnimationFrame(() => render());
 }
 
 /** 一覧に戻る */
 function backToList() {
+  disconnectCollab();
   if (autosaveTimer) {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
@@ -2014,6 +2731,7 @@ async function loadVersionList() {
           }
         );
         loadScene(project.scene, { silent: true });
+        fitViewToContent();
         currentProject.current_version_id = project.current_version_id;
         isDirty = false;
         saveStatusEl.textContent = `v${v.version_number} から復元`;
@@ -2370,6 +3088,29 @@ function buildPropertiesPanelHtml(selected) {
     `;
   }
 
+  if (el.type === "line") {
+    const inspectActive = lineConnectionInspect?.seedLineId === el.id;
+    const connectedCount = inspectActive ? lineConnectionInspect.lineIds.size : 0;
+    const openEndCount = inspectActive ? lineConnectionInspect.openEnds.length : 0;
+    html += `
+      <div class="design-prop-section">
+        <button
+          type="button"
+          class="design-btn${inspectActive ? " design-btn--primary" : ""}"
+          id="prop-line-connect-btn"
+          style="width:100%"
+        >
+          ${inspectActive ? "連結確認を終了" : "連結確認"}
+        </button>
+        ${
+          inspectActive
+            ? `<p class="design-prop-hint">連結 ${connectedCount} 本 · 開放端点 ${openEndCount} 箇所（黄色=連結線、赤=未接続端）</p>`
+            : `<p class="design-prop-hint">頂点一致・線上の頂点（T字）のみ連結とみなします。近いだけでは連結しません。</p>`
+        }
+      </div>
+    `;
+  }
+
   return html;
 }
 
@@ -2378,6 +3119,7 @@ function setTool(tool) {
   currentTool = tool;
   hoverSnap = null;
   measureOverlayText = "";
+  lineConnectionInspect = null;
   document.querySelectorAll(".design-tool-btn").forEach((btn) => {
     btn.classList.toggle("design-tool-btn--active", btn.dataset.tool === tool);
   });
@@ -2397,6 +3139,22 @@ canvas.addEventListener("mousedown", (evt) => {
   const style = getToolStyle();
 
   if (currentTool === "select") {
+    const endpointHit = hitTestLineEndpoint(pt.x, pt.y);
+    if (endpointHit) {
+      if (!selectedIds.has(endpointHit.elementId)) {
+        setSelection([endpointHit.elementId]);
+      }
+      pushHistory();
+      dragState = {
+        type: "lineEndpoint",
+        elementId: endpointHit.elementId,
+        endpoint: endpointHit.endpoint,
+        moved: false,
+      };
+      render();
+      return;
+    }
+
     const hit = hitTest(pt.x, pt.y);
     if (hit) {
       if (evt.shiftKey) {
@@ -2456,9 +3214,16 @@ canvas.addEventListener("mousedown", (evt) => {
     startY = snapped.y;
     hoverSnap = null;
   } else if (currentTool === "line") {
+    const lengthStep = evt.altKey ? DISPLAY_LENGTH_STEP_ALT : DISPLAY_LENGTH_STEP;
     const snapped = snapToEndpoint(pt.x, pt.y);
-    startX = snapped.x;
-    startY = snapped.y;
+    if (snapped.snapped) {
+      startX = snapped.x;
+      startY = snapped.y;
+    } else {
+      const grid = snapToLengthGrid(pt.x, pt.y, lengthStep);
+      startX = grid.x;
+      startY = grid.y;
+    }
     hoverSnap = null;
   }
 
@@ -2486,6 +3251,10 @@ canvas.addEventListener("mousemove", (evt) => {
         hoverSnap = next;
         render();
       }
+    } else if (currentTool === "select" && hitTestLineEndpoint(pt.x, pt.y)) {
+      canvas.style.cursor = "pointer";
+    } else if (currentTool === "select") {
+      canvas.style.cursor = "";
     } else if (hoverSnap) {
       hoverSnap = null;
       render();
@@ -2508,6 +3277,17 @@ canvas.addEventListener("mousemove", (evt) => {
     if (evt.ctrlKey) {
       dx = quantizeDeltaToGrid(dx);
       dy = quantizeDeltaToGrid(dy);
+      dragState.moveSnapTarget = null;
+    } else {
+      const snap = resolveMoveLineEndpointSnap(
+        dx,
+        dy,
+        dragState.bases,
+        Object.keys(dragState.bases)
+      );
+      dx = snap.dx;
+      dy = snap.dy;
+      dragState.moveSnapTarget = snap.snapTarget;
     }
     if (Math.hypot(dx, dy) > screenPxToWorld(1)) dragState.moved = true;
     for (const [id, base] of Object.entries(dragState.bases)) {
@@ -2515,11 +3295,80 @@ canvas.addEventListener("mousemove", (evt) => {
       if (!el) continue;
       translateElementFromBase(el, base, dx, dy);
     }
+    refreshLineConnectionInspect();
+    render();
+    return;
+  }
+
+  if (dragState.type === "lineEndpoint") {
+    const el = elements.find((e) => e.id === dragState.elementId);
+    if (!el || el.type !== "line") return;
+
+    const gridSnap = evt.ctrlKey;
+    const altKey = evt.altKey;
+    let anchorX;
+    let anchorY;
+    if (dragState.endpoint === "start") {
+      anchorX = el.x2;
+      anchorY = el.y2;
+      const next = resolveLineDragPoint(
+        anchorX,
+        anchorY,
+        pt.x,
+        pt.y,
+        shiftKey,
+        gridSnap,
+        el.id,
+        altKey
+      );
+      if (el.x1 !== next.x || el.y1 !== next.y) dragState.moved = true;
+      el.x1 = next.x;
+      el.y1 = next.y;
+    } else {
+      anchorX = el.x1;
+      anchorY = el.y1;
+      const next = resolveLineDragPoint(
+        anchorX,
+        anchorY,
+        pt.x,
+        pt.y,
+        shiftKey,
+        gridSnap,
+        el.id,
+        altKey
+      );
+      if (el.x2 !== next.x || el.y2 !== next.y) dragState.moved = true;
+      el.x2 = next.x;
+      el.y2 = next.y;
+    }
+
+    updateConstraintHint(
+      shiftKey,
+      gridSnap
+        ? "グリッド交点"
+        : shiftKey
+          ? ""
+          : altKey
+            ? "端点スナップ · 0°/45°/90° · 寸法0.5刻み"
+            : "端点スナップ · 0°/45°/90° · 寸法0.1刻み"
+    );
+    measureOverlayText = getPreviewMeasureText(el);
+    refreshLineConnectionInspect();
     render();
     return;
   }
 
   if (dragState.type === "draw") {
+    if (dragState.tool === "line") {
+      handleLineDrawPointerMove(
+        evt.clientX,
+        evt.clientY,
+        shiftKey,
+        evt.ctrlKey,
+        evt.altKey
+      );
+      return;
+    }
     const preview = buildShapePreview(
       dragState.tool,
       dragState.startX,
@@ -2536,62 +3385,90 @@ canvas.addEventListener("mousemove", (evt) => {
 
 function finishDrag(evt) {
   if (!dragState) return;
-  const pt = canvasPoint(evt);
-  const shiftKey = evt.shiftKey;
+  try {
+    stopLineDrawAutoPan();
+    const pt = canvasPoint(evt);
+    const shiftKey = evt.shiftKey;
 
-  if (dragState.type === "boxSelect") {
-    const ids = elementsInBox(
-      dragState.startX,
-      dragState.startY,
-      dragState.currentX ?? pt.x,
-      dragState.currentY ?? pt.y
-    );
-    if (ids.length) {
-      if (dragState.shiftKey) {
-        for (const id of ids) selectedIds.add(id);
-        updateDeleteBtn();
-        updatePropertiesPanel();
-      } else {
-        setSelection(ids);
+    if (dragState.type === "boxSelect") {
+      const ids = elementsInBox(
+        dragState.startX,
+        dragState.startY,
+        dragState.currentX ?? pt.x,
+        dragState.currentY ?? pt.y
+      );
+      if (ids.length) {
+        if (dragState.shiftKey) {
+          for (const id of ids) selectedIds.add(id);
+          updateDeleteBtn();
+          updatePropertiesPanel();
+        } else {
+          setSelection(ids);
+        }
       }
-    }
-    dragState = null;
-    measureOverlayText = "";
-    render();
-    return;
-  }
-
-  if (dragState.type === "move") {
-    if (!dragState.moved && undoStack.length) {
-      undoStack.pop();
-    } else if (dragState.moved) {
-      markDirty();
-    }
-    dragState = null;
-    render();
-    return;
-  }
-
-  if (dragState.type === "draw") {
-    const { startX, startY, tool, style } = dragState;
-    if (Math.hypot(pt.x - startX, pt.y - startY) < screenPxToWorld(4)) {
       dragState = null;
       measureOverlayText = "";
       render();
       return;
     }
 
-    const preview = buildShapePreview(tool, startX, startY, pt.x, pt.y, style, shiftKey, evt.ctrlKey);
-    const el = buildShapeElement(preview);
-    if (el) {
-      pushHistory();
-      elements.push(el);
-      setSelection([el.id]);
+    if (dragState.type === "move") {
+      dragState.moveSnapTarget = null;
+      if (!dragState.moved && undoStack.length) {
+        undoStack.pop();
+      } else if (dragState.moved) {
+        markDirty();
+      }
+      dragState = null;
+      render();
+      return;
     }
-    dragState = null;
-    measureOverlayText = "";
-    render();
-    markDirty();
+
+    if (dragState.type === "lineEndpoint") {
+      if (!dragState.moved && undoStack.length) {
+        undoStack.pop();
+      } else if (dragState.moved) {
+        markDirty();
+      }
+      dragState = null;
+      measureOverlayText = "";
+      render();
+      return;
+    }
+
+    if (dragState.type === "draw") {
+      const { startX, startY, tool, style } = dragState;
+      if (Math.hypot(pt.x - startX, pt.y - startY) < screenPxToWorld(4)) {
+        dragState = null;
+        measureOverlayText = "";
+        render();
+        return;
+      }
+
+      const preview = buildShapePreview(
+        tool,
+        startX,
+        startY,
+        pt.x,
+        pt.y,
+        style,
+        shiftKey,
+        evt.ctrlKey,
+        evt.altKey
+      );
+      const el = buildShapeElement(preview);
+      if (el) {
+        pushHistory();
+        elements.push(el);
+        setSelection([el.id]);
+      }
+      dragState = null;
+      measureOverlayText = "";
+      render();
+      markDirty();
+    }
+  } finally {
+    if (!dragState) flushPendingRemoteScene();
   }
 }
 
@@ -2660,7 +3537,7 @@ document.getElementById("zoom-out-btn")?.addEventListener("click", () => {
   zoomAt(center.x, center.y, 1 / 1.2);
 });
 document.getElementById("zoom-reset-btn")?.addEventListener("click", () => {
-  resetView();
+  fitViewToContent();
   render();
 });
 
@@ -2782,6 +3659,25 @@ document.addEventListener("keydown", (evt) => {
       return;
     }
   }
+  if (
+    currentTool === "select" &&
+    selectedIds.size &&
+    (evt.key === "ArrowUp" ||
+      evt.key === "ArrowDown" ||
+      evt.key === "ArrowLeft" ||
+      evt.key === "ArrowRight")
+  ) {
+    evt.preventDefault();
+    const step = ARROW_NUDGE_DISPLAY / LENGTH_DISPLAY_SCALE;
+    let dx = 0;
+    let dy = 0;
+    if (evt.key === "ArrowUp") dy = -step;
+    else if (evt.key === "ArrowDown") dy = step;
+    else if (evt.key === "ArrowLeft") dx = -step;
+    else if (evt.key === "ArrowRight") dx = step;
+    nudgeSelectedElements(dx, dy);
+    return;
+  }
   if (evt.key === "Delete" || evt.key === "Backspace") {
     evt.preventDefault();
     deleteSelected();
@@ -2841,6 +3737,14 @@ document.getElementById("revoke-share-btn")?.addEventListener("click", async () 
 });
 shareModal?.querySelectorAll("[data-close-modal]").forEach((el) => {
   el.addEventListener("click", closeShareModal);
+});
+
+propertiesBody?.addEventListener("click", (evt) => {
+  const target = evt.target;
+  if (!(target instanceof HTMLElement) || target.id !== "prop-line-connect-btn") return;
+  const selected = getSelectedElements();
+  if (selected.length !== 1 || selected[0].type !== "line") return;
+  toggleLineConnectionInspect(selected[0].id);
 });
 
 propertiesBody?.addEventListener("pointerdown", (evt) => {

@@ -55,6 +55,7 @@
       <input type="text" class="design-title-input" id="project-title" maxlength="120" aria-label="設計タイトル">
       <div class="design-header-actions">
         <span class="design-status" id="save-status" aria-live="polite"></span>
+        <span class="design-peers" id="peers-status" aria-live="polite"></span>
         <button type="button" class="design-btn design-btn--ghost" id="cloud-dest-btn" title="クラウド保存先を指定">保存先…</button>
         <span class="design-cloud-dest" id="cloud-dest-label" hidden></span>
         <button type="button" class="design-btn" id="versions-btn">履歴</button>
@@ -190,7 +191,7 @@
     <div class="design-modal-backdrop" data-close-modal></div>
     <div class="design-modal-panel" role="dialog" aria-labelledby="share-modal-title">
       <h2 id="share-modal-title">共有リンク</h2>
-      <p class="design-modal-desc">リンクを知っている人はログインなしで設計図を閲覧・編集できます。</p>
+      <p class="design-modal-desc">リンクを知っている人はログインなしでリアルタイム共同編集できます。</p>
       <div class="design-share-row">
         <input type="text" class="design-share-url" id="share-url" readonly>
         <button type="button" class="design-btn design-btn--primary" id="copy-share-btn">コピー</button>

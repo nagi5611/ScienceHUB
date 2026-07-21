@@ -39,19 +39,10 @@ export function reconcileDesignElements(local, remote) {
 
 /**
  * リモートシーンを適用
- * @returns {boolean}
  */
-export function applyRemoteDesignScene(state, scene, onApply) {
+export function applyRemoteDesignScene(scene, onApply) {
   if (!scene) return false;
-
-  const merged = reconcileDesignElements(state.elements, scene.elements ?? []);
-  state.elements = merged;
-  state.lastCollabFingerprint = designSceneFingerprint({
-    ...scene,
-    elements: merged,
-  });
-
-  onApply?.(merged, scene);
+  onApply?.(pickCollabScene(scene));
   return true;
 }
 
@@ -64,7 +55,6 @@ const RECONNECT_MAX_MS = 30000;
 export function createDesignCollabConnection(options) {
   const {
     buildUrl,
-    getState,
     setApplyingRemote,
     onApplyRemoteScene,
     onOpen,
@@ -105,14 +95,12 @@ export function createDesignCollabConnection(options) {
       return;
     }
 
-    const state = getState();
-
     if (data.type === "init") {
       clientId = data.clientId;
       reconnectAttempt = 0;
       setApplyingRemote(true);
       try {
-        applyRemoteDesignScene(state, data.scene, onApplyRemoteScene);
+        applyRemoteDesignScene(data.scene, onApplyRemoteScene);
         onPeersChange?.(data.peers ?? [], clientId);
       } finally {
         setApplyingRemote(false);
@@ -123,7 +111,7 @@ export function createDesignCollabConnection(options) {
     if (data.type === "scene" && data.from !== clientId) {
       setApplyingRemote(true);
       try {
-        applyRemoteDesignScene(state, data.scene, onApplyRemoteScene);
+        applyRemoteDesignScene(data.scene, onApplyRemoteScene);
       } finally {
         setApplyingRemote(false);
       }
@@ -132,11 +120,6 @@ export function createDesignCollabConnection(options) {
 
     if (data.type === "presence") {
       onPeersChange?.(data.peers ?? [], clientId);
-      return;
-    }
-
-    if (data.type === "pointer" && data.from !== clientId) {
-      onPeersChange?.(getState().peers ?? [], clientId, data);
     }
   }
 

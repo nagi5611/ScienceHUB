@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler pages dev public",
     "dev:collab": "wrangler dev --config workers/excalidraw-collab/wrangler.jsonc --port 8790",
-    "dev:all": "wrangler pages dev public --do EXCALIDRAW_COLLAB=ExcalidrawCollabRoom@excalidraw-collab",
+    "dev:all": "wrangler pages dev public --do EXCALIDRAW_COLLAB=ExcalidrawCollabRoom@excalidraw-collab --do DESIGN_COLLAB=DesignCollabRoom@design-collab",
     "build": "npm run types && npm run typecheck",
     "typecheck": "tsc --noEmit",
     "predeploy": "npm run build && npm run db:migrate:remote",
@@ -20,6 +20,7 @@
     "admin:set-password": "node scripts/set-remote-admin-password.mjs admin",
     "worker:deploy": "wrangler deploy --config workers/sciencehub-worker/wrangler.jsonc",
     "collab:deploy": "wrangler deploy --config workers/excalidraw-collab/wrangler.jsonc",
+    "design-collab:deploy": "wrangler deploy --config workers/design-collab/wrangler.jsonc",
     "pwa:icons": "node scripts/generate-pwa-icons.mjs"
   },
   "devDependencies": {
