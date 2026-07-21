@@ -32,8 +32,14 @@ export interface Env {
   GOOGLE_3DPRINT_CALENDAR_ID?: string;
   GOOGLE_3DPRINT_SERVICE_ACCOUNT_EMAIL?: string;
   GOOGLE_3DPRINT_PRIVATE_KEY?: string;
+  /** シミュレーション Google Calendar（Service Account） */
+  GOOGLE_SIMULATION_CALENDAR_ID?: string;
+  GOOGLE_SIMULATION_SERVICE_ACCOUNT_EMAIL?: string;
+  GOOGLE_SIMULATION_PRIVATE_KEY?: string;
   /** 3D印刷 Discord 通知 */
   DISCORD_WEBHOOK_URL?: string;
+  /** シミュレーション Discord 通知 */
+  DISCORD_SIMULATION_WEBHOOK_URL?: string;
   /** R2 S3 API（presigned URL 用・Cloudflare ダッシュボードで発行） */
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
