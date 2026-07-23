@@ -45,6 +45,18 @@ export interface Env {
   R2_SECRET_ACCESS_KEY?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
+  /** AWS EC2（FDS テスト実行） */
+  AWS_ACCESS_KEY_ID?: string;
+  AWS_SECRET_ACCESS_KEY?: string;
+  AWS_REGION?: string;
+  /** FDS 入り AMI（/opt/fds/bin/fds があること） */
+  AWS_EC2_FDS_AMI_ID?: string;
+  /** 既定: t3.micro */
+  AWS_EC2_INSTANCE_TYPE?: string;
+  AWS_EC2_SUBNET_ID?: string;
+  AWS_EC2_SECURITY_GROUP_ID?: string;
+  /** EC2 user-data → ScienceHUB 完了通知用 */
+  FDS_JOB_CALLBACK_SECRET?: string;
 }
 
 export interface RoleRow {

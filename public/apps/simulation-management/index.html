@@ -71,6 +71,14 @@
         </span>
         <span>シフト</span>
       </button>
+      <button class="admin-mobile-nav-item" data-panel="fds-test" type="button">
+        <span class="admin-mobile-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+          </svg>
+        </span>
+        <span>FDS</span>
+      </button>
     </nav>
 
     <div class="admin-layout">
@@ -85,6 +93,7 @@
           <button class="admin-menu-item" data-panel="members" type="button">メンバー一覧</button>
           <button class="admin-menu-item" data-panel="simulators" type="button">シミュレーター管理</button>
           <button class="admin-menu-item" data-panel="shifts" type="button">シフト管理表</button>
+          <button class="admin-menu-item" data-panel="fds-test" type="button">FDSテスト</button>
         </nav>
         <button class="btn btn-secondary btn-sm admin-logout" id="logout-btn" type="button">ダッシュボード</button>
       </aside>
@@ -414,6 +423,41 @@
               <p class="hint calendar-hint-text">担当者またはシミュレーターを選び、日付をタップでON/OFF。長押しドラッグでまとめてON。</p>
             </details>
             <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">担当者・シミュレーターを選んでから日付をクリックまたはドラッグ。カレンダーにはその日の担当者（色チップ）と稼働シミュレーター名が表示されます。</p>
+          </section>
+        </div>
+
+        <div class="admin-panel hidden" id="panel-fds-test">
+          <h1 class="page-heading">FDS テスト実行</h1>
+          <p class="page-subheading">AWS EC2 上で FDS を試験実行します（テスト用パイプライン）。1ジョブあたり最大10時間・既定は t3.micro です。</p>
+
+          <section class="card" id="fds-config-section">
+            <h2 class="section-heading">接続状態</h2>
+            <div id="fds-config-mount"><p class="hint">読み込み中...</p></div>
+          </section>
+
+          <section class="card" style="margin-top:1.5rem">
+            <h2 class="section-heading">新規テスト実行</h2>
+            <div id="fds-run-alert"></div>
+            <form id="fds-run-form">
+              <div class="form-group">
+                <label for="fds-title">タイトル（任意）</label>
+                <input type="text" id="fds-title" name="title" placeholder="例: 禁煙室ミニケース" maxlength="80" />
+              </div>
+              <div class="form-group">
+                <label for="fds-file">FDS ファイル（.fds）</label>
+                <input type="file" id="fds-file" name="file" accept=".fds" required />
+                <p class="hint">超軽量の検証用ケースから試してください。最大 50MB。</p>
+              </div>
+              <button type="submit" class="btn btn-primary" id="fds-run-btn">テスト実行を開始</button>
+            </form>
+          </section>
+
+          <section class="card admin-list-section" style="margin-top:1.5rem">
+            <div class="section-heading-row">
+              <h2 class="section-heading">ジョブ履歴</h2>
+              <button type="button" class="btn btn-secondary btn-sm" id="fds-refresh-btn">更新</button>
+            </div>
+            <div id="fds-jobs-mount"><p class="hint">読み込み中...</p></div>
           </section>
         </div>
       </div>

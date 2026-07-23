@@ -23,6 +23,7 @@ import {
   initPrintVideoFolderPicker,
   openPrintVideoFolderPicker,
 } from './result-video-folder-picker.js';
+import { initFdsTestPanel, renderFdsTestPanel } from './fds-test.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 
@@ -46,6 +47,7 @@ const ADMIN_PANEL_TITLES = {
   members: 'メンバー',
   simulators: 'シミュレーター',
   shifts: 'シフト',
+  'fds-test': 'FDSテスト',
 };
 
 let currentReservationId = null;
@@ -173,6 +175,7 @@ async function init() {
   document.getElementById('calendar-test-btn')?.addEventListener('click', testGoogleCalendar);
   setupAdminFormModal();
   initShiftPanel();
+  initFdsTestPanel();
 
   /** Shows admin panel. */
   function showSection(isAuthed) {
@@ -207,6 +210,7 @@ function switchPanel(panel) {
     loadPrintVideoSettings();
   }
   if (panel === 'shifts') renderShiftPanel();
+  if (panel === 'fds-test') renderFdsTestPanel();
   updateAdminStickyOffsets();
 }
 

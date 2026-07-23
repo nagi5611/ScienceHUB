@@ -1,0 +1,4 @@
+&HEAD CHID='simple_test', TITLE='ScienceHUB FDS smoke test' /
+&MESH IJK=10,10,10, XB=0.0,1.0,0.0,1.0,0.0,1.0 /
+&TIME T_END=1.0, DT=0.1 /
+&TAIL /

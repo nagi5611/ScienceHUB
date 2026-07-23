@@ -3,6 +3,7 @@
  */
 
 import type { Env } from "../../lib/types";
+import { createId } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { requireUser } from "../../lib/auth";
 import { canUserAccessApp } from "../../lib/apps";
@@ -144,6 +145,23 @@ import { parseLogicalPath } from "../../lib/storage/keys";
 import { streamStorageFile } from "../../lib/storage/operations";
 import { listDirectory } from "../../lib/storage/list";
 import { authorizeStoragePath } from "../../lib/storage/permissions";
+import { handleFdsJobCallback } from "../../lib/simulation/fds-callback";
+import {
+  cancelFdsJob,
+  getFdsAwsConfig,
+  launchFdsJobOnEc2,
+  syncFdsJobFromEc2,
+} from "../../lib/simulation/fds-ec2-runner";
+import {
+  createFdsJob,
+  FDS_DEFAULT_INSTANCE_TYPE,
+  FDS_MAX_INPUT_BYTES,
+  formatFdsJobForApi,
+  generateFdsInputR2Key,
+  getFdsJobById,
+  listFdsJobs,
+  validateFdsFilename,
+} from "../../lib/simulation/fds-jobs";
 
 const RESERVATION_APP = "simulation-request";
 const MANAGEMENT_APP = "simulation-management";
@@ -503,6 +521,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 
   try {
+    // POST /api/simulation/fds-jobs/callback — EC2 からの完了通知（ユーザ認証なし）
+    if (method === "POST" && segments[0] === "fds-jobs" && segments[1] === "callback") {
+      return handleFdsJobCallback(env, request);
+    }
+
     const isAdminRoute = segments[0] === "admin";
     const isUploadRoute = segments[0] === "upload";
 
@@ -1817,6 +1840,167 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const deleted = await deleteSimulator(db, segments[2]);
       if (!deleted) return error("シミュレーターの削除に失敗しました", 400);
       return json({ ok: true });
+    }
+
+    // GET /api/simulation/admin/fds-jobs/config
+    if (method === "GET" && segments[1] === "fds-jobs" && segments[2] === "config") {
+      const config = getFdsAwsConfig(env);
+      return json({
+        aws: config,
+        r2_presign: Boolean(
+          env.R2_ACCESS_KEY_ID?.trim() &&
+            env.R2_SECRET_ACCESS_KEY?.trim() &&
+            env.R2_ACCOUNT_ID?.trim()
+        ),
+        callback_secret: Boolean(env.FDS_JOB_CALLBACK_SECRET?.trim()),
+        max_runtime_hours: 10,
+        default_instance_type: env.AWS_EC2_INSTANCE_TYPE?.trim() || FDS_DEFAULT_INSTANCE_TYPE,
+      });
+    }
+
+    // GET /api/simulation/admin/fds-jobs
+    if (method === "GET" && segments[1] === "fds-jobs" && segments.length === 2) {
+      const jobs = await listFdsJobs(db);
+      const synced = await Promise.all(jobs.map((job) => syncFdsJobFromEc2(env, job)));
+      return json({ jobs: synced.map(formatFdsJobForApi) });
+    }
+
+    // POST /api/simulation/admin/fds-jobs/run — .fds をアップロードして即実行
+    if (method === "POST" && segments[1] === "fds-jobs" && segments[2] === "run") {
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      const titleInput = String(formData.get("title") ?? "").trim();
+
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .fds ファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateFdsFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > FDS_MAX_INPUT_BYTES) {
+        return error(`ファイルサイズは 1 バイト以上 ${FDS_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`, 400);
+      }
+
+      const jobId = createId("fds");
+      const r2Key = generateFdsInputR2Key(jobId, filename);
+      const title = titleInput || filename.replace(/\.fds$/i, "");
+      const instanceType = env.AWS_EC2_INSTANCE_TYPE?.trim() || FDS_DEFAULT_INSTANCE_TYPE;
+      const createdAt = new Date().toISOString();
+
+      await env.FILES.put(r2Key, await fileEntry.arrayBuffer(), {
+        httpMetadata: { contentType: "text/plain; charset=utf-8" },
+      });
+
+      const job = await createFdsJob(db, {
+        id: jobId,
+        title,
+        inputR2Key: r2Key,
+        inputFilename: filename,
+        inputSizeBytes: sizeBytes,
+        instanceType,
+        createdByUserId: userId,
+        createdAt,
+      });
+
+      try {
+        const callbackBase = getOAuthRedirectBase(request, env);
+        const launched = await launchFdsJobOnEc2(env, job, callbackBase);
+        return json({ job: formatFdsJobForApi(launched) }, 201);
+      } catch (launchErr) {
+        const message =
+          launchErr instanceof Error ? launchErr.message : "EC2 の起動に失敗しました";
+        return error(message, 500, { job: formatFdsJobForApi(job) });
+      }
+    }
+
+    // GET /api/simulation/admin/fds-jobs/:id
+    if (method === "GET" && segments[1] === "fds-jobs" && segments.length === 3) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      const synced = await syncFdsJobFromEc2(env, job);
+      return json({ job: formatFdsJobForApi(synced) });
+    }
+
+    // POST /api/simulation/admin/fds-jobs/:id/run
+    if (
+      method === "POST" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 4 &&
+      segments[3] === "run"
+    ) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      if (job.status !== "pending" && job.status !== "failed" && job.status !== "cancelled") {
+        return error("このジョブは再実行できません", 400);
+      }
+
+      const launched = await launchFdsJobOnEc2(env, job, getOAuthRedirectBase(request, env));
+      return json({ job: formatFdsJobForApi(launched) });
+    }
+
+    // POST /api/simulation/admin/fds-jobs/:id/cancel
+    if (
+      method === "POST" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 4 &&
+      segments[3] === "cancel"
+    ) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      if (!["pending", "launching", "running"].includes(job.status)) {
+        return error("このジョブはキャンセルできません", 400);
+      }
+      const cancelled = await cancelFdsJob(env, job);
+      return json({ job: formatFdsJobForApi(cancelled) });
+    }
+
+    // GET /api/simulation/admin/fds-jobs/:id/output/download
+    if (
+      method === "GET" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "output" &&
+      segments[4] === "download"
+    ) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job?.output_r2_key) return error("結果ファイルがありません", 404);
+      const obj = await env.FILES.get(job.output_r2_key);
+      if (!obj) return error("結果ファイルが見つかりません", 404);
+      const filename = job.output_filename ?? "results.zip";
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+        },
+      });
+    }
+
+    // GET /api/simulation/admin/fds-jobs/:id/log/download
+    if (
+      method === "GET" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "log" &&
+      segments[4] === "download"
+    ) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job?.log_r2_key) return error("ログファイルがありません", 404);
+      const obj = await env.FILES.get(job.log_r2_key);
+      if (!obj) return error("ログファイルが見つかりません", 404);
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="runner.log"`,
+        },
+      });
     }
 
     // GET /api/simulation/admin/stl/:id
