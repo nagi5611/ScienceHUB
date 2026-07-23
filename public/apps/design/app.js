@@ -7,6 +7,8 @@ import { apiRequest, fetchDownloadBlob } from "../cloud-storage/js/api.js";
 import {
   createDesignCollabConnection,
   designSceneFingerprint,
+  getElementCollabVersion,
+  mergeCollabTombstones,
   pickCollabScene,
   reconcileDesignElements,
 } from "../../js/design-collab-utils.js";
@@ -159,6 +161,10 @@ let collabBroadcastTimer = null;
 /** @type {ReturnType<typeof pickCollabScene> | null} */
 let pendingRemoteScene = null;
 let lastCollabFingerprint = "";
+/** @type {Record<string, number>} */
+let collabTombstones = {};
+/** @type {Set<string>} */
+let pendingLocalDeletions = new Set();
 const COLLAB_BROADCAST_MS = 200;
 /** 線描画時の端オートパン（画面端からの距離・px） */
 const AUTO_PAN_EDGE_PX = 48;
@@ -536,7 +542,31 @@ function stripStrokeWidth(el) {
   const next = { ...el };
   delete next.strokeWidth;
   if (next.stroke) next.stroke = resolveStrokeColor(next.stroke);
+  if (typeof next.collabVersion !== "number" || next.collabVersion <= 0) {
+    next.collabVersion = 1;
+  }
   return next;
+}
+
+/** 要素の共同編集バージョンを進める */
+function bumpElementCollabVersion(el) {
+  if (!el) return;
+  el.collabVersion = getElementCollabVersion(el) + 1;
+}
+
+/** 共同編集の削除トゥームストーンを記録 */
+function noteCollabDeletion(id, el) {
+  const version = el ? getElementCollabVersion(el) + 1 : 1;
+  collabTombstones[id] = Math.max(collabTombstones[id] ?? 0, version);
+  pendingLocalDeletions.add(id);
+}
+
+/** 共同編集ブロードキャスト用シーン */
+function buildCollabBroadcastScene() {
+  return {
+    ...pickCollabScene(getScene()),
+    tombstones: { ...collabTombstones },
+  };
 }
 
 /** 旧形式の要素を線分ベースに正規化 */
@@ -879,10 +909,14 @@ function nudgeSelectedElements(dx, dy) {
 function deleteSelected() {
   if (!selectedIds.size) return;
   pushHistory();
+  for (const id of selectedIds) {
+    noteCollabDeletion(id, elements.find((el) => el.id === id));
+  }
   elements = elements.filter((el) => !selectedIds.has(el.id));
   clearSelection();
   render();
   markDirty();
+  broadcastCollabScene();
 }
 
 /** 選択中の要素をコピー */
@@ -908,6 +942,7 @@ function pasteClipboard() {
   const newIds = [];
   for (const el of clones) {
     el.id = uid();
+    el.collabVersion = 1;
     newIds.push(el.id);
   }
   const bounds = getElementsBounds(clones);
@@ -1176,9 +1211,14 @@ function commitTextEditor() {
   if (!value.trim()) {
     if (!state.isNew && state.elementId) {
       pushHistory();
+      noteCollabDeletion(
+        state.elementId,
+        elements.find((el) => el.id === state.elementId)
+      );
       elements = elements.filter((el) => el.id !== state.elementId);
       clearSelection();
       markDirty();
+      broadcastCollabScene();
     }
     render();
     flushPendingRemoteScene();
@@ -1191,6 +1231,7 @@ function commitTextEditor() {
   if (state.isNew) {
     const el = {
       id: uid(),
+      collabVersion: 1,
       type: "text",
       x: state.x,
       y: state.y,
@@ -1206,6 +1247,7 @@ function commitTextEditor() {
     if (el) {
       el.text = value;
       el.stroke = stroke;
+      bumpElementCollabVersion(el);
     }
   }
 
@@ -2204,7 +2246,7 @@ function buildShapePreview(tool, startX, startY, endX, endY, style, shiftKey, gr
 /** プレビューから確定要素を生成 */
 function buildShapeElement(preview) {
   if (!preview) return null;
-  return { id: uid(), ...structuredClone(preview) };
+  return { id: uid(), collabVersion: 1, ...structuredClone(preview) };
 }
 
 /** 寸法表示を更新 */
@@ -2323,10 +2365,26 @@ function markDirty() {
 /** 共同編集のリモートシーンをマージ適用（選択・Undoは維持） */
 function mergeRemoteCollabScene(scene) {
   const remote = pickCollabScene(scene);
-  const merged = reconcileDesignElements(elements, remote.elements).map(
-    normalizeLegacyElement
-  );
-  const nextFingerprint = designSceneFingerprint({ ...remote, elements: merged });
+  const remoteTombs = remote.tombstones ?? {};
+  collabTombstones = mergeCollabTombstones(collabTombstones, remoteTombs);
+
+  let merged = reconcileDesignElements(elements, remote.elements, {
+    localTombstones: collabTombstones,
+    remoteTombstones: remoteTombs,
+  }).map(normalizeLegacyElement);
+  merged = merged.filter((el) => !pendingLocalDeletions.has(el.id));
+
+  for (const id of [...pendingLocalDeletions]) {
+    if (!remote.elements.some((el) => el?.id === id)) {
+      pendingLocalDeletions.delete(id);
+    }
+  }
+
+  const nextFingerprint = designSceneFingerprint({
+    ...remote,
+    elements: merged,
+    tombstones: collabTombstones,
+  });
   if (nextFingerprint === designSceneFingerprint(pickCollabScene(getScene()))) {
     lastCollabFingerprint = nextFingerprint;
     return false;
@@ -2431,6 +2489,8 @@ function disconnectCollab() {
     collabBroadcastTimer = null;
   }
   pendingRemoteScene = null;
+  collabTombstones = {};
+  pendingLocalDeletions = new Set();
   if (peersStatusEl) peersStatusEl.textContent = "";
 }
 
@@ -2469,7 +2529,7 @@ function connectCollab({ projectId, token } = {}) {
 /** 共同編集へシーンを送信 */
 function broadcastCollabScene() {
   if (!collab || applyingRemote) return;
-  const scene = pickCollabScene(getScene());
+  const scene = buildCollabBroadcastScene();
   const fingerprint = designSceneFingerprint(scene);
   if (fingerprint === lastCollabFingerprint) return;
   lastCollabFingerprint = fingerprint;
@@ -3016,6 +3076,7 @@ function getCommonStrokeColor(selected) {
 function applyPropertyChange(mutator) {
   pushHistory();
   mutator();
+  for (const el of getSelectedElements()) bumpElementCollabVersion(el);
   markDirty();
   render();
   updatePropertiesPanel();
@@ -3417,6 +3478,9 @@ function finishDrag(evt) {
       if (!dragState.moved && undoStack.length) {
         undoStack.pop();
       } else if (dragState.moved) {
+        for (const id of selectedIds) {
+          bumpElementCollabVersion(elements.find((el) => el.id === id));
+        }
         markDirty();
       }
       dragState = null;
@@ -3428,6 +3492,9 @@ function finishDrag(evt) {
       if (!dragState.moved && undoStack.length) {
         undoStack.pop();
       } else if (dragState.moved) {
+        bumpElementCollabVersion(
+          elements.find((el) => el.id === dragState.elementId)
+        );
         markDirty();
       }
       dragState = null;
@@ -3466,6 +3533,7 @@ function finishDrag(evt) {
       measureOverlayText = "";
       render();
       markDirty();
+      broadcastCollabScene();
     }
   } finally {
     if (!dragState) flushPendingRemoteScene();

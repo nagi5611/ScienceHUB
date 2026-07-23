@@ -5,14 +5,19 @@
 /** 共同編集で送受信するシーン（ビューは個人設定のため除外） */
 export function pickCollabScene(scene) {
   if (!scene) {
-    return { version: 2, width: 2000, height: 1500, elements: [] };
+    return { version: 2, width: 2000, height: 1500, elements: [], tombstones: {} };
   }
-  return {
+  const base = {
     version: scene.version ?? 2,
     width: scene.width ?? 2000,
     height: scene.height ?? 1500,
     elements: Array.isArray(scene.elements) ? scene.elements : [],
   };
+  const tombstones = normalizeCollabTombstones(scene.tombstones);
+  if (Object.keys(tombstones).length > 0) {
+    base.tombstones = tombstones;
+  }
+  return base;
 }
 
 /** シーン変更検知用フィンガープリント */
@@ -20,21 +25,92 @@ export function designSceneFingerprint(scene) {
   return JSON.stringify(pickCollabScene(scene));
 }
 
-/** 要素を ID でマージ（リモート優先） */
-export function reconcileDesignElements(local, remote) {
-  if (!Array.isArray(remote)) return local ?? [];
-  if (remote.length === 0) return [];
+/** 要素の共同編集バージョン */
+export function getElementCollabVersion(el) {
+  const version = el?.collabVersion;
+  return typeof version === "number" && version > 0 ? version : 1;
+}
 
-  const map = new Map();
-  for (const el of local ?? []) {
-    if (el?.id) map.set(el.id, el);
+/** 削除トゥームストーンを正規化 */
+export function normalizeCollabTombstones(input) {
+  if (!input || typeof input !== "object") return {};
+  const out = {};
+  for (const [id, version] of Object.entries(input)) {
+    if (!id || typeof version !== "number" || version <= 0) continue;
+    out[id] = Math.max(out[id] ?? 0, version);
   }
-  for (const el of remote) {
-    if (el?.id) map.set(el.id, el);
+  return out;
+}
+
+/** 削除トゥームストーンをマージ（高いバージョンを採用） */
+export function mergeCollabTombstones(...sources) {
+  const merged = {};
+  for (const source of sources) {
+    const normalized = normalizeCollabTombstones(source);
+    for (const [id, version] of Object.entries(normalized)) {
+      merged[id] = Math.max(merged[id] ?? 0, version);
+    }
+  }
+  return merged;
+}
+
+/**
+ * 要素を ID でマージ
+ * - 同一 ID は collabVersion が高い方を採用（同値はリモート優先）
+ * - トゥームストーンより古い要素は除外
+ * - リモートに無いローカル専用 ID は保持（未送信の新規作成）
+ */
+export function reconcileDesignElements(local, remote, options = {}) {
+  const remoteElements = Array.isArray(remote) ? remote : [];
+  const localElements = Array.isArray(local) ? local : [];
+  const tombstones = mergeCollabTombstones(
+    options.localTombstones,
+    options.remoteTombstones
+  );
+
+  const remoteMap = new Map();
+  for (const el of remoteElements) {
+    if (el?.id) remoteMap.set(el.id, el);
+  }
+  const remoteIds = new Set(remoteMap.keys());
+
+  const merged = new Map();
+
+  const consider = (el, preferOnTie) => {
+    if (!el?.id) return;
+    const tombVersion = tombstones[el.id];
+    const elementVersion = getElementCollabVersion(el);
+    if (tombVersion !== undefined && tombVersion >= elementVersion) return;
+
+    const prev = merged.get(el.id);
+    if (!prev) {
+      merged.set(el.id, el);
+      return;
+    }
+
+    const prevVersion = getElementCollabVersion(prev);
+    if (elementVersion > prevVersion) {
+      merged.set(el.id, el);
+      return;
+    }
+    if (elementVersion === prevVersion && preferOnTie) {
+      merged.set(el.id, el);
+    }
+  };
+
+  for (const el of localElements) consider(el, false);
+  for (const el of remoteElements) consider(el, true);
+
+  const result = [...merged.values()];
+  for (const el of localElements) {
+    if (!el?.id || remoteIds.has(el.id) || merged.has(el.id)) continue;
+    const tombVersion = tombstones[el.id];
+    const elementVersion = getElementCollabVersion(el);
+    if (tombVersion !== undefined && tombVersion >= elementVersion) continue;
+    result.push(el);
   }
 
-  const remoteIds = new Set(remote.map((el) => el?.id).filter(Boolean));
-  return [...map.values()].filter((el) => el?.id && remoteIds.has(el.id));
+  return result;
 }
 
 /**

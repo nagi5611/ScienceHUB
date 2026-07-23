@@ -20,6 +20,7 @@ interface DesignSceneState {
   width: number;
   height: number;
   elements: unknown[];
+  tombstones: Record<string, number>;
 }
 
 const COLORS = [
@@ -34,7 +35,7 @@ const COLORS = [
 ];
 
 function emptyScene(): DesignSceneState {
-  return { version: 2, width: 2000, height: 1500, elements: [] };
+  return { version: 2, width: 2000, height: 1500, elements: [], tombstones: {} };
 }
 
 function colorFor(userId: string): string {
@@ -45,34 +46,98 @@ function colorFor(userId: string): string {
   return COLORS[hash % COLORS.length]!;
 }
 
-/** 要素 ID でマージ（リモート優先） */
-function reconcileElements(local: unknown[], remote: unknown[]): unknown[] {
-  if (!Array.isArray(remote)) return local;
-  if (remote.length === 0 && local.length > 0) {
-    return remote;
+function getElementCollabVersion(el: Record<string, unknown>): number {
+  const version = el.collabVersion;
+  return typeof version === "number" && version > 0 ? version : 1;
+}
+
+function normalizeCollabTombstones(
+  input: Record<string, number> | undefined
+): Record<string, number> {
+  if (!input || typeof input !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [id, version] of Object.entries(input)) {
+    if (!id || typeof version !== "number" || version <= 0) continue;
+    out[id] = Math.max(out[id] ?? 0, version);
   }
-  const map = new Map<string, unknown>();
-  for (const el of local) {
+  return out;
+}
+
+function mergeCollabTombstones(
+  ...sources: Array<Record<string, number> | undefined>
+): Record<string, number> {
+  const merged: Record<string, number> = {};
+  for (const source of sources) {
+    const normalized = normalizeCollabTombstones(source);
+    for (const [id, version] of Object.entries(normalized)) {
+      merged[id] = Math.max(merged[id] ?? 0, version);
+    }
+  }
+  return merged;
+}
+
+/** 要素 ID でマージ（クライアント側 reconcileDesignElements と同等） */
+function reconcileElements(
+  local: unknown[],
+  remote: unknown[],
+  tombstones: Record<string, number>
+): unknown[] {
+  const remoteElements = Array.isArray(remote) ? remote : [];
+  const localElements = Array.isArray(local) ? local : [];
+
+  const remoteMap = new Map<string, unknown>();
+  for (const el of remoteElements) {
     if (!el || typeof el !== "object") continue;
     const item = el as Record<string, unknown>;
-    if (typeof item.id === "string") map.set(item.id, item);
+    if (typeof item.id === "string") remoteMap.set(item.id, item);
   }
-  for (const el of remote) {
+  const remoteIds = new Set(remoteMap.keys());
+
+  const merged = new Map<string, unknown>();
+
+  const consider = (el: unknown, preferOnTie: boolean) => {
+    if (!el || typeof el !== "object") return;
+    const item = el as Record<string, unknown>;
+    if (typeof item.id !== "string") return;
+
+    const tombVersion = tombstones[item.id];
+    const elementVersion = getElementCollabVersion(item);
+    if (tombVersion !== undefined && tombVersion >= elementVersion) return;
+
+    const prev = merged.get(item.id);
+    if (!prev || typeof prev !== "object") {
+      merged.set(item.id, item);
+      return;
+    }
+
+    const prevItem = prev as Record<string, unknown>;
+    const prevVersion = getElementCollabVersion(prevItem);
+    if (elementVersion > prevVersion) {
+      merged.set(item.id, item);
+      return;
+    }
+    if (elementVersion === prevVersion && preferOnTie) {
+      merged.set(item.id, el);
+    }
+  };
+
+  for (const el of localElements) consider(el, false);
+  for (const el of remoteElements) consider(el, true);
+
+  const result = [...merged.values()];
+  for (const el of localElements) {
     if (!el || typeof el !== "object") continue;
     const item = el as Record<string, unknown>;
-    if (typeof item.id === "string") map.set(item.id, item);
+    if (typeof item.id !== "string") continue;
+    if (remoteIds.has(item.id) || merged.has(item.id)) continue;
+
+    const tombVersion = tombstones[item.id];
+    const elementVersion = getElementCollabVersion(item);
+    if (tombVersion !== undefined && tombVersion >= elementVersion) continue;
+    result.push(el);
   }
-  const remoteIds = new Set(
-    remote
-      .filter((el) => el && typeof el === "object")
-      .map((el) => (el as Record<string, unknown>).id)
-      .filter((id): id is string => typeof id === "string")
-  );
-  return [...map.values()].filter((el) => {
-    if (!el || typeof el !== "object") return false;
-    const id = (el as Record<string, unknown>).id;
-    return typeof id === "string" && remoteIds.has(id);
-  });
+
+  return result;
 }
 
 function normalizeScene(input: Partial<DesignSceneState> | undefined): DesignSceneState {
@@ -82,6 +147,7 @@ function normalizeScene(input: Partial<DesignSceneState> | undefined): DesignSce
     width: typeof input.width === "number" ? input.width : 2000,
     height: typeof input.height === "number" ? input.height : 1500,
     elements: Array.isArray(input.elements) ? input.elements : [],
+    tombstones: normalizeCollabTombstones(input.tombstones),
   };
 }
 
@@ -143,6 +209,24 @@ export class DesignCollabRoom extends DurableObject<DesignCollabEnv> {
     this.broadcast(JSON.stringify({ type: "presence", peers: this.listPeers() }));
   }
 
+  private applyIncomingScene(incoming: DesignSceneState): void {
+    this.scene.tombstones = mergeCollabTombstones(
+      this.scene.tombstones,
+      incoming.tombstones
+    );
+    this.scene = {
+      version: incoming.version,
+      width: incoming.width,
+      height: incoming.height,
+      elements: reconcileElements(
+        this.scene.elements,
+        incoming.elements,
+        this.scene.tombstones
+      ),
+      tombstones: this.scene.tombstones,
+    };
+  }
+
   async fetch(request: Request): Promise<Response> {
     await this.ensureLoaded();
     const url = new URL(request.url);
@@ -160,14 +244,18 @@ export class DesignCollabRoom extends DurableObject<DesignCollabEnv> {
         if (isSeed && this.scene.elements.length > 0) {
           return Response.json({ ok: true, skipped: true });
         }
-        this.scene = {
-          version: incoming.version,
-          width: incoming.width,
-          height: incoming.height,
-          elements: isSeed
-            ? incoming.elements
-            : reconcileElements(this.scene.elements, incoming.elements),
-        };
+        if (isSeed) {
+          this.scene = incoming;
+        } else {
+          // D1 からの永続化はプロジェクトの正とみなし、要素は置き換える
+          this.scene = {
+            ...incoming,
+            tombstones: mergeCollabTombstones(
+              this.scene.tombstones,
+              incoming.tombstones
+            ),
+          };
+        }
         await this.persistScene();
       }
       return Response.json({ ok: true });
@@ -231,12 +319,7 @@ export class DesignCollabRoom extends DurableObject<DesignCollabEnv> {
 
     if (data.type === "scene" && data.scene) {
       const incoming = normalizeScene(data.scene);
-      this.scene = {
-        version: incoming.version,
-        width: incoming.width,
-        height: incoming.height,
-        elements: reconcileElements(this.scene.elements, incoming.elements),
-      };
+      this.applyIncomingScene(incoming);
       await this.persistScene();
       this.broadcast(
         JSON.stringify({
