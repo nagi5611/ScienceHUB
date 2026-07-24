@@ -34,6 +34,9 @@ import {
   completeTask,
   updateTask,
   updateIssuedTaskBatch,
+  setIssuedTaskActivityDayAssignees,
+  previewActivityDayAssignmentConflicts,
+  ActivityScheduleConflictError,
   deleteIssuedTaskBatch,
   deleteTask,
   getGroupStorageRootPath,
@@ -121,6 +124,7 @@ interface CreateTaskBody {
   assignee_id?: string;
   assignee_ids?: string[];
   activity_dates?: string[];
+  storage_path?: string | null;
 }
 
 interface UpdateTaskBody {
@@ -129,6 +133,7 @@ interface UpdateTaskBody {
   due_date?: string | null;
   status?: "pending" | "active";
   child_project_id?: string | null;
+  storage_path?: string | null;
 }
 
 interface UpdateIssuedTaskBatchBody {
@@ -138,6 +143,13 @@ interface UpdateIssuedTaskBatchBody {
   child_project_id?: string | null;
   assignee_ids?: string[];
   activity_dates?: string[];
+  storage_path?: string | null;
+}
+
+interface SetActivityDayAssigneesBody {
+  activity_date?: string;
+  user_ids?: string[];
+  acknowledge_conflicts?: boolean;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -205,6 +217,36 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       return Response.json(data);
     } catch (error) {
       return toErrorResponse(error, "工数の取得に失敗しました");
+    }
+  }
+
+  // GET /api/project-management/task-batches/:id/activity-schedule-conflicts
+  if (
+    parts.length === 3 &&
+    parts[0] === "task-batches" &&
+    parts[2] === "activity-schedule-conflicts"
+  ) {
+    const batchId = parts[1] ?? "";
+    if (!batchId) {
+      return jsonError("バッチ ID が不正です", 400);
+    }
+    const url = new URL(context.request.url);
+    const activityDate = url.searchParams.get("activity_date")?.trim() ?? "";
+    const userIds = url.searchParams.getAll("user_ids");
+    if (!activityDate) {
+      return jsonError("activity_date を指定してください", 400);
+    }
+    try {
+      const data = await previewActivityDayAssignmentConflicts(
+        db,
+        auth.id,
+        batchId,
+        activityDate,
+        userIds
+      );
+      return Response.json(data);
+    } catch (error) {
+      return toErrorResponse(error, "重複の確認に失敗しました");
     }
   }
 
@@ -400,6 +442,53 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     }
   }
 
+  // PUT /api/project-management/task-batches/:id/activity-day-assignees
+  if (
+    parts.length === 3 &&
+    parts[0] === "task-batches" &&
+    parts[2] === "activity-day-assignees"
+  ) {
+    const batchId = parts[1] ?? "";
+    if (!batchId) {
+      return jsonError("バッチ ID が不正です", 400);
+    }
+    let body: SetActivityDayAssigneesBody;
+    try {
+      body = await context.request.json<SetActivityDayAssigneesBody>();
+    } catch {
+      return jsonError("リクエスト形式が不正です", 400);
+    }
+    const activityDate = body.activity_date?.trim() ?? "";
+    if (!activityDate) {
+      return jsonError("activity_date を指定してください", 400);
+    }
+    const userIds = Array.isArray(body.user_ids)
+      ? body.user_ids.map((id) => String(id ?? "").trim()).filter(Boolean)
+      : [];
+
+    try {
+      const result = await setIssuedTaskActivityDayAssignees(
+        db,
+        auth.id,
+        batchId,
+        {
+          activity_date: activityDate,
+          user_ids: userIds,
+          acknowledge_conflicts: body.acknowledge_conflicts === true,
+        }
+      );
+      return Response.json(result);
+    } catch (error) {
+      if (error instanceof ActivityScheduleConflictError) {
+        return Response.json(
+          { error: error.message, conflicts: error.conflicts },
+          { status: 409 }
+        );
+      }
+      return toErrorResponse(error, "活動日の担当者設定に失敗しました");
+    }
+  }
+
   // PUT /api/project-management/task-batches/:id
   if (parts.length === 2 && parts[0] === "task-batches") {
     const batchId = parts[1] ?? "";
@@ -502,6 +591,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         status: body.status,
         assignee_ids: assigneeIds,
         activity_dates: body.activity_dates,
+        storage_path: body.storage_path,
       });
       return Response.json(result);
     } catch (error) {

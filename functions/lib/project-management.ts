@@ -53,8 +53,6 @@ export interface PmTask {
   description: string;
   parent_project_id: string | null;
   parent_name: string | null;
-  child_project_id: string | null;
-  child_name: string | null;
   due_date: string | null;
   status: PmTaskStatus;
   /** status === 'active' かつ未完了 */
@@ -70,6 +68,8 @@ export interface PmTask {
   created_at: number;
   /** 発行タスク ID（同一発行の担当者行で共有） */
   issued_task_id: string | null;
+  /** クラウドストレージ論理パス（例: g/{slug}/folder） */
+  storage_path: string | null;
 }
 
 /** 発行タスクの担当者ごとの進捗 */
@@ -87,13 +87,42 @@ export interface PmIssuedTaskBatch {
   issued_task_id: string;
   title: string;
   description: string;
-  child_project_id: string | null;
-  child_name: string | null;
+  parent_project_id: string | null;
+  parent_name: string | null;
   due_date: string | null;
   created_at: number;
   /** タスクの活動日（YYYY-MM-DD、バッチ内で共有） */
   activity_dates: string[];
+  /** 活動日ごとの担当者（未カスタムの日は全担当者） */
+  activity_day_assignments: PmActivityDayAssignment[];
   assignments: PmIssuedTaskAssignment[];
+  storage_path: string | null;
+}
+
+export interface PmActivityDayAssignment {
+  date: string;
+  user_ids: string[];
+  /** 管理者が明示設定した日 */
+  is_custom: boolean;
+}
+
+/** 活動日の担当者が他タスクと重なったときの警告用 */
+export interface PmActivityScheduleConflict {
+  user_id: string;
+  display_name: string;
+  activity_date: string;
+  other_issued_task_id: string;
+  other_task_title: string;
+}
+
+export class ActivityScheduleConflictError extends Error {
+  readonly conflicts: PmActivityScheduleConflict[];
+
+  constructor(conflicts: PmActivityScheduleConflict[]) {
+    super("活動日の担当者が他のタスクと重なっています");
+    this.name = "ActivityScheduleConflictError";
+    this.conflicts = conflicts;
+  }
 }
 
 export interface PmMemberBoard {
@@ -118,60 +147,35 @@ export interface PmAssignee {
 
 export type PmDueUrgency = "ok" | "warning" | "overdue" | null;
 
-export interface PmChildProject {
+/** グループ内のプロジェクト（単一階層） */
+export interface PmProject {
   id: string;
   name: string;
   position: number;
-  /** 明示設定された開始予定日（未設定なら null） */
+  leader: PmAssignee | null;
+  leaders: PmAssignee[];
+  members: PmAssignee[];
+  is_leader: boolean;
   start_date: string | null;
-  /** 実効開始日（start_date または作成日） */
   effective_start_date: string;
   due_date: string | null;
   completed_at: number | null;
   is_completed: boolean;
-  /** 開始済みかつ未達成 */
   is_active: boolean;
-  /** 開始前かつ未達成 */
   is_pending: boolean;
   due_urgency: PmDueUrgency;
   assignees: PmAssignee[];
-  /** 開始日〜納期（または今日〜納期）の担当者活動可能日合計 */
   effort_days: number | null;
-  /** 紐づいたグループストレージの論理パス（例: g/lab-a/docs） */
   storage_path: string | null;
-  /** プロジェクト用 Excalidraw ノート ID */
   excalidraw_note_id: string | null;
-}
-
-export interface PmParentProject {
-  id: string;
-  name: string;
-  position: number;
-  /** @deprecated leaders を使用。先頭リーダー（互換） */
-  leader: PmAssignee | null;
-  /** 親プロジェクトのリーダー（複数可） */
-  leaders: PmAssignee[];
-  /** 親プロジェクトの担当者（リーダーがグループメンバーから管理） */
-  members: PmAssignee[];
-  /** 現ユーザーがこの親のリーダーか */
-  is_leader: boolean;
-  children: PmChildProject[];
-  completed_children: PmChildProject[];
-  /** 子の達成率 0–100（手動上書きがあればそちら） */
   progress_percent: number;
-  child_total: number;
-  child_completed: number;
-  /** 進捗が手動設定か（false なら子の達成率） */
   progress_manual: boolean;
-  /** 親の最終更新（Unix ms） */
   updated_at: number;
-  /** 子の最遅納期（YYYY-MM-DD） */
   latest_due_date: string | null;
-  /** プロジェクト用 Excalidraw ノート ID */
-  excalidraw_note_id: string | null;
-  /** リーダー向け発行タスク一覧（非リーダーは空配列） */
   issued_tasks: PmIssuedTaskBatch[];
 }
+
+export type PmParentProject = PmProject;
 
 export type PmActivityAction =
   | "created_parent"
@@ -284,6 +288,7 @@ interface TaskRow {
   created_at: number;
   updated_at: number;
   issue_batch_id: string | null;
+  storage_path: string | null;
   parent_name: string | null;
   child_name: string | null;
   assignee_display_name: string;
@@ -563,14 +568,27 @@ function dueUrgency(
   return "ok";
 }
 
-/** 子プロジェクト行を API 用オブジェクトに変換 */
-async function toChildProject(
+/** プロジェクト行を API 用オブジェクトに変換 */
+async function toProjectDetail(
   db: D1Database,
   groupId: string,
   row: ProjectRow,
   assignees: PmAssignee[],
   today: string
-): Promise<PmChildProject> {
+): Promise<{
+  start_date: string | null;
+  effective_start_date: string;
+  due_date: string | null;
+  completed_at: number | null;
+  is_completed: boolean;
+  is_active: boolean;
+  is_pending: boolean;
+  due_urgency: PmDueUrgency;
+  assignees: PmAssignee[];
+  effort_days: number | null;
+  storage_path: string | null;
+  excalidraw_note_id: string | null;
+}> {
   const isCompleted = row.completed_at != null;
   const start = effectiveStartDate(row);
   const isActive = !isCompleted && start <= today;
@@ -596,9 +614,6 @@ async function toChildProject(
       : null;
 
   return {
-    id: row.id,
-    name: row.name,
-    position: row.position,
     start_date: row.start_date,
     effective_start_date: start,
     due_date: row.due_date,
@@ -784,30 +799,6 @@ async function listParentLeaderIds(
   return new Set((result.results ?? []).map((r) => r.user_id));
 }
 
-/** 子一覧から進捗率と最遅納期を算出 */
-function parentProgressStats(kids: PmChildProject[]): {
-  progress_percent: number;
-  child_total: number;
-  child_completed: number;
-  latest_due_date: string | null;
-} {
-  const childTotal = kids.length;
-  const childCompleted = kids.filter((c) => c.is_completed).length;
-  const progressPercent =
-    childTotal === 0 ? 0 : Math.round((childCompleted / childTotal) * 100);
-  const dueDates = kids
-    .map((c) => c.due_date)
-    .filter((d): d is string => Boolean(d && DATE_RE.test(d)))
-    .sort();
-  const latestDue = dueDates.length > 0 ? dueDates[dueDates.length - 1]! : null;
-  return {
-    progress_percent: progressPercent,
-    child_total: childTotal,
-    child_completed: childCompleted,
-    latest_due_date: latestDue,
-  };
-}
-
 /** アクティビティを記録 */
 async function recordActivity(
   db: D1Database,
@@ -898,8 +889,6 @@ function toPmTask(row: TaskRow, today: string): PmTask {
     description: row.description ?? "",
     parent_project_id: row.parent_project_id,
     parent_name: row.parent_name,
-    child_project_id: row.child_project_id,
-    child_name: row.child_name,
     due_date: row.due_date,
     status,
     is_active: !isCompleted && status === "active",
@@ -919,12 +908,13 @@ function toPmTask(row: TaskRow, today: string): PmTask {
     due_urgency: dueUrgency(row.due_date, isCompleted, today),
     created_at: row.created_at,
     issued_task_id: row.issue_batch_id ?? null,
+    storage_path: row.storage_path ?? null,
   };
 }
 
 const TASK_SELECT_SQL = `SELECT t.id, t.group_id, t.parent_project_id, t.child_project_id,
               t.title, t.description, t.due_date, t.status, t.assignee_id, t.created_by,
-              t.completed_at, t.created_at, t.updated_at, t.issue_batch_id,
+              t.completed_at, t.created_at, t.updated_at, t.issue_batch_id, t.storage_path,
               p.name AS parent_name,
               c.name AS child_name,
               ua.display_name AS assignee_display_name,
@@ -1039,12 +1029,14 @@ async function listIssuedTasksByParents(
         issued_task_id: batchId,
         title: row.title,
         description: row.description ?? "",
-        child_project_id: row.child_project_id,
-        child_name: row.child_name,
+        parent_project_id: row.parent_project_id,
+        parent_name: row.parent_name,
         due_date: row.due_date,
         created_at: row.created_at,
         activity_dates: [],
+        activity_day_assignments: [],
         assignments: [],
+        storage_path: row.storage_path ?? null,
       };
       batchMap.set(batchKey, batch);
     }
@@ -1067,6 +1059,20 @@ async function listIssuedTasksByParents(
       : [];
   }
 
+  const batchIds = [
+    ...new Set([...batchMap.values()].map((b) => b.issued_task_id)),
+  ];
+  const overrideMap = await listIssueActivityDayOverrides(db, batchIds);
+  for (const batch of batchMap.values()) {
+    const assigneeIds = batch.assignments.map((a) => a.assignee.id);
+    const overrides = overrideMap.get(batch.issued_task_id);
+    batch.activity_day_assignments = buildActivityDayAssignments(
+      batch.activity_dates,
+      assigneeIds,
+      overrides
+    );
+  }
+
   for (const [batchKey, batch] of batchMap) {
     const parentId = batchKey.split(":")[0]!;
     const list = map.get(parentId) ?? [];
@@ -1080,6 +1086,384 @@ async function listIssuedTasksByParents(
   }
 
   return map;
+}
+
+/** 活動日ごとの担当者割り当て（API 用） */
+function buildActivityDayAssignments(
+  activityDates: string[],
+  assigneeIds: string[],
+  overrides:
+    | { overrideDates: Set<string>; usersByDate: Map<string, string[]> }
+    | undefined
+): PmActivityDayAssignment[] {
+  const defaultIds = [...assigneeIds];
+  return activityDates.map((date) => {
+    const isCustom = overrides?.overrideDates.has(date) ?? false;
+    const userIds = isCustom
+      ? (overrides!.usersByDate.get(date) ?? [])
+      : defaultIds;
+    return { date, user_ids: [...userIds], is_custom: isCustom };
+  });
+}
+
+/** 発行バッチの活動日担当者オーバーライドを読み込む */
+async function listIssueActivityDayOverrides(
+  db: D1Database,
+  batchIds: string[]
+): Promise<
+  Map<string, { overrideDates: Set<string>; usersByDate: Map<string, string[]> }>
+> {
+  const map = new Map<
+    string,
+    { overrideDates: Set<string>; usersByDate: Map<string, string[]> }
+  >();
+  if (batchIds.length === 0) return map;
+
+  const placeholders = batchIds.map(() => "?").join(", ");
+  const overrideRows = await db
+    .prepare(
+      `SELECT issue_batch_id, activity_date
+       FROM pm_issue_activity_day_overrides
+       WHERE issue_batch_id IN (${placeholders})`
+    )
+    .bind(...batchIds)
+    .all<{ issue_batch_id: string; activity_date: string }>();
+
+  const userRows = await db
+    .prepare(
+      `SELECT issue_batch_id, activity_date, user_id
+       FROM pm_issue_activity_day_override_users
+       WHERE issue_batch_id IN (${placeholders})`
+    )
+    .bind(...batchIds)
+    .all<{
+      issue_batch_id: string;
+      activity_date: string;
+      user_id: string;
+    }>();
+
+  for (const batchId of batchIds) {
+    map.set(batchId, {
+      overrideDates: new Set(),
+      usersByDate: new Map(),
+    });
+  }
+
+  for (const row of overrideRows.results ?? []) {
+    const entry = map.get(row.issue_batch_id);
+    if (entry) entry.overrideDates.add(row.activity_date);
+  }
+
+  for (const row of userRows.results ?? []) {
+    const entry = map.get(row.issue_batch_id);
+    if (!entry) continue;
+    const list = entry.usersByDate.get(row.activity_date) ?? [];
+    list.push(row.user_id);
+    entry.usersByDate.set(row.activity_date, list);
+  }
+
+  return map;
+}
+
+/** 1 活動日分の担当者割り当てを保存（オーバーライド） */
+async function saveIssueActivityDayOverride(
+  db: D1Database,
+  batchId: string,
+  activityDate: string,
+  userIds: string[]
+): Promise<void> {
+  const date = activityDate.trim();
+  if (!DATE_RE.test(date)) {
+    throw new Error("活動日の形式が不正です");
+  }
+  const uniqueIds = [
+    ...new Set(userIds.map((id) => String(id ?? "").trim()).filter(Boolean)),
+  ];
+
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO pm_issue_activity_day_overrides (issue_batch_id, activity_date)
+       VALUES (?, ?)`
+    )
+    .bind(batchId, date)
+    .run();
+
+  await db
+    .prepare(
+      `DELETE FROM pm_issue_activity_day_override_users
+       WHERE issue_batch_id = ? AND activity_date = ?`
+    )
+    .bind(batchId, date)
+    .run();
+
+  for (const userId of uniqueIds) {
+    await db
+      .prepare(
+        `INSERT INTO pm_issue_activity_day_override_users
+           (issue_batch_id, activity_date, user_id)
+         VALUES (?, ?, ?)`
+      )
+      .bind(batchId, date, userId)
+      .run();
+  }
+}
+
+async function deleteIssueActivityOverridesForBatch(
+  db: D1Database,
+  batchId: string
+): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM pm_issue_activity_day_override_users WHERE issue_batch_id = ?`
+    )
+    .bind(batchId)
+    .run();
+  await db
+    .prepare(
+      `DELETE FROM pm_issue_activity_day_overrides WHERE issue_batch_id = ?`
+    )
+    .bind(batchId)
+    .run();
+}
+
+async function pruneIssueActivityOverrides(
+  db: D1Database,
+  batchId: string,
+  allowedDates: Set<string>
+): Promise<void> {
+  const rows = await db
+    .prepare(
+      `SELECT activity_date FROM pm_issue_activity_day_overrides WHERE issue_batch_id = ?`
+    )
+    .bind(batchId)
+    .all<{ activity_date: string }>();
+
+  for (const row of rows.results ?? []) {
+    if (!allowedDates.has(row.activity_date)) {
+      await db
+        .prepare(
+          `DELETE FROM pm_issue_activity_day_override_users
+           WHERE issue_batch_id = ? AND activity_date = ?`
+        )
+        .bind(batchId, row.activity_date)
+        .run();
+      await db
+        .prepare(
+          `DELETE FROM pm_issue_activity_day_overrides
+           WHERE issue_batch_id = ? AND activity_date = ?`
+        )
+        .bind(batchId, row.activity_date)
+        .run();
+    }
+  }
+}
+
+async function removeUserFromIssueActivityOverrides(
+  db: D1Database,
+  batchId: string,
+  userId: string
+): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM pm_issue_activity_day_override_users
+       WHERE issue_batch_id = ? AND user_id = ?`
+    )
+    .bind(batchId, userId)
+    .run();
+}
+
+/** 指定日に他タスクへ既に割り当て済みの担当者を検出 */
+async function listActivityScheduleConflicts(
+  db: D1Database,
+  groupId: string,
+  excludeBatchId: string,
+  activityDate: string,
+  userIds: string[]
+): Promise<PmActivityScheduleConflict[]> {
+  const uniqueUserIds = [
+    ...new Set(userIds.map((id) => String(id ?? "").trim()).filter(Boolean)),
+  ];
+  if (uniqueUserIds.length === 0) return [];
+
+  const taskRows = await db
+    .prepare(
+      `SELECT t.id, t.title, t.assignee_id, t.issue_batch_id
+       FROM pm_tasks t
+       INNER JOIN pm_task_activity_days ad
+         ON ad.task_id = t.id AND ad.activity_date = ?
+       WHERE t.group_id = ? AND t.completed_at IS NULL`
+    )
+    .bind(activityDate, groupId)
+    .all<{
+      id: string;
+      title: string;
+      assignee_id: string;
+      issue_batch_id: string | null;
+    }>();
+
+  const batchMap = new Map<
+    string,
+    { title: string; assigneeIds: Set<string> }
+  >();
+
+  for (const row of taskRows.results ?? []) {
+    const batchKey = row.issue_batch_id?.trim() || row.id;
+    if (batchKey === excludeBatchId) continue;
+
+    let entry = batchMap.get(batchKey);
+    if (!entry) {
+      entry = { title: row.title, assigneeIds: new Set() };
+      batchMap.set(batchKey, entry);
+    }
+    entry.assigneeIds.add(row.assignee_id);
+  }
+
+  if (batchMap.size === 0) return [];
+
+  const batchIds = [...batchMap.keys()];
+  const overrideMap = await listIssueActivityDayOverrides(db, batchIds);
+
+  const conflictKeys = new Set<string>();
+  const rawConflicts: Omit<PmActivityScheduleConflict, "display_name">[] = [];
+
+  for (const [batchKey, entry] of batchMap) {
+    const overrides = overrideMap.get(batchKey);
+    const isCustom = overrides?.overrideDates.has(activityDate) ?? false;
+    const effective = isCustom
+      ? new Set(overrides!.usersByDate.get(activityDate) ?? [])
+      : entry.assigneeIds;
+
+    for (const uid of uniqueUserIds) {
+      if (!effective.has(uid)) continue;
+      const key = `${uid}:${batchKey}`;
+      if (conflictKeys.has(key)) continue;
+      conflictKeys.add(key);
+      rawConflicts.push({
+        user_id: uid,
+        activity_date: activityDate,
+        other_issued_task_id: batchKey,
+        other_task_title: entry.title,
+      });
+    }
+  }
+
+  if (rawConflicts.length === 0) return [];
+
+  const nameIds = [...new Set(rawConflicts.map((c) => c.user_id))];
+  const namePlaceholders = nameIds.map(() => "?").join(", ");
+  const nameRows = await db
+    .prepare(
+      `SELECT id, display_name, username FROM users WHERE id IN (${namePlaceholders})`
+    )
+    .bind(...nameIds)
+    .all<{ id: string; display_name: string; username: string }>();
+
+  const nameMap = new Map(
+    (nameRows.results ?? []).map((r) => [
+      r.id,
+      r.display_name?.trim() || r.username,
+    ])
+  );
+
+  return rawConflicts.map((c) => ({
+    ...c,
+    display_name: nameMap.get(c.user_id) ?? c.user_id,
+  }));
+}
+
+async function assertIssuedBatchForActivityDayAdmin(
+  db: D1Database,
+  userId: string,
+  issuedTaskId: string
+): Promise<{
+  groupId: string;
+  resolvedBatchId: string;
+  batchAssigneeIds: Set<string>;
+  activityDates: string[];
+}> {
+  const batchId = issuedTaskId.trim();
+  if (!batchId) {
+    throw new Error("発行タスク ID が不正です");
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT id, group_id, parent_project_id, assignee_id, completed_at, issue_batch_id
+       FROM pm_tasks
+       WHERE issue_batch_id = ? OR id = ?`
+    )
+    .bind(batchId, batchId)
+    .all<{
+      id: string;
+      group_id: string;
+      parent_project_id: string | null;
+      assignee_id: string;
+      completed_at: number | null;
+      issue_batch_id: string | null;
+    }>();
+
+  const tasks = rows.results ?? [];
+  if (tasks.length === 0) {
+    throw new Error("発行タスクが見つかりません");
+  }
+
+  if (!tasks[0]!.parent_project_id) {
+    throw new Error("プロジェクトに紐づいていないタスクです");
+  }
+
+  const groupId = tasks[0]!.group_id;
+  const membership = await requireGroupMembership(db, userId, groupId);
+  await assertGroupAdmin(db, userId, membership);
+
+  const firstTaskId = tasks[0]!.id;
+  const activityDates =
+    (await listActivityDatesByTaskIds(db, [firstTaskId])).get(firstTaskId) ??
+    [];
+
+  return {
+    groupId,
+    resolvedBatchId: tasks[0]!.issue_batch_id ?? tasks[0]!.id,
+    batchAssigneeIds: new Set(tasks.map((t) => t.assignee_id)),
+    activityDates,
+  };
+}
+
+/** 活動日担当者の他タスク重複をプレビュー（管理者） */
+export async function previewActivityDayAssignmentConflicts(
+  db: D1Database,
+  userId: string,
+  issuedTaskId: string,
+  activityDate: string,
+  userIds: string[]
+): Promise<{ conflicts: PmActivityScheduleConflict[] }> {
+  const date = activityDate.trim();
+  if (!DATE_RE.test(date)) {
+    throw new Error("活動日の形式が不正です");
+  }
+
+  const ctx = await assertIssuedBatchForActivityDayAdmin(db, userId, issuedTaskId);
+  if (!ctx.activityDates.includes(date)) {
+    throw new Error("この日はタスクの活動日に含まれていません");
+  }
+
+  const normalizedUserIds = [
+    ...new Set(userIds.map((id) => String(id ?? "").trim()).filter(Boolean)),
+  ];
+  for (const assigneeId of normalizedUserIds) {
+    if (!ctx.batchAssigneeIds.has(assigneeId)) {
+      throw new Error("この発行タスクの担当者のみ指定できます");
+    }
+  }
+
+  const conflicts = await listActivityScheduleConflicts(
+    db,
+    ctx.groupId,
+    ctx.resolvedBatchId,
+    date,
+    normalizedUserIds
+  );
+
+  return { conflicts };
 }
 
 /** 発行タスクバッチの管理権限（親リーダーまたは管理者） */
@@ -1454,8 +1838,8 @@ export async function previewEffort(
   if (!project) {
     throw new Error("プロジェクトが見つかりません");
   }
-  if (!project.parent_id) {
-    throw new Error("子プロジェクトのみ納期を設定できます");
+  if (project.parent_id) {
+    throw new Error("プロジェクトが見つかりません");
   }
 
   await requireGroupMembership(db, userId, project.group_id);
@@ -1506,53 +1890,34 @@ export async function previewEffort(
   };
 }
 
-/** グループの親子プロジェクト一覧 */
+/** グループのプロジェクト一覧（単一階層） */
 export async function listProjects(
   db: D1Database,
   groupId: string,
   currentUserId?: string
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const result = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, updated_at, storage_path, excalidraw_note_id, leader_user_id, progress_override
        FROM pm_projects
-       WHERE group_id = ?
+       WHERE group_id = ? AND parent_id IS NULL
        ORDER BY position ASC, created_at ASC`
     )
     .bind(groupId)
     .all<ProjectRow>();
 
-  const rows = result.results ?? [];
-  const parents = rows.filter((r) => !r.parent_id);
-  const children = rows.filter((r) => r.parent_id);
-  const childIds = children.map((c) => c.id);
-  const assigneeMap = await listAssigneesByProjects(db, childIds);
-  const leaderMap = await listLeadersByProjects(
-    db,
-    parents.map((p) => p.id)
-  );
-  const parentMemberMap = await listParentMembersByProjects(
-    db,
-    parents.map((p) => p.id)
-  );
+  const projects = result.results ?? [];
+  const projectIds = projects.map((p) => p.id);
+  const assigneeMap = await listAssigneesByProjects(db, projectIds);
+  const leaderMap = await listLeadersByProjects(db, projectIds);
+  const parentMemberMap = await listParentMembersByProjects(db, projectIds);
   const today = todayJst();
   const hubAdmin =
-    currentUserId != null
-      ? await isHubAdminUser(db, currentUserId)
-      : false;
+    currentUserId != null ? await isHubAdminUser(db, currentUserId) : false;
 
-  const childById = new Map<string, PmChildProject>();
-  for (const c of children) {
-    const assignees = assigneeMap.get(c.id) ?? [];
-    childById.set(
-      c.id,
-      await toChildProject(db, groupId, c, assignees, today)
-    );
-  }
-
-  const leaderParentIds = hubAdmin
-    ? parents.map((p) => p.id)
-    : parents
+  const leaderProjectIds = hubAdmin
+    ? projectIds
+    : projects
         .filter((p) => {
           const leaders = leaderMap.get(p.id) ?? [];
           return Boolean(
@@ -1560,22 +1925,18 @@ export async function listProjects(
           );
         })
         .map((p) => p.id);
-  const issuedMap = await listIssuedTasksByParents(db, leaderParentIds);
+  const issuedMap = await listIssuedTasksByParents(db, leaderProjectIds);
 
-  return parents.map((parent) => {
-    const siblingChildren = children.filter((c) => c.parent_id === parent.id);
-    const kids = siblingChildren
-      .map((c) => childById.get(c.id)!)
-      .filter(Boolean);
-    const members = parentMemberMap.get(parent.id) ?? [];
-    const leaders = leaderMap.get(parent.id) ?? [];
+  const items: PmProject[] = [];
+  for (const row of projects) {
+    const assignees = assigneeMap.get(row.id) ?? [];
+    const detail = await toProjectDetail(db, groupId, row, assignees, today);
+    const members = parentMemberMap.get(row.id) ?? [];
+    const leaders = leaderMap.get(row.id) ?? [];
     const isLeader =
       hubAdmin ||
-      Boolean(
-        currentUserId && leaders.some((l) => l.id === currentUserId)
-      );
-    const stats = parentProgressStats(kids);
-    const override = parent.progress_override;
+      Boolean(currentUserId && leaders.some((l) => l.id === currentUserId));
+    const override = row.progress_override;
     const progressManual =
       override != null &&
       Number.isFinite(override) &&
@@ -1583,28 +1944,39 @@ export async function listProjects(
       override <= 100;
     const progressPercent = progressManual
       ? Math.round(Number(override))
-      : stats.progress_percent;
+      : detail.is_completed
+        ? 100
+        : 0;
 
-    return {
-      id: parent.id,
-      name: parent.name,
-      position: parent.position,
+    items.push({
+      id: row.id,
+      name: row.name,
+      position: row.position,
       leader: leaders[0] ?? null,
       leaders,
       members,
       is_leader: isLeader,
-      children: kids.filter((c) => !c.is_completed),
-      completed_children: kids.filter((c) => c.is_completed),
+      start_date: detail.start_date,
+      effective_start_date: detail.effective_start_date,
+      due_date: detail.due_date,
+      completed_at: detail.completed_at,
+      is_completed: detail.is_completed,
+      is_active: detail.is_active,
+      is_pending: detail.is_pending,
+      due_urgency: detail.due_urgency,
+      assignees: detail.assignees,
+      effort_days: detail.effort_days,
+      storage_path: detail.storage_path,
+      excalidraw_note_id: detail.excalidraw_note_id,
       progress_percent: progressPercent,
       progress_manual: progressManual,
-      child_total: stats.child_total,
-      child_completed: stats.child_completed,
-      updated_at: parent.updated_at ?? parent.created_at,
-      latest_due_date: stats.latest_due_date,
-      excalidraw_note_id: parent.excalidraw_note_id ?? null,
-      issued_tasks: isLeader ? (issuedMap.get(parent.id) ?? []) : [],
-    };
-  });
+      updated_at: row.updated_at ?? row.created_at,
+      latest_due_date: detail.due_date,
+      issued_tasks: isLeader ? (issuedMap.get(row.id) ?? []) : [],
+    });
+  }
+
+  return items;
 }
 
 /** 親または子プロジェクトを作成（管理者のみ） */
@@ -1628,32 +2000,17 @@ export async function createProject(
   );
   await assertGroupAdmin(db, userId, membership);
 
-  let parentId: string | null = null;
-  if (input.parent_id) {
-    const parent = await db
-      .prepare(
-        `SELECT id, group_id, parent_id FROM pm_projects
-         WHERE id = ? AND group_id = ?`
-      )
-      .bind(input.parent_id, input.group_id)
-      .first<ProjectRow>();
-
-    if (!parent) {
-      throw new Error("親プロジェクトが見つかりません");
-    }
-    if (parent.parent_id) {
-      throw new Error("子プロジェクトの下には作成できません");
-    }
-    parentId = parent.id;
+  if (input.parent_id?.trim()) {
+    throw new Error("子プロジェクトは廃止されました");
   }
 
   const posRow = await db
     .prepare(
       `SELECT COALESCE(MAX(position), -1) AS max_pos
        FROM pm_projects
-       WHERE group_id = ? AND ${parentId ? "parent_id = ?" : "parent_id IS NULL"}`
+       WHERE group_id = ? AND parent_id IS NULL`
     )
-    .bind(...(parentId ? [input.group_id, parentId] : [input.group_id]))
+    .bind(input.group_id)
     .first<{ max_pos: number }>();
 
   const position = (posRow?.max_pos ?? -1) + 1;
@@ -1664,26 +2021,17 @@ export async function createProject(
     .prepare(
       `INSERT INTO pm_projects
          (id, group_id, parent_id, name, position, due_date, start_date, completed_at, storage_path, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)`
+       VALUES (?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)`
     )
-    .bind(
-      id,
-      input.group_id,
-      parentId,
-      name,
-      position,
-      userId,
-      timestamp,
-      timestamp
-    )
+    .bind(id, input.group_id, name, position, userId, timestamp, timestamp)
     .run();
 
   await recordActivity(db, {
     group_id: input.group_id,
-    parent_project_id: parentId,
+    parent_project_id: id,
     actor_user_id: userId,
-    action: parentId ? "created_child" : "created_parent",
-    target_type: parentId ? "child" : "parent",
+    action: "created_parent",
+    target_type: "parent",
     target_id: id,
     target_name: name,
   });
@@ -1755,8 +2103,8 @@ export async function updateChildSchedule(
   if (!project) {
     throw new Error("プロジェクトが見つかりません");
   }
-  if (!project.parent_id) {
-    throw new Error("子プロジェクトのみスケジュールを設定できます");
+  if (project.parent_id) {
+    throw new Error("プロジェクトが見つかりません");
   }
 
   await requireGroupMembership(db, userId, project.group_id);
@@ -1833,8 +2181,8 @@ export async function setChildCompleted(
   if (!project) {
     throw new Error("プロジェクトが見つかりません");
   }
-  if (!project.parent_id) {
-    throw new Error("子プロジェクトのみ達成済みにできます");
+  if (project.parent_id) {
+    throw new Error("プロジェクトが見つかりません");
   }
 
   const membership = await requireGroupMembership(
@@ -1865,6 +2213,32 @@ export async function setChildCompleted(
   return listProjects(db, project.group_id, userId);
 }
 
+/** グループ内クラウドストレージの論理パスを正規化（空は null） */
+async function normalizeGroupStoragePath(
+  db: D1Database,
+  groupId: string,
+  storagePath: string | null | undefined
+): Promise<string | null> {
+  if (storagePath == null || !String(storagePath).trim()) {
+    return null;
+  }
+  const group = await db
+    .prepare("SELECT slug FROM hub_groups WHERE id = ?")
+    .bind(groupId)
+    .first<{ slug: string }>();
+  if (!group?.slug) {
+    throw new Error("グループが見つかりません");
+  }
+  const normalized = String(storagePath).trim().replace(/^\/+|\/+$/g, "");
+  const prefix = `g/${group.slug}`;
+  if (normalized !== prefix && !normalized.startsWith(`${prefix}/`)) {
+    throw new Error(
+      "このグループのクラウドストレージ内のディレクトリのみ指定できます"
+    );
+  }
+  return normalized;
+}
+
 /**
  * 子プロジェクトにグループストレージのディレクトリを紐づける（管理者のみ）。
  * path は論理パス（例: g/{groupSlug}/docs）。null で解除。
@@ -1886,8 +2260,8 @@ export async function setChildStoragePath(
   if (!project) {
     throw new Error("プロジェクトが見つかりません");
   }
-  if (!project.parent_id) {
-    throw new Error("子プロジェクトのみストレージを紐づけできます");
+  if (project.parent_id) {
+    throw new Error("プロジェクトが見つかりません");
   }
 
   const membership = await requireGroupMembership(
@@ -1897,25 +2271,11 @@ export async function setChildStoragePath(
   );
   await assertGroupAdmin(db, userId, membership);
 
-  const group = await db
-    .prepare("SELECT slug FROM hub_groups WHERE id = ?")
-    .bind(project.group_id)
-    .first<{ slug: string }>();
-
-  if (!group?.slug) {
-    throw new Error("グループが見つかりません");
-  }
-
-  let normalized: string | null = null;
-  if (storagePath && storagePath.trim()) {
-    normalized = storagePath.trim().replace(/^\/+|\/+$/g, "");
-    const prefix = `g/${group.slug}`;
-    if (normalized !== prefix && !normalized.startsWith(`${prefix}/`)) {
-      throw new Error(
-        "このグループのクラウドストレージ内のディレクトリのみ指定できます"
-      );
-    }
-  }
+  const normalized = await normalizeGroupStoragePath(
+    db,
+    project.group_id,
+    storagePath
+  );
 
   const timestamp = now();
   await db
@@ -1966,8 +2326,8 @@ export async function setChildAssignees(
   if (!project) {
     throw new Error("プロジェクトが見つかりません");
   }
-  if (!project.parent_id) {
-    throw new Error("子プロジェクトのみ担当を設定できます");
+  if (project.parent_id) {
+    throw new Error("プロジェクトが見つかりません");
   }
 
   const membership = await requireGroupMembership(
@@ -2269,6 +2629,7 @@ export async function createTask(
     assignee_id?: string;
     assignee_ids?: string[];
     activity_dates?: string[];
+    storage_path?: string | null;
   }
 ): Promise<{
   projects: PmParentProject[];
@@ -2298,27 +2659,11 @@ export async function createTask(
   }
 
   const status = parseTaskStatus(input.status);
-  let parentProjectId = input.parent_project_id?.trim() || null;
-  let childProjectId = input.child_project_id?.trim() || null;
+  const parentProjectId = input.parent_project_id?.trim() || null;
   let groupId = input.group_id?.trim() || "";
 
-  if (childProjectId) {
-    const child = await db
-      .prepare(
-        `SELECT id, group_id, parent_id, name FROM pm_projects WHERE id = ?`
-      )
-      .bind(childProjectId)
-      .first<{
-        id: string;
-        group_id: string;
-        parent_id: string | null;
-        name: string;
-      }>();
-    if (!child || !child.parent_id) {
-      throw new Error("子プロジェクトが見つかりません");
-    }
-    parentProjectId = child.parent_id;
-    groupId = child.group_id;
+  if (input.child_project_id?.trim()) {
+    throw new Error("子プロジェクトは廃止されました");
   }
 
   let parent: ProjectRow | null = null;
@@ -2371,10 +2716,6 @@ export async function createTask(
     parent != null ? await listParentLeaderIds(db, parent.id) : new Set<string>();
   const isLeader = leaderIds.has(userId);
 
-  if ((isLeader || admin.isAdmin) && parent && !childProjectId) {
-    throw new Error("割り当て子プロジェクトを選択してください");
-  }
-
   const parentMemberIds =
     parent != null ? await listParentMemberIds(db, parent.id) : new Set<string>();
 
@@ -2396,12 +2737,19 @@ export async function createTask(
 
   const timestamp = now();
   const issuedTaskId =
-    (isLeader || admin.isAdmin) && parent && childProjectId
-      ? createId("pmissue")
-      : null;
+    (isLeader || admin.isAdmin) && parent ? createId("pmissue") : null;
 
   const activityDates = normalizeActivityDates(input.activity_dates ?? []);
   const createdTaskIds: string[] = [];
+
+  let taskStoragePath: string | null = null;
+  if (input.storage_path !== undefined) {
+    taskStoragePath = await normalizeGroupStoragePath(
+      db,
+      groupId,
+      input.storage_path
+    );
+  }
 
   for (const assigneeId of assigneeIds) {
     const id = createId("pmtask");
@@ -2411,14 +2759,14 @@ export async function createTask(
       .prepare(
         `INSERT INTO pm_tasks
            (id, group_id, parent_project_id, child_project_id, title, description,
-            due_date, status, assignee_id, created_by, completed_at, created_at, updated_at, issue_batch_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+            due_date, status, assignee_id, created_by, completed_at, created_at, updated_at, issue_batch_id, storage_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`
       )
       .bind(
         id,
         groupId,
         parentProjectId,
-        childProjectId,
+        null,
         title,
         description,
         dueDate,
@@ -2427,7 +2775,8 @@ export async function createTask(
         userId,
         timestamp,
         timestamp,
-        batchId
+        batchId,
+        taskStoragePath
       )
       .run();
 
@@ -2461,6 +2810,7 @@ export async function updateIssuedTaskBatch(
     child_project_id?: string | null;
     assignee_ids?: string[];
     activity_dates?: string[];
+    storage_path?: string | null;
   }
 ): Promise<{
   projects: PmParentProject[];
@@ -2476,7 +2826,7 @@ export async function updateIssuedTaskBatch(
   const rows = await db
     .prepare(
       `SELECT id, group_id, parent_project_id, child_project_id, title, description,
-              due_date, status, assignee_id, created_by, completed_at, issue_batch_id
+              due_date, status, assignee_id, created_by, completed_at, issue_batch_id, storage_path
        FROM pm_tasks
        WHERE issue_batch_id = ? OR id = ?`
     )
@@ -2494,6 +2844,7 @@ export async function updateIssuedTaskBatch(
       created_by: string;
       completed_at: number | null;
       issue_batch_id: string | null;
+      storage_path: string | null;
     }>();
 
   const tasks = rows.results ?? [];
@@ -2532,27 +2883,9 @@ export async function updateIssuedTaskBatch(
     }
   }
 
-  let childProjectId: string | null = tasks[0]!.child_project_id;
-  let resolvedParentId = parentProjectId;
-  if (input.child_project_id !== undefined) {
-    childProjectId = input.child_project_id?.trim() || null;
-    if (childProjectId) {
-      const child = await db
-        .prepare(`SELECT id, parent_id, group_id FROM pm_projects WHERE id = ?`)
-        .bind(childProjectId)
-        .first<{
-          id: string;
-          parent_id: string | null;
-          group_id: string;
-        }>();
-      if (!child || !child.parent_id) {
-        throw new Error("子プロジェクトが見つかりません");
-      }
-      if (child.parent_id !== parentProjectId) {
-        throw new Error("この親プロジェクトの子のみ指定できます");
-      }
-      resolvedParentId = child.parent_id;
-    }
+  const resolvedParentId = parentProjectId;
+  if (input.child_project_id !== undefined && input.child_project_id?.trim()) {
+    throw new Error("子プロジェクトは廃止されました");
   }
 
   const status =
@@ -2560,20 +2893,28 @@ export async function updateIssuedTaskBatch(
       ? parseTaskStatus(input.status)
       : parseTaskStatus(tasks[0]!.status);
 
+  let batchStoragePath = tasks[0]!.storage_path ?? null;
+  if (input.storage_path !== undefined) {
+    batchStoragePath = await normalizeGroupStoragePath(
+      db,
+      groupId,
+      input.storage_path
+    );
+  }
+
   for (const task of tasks) {
     if (task.completed_at != null) {
       await db
         .prepare(
           `UPDATE pm_tasks
-           SET title = ?, due_date = ?, child_project_id = ?,
-               parent_project_id = ?, updated_at = ?
+           SET title = ?, due_date = ?, parent_project_id = ?, storage_path = ?, updated_at = ?
            WHERE id = ?`
         )
         .bind(
           title,
           dueDate,
-          childProjectId,
           resolvedParentId,
+          batchStoragePath,
           timestamp,
           task.id
         )
@@ -2583,16 +2924,15 @@ export async function updateIssuedTaskBatch(
     await db
       .prepare(
         `UPDATE pm_tasks
-         SET title = ?, due_date = ?, status = ?, child_project_id = ?,
-             parent_project_id = ?, updated_at = ?
+         SET title = ?, due_date = ?, status = ?, parent_project_id = ?, storage_path = ?, updated_at = ?
          WHERE id = ?`
       )
       .bind(
         title,
         dueDate,
         status,
-        childProjectId,
         resolvedParentId,
+        batchStoragePath,
         timestamp,
         task.id
       )
@@ -2625,6 +2965,11 @@ export async function updateIssuedTaskBatch(
 
     for (const task of openTasks) {
       if (!desiredIds.includes(task.assignee_id)) {
+        await removeUserFromIssueActivityOverrides(
+          db,
+          batchId,
+          task.assignee_id
+        );
         await db.prepare(`DELETE FROM pm_tasks WHERE id = ?`).bind(task.id).run();
       }
     }
@@ -2640,14 +2985,14 @@ export async function updateIssuedTaskBatch(
         .prepare(
           `INSERT INTO pm_tasks
              (id, group_id, parent_project_id, child_project_id, title, description,
-              due_date, status, assignee_id, created_by, completed_at, created_at, updated_at, issue_batch_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+              due_date, status, assignee_id, created_by, completed_at, created_at, updated_at, issue_batch_id, storage_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`
         )
         .bind(
           id,
           groupId,
           resolvedParentId,
-          childProjectId,
+          null,
           title,
           template.description ?? "",
           dueDate,
@@ -2656,7 +3001,8 @@ export async function updateIssuedTaskBatch(
           template.created_by,
           timestamp,
           timestamp,
-          resolvedBatchId
+          resolvedBatchId,
+          batchStoragePath
         )
         .run();
 
@@ -2678,10 +3024,79 @@ export async function updateIssuedTaskBatch(
       .bind(batchId, batchId)
       .all<{ id: string }>();
     const taskIds = (remaining.results ?? []).map((row) => row.id);
-    await replaceTaskActivityDays(db, taskIds, input.activity_dates);
+    const normalized = normalizeActivityDates(input.activity_dates);
+    await replaceTaskActivityDays(db, taskIds, normalized);
+    await pruneIssueActivityOverrides(
+      db,
+      batchId,
+      new Set(normalized)
+    );
   }
 
   return taskMutationResult(db, groupId, userId);
+}
+
+/** 発行タスクの活動日担当者を設定（グループ管理者のみ） */
+export async function setIssuedTaskActivityDayAssignees(
+  db: D1Database,
+  userId: string,
+  issuedTaskId: string,
+  input: {
+    activity_date: string;
+    user_ids: string[];
+    acknowledge_conflicts?: boolean;
+  }
+): Promise<{
+  projects: PmParentProject[];
+  tasks: PmTask[];
+  completed_tasks: PmTask[];
+  member_board: PmMemberBoard[];
+}> {
+  const activityDate = input.activity_date.trim();
+  if (!DATE_RE.test(activityDate)) {
+    throw new Error("活動日の形式が不正です");
+  }
+
+  const ctx = await assertIssuedBatchForActivityDayAdmin(
+    db,
+    userId,
+    issuedTaskId
+  );
+  if (!ctx.activityDates.includes(activityDate)) {
+    throw new Error("この日はタスクの活動日に含まれていません");
+  }
+
+  const userIds = [
+    ...new Set(
+      input.user_ids.map((id) => String(id ?? "").trim()).filter(Boolean)
+    ),
+  ];
+  for (const assigneeId of userIds) {
+    if (!ctx.batchAssigneeIds.has(assigneeId)) {
+      throw new Error("この発行タスクの担当者のみ割り当てできます");
+    }
+    await assertAssigneeInGroup(db, ctx.groupId, assigneeId);
+  }
+
+  const conflicts = await listActivityScheduleConflicts(
+    db,
+    ctx.groupId,
+    ctx.resolvedBatchId,
+    activityDate,
+    userIds
+  );
+  if (conflicts.length > 0 && !input.acknowledge_conflicts) {
+    throw new ActivityScheduleConflictError(conflicts);
+  }
+
+  await saveIssueActivityDayOverride(
+    db,
+    ctx.resolvedBatchId,
+    activityDate,
+    userIds
+  );
+
+  return taskMutationResult(db, ctx.groupId, userId);
 }
 
 /** 発行タスクを削除（親リーダーまたは管理者） */
@@ -2730,6 +3145,8 @@ export async function deleteIssuedTaskBatch(
     tasks[0]!.group_id
   );
 
+  await deleteIssueActivityOverridesForBatch(db, batchId);
+
   await db
     .prepare(`DELETE FROM pm_tasks WHERE issue_batch_id = ? OR id = ?`)
     .bind(batchId, batchId)
@@ -2749,6 +3166,7 @@ export async function updateTask(
     due_date?: string | null;
     status?: PmTaskStatus;
     child_project_id?: string | null;
+    storage_path?: string | null;
   }
 ): Promise<{
   projects: PmParentProject[];
@@ -2816,33 +3234,18 @@ export async function updateTask(
     values.push(parseTaskStatus(input.status));
   }
 
-  if (input.child_project_id !== undefined) {
-    let childProjectId: string | null =
-      input.child_project_id?.trim() || null;
-    let parentProjectId = task.parent_project_id;
+  if (input.child_project_id !== undefined && input.child_project_id?.trim()) {
+    throw new Error("子プロジェクトは廃止されました");
+  }
 
-    if (childProjectId) {
-      const child = await db
-        .prepare(`SELECT id, parent_id, group_id FROM pm_projects WHERE id = ?`)
-        .bind(childProjectId)
-        .first<{
-          id: string;
-          parent_id: string | null;
-          group_id: string;
-        }>();
-      if (!child || !child.parent_id) {
-        throw new Error("子プロジェクトが見つかりません");
-      }
-      if (child.group_id !== task.group_id) {
-        throw new Error("別グループの子プロジェクトは指定できません");
-      }
-      parentProjectId = child.parent_id;
-    }
-
-    updates.push("child_project_id = ?");
-    values.push(childProjectId);
-    updates.push("parent_project_id = ?");
-    values.push(parentProjectId);
+  if (input.storage_path !== undefined) {
+    const normalized = await normalizeGroupStoragePath(
+      db,
+      task.group_id,
+      input.storage_path
+    );
+    updates.push("storage_path = ?");
+    values.push(normalized);
   }
 
   if (updates.length === 0) {

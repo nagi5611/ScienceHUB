@@ -89,9 +89,6 @@ let memberTaskAssigneeId = null;
 /** @type {string | null} */
 let editingMemberTaskId = null;
 
-/** @type {string | null} */
-let memberTaskChildId = null;
-
 /** ハッシュ状態を取得 */
 function parseHashState() {
   const raw = location.hash.replace(/^#/, "").trim();
@@ -160,33 +157,8 @@ function formatDueSlash(dateStr) {
 
 /** タスクのプロジェクト表示名 */
 function taskProjectLabel(task) {
-  if (task.child_name) return task.child_name;
   if (task.parent_name) return task.parent_name;
   return "未設定";
-}
-
-/** 子プロジェクト選択肢をフラット化 */
-function listAllChildProjects() {
-  const items = [];
-  for (const parent of dashboard?.projects ?? []) {
-    for (const child of parent.children ?? []) {
-      items.push({
-        id: child.id,
-        name: child.name,
-        parent_name: parent.name,
-        label: `${parent.name} / ${child.name}`,
-      });
-    }
-    for (const child of parent.completed_children ?? []) {
-      items.push({
-        id: child.id,
-        name: child.name,
-        parent_name: parent.name,
-        label: `${parent.name} / ${child.name}`,
-      });
-    }
-  }
-  return items;
 }
 
 /** リーダー表示名（複数対応） */
@@ -205,21 +177,6 @@ function formatMembersLabel(parent) {
   const members = parent.members ?? [];
   if (members.length === 0) return "担当者未設定";
   return members.map((m) => m.display_name).join("、");
-}
-
-/** 親プロジェクト配下の子プロジェクト一覧 */
-function listChildProjectsForParent(parentId) {
-  const parent = findParentProject(parentId);
-  if (!parent) return [];
-  const items = [];
-  for (const child of [...(parent.children ?? []), ...(parent.completed_children ?? [])]) {
-    items.push({
-      id: child.id,
-      name: child.name,
-      label: child.name,
-    });
-  }
-  return items;
 }
 
 /** 発行タスクの担当者ステータス表示 */
@@ -253,19 +210,23 @@ function formatIssuedTaskId(issuedTaskId) {
 }
 
 /** 発行タスク一覧の1行 */
-function renderIssuedTaskRow(batch, parentId) {
+function renderIssuedTaskRow(batch, parentId, options = {}) {
+  const { showProjectName = false, parentName = "" } = options;
   const assignments = batch.assignments ?? [];
   const completedCount = assignments.filter((a) => a.is_completed).length;
-  const childLabel = batch.child_name ?? "未設定";
   const dueLabel = batch.due_date
     ? formatDate(batch.due_date)
     : "納期未設定";
+  const projectPrefix =
+    showProjectName && parentName
+      ? `${escapeHtml(parentName)} · `
+      : "";
 
   return `<li>
     <button type="button" class="pm-issued-task-row" data-open-issued-detail="${escapeHtml(batch.issued_task_id)}" data-issued-parent="${escapeHtml(parentId)}">
       <span class="pm-issued-task-row-main">
         <span class="pm-issued-task-row-title">${escapeHtml(batch.title)}</span>
-        <span class="pm-issued-task-row-meta">${escapeHtml(childLabel)} · 納期 ${escapeHtml(dueLabel)} · 担当 ${assignments.length}名 · ${completedCount}/${assignments.length} 完了</span>
+        <span class="pm-issued-task-row-meta">${projectPrefix}納期 ${escapeHtml(dueLabel)} · 担当 ${assignments.length}名 · ${completedCount}/${assignments.length} 完了</span>
       </span>
       <span class="pm-issued-task-row-caret" aria-hidden="true">›</span>
     </button>
@@ -310,7 +271,8 @@ function openIssuedTaskDetailDialog(parentId, batchId) {
   if (!parentId || !batchId) return;
   const parent = findParentProject(parentId);
   const batch = findIssuedBatch(parentId, batchId);
-  if (!parent || !batch || !parent.is_leader) return;
+  if (!parent || !batch) return;
+  if (!parent.is_leader && !isAdmin()) return;
 
   viewingIssuedParentId = parentId;
   viewingIssuedBatchId = batchId;
@@ -321,14 +283,24 @@ function openIssuedTaskDetailDialog(parentId, batchId) {
   const dialog = document.getElementById("pm-issued-task-detail-dialog");
   if (!titleEl || !metaEl || !listEl || !dialog) return;
 
-  const childLabel = batch.child_name ?? "未設定";
   const dueLabel = batch.due_date
     ? formatDate(batch.due_date)
     : "納期未設定";
   const completedCount = batch.assignments.filter((a) => a.is_completed).length;
 
   titleEl.textContent = batch.title;
-  metaEl.textContent = `発行ID: ${formatIssuedTaskId(batch.issued_task_id)} · 子: ${childLabel} · 納期 ${dueLabel} · 担当 ${batch.assignments.length}名 · 進捗 ${completedCount}/${batch.assignments.length} 完了`;
+  metaEl.textContent = `発行ID: ${formatIssuedTaskId(batch.issued_task_id)} · 納期 ${dueLabel} · 担当 ${batch.assignments.length}名 · 進捗 ${completedCount}/${batch.assignments.length} 完了`;
+
+  const storageEl = document.getElementById("pm-issued-detail-storage");
+  if (storageEl) {
+    if (batch.storage_path) {
+      storageEl.hidden = false;
+      storageEl.innerHTML = renderStorageLink(batch.storage_path);
+    } else {
+      storageEl.hidden = true;
+      storageEl.innerHTML = "";
+    }
+  }
 
   listEl.innerHTML = batch.assignments
     .map((assignment) => {
@@ -342,6 +314,415 @@ function openIssuedTaskDetailDialog(parentId, batchId) {
     .join("");
 
   dialog.showModal();
+  openIssuedDetailCalendar(batch);
+}
+
+/** 発行タスク詳細の活動日カレンダーを表示 */
+function openIssuedDetailCalendar(batch) {
+  issuedDetailActivityDates = new Set(batch.activity_dates ?? []);
+  issuedDetailAssigneeCatalog = (batch.assignments ?? []).map((a) => a.assignee);
+  issuedDetailAssigneeIds = new Set(
+    issuedDetailAssigneeCatalog.map((m) => m.id)
+  );
+  issuedDetailDayAssignments = new Map();
+  for (const entry of batch.activity_day_assignments ?? []) {
+    issuedDetailDayAssignments.set(entry.date, [...entry.user_ids]);
+  }
+
+  const dates = [...issuedDetailActivityDates].sort();
+  if (dates.length > 0) {
+    const parts = dates[0].split("-").map(Number);
+    issuedDetailCalYear = parts[0];
+    issuedDetailCalMonth = parts[1];
+  } else {
+    const today = todayJst().split("-").map(Number);
+    issuedDetailCalYear = today[0];
+    issuedDetailCalMonth = today[1];
+  }
+
+  renderIssuedDetailCalendar();
+
+  const hint = document.querySelector(".pm-issued-detail-cal-hint");
+  if (hint) {
+    if (dates.length === 0) {
+      hint.textContent = "活動日が未設定です。";
+    } else if (isAdmin()) {
+      hint.textContent =
+        "色付きの日が活動日です。管理者は日付をクリックして担当者を割り当てられます。";
+    } else {
+      hint.textContent =
+        "色付きの日がタスクの活動日です。点はその日に割り当てた担当者です。";
+    }
+  }
+}
+
+/** 活動日に割り当て済みの担当者 ID */
+function getIssuedDetailUserIdsForDate(dateStr) {
+  if (issuedDetailDayAssignments.has(dateStr)) {
+    return issuedDetailDayAssignments.get(dateStr) ?? [];
+  }
+  return [...issuedDetailAssigneeIds];
+}
+
+/** 割り当て担当者の点を日セルに表示 */
+function appendAssignedMemberDots(cell, members, dateStr) {
+  if (members.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "pm-cal-day-assign-empty";
+    empty.textContent = "未割当";
+    cell.appendChild(empty);
+    return;
+  }
+
+  cell.classList.add("pm-cal-day--has-members");
+  const wrap = document.createElement("div");
+  wrap.className = "pm-cal-day-members";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", `${formatDate(dateStr)}の担当者`);
+
+  for (const member of members) {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "pm-cal-member-dot";
+    dot.style.background = memberDotColor(member.id);
+    dot.title = member.display_name;
+    dot.setAttribute(
+      "aria-label",
+      `${member.display_name}（${formatDate(dateStr)}）`
+    );
+    dot.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showMemberPopover(dateStr, members, dot);
+    });
+    wrap.appendChild(dot);
+  }
+
+  cell.appendChild(wrap);
+}
+
+/** 活動日の担当者割り当てポップオーバーを閉じる */
+function closeIssuedDayAssignPopover() {
+  const popover = document.getElementById("pm-issued-day-assign-popover");
+  if (popover) popover.hidden = true;
+  const warnEl = document.getElementById("pm-issued-day-assign-warnings");
+  if (warnEl) {
+    warnEl.hidden = true;
+    warnEl.innerHTML = "";
+  }
+  clearTimeout(issuedDayConflictTimer);
+  issuedDetailAssignEditingDate = null;
+}
+
+/** 活動日の担当者割り当てポップオーバーを開く（管理者） */
+function openIssuedDayAssignPopover(dateStr, anchorEl) {
+  if (!isAdmin() || !dateStr || !viewingIssuedBatchId) return;
+  if (!issuedDetailActivityDates.has(dateStr)) return;
+
+  issuedDetailAssignEditingDate = dateStr;
+  const popover = document.getElementById("pm-issued-day-assign-popover");
+  const dateEl = document.getElementById("pm-issued-day-assign-date");
+  const checks = document.getElementById("pm-issued-day-assign-checks");
+  if (!popover || !dateEl || !checks) return;
+
+  dateEl.textContent = formatDate(dateStr);
+  const selected = new Set(getIssuedDetailUserIdsForDate(dateStr));
+  checks.innerHTML = issuedDetailAssigneeCatalog
+    .map(
+      (m) => `<label class="pm-assignee-check">
+        <input type="checkbox" value="${escapeHtml(m.id)}" ${
+          selected.has(m.id) ? "checked" : ""
+        }>
+        ${escapeHtml(m.display_name)}
+        <span class="pm-assignee-username">@${escapeHtml(m.username)}</span>
+      </label>`
+    )
+    .join("");
+
+  popover.hidden = false;
+  popover.style.visibility = "hidden";
+  popover.style.left = "0";
+  popover.style.top = "0";
+
+  const rect = anchorEl.getBoundingClientRect();
+  const popRect = popover.getBoundingClientRect();
+  let left = rect.left + rect.width / 2 - popRect.width / 2;
+  let top = rect.bottom + 6;
+  if (left < 8) left = 8;
+  if (left + popRect.width > window.innerWidth - 8) {
+    left = window.innerWidth - popRect.width - 8;
+  }
+  if (top + popRect.height > window.innerHeight - 8) {
+    top = rect.top - popRect.height - 6;
+  }
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+  popover.style.visibility = "";
+
+  checks.addEventListener("change", scheduleIssuedDayConflictPreview);
+  void refreshIssuedDayConflictPreview();
+}
+
+/** 他タスク重複の警告文 */
+function formatActivityConflictMessage(conflicts) {
+  return conflicts
+    .map(
+      (c) =>
+        `・${c.display_name} → 「${c.other_task_title}」（${formatDate(c.activity_date)}）`
+    )
+    .join("\n");
+}
+
+/** 担当者選択に応じて重複警告を更新 */
+function scheduleIssuedDayConflictPreview() {
+  clearTimeout(issuedDayConflictTimer);
+  issuedDayConflictTimer = setTimeout(() => {
+    void refreshIssuedDayConflictPreview();
+  }, 250);
+}
+
+/** 活動日担当者の他タスク重複をプレビュー表示 */
+async function refreshIssuedDayConflictPreview() {
+  const warnEl = document.getElementById("pm-issued-day-assign-warnings");
+  const dateStr = issuedDetailAssignEditingDate;
+  const batchId = viewingIssuedBatchId;
+  if (!warnEl || !dateStr || !batchId) return;
+
+  const userIds = [
+    ...document.querySelectorAll(
+      "#pm-issued-day-assign-checks input[type=checkbox]:checked"
+    ),
+  ].map((el) => el.value);
+
+  if (userIds.length === 0) {
+    warnEl.hidden = true;
+    warnEl.innerHTML = "";
+    return;
+  }
+
+  const params = new URLSearchParams({ activity_date: dateStr });
+  for (const id of userIds) {
+    params.append("user_ids", id);
+  }
+
+  try {
+    const response = await fetch(
+      `/api/project-management/task-batches/${encodeURIComponent(batchId)}/activity-schedule-conflicts?${params}`,
+      { credentials: "same-origin" }
+    );
+    const data = await response.json().catch(() => ({}));
+    const conflicts = data.conflicts ?? [];
+    if (!response.ok || conflicts.length === 0) {
+      warnEl.hidden = true;
+      warnEl.innerHTML = "";
+      return;
+    }
+
+    warnEl.hidden = false;
+    warnEl.innerHTML = `<p class="pm-issued-day-assign-warn-title">他タスクと予定が重なっています</p>
+      <ul class="pm-issued-day-assign-warn-list">${conflicts
+        .map(
+          (c) =>
+            `<li>${escapeHtml(c.display_name)}: 「${escapeHtml(c.other_task_title)}」</li>`
+        )
+        .join("")}</ul>`;
+  } catch {
+    warnEl.hidden = true;
+    warnEl.innerHTML = "";
+  }
+}
+
+/** 活動日の担当者割り当てを保存 */
+async function saveIssuedDayAssignees(acknowledgeConflicts = false) {
+  const dateStr = issuedDetailAssignEditingDate;
+  const batchId = viewingIssuedBatchId;
+  const parentId = viewingIssuedParentId;
+  if (!dateStr || !batchId) return;
+
+  const checks = document.querySelectorAll(
+    "#pm-issued-day-assign-checks input[type=checkbox]:checked"
+  );
+  const userIds = [...checks].map((el) => el.value);
+
+  try {
+    const response = await fetch(
+      `/api/project-management/task-batches/${encodeURIComponent(batchId)}/activity-day-assignees`,
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activity_date: dateStr,
+          user_ids: userIds,
+          acknowledge_conflicts: acknowledgeConflicts,
+        }),
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 409 && data.conflicts?.length) {
+      const message = `同じ日に別タスクの予定があります。\n\n${formatActivityConflictMessage(data.conflicts)}\n\nこのまま割り当てますか？`;
+      if (!window.confirm(message)) {
+        return;
+      }
+      await saveIssuedDayAssignees(true);
+      return;
+    }
+    if (!response.ok) {
+      showToast(data.error || "担当者の割り当てに失敗しました", true);
+      return;
+    }
+    applyTaskMutationResult(data);
+    closeIssuedDayAssignPopover();
+    const batch = parentId ? findIssuedBatch(parentId, batchId) : null;
+    if (batch) {
+      openIssuedDetailCalendar(batch);
+    }
+    showToast("活動日の担当者を保存しました");
+  } catch {
+    showToast("担当者の割り当てに失敗しました", true);
+  }
+}
+
+/** 発行タスク詳細カレンダーの月ラベル */
+function updateIssuedDetailMonthLabel() {
+  const label = document.getElementById("pm-issued-detail-cal-month-text");
+  if (label) {
+    label.textContent = `${issuedDetailCalYear}年${issuedDetailCalMonth}月`;
+  }
+}
+
+/** 発行タスク詳細カレンダーの曜日ヘッダー */
+function renderIssuedDetailWeekdays() {
+  const row = document.getElementById("pm-issued-detail-cal-weekdays");
+  if (!row) return;
+  row.innerHTML = WEEKDAYS.map(
+    (d) => `<span class="pm-cal-weekday pm-cal-weekday--static">${d}</span>`
+  ).join("");
+}
+
+/** 発行タスク詳細カレンダーの日セル（閲覧専用） */
+function createIssuedDetailDayCell(dayNum, otherMonth, todayStr, dateStr) {
+  const cell = document.createElement("div");
+  cell.className = "pm-cal-day pm-cal-day--readonly";
+  if (otherMonth) cell.classList.add("other-month");
+  if (dateStr === todayStr) cell.classList.add("today");
+
+  const num = document.createElement("div");
+  num.className = "pm-cal-day-num";
+  num.textContent = String(dayNum);
+  cell.appendChild(num);
+
+  if (!dateStr || otherMonth) return cell;
+
+  const isActivityDay = issuedDetailActivityDates.has(dateStr);
+  if (isActivityDay) {
+    cell.classList.add("pm-cal-day--task-selected");
+    cell.dataset.activityDay = "true";
+    const ids = getIssuedDetailUserIdsForDate(dateStr);
+    const members = issuedDetailAssigneeCatalog.filter((m) =>
+      ids.includes(m.id)
+    );
+    appendAssignedMemberDots(cell, members, dateStr);
+    if (isAdmin()) {
+      cell.classList.add("pm-cal-day--assignable");
+      cell.setAttribute("role", "button");
+      cell.tabIndex = 0;
+      cell.addEventListener("click", () => {
+        openIssuedDayAssignPopover(dateStr, cell);
+      });
+      cell.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openIssuedDayAssignPopover(dateStr, cell);
+        }
+      });
+    }
+  }
+
+  return cell;
+}
+
+/** 発行タスク詳細カレンダーを描画 */
+function renderIssuedDetailCalendar() {
+  updateIssuedDetailMonthLabel();
+  renderIssuedDetailWeekdays();
+
+  const grid = document.getElementById("pm-issued-detail-cal-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  const todayStr = todayJst();
+  const firstDay = new Date(issuedDetailCalYear, issuedDetailCalMonth - 1, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(
+    issuedDetailCalYear,
+    issuedDetailCalMonth,
+    0
+  ).getDate();
+  const prevMonthDays = new Date(
+    issuedDetailCalYear,
+    issuedDetailCalMonth - 1,
+    0
+  ).getDate();
+
+  for (let i = 0; i < startWeekday; i++) {
+    const dayNum = prevMonthDays - startWeekday + i + 1;
+    grid.appendChild(
+      createIssuedDetailDayCell(dayNum, true, todayStr, null)
+    );
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${issuedDetailCalYear}-${String(issuedDetailCalMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    grid.appendChild(
+      createIssuedDetailDayCell(day, false, todayStr, dateStr)
+    );
+  }
+
+  const totalCells = startWeekday + daysInMonth;
+  const trailing = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let day = 1; day <= trailing; day++) {
+    grid.appendChild(
+      createIssuedDetailDayCell(day, true, todayStr, null)
+    );
+  }
+}
+
+/** 発行タスク詳細カレンダーの月移動 */
+function bindIssuedDetailCalNav() {
+  const bindOnce = (id, handler) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound === "1") return;
+    el.dataset.bound = "1";
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      handler();
+    });
+  };
+
+  bindOnce("pm-issued-detail-cal-prev", () => {
+    issuedDetailCalMonth -= 1;
+    if (issuedDetailCalMonth < 1) {
+      issuedDetailCalMonth = 12;
+      issuedDetailCalYear -= 1;
+    }
+    renderIssuedDetailCalendar();
+  });
+
+  bindOnce("pm-issued-detail-cal-next", () => {
+    issuedDetailCalMonth += 1;
+    if (issuedDetailCalMonth > 12) {
+      issuedDetailCalMonth = 1;
+      issuedDetailCalYear += 1;
+    }
+    renderIssuedDetailCalendar();
+  });
+
+  bindOnce("pm-issued-detail-cal-today", () => {
+    const parts = todayJst().split("-").map(Number);
+    issuedDetailCalYear = parts[0];
+    issuedDetailCalMonth = parts[1];
+    renderIssuedDetailCalendar();
+  });
 }
 
 /** 発行タスク詳細ダイアログを閉じる */
@@ -349,6 +730,11 @@ function closeIssuedTaskDetailDialog() {
   document.getElementById("pm-issued-task-detail-dialog")?.close();
   viewingIssuedBatchId = null;
   viewingIssuedParentId = null;
+  issuedDetailActivityDates = new Set();
+  issuedDetailAssigneeIds = new Set();
+  issuedDetailDayAssignments = new Map();
+  issuedDetailAssigneeCatalog = [];
+  closeIssuedDayAssignPopover();
 }
 
 /** 発行タスクを削除 */
@@ -400,6 +786,111 @@ function formatTimestampJa(ts) {
   if (!ts) return "";
   const d = new Date(ts);
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+/** 相対時間表示（フィード用） */
+function formatRelativeTimeJa(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const df = (Date.now() - ts) / 1000;
+  if (df < 60) return "たった今";
+  if (df < 3600) return `${Math.floor(df / 60)}分前`;
+  if (df < 86400) return `${Math.floor(df / 3600)}時間前`;
+  if (df < 86400 * 7) return `${Math.floor(df / 86400)}日前`;
+  return formatTimestampJa(ts);
+}
+
+/** ダッシュボード集計 */
+function computeDashboardStats() {
+  const tasks = dashboard?.tasks ?? [];
+  const completed = dashboard?.completed_tasks ?? [];
+  const projects = dashboard?.projects ?? [];
+  let teamActive = 0;
+  let teamPending = 0;
+  for (const board of dashboard?.member_board ?? []) {
+    teamActive += board.active_tasks?.length ?? 0;
+    teamPending += board.pending_tasks?.length ?? 0;
+  }
+  return {
+    myOpen: tasks.length,
+    myActive: tasks.filter((t) => t.status === "active").length,
+    myCompleted: completed.length,
+    projects: projects.length,
+    teamActive,
+    teamPending,
+    teamOpen: teamActive + teamPending,
+  };
+}
+
+/** ヒーロー・更新時刻 */
+function renderOverviewHeader() {
+  const eyebrow = document.getElementById("pm-hero-eyebrow");
+  const updated = document.getElementById("pm-updated-text");
+  if (!dashboard) return;
+  if (eyebrow) {
+    const groupName = dashboard.group?.name ?? "グループ";
+    eyebrow.textContent = `${groupName} · ライブ`;
+  }
+  if (updated) {
+    const t = new Date().toLocaleTimeString("ja-JP", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    updated.textContent = `更新 ${t}`;
+  }
+}
+
+/** KPI カード行 */
+function renderOverviewKpis() {
+  const row = document.getElementById("pm-kpi-row");
+  if (!row || !dashboard) return;
+  const s = computeDashboardStats();
+  const items = [
+    { label: "自分の未完了タスク", value: s.myOpen },
+    { label: "進行中（自分）", value: s.myActive, good: true },
+    { label: "親プロジェクト", value: s.projects },
+    { label: "達成済み（自分）", value: s.myCompleted },
+  ];
+  row.innerHTML = items
+    .map(
+      (item) =>
+        `<div class="pm-kpi-card"><span class="pm-kpi-label">${escapeHtml(item.label)}</span>` +
+        `<div class="pm-kpi-value${item.good ? " pm-kpi-value--good" : ""}">${escapeHtml(String(item.value))}</div></div>`
+    )
+    .join("");
+}
+
+/** ステータスタイルのタイル（overview 風） */
+function renderStatusTiles() {
+  const wrap = document.getElementById("pm-status-tiles-wrap");
+  if (!wrap || !dashboard) return;
+  const s = computeDashboardStats();
+  const tiles = [
+    { label: "進行中", count: s.teamActive, color: "var(--success-500)" },
+    { label: "未進行", count: s.teamPending, color: "var(--warn-500)" },
+    { label: "未完了（全体）", count: s.teamOpen, color: "var(--viz-2)" },
+    { label: "達成済み（自分）", count: s.myCompleted, color: "var(--viz-1)" },
+  ];
+  wrap.innerHTML = `<div class="pm-dash-card">
+    <div class="pm-phead">
+      <div>
+        <h3 class="pm-t-h3">タスクの内訳</h3>
+        <p class="pm-t-small">メンバー全員の未完了と自分の達成済み</p>
+      </div>
+      <button type="button" class="pm-btn pm-btn--ghost" id="pm-go-members-inline">メンバー一覧を開く</button>
+    </div>
+    <div class="pm-tiles">${tiles
+      .map((tile) => {
+        const bg = `color-mix(in srgb, ${tile.color} 10%, var(--ink-0))`;
+        return `<div class="pm-tile" style="border-left-color:${tile.color};background:${bg}">
+          <div class="pm-tile-value" style="color:${tile.color}">${escapeHtml(String(tile.count))}</div>
+          <div class="pm-tile-label"><span class="pm-tile-dot" style="background:${tile.color}"></span>${escapeHtml(tile.label)}</div>
+        </div>`;
+      })
+      .join("")}</div>
+  </div>`;
+  wrap.querySelector("#pm-go-members-inline")?.addEventListener("click", navigateToMembers);
 }
 
 /** カード用の更新日表示 */
@@ -762,8 +1253,13 @@ function toggleCalendarEditMode() {
 }
 
 /** 閲覧用の日セルにメンバー点を追加 */
-function appendMemberDots(cell, dateStr) {
-  const members = groupAvailabilityMap.get(dateStr) ?? [];
+function appendMemberDots(cell, dateStr, options = {}) {
+  const { membersFilter = null, availabilityMap = groupAvailabilityMap } =
+    options;
+  let members = availabilityMap.get(dateStr) ?? [];
+  if (membersFilter) {
+    members = members.filter((m) => membersFilter.has(m.id));
+  }
   if (members.length === 0) return;
 
   cell.classList.add("pm-cal-day--has-members");
@@ -1172,10 +1668,34 @@ let editingIssuedParentId = null;
 let viewingIssuedBatchId = null;
 /** @type {string | null} */
 let viewingIssuedParentId = null;
+/** 発行タスク詳細カレンダー */
+let issuedDetailCalYear = 2026;
+let issuedDetailCalMonth = 7;
+/** @type {Set<string>} */
+let issuedDetailActivityDates = new Set();
+/** @type {Set<string>} */
+let issuedDetailAssigneeIds = new Set();
+/** @type {Map<string, string[]>} */
+let issuedDetailDayAssignments = new Map();
+/** @type {{ id: string; display_name: string; username: string }[]} */
+let issuedDetailAssigneeCatalog = [];
+/** @type {string | null} */
+let issuedDetailAssignEditingDate = null;
+let issuedDayConflictTimer = null;
+
 /** @type {string} */
 let storagePickerPath = "";
 /** @type {string} */
 let storageGroupRoot = "";
+/** @type {'inline' | 'modal'} */
+let storagePickerUi = "inline";
+let modalStorageClear = false;
+/** @type {((result: { path: string | null; cleared: boolean }) => void) | null} */
+let storagePickerOnConfirm = null;
+/** @type {{ path: string; clear: boolean }} */
+const memberTaskStorage = { path: "", clear: false };
+/** @type {{ path: string; clear: boolean }} */
+const issueTaskStorage = { path: "", clear: false };
 let effortPreviewTimer = null;
 let taskIssueEffortTimer = null;
 
@@ -1229,8 +1749,11 @@ function renderView() {
   listView.hidden = false;
   detailView.hidden = true;
   membersView.hidden = true;
+  renderOverviewHeader();
+  renderOverviewKpis();
+  renderStatusTiles();
   renderProjectCards();
-  renderRecentActivity();
+  renderIssuedTasksOverview();
 }
 
 /** メンバー別タスクカード1枚のタイル */
@@ -1254,6 +1777,7 @@ function renderMemberTaskTile(task) {
     <h4 class="pm-member-task-title">${escapeHtml(task.title)}</h4>
     <p class="pm-member-task-project">${escapeHtml(projectLabel)}</p>
     <p class="pm-member-task-due">${escapeHtml(due)}</p>
+    ${task.storage_path ? `<div class="pm-member-task-storage">${renderStorageLink(task.storage_path)}</div>` : ""}
     ${actions}
   </article>`;
 }
@@ -1353,7 +1877,6 @@ function openMemberTaskDialog(assigneeId) {
 
   editingMemberTaskId = null;
   memberTaskAssigneeId = assigneeId;
-  memberTaskChildId = null;
 
   const dialog = document.getElementById("pm-member-task-dialog");
   const titleEl = document.getElementById("pm-member-task-dialog-title");
@@ -1361,9 +1884,7 @@ function openMemberTaskDialog(assigneeId) {
   const inputTitle = document.getElementById("pm-member-task-title");
   const inputDue = document.getElementById("pm-member-task-due");
   const inputStatus = document.getElementById("pm-member-task-status");
-  const childLabel = document.getElementById("pm-member-task-child-label");
   const saveBtn = document.getElementById("pm-member-task-save");
-  const clearChildBtn = document.getElementById("pm-member-task-child-clear");
   if (!dialog || !inputTitle || !inputDue || !inputStatus) return;
 
   if (titleEl) titleEl.textContent = "タスクを追加";
@@ -1374,8 +1895,6 @@ function openMemberTaskDialog(assigneeId) {
   inputTitle.value = "";
   inputDue.value = "";
   inputStatus.value = "pending";
-  if (childLabel) childLabel.textContent = "なし（未設定）";
-  if (clearChildBtn) clearChildBtn.hidden = true;
 
   dialog.showModal();
   inputTitle.focus();
@@ -1392,7 +1911,6 @@ function openMemberTaskEditDialog(taskId) {
 
   editingMemberTaskId = taskId;
   memberTaskAssigneeId = task.assignee.id;
-  memberTaskChildId = task.child_project_id;
 
   const dialog = document.getElementById("pm-member-task-dialog");
   const titleEl = document.getElementById("pm-member-task-dialog-title");
@@ -1400,9 +1918,7 @@ function openMemberTaskEditDialog(taskId) {
   const inputTitle = document.getElementById("pm-member-task-title");
   const inputDue = document.getElementById("pm-member-task-due");
   const inputStatus = document.getElementById("pm-member-task-status");
-  const childLabel = document.getElementById("pm-member-task-child-label");
   const saveBtn = document.getElementById("pm-member-task-save");
-  const clearChildBtn = document.getElementById("pm-member-task-child-clear");
   if (!dialog || !inputTitle || !inputDue || !inputStatus) return;
 
   if (titleEl) titleEl.textContent = "タスクを編集";
@@ -1413,23 +1929,9 @@ function openMemberTaskEditDialog(taskId) {
   inputTitle.value = task.title;
   inputDue.value = task.due_date ?? "";
   inputStatus.value = task.status === "active" ? "active" : "pending";
-  updateMemberTaskChildLabel();
-  if (clearChildBtn) clearChildBtn.hidden = !memberTaskChildId;
 
   dialog.showModal();
   inputTitle.focus();
-}
-
-/** 子プロジェクト選択ラベルを更新 */
-function updateMemberTaskChildLabel() {
-  const childLabel = document.getElementById("pm-member-task-child-label");
-  if (!childLabel) return;
-  if (!memberTaskChildId) {
-    childLabel.textContent = "なし（未設定）";
-    return;
-  }
-  const child = listAllChildProjects().find((c) => c.id === memberTaskChildId);
-  childLabel.textContent = child?.label ?? "選択済み";
 }
 
 /** ボード上のタスクを ID で探す */
@@ -1443,36 +1945,6 @@ function findMemberTask(taskId) {
     if (task.id === taskId) return task;
   }
   return null;
-}
-
-/** 子プロジェクト選択ダイアログ */
-function openChildPickerDialog() {
-  const list = document.getElementById("pm-child-picker-list");
-  const dialog = document.getElementById("pm-child-picker-dialog");
-  if (!list || !dialog) return;
-
-  const children = listAllChildProjects();
-  if (children.length === 0) {
-    list.innerHTML = `<p class="pm-empty">子プロジェクトがありません</p>`;
-  } else {
-    list.innerHTML = children
-      .map(
-        (child) =>
-          `<button type="button" class="pm-child-picker-item" data-pick-child="${escapeHtml(child.id)}">${escapeHtml(child.label)}</button>`
-      )
-      .join("");
-    list.querySelectorAll("[data-pick-child]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        memberTaskChildId = btn.getAttribute("data-pick-child");
-        updateMemberTaskChildLabel();
-        const clearBtn = document.getElementById("pm-member-task-child-clear");
-        if (clearBtn) clearBtn.hidden = !memberTaskChildId;
-        dialog.close();
-      });
-    });
-  }
-
-  dialog.showModal();
 }
 
 /** 担当タスクを保存（追加または更新） */
@@ -1504,7 +1976,6 @@ async function handleSaveMemberTask() {
             title,
             due_date: dueDate,
             status,
-            child_project_id: memberTaskChildId,
           }),
         }
       );
@@ -1528,7 +1999,6 @@ async function handleSaveMemberTask() {
           title,
           due_date: dueDate,
           status,
-          child_project_id: memberTaskChildId,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -1552,7 +2022,6 @@ async function handleSaveMemberTask() {
 function clearMemberTaskDialogState() {
   memberTaskAssigneeId = null;
   editingMemberTaskId = null;
-  memberTaskChildId = null;
 }
 
 /** 担当タスクを削除 */
@@ -1628,12 +2097,55 @@ function renderProjectCards() {
   });
 }
 
-/** 一覧サイドバー：最近の変更 */
-function renderRecentActivity() {
-  const list = document.getElementById("pm-activity-list");
-  if (!list) return;
-  const activities = dashboard?.recent_activity ?? [];
-  list.innerHTML = renderActivityItems(activities, "最近の変更はありません");
+/** 一覧：発行中タスク（リーダー向け・未完了の発行バッチ） */
+function renderIssuedTasksOverview() {
+  const container = document.getElementById("pm-issued-overview-list");
+  if (!container) return;
+
+  const items = [];
+  for (const parent of dashboard?.projects ?? []) {
+    if (!parent.is_leader) continue;
+    for (const batch of parent.issued_tasks ?? []) {
+      const assignments = batch.assignments ?? [];
+      if (assignments.length === 0) continue;
+      const completedCount = assignments.filter((a) => a.is_completed).length;
+      if (completedCount >= assignments.length) continue;
+      items.push({ parent, batch });
+    }
+  }
+
+  items.sort(
+    (a, b) => (b.batch.created_at ?? 0) - (a.batch.created_at ?? 0)
+  );
+
+  const isLeaderOnAny = (dashboard?.projects ?? []).some((p) => p.is_leader);
+
+  if (items.length === 0) {
+    container.innerHTML = `<p class="pm-empty">${
+      isLeaderOnAny
+        ? "発行中のタスクはありません"
+        : "リーダーとして担当するプロジェクトがありません"
+    }</p>`;
+    return;
+  }
+
+  container.innerHTML = `<ul class="pm-issued-task-list pm-issued-task-list--overview">${items
+    .map(({ parent, batch }) =>
+      renderIssuedTaskRow(batch, parent.id, {
+        showProjectName: true,
+        parentName: parent.name,
+      })
+    )
+    .join("")}</ul>`;
+
+  container.querySelectorAll("[data-open-issued-detail]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openIssuedTaskDetailDialog(
+        btn.getAttribute("data-issued-parent"),
+        btn.getAttribute("data-open-issued-detail")
+      );
+    });
+  });
 }
 
 /** ストレージパスの表示用ラベル（グループ接頭辞を省略） */
@@ -1734,48 +2246,13 @@ async function openProjectNote(projectId) {
   );
 }
 
-/** 詳細画面の子行 */
-function renderDetailChildRow(child) {
-  const isCompleted = Boolean(child.is_completed);
-  const itemClass = isCompleted ? "pm-detail-child-row--completed" : "";
-  const nameHtml = isCompleted
-    ? `<span class="pm-detail-child-name pm-detail-child-name--done">${escapeHtml(child.name)}</span>`
-    : `<span class="pm-detail-child-name">${escapeHtml(child.name)}</span>`;
-  const storageHtml = renderProjectResourceLinks({
-    storagePath: child.storage_path,
-    noteId: child.excalidraw_note_id,
-    projectId: child.id,
-  });
-
-  return `<li class="pm-detail-child-row ${itemClass}">
-    <div class="pm-detail-child-info">
-      ${nameHtml}
-      <p class="pm-detail-child-desc">説明なし</p>
-      ${storageHtml}
-    </div>
-    <button type="button" class="pm-btn pm-btn--ghost" data-edit-child="${escapeHtml(child.id)}">タスクの編集</button>
-  </li>`;
-}
-
-/** 詳細の子リストに編集ボタンをバインド */
-function bindDetailChildEditButtons(scope) {
-  scope.querySelectorAll("[data-edit-child]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openEditChildDialog(btn.getAttribute("data-edit-child"));
-    });
-  });
-}
-
 /** 親プロジェクト詳細画面 */
 function renderDetailView(parent) {
   const breadcrumbName = document.getElementById("pm-detail-breadcrumb-name");
   const header = document.getElementById("pm-detail-header");
-  const childList = document.getElementById("pm-detail-child-list");
-  const completedWrap = document.getElementById("pm-detail-completed-wrap");
+  const projectBody = document.getElementById("pm-detail-project-body");
   const timelineList = document.getElementById("pm-detail-timeline-list");
-  const addChildBtn = document.getElementById("pm-detail-add-child");
-  if (!breadcrumbName || !header || !childList || !timelineList) return;
+  if (!breadcrumbName || !header || !projectBody || !timelineList) return;
 
   breadcrumbName.textContent = parent.name;
 
@@ -1784,17 +2261,13 @@ function renderDetailView(parent) {
   const percent = parent.progress_percent ?? 0;
   const admin = isAdmin();
 
-  if (addChildBtn) {
-    addChildBtn.hidden = !admin;
-  }
-
   header.innerHTML = `
     <div class="pm-detail-header-main">
       <h2 class="pm-detail-title">${escapeHtml(parent.name)}</h2>
       <p class="pm-detail-leader">リーダー: ${escapeHtml(leaderName)}</p>
       <p class="pm-detail-members">担当者: ${escapeHtml(membersName)}</p>
       ${renderProjectResourceLinks({
-        storagePath: null,
+        storagePath: parent.storage_path,
         noteId: parent.excalidraw_note_id,
         projectId: parent.id,
       })}
@@ -1803,7 +2276,7 @@ function renderDetailView(parent) {
     <div class="pm-detail-header-actions">
       ${
         admin
-          ? `<button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-edit-progress" data-parent-id="${escapeHtml(parent.id)}">編集</button>`
+          ? `<button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-edit-progress" data-parent-id="${escapeHtml(parent.id)}">進捗</button>`
           : ""
       }
       ${
@@ -1837,45 +2310,34 @@ function renderDetailView(parent) {
     .getElementById("pm-detail-delete-parent")
     ?.addEventListener("click", () => handleDeleteProject(parent.id));
 
+  const editBtn = document.getElementById("pm-detail-edit-project");
+  if (editBtn) {
+    editBtn.hidden = !admin;
+    editBtn.onclick = admin ? () => openEditChildDialog(parent.id) : null;
+  }
+
   bindNoteLinkHandlers(header);
 
-  const activeChildren = parent.children ?? [];
-  const completedChildren = parent.completed_children ?? [];
+  const startLabel = formatDate(parent.effective_start_date);
+  const dueLabel = parent.due_date ? formatDate(parent.due_date) : "未設定";
+  const effortLabel =
+    parent.effort_days === null || parent.effort_days === undefined
+      ? "—"
+      : `${parent.effort_days}日`;
+  const statusLabel = parent.is_completed
+    ? "達成済み"
+    : parent.is_active
+      ? "進行中"
+      : "開始前";
 
-  if (activeChildren.length === 0) {
-    childList.innerHTML = `<li class="pm-empty">進行中・開始前の子プロジェクトはありません</li>`;
-  } else {
-    childList.innerHTML = activeChildren.map(renderDetailChildRow).join("");
-    bindDetailChildEditButtons(childList);
-    bindNoteLinkHandlers(childList);
-  }
-
-  if (completedWrap) {
-    if (completedChildren.length === 0) {
-      completedWrap.innerHTML = "";
-    } else {
-      completedWrap.innerHTML = `
-        <button type="button" class="pm-completed-toggle" data-toggle-completed aria-expanded="false">
-          <span class="pm-completed-caret" aria-hidden="true">▶</span>
-          達成済みのプロジェクト（${completedChildren.length}）
-        </button>
-        <ul class="pm-detail-child-list pm-detail-completed-list" hidden>
-          ${completedChildren.map(renderDetailChildRow).join("")}
-        </ul>
-      `;
-      const toggleBtn = completedWrap.querySelector("[data-toggle-completed]");
-      const completedList = completedWrap.querySelector(".pm-detail-completed-list");
-      if (toggleBtn && completedList) {
-        toggleBtn.addEventListener("click", () => {
-          const open = completedList.hidden;
-          completedList.hidden = !open;
-          toggleBtn.setAttribute("aria-expanded", String(open));
-        });
-        bindDetailChildEditButtons(completedList);
-        bindNoteLinkHandlers(completedList);
-      }
-    }
-  }
+  projectBody.innerHTML = `
+    <dl class="pm-detail-project-meta">
+      <div><dt>状態</dt><dd>${escapeHtml(statusLabel)}</dd></div>
+      <div><dt>開始</dt><dd>${escapeHtml(startLabel)}</dd></div>
+      <div><dt>納期</dt><dd>${escapeHtml(dueLabel)}</dd></div>
+      <div><dt>工数</dt><dd>${escapeHtml(effortLabel)}</dd></div>
+    </dl>
+  `;
 
   const activities = (dashboard?.recent_activity ?? []).filter(
     (a) => a.parent_project_id === parent.id
@@ -1888,86 +2350,11 @@ function renderDetailView(parent) {
   renderIssuedTasks(parent);
 }
 
-/** 子プロジェクト1件の HTML */
-function renderChildItem(child) {
-  const assignees = child.assignees ?? [];
-  const assigneeHtml =
-    assignees.length === 0
-      ? `<span>担当未設定</span>`
-      : `<span class="pm-assignee-tags">${assignees
-          .map(
-            (a) =>
-              `<span class="pm-assignee-tag">${escapeHtml(a.display_name)}</span>`
-          )
-          .join("")}</span>`;
-
-  const startLabel = formatDate(child.effective_start_date);
-  const startNote = child.start_date ? "" : "（作成日）";
-  const dueLabel = child.due_date ? formatDate(child.due_date) : "未設定";
-  const effortLabel =
-    child.effort_days === null || child.effort_days === undefined
-      ? "—"
-      : `${child.effort_days}日`;
-
-  const urgency = child.due_urgency;
-  let itemClass = "pm-child-item";
-  if (child.is_completed) itemClass += " pm-child-item--completed";
-  else if (urgency === "overdue") itemClass += " pm-child-item--overdue";
-  else if (urgency === "warning") itemClass += " pm-child-item--warning";
-
-  const statusLabel = child.is_completed
-    ? "達成済み"
-    : child.is_active
-      ? "進行中"
-      : "開始前";
-
-  const storagePath = child.storage_path;
-  const nameHtml = storagePath
-    ? `<a class="pm-child-name-link" href="/apps/cloud-storage/?path=${encodeURIComponent(storagePath)}" title="クラウドストレージを開く">${escapeHtml(child.name)}</a>`
-    : `<span class="pm-child-name">${escapeHtml(child.name)}</span>`;
-
-  const storageLinksHtml = renderProjectResourceLinks({
-    storagePath,
-    noteId: child.excalidraw_note_id,
-    projectId: child.id,
-  });
-
-  return `<li class="${itemClass}" data-child-id="${escapeHtml(child.id)}">
-    <div class="pm-child-top">
-      ${nameHtml}
-      <div class="pm-child-actions">
-        <button type="button" class="pm-btn pm-btn--ghost" data-edit-child="${escapeHtml(child.id)}">タスクの編集</button>
-      </div>
-    </div>
-    <div class="pm-child-meta">
-      <span class="pm-child-meta-item">状態: <strong>${statusLabel}</strong></span>
-      <span class="pm-child-meta-item">担当: ${assigneeHtml}</span>
-      <span class="pm-child-meta-item">開始: <strong>${escapeHtml(startLabel)}</strong>${escapeHtml(startNote)}</span>
-      <span class="pm-child-meta-item">納期: <strong>${escapeHtml(dueLabel)}</strong></span>
-      <span class="pm-child-meta-item">工数: <strong>${escapeHtml(effortLabel)}</strong></span>
-      <span class="pm-child-meta-item pm-child-meta-item--resources">${storageLinksHtml}</span>
-    </div>
-  </li>`;
-}
-
-/** 子プロジェクトを ID で探す（達成済み含む） */
-function findChildProject(projectId) {
-  for (const parent of dashboard?.projects ?? []) {
-    const child = (parent.children ?? []).find((c) => c.id === projectId);
-    if (child) return child;
-    const done = (parent.completed_children ?? []).find(
-      (c) => c.id === projectId
-    );
-    if (done) return done;
-  }
-  return null;
-}
-
-/** 子プロジェクト編集ダイアログを開く */
+/** プロジェクト編集ダイアログを開く */
 async function openEditChildDialog(projectId) {
   if (!projectId) return;
-  const child = findChildProject(projectId);
-  if (!child) return;
+  const project = findParentProject(projectId);
+  if (!project) return;
 
   editingChildProjectId = projectId;
   editingDueProjectId = projectId;
@@ -1988,31 +2375,31 @@ async function openEditChildDialog(projectId) {
   const deleteBtn = document.getElementById("pm-edit-delete");
   if (!nameEl || !startInput || !dueInput || !dialog) return;
 
-  nameEl.textContent = child.name;
-  startInput.value = child.start_date ?? "";
-  dueInput.value = child.due_date ?? "";
+  nameEl.textContent = project.name;
+  startInput.value = project.start_date ?? "";
+  dueInput.value = project.due_date ?? "";
   updateDueEffortPreview();
 
   const admin = isAdmin();
   if (assigneeSection) {
     assigneeSection.hidden = !admin;
-    if (admin) fillAssigneeChecks(child);
+    if (admin) fillAssigneeChecks(project);
   }
   if (storageSection) {
     storageSection.hidden = !admin;
-    if (admin) await initEditStoragePicker(child);
+    if (admin) await initEditStoragePicker(project);
   }
   if (statusSection) {
     statusSection.hidden = !admin;
     if (admin && statusLabel) {
-      statusLabel.textContent = child.is_completed
+      statusLabel.textContent = project.is_completed
         ? "状態: 達成済み"
-        : child.is_active
+        : project.is_active
           ? "状態: 進行中"
           : "状態: 開始前";
     }
-    if (completeBtn) completeBtn.hidden = !admin || child.is_completed;
-    if (reopenBtn) reopenBtn.hidden = !admin || !child.is_completed;
+    if (completeBtn) completeBtn.hidden = !admin || project.is_completed;
+    if (reopenBtn) reopenBtn.hidden = !admin || !project.is_completed;
     if (deleteBtn) deleteBtn.hidden = !admin;
   }
 
@@ -2646,14 +3033,11 @@ function openProgressDialog(parentId) {
   slider.value = String(percent);
   valueLabel.textContent = `${percent}%`;
 
-  const autoPercent =
-    parent.child_total > 0
-      ? Math.round((parent.child_completed / parent.child_total) * 100)
-      : 0;
+  const autoPercent = parent.is_completed ? 100 : 0;
   if (hint) {
     hint.textContent = parent.progress_manual
-      ? `現在は手動設定です。子の達成率からの自動値は ${autoPercent}% です。`
-      : `現在は子の達成率から自動算出（${autoPercent}%）です。スライダーで上書きできます。`;
+      ? "現在は手動で進捗を設定しています。"
+      : `自動進捗は ${autoPercent}% です（達成済みなら100%）。スライダーで上書きできます。`;
   }
 
   dialog.showModal();
@@ -2881,31 +3265,14 @@ function openTaskDialog(parentId) {
   creatingTaskParentId = parentId;
   const nameEl = document.getElementById("pm-task-project-name");
   const titleEl = document.getElementById("pm-task-title");
-  const childEl = document.getElementById("pm-task-child");
   const dueEl = document.getElementById("pm-task-due");
   const assigneesEl = document.getElementById("pm-task-assignees");
   const dialog = document.getElementById("pm-task-dialog");
-  if (!nameEl || !titleEl || !childEl || !dueEl || !assigneesEl || !dialog) return;
+  if (!nameEl || !titleEl || !dueEl || !assigneesEl || !dialog) return;
 
   nameEl.textContent = parent.name;
   titleEl.value = "";
   dueEl.value = "";
-
-  const children = listChildProjectsForParent(parentId);
-  if (children.length === 0) {
-    childEl.innerHTML = `<option value="">子プロジェクトがありません</option>`;
-    childEl.disabled = true;
-  } else {
-    childEl.disabled = false;
-    childEl.innerHTML =
-      `<option value="">選択してください</option>` +
-      children
-        .map(
-          (child) =>
-            `<option value="${escapeHtml(child.id)}">${escapeHtml(child.label)}</option>`
-        )
-        .join("");
-  }
 
   const members = parent.members ?? [];
   if (members.length === 0) {
@@ -2941,22 +3308,16 @@ function openTaskDialog(parentId) {
 async function handleCreateTask() {
   if (!creatingTaskParentId) return;
   const titleEl = document.getElementById("pm-task-title");
-  const childEl = document.getElementById("pm-task-child");
   const dueEl = document.getElementById("pm-task-due");
-  if (!titleEl || !childEl) return;
+  if (!titleEl) return;
 
   const title = titleEl.value.trim();
-  const childProjectId = childEl.value;
   const assigneeIds = [
     ...document.querySelectorAll("#pm-task-assignees input[type=checkbox]:checked"),
   ].map((el) => el.value);
 
   if (!title) {
     showToast("タスクの内容を入力してください", true);
-    return;
-  }
-  if (!childProjectId) {
-    showToast("割り当て子プロジェクトを選択してください", true);
     return;
   }
   if (assigneeIds.length === 0) {
@@ -2971,7 +3332,6 @@ async function handleCreateTask() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         parent_project_id: creatingTaskParentId,
-        child_project_id: childProjectId,
         title,
         due_date: dueEl?.value || null,
         assignee_ids: assigneeIds,
@@ -3010,20 +3370,11 @@ function openIssuedTaskEditDialog(parentId, batchId) {
 
   const nameEl = document.getElementById("pm-issued-task-project-name");
   const titleEl = document.getElementById("pm-issued-task-title");
-  const childEl = document.getElementById("pm-issued-task-child");
   const dueEl = document.getElementById("pm-issued-task-due");
   const statusEl = document.getElementById("pm-issued-task-status");
   const assigneesEl = document.getElementById("pm-issued-task-assignees");
   const dialog = document.getElementById("pm-issued-task-dialog");
-  if (
-    !nameEl ||
-    !titleEl ||
-    !childEl ||
-    !dueEl ||
-    !statusEl ||
-    !assigneesEl ||
-    !dialog
-  ) {
+  if (!nameEl || !titleEl || !dueEl || !statusEl || !assigneesEl || !dialog) {
     return;
   }
 
@@ -3035,24 +3386,6 @@ function openIssuedTaskEditDialog(parentId, batchId) {
   const batchStatus =
     openAssignments.some((a) => a.status === "active") ? "active" : "pending";
   statusEl.value = batchStatus;
-
-  const children = listChildProjectsForParent(parentId);
-  if (children.length === 0) {
-    childEl.innerHTML = `<option value="">子プロジェクトがありません</option>`;
-    childEl.disabled = true;
-  } else {
-    childEl.disabled = false;
-    childEl.innerHTML =
-      `<option value="">選択してください</option>` +
-      children
-        .map(
-          (child) =>
-            `<option value="${escapeHtml(child.id)}" ${
-              child.id === batch.child_project_id ? "selected" : ""
-            }>${escapeHtml(child.label)}</option>`
-        )
-        .join("");
-  }
 
   const selectedIds = new Set(
     batch.assignments.map((assignment) => assignment.assignee.id)
@@ -3105,13 +3438,11 @@ async function handleSaveIssuedTask() {
   if (!editingIssuedBatchId) return;
 
   const titleEl = document.getElementById("pm-issued-task-title");
-  const childEl = document.getElementById("pm-issued-task-child");
   const dueEl = document.getElementById("pm-issued-task-due");
   const statusEl = document.getElementById("pm-issued-task-status");
-  if (!titleEl || !childEl || !statusEl) return;
+  if (!titleEl || !statusEl) return;
 
   const title = titleEl.value.trim();
-  const childProjectId = childEl.value;
   const assigneeIds = [
     ...document.querySelectorAll(
       "#pm-issued-task-assignees input[type=checkbox]:checked"
@@ -3123,10 +3454,6 @@ async function handleSaveIssuedTask() {
 
   if (!title) {
     showToast("タスクの内容を入力してください", true);
-    return;
-  }
-  if (!childProjectId) {
-    showToast("割り当て子プロジェクトを選択してください", true);
     return;
   }
   if (assigneeIds.length === 0) {
@@ -3146,7 +3473,6 @@ async function handleSaveIssuedTask() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
-          child_project_id: childProjectId,
           due_date: dueEl?.value || null,
           status: statusEl.value === "active" ? "active" : "pending",
           assignee_ids: assigneeIds,
@@ -3233,45 +3559,10 @@ async function handleAddParent() {
   }
 }
 
-/** 子プロジェクト追加 */
-async function handleAddChild(parentId) {
-  if (!selectedGroupId || !isAdmin() || !parentId) return;
-  const name = window.prompt("子プロジェクト名");
-  if (name === null) return;
-  const trimmed = name.trim();
-  if (!trimmed) {
-    showToast("名前を入力してください", true);
-    return;
-  }
-
-  try {
-    const response = await fetch("/api/project-management/projects", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        group_id: selectedGroupId,
-        name: trimmed,
-        parent_id: parentId,
-      }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      showToast(data.error || "作成に失敗しました", true);
-      return;
-    }
-    dashboard.projects = data.projects ?? [];
-    await loadDashboard(selectedGroupId);
-    showToast("子プロジェクトを追加しました");
-  } catch {
-    showToast("作成に失敗しました", true);
-  }
-}
-
 /** プロジェクト削除 */
 async function handleDeleteProject(projectId) {
   if (!isAdmin() || !projectId) return;
-  if (!window.confirm("このプロジェクトを削除しますか？（子も削除されます）")) {
+  if (!window.confirm("このプロジェクトを削除しますか？")) {
     return;
   }
 
@@ -3345,6 +3636,9 @@ function renderAdminSettings() {
 /** 全体を再描画 */
 function renderAll() {
   renderHeader();
+  renderOverviewHeader();
+  renderOverviewKpis();
+  renderStatusTiles();
   renderTasks();
   renderCalendar();
   renderView();
@@ -3414,19 +3708,6 @@ function bindEvents() {
     .getElementById("pm-back-from-members")
     ?.addEventListener("click", navigateToList);
 
-  document
-    .getElementById("pm-member-task-child-pick")
-    ?.addEventListener("click", openChildPickerDialog);
-
-  document
-    .getElementById("pm-member-task-child-clear")
-    ?.addEventListener("click", () => {
-      memberTaskChildId = null;
-      updateMemberTaskChildLabel();
-      const clearBtn = document.getElementById("pm-member-task-child-clear");
-      if (clearBtn) clearBtn.hidden = true;
-    });
-
   const memberTaskForm = document.getElementById("pm-member-task-form");
   memberTaskForm?.addEventListener("submit", (e) => {
     const submitter = e.submitter;
@@ -3443,12 +3724,6 @@ function bindEvents() {
     .getElementById("pm-back-to-list")
     ?.addEventListener("click", navigateToList);
 
-  document
-    .getElementById("pm-detail-add-child")
-    ?.addEventListener("click", () => {
-      if (selectedParentId) handleAddChild(selectedParentId);
-    });
-
   window.addEventListener("hashchange", () => {
     selectedParentId = parseHashParent();
     renderView();
@@ -3459,22 +3734,36 @@ function bindEvents() {
     ?.addEventListener("click", toggleCalendarEditMode);
 
   document.addEventListener("click", (e) => {
-    const popover = document.getElementById("pm-cal-member-popover");
-    if (!popover || popover.hidden) return;
     const target = e.target;
     if (!(target instanceof Element)) return;
-    if (
-      target.closest("#pm-cal-member-popover") ||
-      target.closest(".pm-cal-day-members") ||
-      target.closest(".pm-cal-day--has-members")
-    ) {
-      return;
+
+    const memberPop = document.getElementById("pm-cal-member-popover");
+    if (memberPop && !memberPop.hidden) {
+      if (
+        !target.closest("#pm-cal-member-popover") &&
+        !target.closest(".pm-cal-day-members") &&
+        !target.closest(".pm-cal-day--has-members")
+      ) {
+        closeMemberPopover();
+      }
     }
-    closeMemberPopover();
+
+    const assignPop = document.getElementById("pm-issued-day-assign-popover");
+    if (assignPop && !assignPop.hidden) {
+      if (
+        !target.closest("#pm-issued-day-assign-popover") &&
+        !target.closest(".pm-cal-day--assignable")
+      ) {
+        closeIssuedDayAssignPopover();
+      }
+    }
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeMemberPopover();
+    if (e.key === "Escape") {
+      closeMemberPopover();
+      closeIssuedDayAssignPopover();
+    }
   });
 
   document
@@ -3550,6 +3839,15 @@ function bindEvents() {
 
   bindTaskActivityCalNav("pm-task", "task");
   bindTaskActivityCalNav("pm-issued-task", "issued");
+  bindIssuedDetailCalNav();
+  document
+    .getElementById("pm-issued-day-assign-save")
+    ?.addEventListener("click", () => {
+      void saveIssuedDayAssignees();
+    });
+  document
+    .getElementById("pm-issued-day-assign-cancel")
+    ?.addEventListener("click", closeIssuedDayAssignPopover);
   document.addEventListener("mouseup", handleTaskActivityDragEnd);
 
   document.getElementById("pm-task-assignees")?.addEventListener("change", (e) => {

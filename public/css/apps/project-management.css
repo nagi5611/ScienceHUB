@@ -1,28 +1,64 @@
-/* プロジェクト管理アプリ — ダッシュボード UI（top と同一ベースカラー） */
+/* プロジェクト管理 — overview_dashboard ベースのダッシュボード UI */
 
 :root {
   --cf-orange: #f38020;
   --cf-orange-hover: #e5700f;
   --cf-orange-soft: #fff4eb;
-  --cf-bg: #ffffff;
-  --cf-surface: #f6f6f7;
-  --cf-border: #e2e5e9;
-  --cf-text: #1d2433;
-  --cf-muted: #6b7280;
-  --cf-radius: 8px;
-  --cf-radius-lg: 12px;
+
+  --brand-50: #fff4eb;
+  --brand-100: #ffe8d4;
+  --brand-500: #f38020;
+  --brand-600: #e5700f;
+  --brand-700: #c45f10;
+
+  --ink-0: #ffffff;
+  --ink-25: #fafaf8;
+  --ink-50: #f5f4f0;
+  --ink-100: #efede7;
+  --ink-200: #e8e6e1;
+  --ink-300: #d6d3cc;
+  --ink-400: #a8a29e;
+  --ink-500: #78716c;
+  --ink-600: #57534e;
+  --ink-700: #3f3d3a;
+  --ink-800: #292724;
+  --ink-900: #1a1a17;
+
+  --success-500: #0f8a5e;
+  --warn-500: #b86e16;
+  --danger-500: #b42318;
+
+  --viz-1: #f38020;
+  --viz-2: #5b8def;
+  --viz-3: #0f8a5e;
+  --viz-4: #b86e16;
+  --viz-5: #78716c;
+  --viz-6: #7da3c7;
+
+  --shadow-card: 0 1px 2px rgba(26, 26, 23, 0.04), 0 0 0 1px rgba(26, 26, 23, 0.06);
+  --shadow-pop: 0 4px 12px rgba(26, 26, 23, 0.06), 0 0 0 1px rgba(26, 26, 23, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(243, 128, 32, 0.22);
+
+  --cf-bg: var(--ink-0);
+  --cf-surface: var(--ink-50);
+  --cf-border: var(--ink-200);
+  --cf-text: var(--ink-800);
+  --cf-muted: var(--ink-500);
+  --cf-radius: 6px;
+  --cf-radius-lg: 8px;
   --cf-font: "Inter", system-ui, -apple-system, sans-serif;
-  --pm-accent: var(--cf-orange);
-  --pm-accent-soft: var(--cf-orange-soft);
-  --pm-bg: var(--cf-bg);
-  --pm-surface: var(--cf-surface);
-  --pm-border: var(--cf-border);
-  --pm-text: var(--cf-text);
-  --pm-muted: var(--cf-muted);
+
+  --pm-accent: var(--brand-500);
+  --pm-accent-soft: var(--brand-50);
+  --pm-bg: var(--ink-0);
+  --pm-surface: var(--ink-50);
+  --pm-border: var(--ink-200);
+  --pm-text: var(--ink-800);
+  --pm-muted: var(--ink-500);
   --pm-radius: var(--cf-radius-lg);
   --pm-radius-sm: var(--cf-radius);
   --pm-font: var(--cf-font);
-  --pm-progress: var(--cf-orange);
+  --pm-progress: var(--brand-500);
 }
 
 *,
@@ -34,10 +70,250 @@
 body.pm-app {
   margin: 0;
   font-family: var(--pm-font);
-  font-size: 16px;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--pm-text);
-  background: var(--pm-bg);
+  background: var(--ink-25);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pm-main {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.pm-dash {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.pm-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.pm-hero-sub {
+  margin: 0.5rem 0 0;
+  max-width: 34rem;
+}
+
+.pm-t-micro {
+  margin: 0 0 0.35rem;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.pm-t-h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.pm-t-h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--ink-800);
+}
+
+.pm-t-body {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-600);
+}
+
+.pm-t-small {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+
+.pm-pillbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--ink-0);
+  box-shadow: 0 0 0 1px rgba(26, 26, 23, 0.06);
+  color: var(--ink-500);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pm-pillbox-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success-500);
+}
+
+.pm-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.pm-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1.25rem 1.35rem;
+  background: var(--ink-0);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+}
+
+.pm-kpi-label {
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+
+.pm-kpi-value {
+  font-size: 1.75rem;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-kpi-value--good {
+  color: var(--success-500);
+}
+
+.pm-dash-panels {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.pm-dash-card {
+  background: var(--ink-0);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+  padding: 1.25rem 1.35rem;
+}
+
+.pm-dash-card--feed {
+  padding-bottom: 0.35rem;
+}
+
+.pm-phead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.pm-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+}
+
+.pm-tile {
+  border: 1px solid var(--ink-200);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+}
+
+.pm-tile-value {
+  font-size: 1.625rem;
+  line-height: 1.1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-tile-label {
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+
+.pm-tile-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.pm-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.pm-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--ink-100);
+}
+
+.pm-feed-row:first-child {
+  border-top: none;
+}
+
+.pm-feed-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pm-feed-title {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--ink-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-feed-meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-400);
+}
+
+.pm-feed-when {
+  font-size: 0.75rem;
+  color: var(--ink-400);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-feed-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(26, 26, 23, 0.05);
 }
 
 .pm-header {
@@ -110,15 +386,6 @@ body.pm-app {
   padding: 0.2rem 0.65rem;
 }
 
-.pm-main {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 2.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
 .pm-top-grid {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
@@ -150,11 +417,12 @@ body.pm-app {
 }
 
 .pm-panel {
-  border: 1.5px solid var(--pm-border);
-  border-radius: var(--pm-radius);
-  background: var(--pm-bg);
+  border-radius: 8px;
+  background: var(--ink-0);
+  box-shadow: var(--shadow-card);
   min-height: 12rem;
   padding: 1rem 1.1rem;
+  border: none;
 }
 
 .pm-panel--tasks {
@@ -513,6 +781,22 @@ body.pm-app {
   font-size: 0.75rem;
   color: var(--pm-muted);
   word-break: break-all;
+}
+
+.pm-task-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.pm-task-storage-summary {
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+}
+
+.pm-issued-detail-storage {
+  margin: 0 0 1rem;
 }
 
 .pm-task-title {
@@ -1334,18 +1618,19 @@ body.pm-app {
   text-align: left;
   width: 100%;
   padding: 1rem 1.1rem;
-  border: 1.5px solid var(--pm-border);
-  border-radius: var(--pm-radius);
-  background: var(--pm-bg);
+  border: none;
+  border-radius: 8px;
+  background: var(--ink-0);
+  box-shadow: var(--shadow-card);
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: box-shadow 0.12s, transform 0.12s;
 }
 
 .pm-project-card:hover {
-  border-color: var(--pm-accent);
-  box-shadow: 0 2px 12px rgba(243, 128, 32, 0.12);
+  box-shadow: var(--shadow-pop);
+  transform: translateY(-1px);
 }
 
 .pm-project-card:focus-visible {
@@ -1638,6 +1923,10 @@ body.pm-app {
   gap: 0.5rem;
 }
 
+.pm-issued-task-list--overview {
+  margin-top: 0.25rem;
+}
+
 .pm-issued-task-row {
   width: 100%;
   display: flex;
@@ -1684,6 +1973,89 @@ body.pm-app {
 
 .pm-issued-detail-section {
   margin-top: 0.5rem;
+}
+
+.pm-issued-detail-cal-hint {
+  margin: 0 0 0.75rem;
+}
+
+.pm-issued-detail-cal .pm-cal-day--readonly {
+  cursor: default;
+}
+
+.pm-issued-detail-cal .pm-cal-day--assignable {
+  cursor: pointer;
+}
+
+.pm-issued-detail-cal .pm-cal-day--assignable:hover {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--pm-accent) 55%, transparent);
+}
+
+.pm-cal-day-assign-empty {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.65rem;
+  color: var(--pm-muted);
+  line-height: 1.2;
+}
+
+.pm-issued-day-assign-popover {
+  position: fixed;
+  z-index: 1200;
+  min-width: 16rem;
+  max-width: min(22rem, calc(100vw - 16px));
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--pm-radius-sm);
+  border: 1px solid var(--pm-border);
+  background: var(--pm-surface);
+  box-shadow: var(--pm-shadow-lg);
+}
+
+.pm-issued-day-assign-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.pm-issued-day-assign-date {
+  margin: 0.25rem 0 0.65rem;
+  font-size: 0.8rem;
+  color: var(--pm-muted);
+}
+
+.pm-issued-day-assign-checks {
+  max-height: 12rem;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+}
+
+.pm-issued-day-assign-warnings {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--pm-radius-sm);
+  background: color-mix(in srgb, var(--warn-500, #d97706) 12%, var(--pm-surface));
+  border: 1px solid color-mix(in srgb, var(--warn-500, #d97706) 35%, transparent);
+}
+
+.pm-issued-day-assign-warn-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--warn-500, #b45309);
+}
+
+.pm-issued-day-assign-warn-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  color: var(--pm-text);
+}
+
+.pm-issued-day-assign-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .pm-issued-detail-assignments {
@@ -1836,6 +2208,38 @@ body.pm-app {
   color: var(--pm-muted);
 }
 
+.pm-detail-project-body {
+  padding: 0 0 0.5rem;
+}
+
+.pm-detail-project-meta {
+  display: grid;
+  gap: 0.75rem 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  margin: 0;
+}
+
+.pm-detail-project-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pm-detail-project-meta dt {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--pm-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pm-detail-project-meta dd {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--pm-text);
+}
+
 .pm-storage-link {
   display: inline-flex;
   align-items: center;
@@ -1973,9 +2377,10 @@ body.pm-app {
 }
 
 .pm-member-card {
-  border: 1.5px solid var(--pm-border);
-  border-radius: var(--pm-radius);
-  background: var(--pm-bg);
+  border: none;
+  border-radius: 8px;
+  background: var(--ink-0);
+  box-shadow: var(--shadow-card);
   padding: 0.85rem 0.9rem 1rem;
   display: flex;
   flex-direction: column;
@@ -2173,6 +2578,10 @@ body.pm-app {
 }
 
 @media (max-width: 800px) {
+  .pm-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .pm-top-grid {
     grid-template-columns: 1fr;
   }

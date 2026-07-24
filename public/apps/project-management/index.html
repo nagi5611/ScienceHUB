@@ -29,7 +29,23 @@
   </header>
 
   <main class="pm-main" id="app-main" hidden>
-    <div id="pm-list-view">
+    <div id="pm-list-view" class="pm-dash">
+      <header class="pm-hero" aria-label="ダッシュボード概要">
+        <div class="pm-hero-text">
+          <p class="pm-t-micro" id="pm-hero-eyebrow">グループ</p>
+          <h2 class="pm-t-h1" id="pm-hero-title">プロジェクト管理</h2>
+          <p class="pm-t-body pm-hero-sub">タスク・プロジェクト・活動予定をひと目で確認できます。</p>
+        </div>
+        <span class="pm-pillbox" id="pm-updated-pill">
+          <span class="pm-pillbox-dot" aria-hidden="true"></span>
+          <span id="pm-updated-text">更新 —</span>
+        </span>
+      </header>
+
+      <div class="pm-kpi-row" id="pm-kpi-row" aria-label="サマリー"></div>
+
+      <div class="pm-dash-panels pm-dash-panels--single" id="pm-status-tiles-wrap"></div>
+
       <div class="pm-top-grid">
         <section class="pm-section" aria-labelledby="pm-tasks-heading">
           <div class="pm-tasks-toolbar">
@@ -116,14 +132,20 @@
             </button>
           </div>
         </div>
-        <div class="pm-projects-layout">
-          <div class="pm-projects-main">
-            <div class="pm-project-cards" id="pm-project-cards"></div>
+        <div class="pm-projects-main">
+          <div class="pm-project-cards" id="pm-project-cards"></div>
+        </div>
+      </section>
+
+      <section class="pm-section" aria-labelledby="pm-issued-overview-heading">
+        <div class="pm-dash-card pm-dash-card--feed">
+          <div class="pm-phead">
+            <div>
+              <h2 class="pm-t-h3" id="pm-issued-overview-heading">発行中タスク一覧</h2>
+              <p class="pm-t-small">リーダーとして発行した、未完了のタスク</p>
+            </div>
           </div>
-          <aside class="pm-activity-sidebar" aria-labelledby="pm-activity-heading">
-            <h3 class="pm-activity-title" id="pm-activity-heading">最近の変更</h3>
-            <ul class="pm-activity-list" id="pm-activity-list"></ul>
-          </aside>
+          <div id="pm-issued-overview-list"></div>
         </div>
       </section>
 
@@ -155,13 +177,12 @@
 
       <div class="pm-detail-body">
         <div class="pm-detail-primary">
-          <section class="pm-detail-children" aria-labelledby="pm-detail-children-heading">
+          <section class="pm-detail-project" aria-labelledby="pm-detail-project-heading">
             <div class="pm-detail-section-head">
-              <h2 class="pm-section-title" id="pm-detail-children-heading">子プロジェクト</h2>
-              <button type="button" class="pm-btn pm-btn--primary" id="pm-detail-add-child" hidden>+ 追加</button>
+              <h2 class="pm-section-title" id="pm-detail-project-heading">プロジェクト情報</h2>
+              <button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-edit-project" hidden>編集</button>
             </div>
-            <ul class="pm-detail-child-list" id="pm-detail-child-list"></ul>
-            <div id="pm-detail-completed-wrap"></div>
+            <div class="pm-detail-project-body" id="pm-detail-project-body"></div>
           </section>
 
           <section class="pm-detail-issued" id="pm-detail-issued-section" hidden aria-labelledby="pm-detail-issued-heading">
@@ -179,7 +200,7 @@
       </div>
     </div>
 
-    <div id="pm-members-view" class="pm-members-view" hidden>
+    <div id="pm-members-view" class="pm-members-view pm-dash" hidden>
       <div class="pm-members-head">
         <div class="pm-members-head-text">
           <h2 class="pm-section-title">メンバー全員のタスク一覧</h2>
@@ -206,9 +227,21 @@
     <ul class="pm-cal-member-popover-list" id="pm-cal-member-popover-list"></ul>
   </div>
 
+  <div class="pm-issued-day-assign-popover" id="pm-issued-day-assign-popover" hidden role="dialog" aria-labelledby="pm-issued-day-assign-title">
+    <p class="pm-issued-day-assign-title" id="pm-issued-day-assign-title">活動日の担当者</p>
+    <p class="pm-issued-day-assign-date" id="pm-issued-day-assign-date"></p>
+    <div class="pm-assignee-checks pm-issued-day-assign-checks" id="pm-issued-day-assign-checks"></div>
+    <div class="pm-issued-day-assign-warnings" id="pm-issued-day-assign-warnings" hidden role="alert"></div>
+    <p class="pm-field-hint">この日に作業する担当者を選びます（グループ管理者のみ変更可）。</p>
+    <div class="pm-issued-day-assign-actions">
+      <button type="button" class="pm-btn pm-btn--primary" id="pm-issued-day-assign-save">保存</button>
+      <button type="button" class="pm-btn pm-btn--ghost" id="pm-issued-day-assign-cancel">キャンセル</button>
+    </div>
+  </div>
+
   <dialog class="pm-dialog pm-dialog--wide" id="pm-edit-child-dialog">
     <form method="dialog" class="pm-dialog-form" id="pm-edit-child-form">
-      <h3 class="pm-dialog-title">タスクの編集</h3>
+      <h3 class="pm-dialog-title">プロジェクトの編集</h3>
       <p class="pm-dialog-sub" id="pm-edit-child-name"></p>
 
       <section class="pm-edit-section" aria-labelledby="pm-edit-schedule-heading">
@@ -298,25 +331,17 @@
         <option value="pending">未進行</option>
         <option value="active">進行中</option>
       </select>
-      <label class="pm-field-label">子プロジェクト先</label>
-      <div class="pm-member-child-row">
-        <span class="pm-member-child-selected" id="pm-member-task-child-label">なし（未設定）</span>
-        <button type="button" class="pm-btn pm-btn--ghost" id="pm-member-task-child-pick">選択</button>
-        <button type="button" class="pm-btn pm-btn--ghost" id="pm-member-task-child-clear" hidden>解除</button>
-      </div>
+      <section class="pm-edit-section pm-task-storage-field" aria-labelledby="pm-member-task-storage-heading">
+        <h4 class="pm-edit-section-title" id="pm-member-task-storage-heading">クラウドストレージ</h4>
+        <div class="pm-task-storage-summary" id="pm-member-task-storage-summary">フォルダ: 未設定</div>
+        <div class="pm-task-storage-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" id="pm-member-task-storage-pick">フォルダを選択</button>
+          <button type="button" class="pm-btn pm-btn--ghost" id="pm-member-task-storage-clear">紐づけ解除</button>
+        </div>
+      </section>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
         <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-member-task-save">追加</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog class="pm-dialog" id="pm-child-picker-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-child-picker-form">
-      <h3 class="pm-dialog-title">子プロジェクトを選択</h3>
-      <div class="pm-child-picker-list" id="pm-child-picker-list"></div>
-      <div class="pm-dialog-actions">
-        <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
       </div>
     </form>
   </dialog>
@@ -339,6 +364,21 @@
     <div class="pm-dialog-form">
       <h3 class="pm-dialog-title" id="pm-issued-detail-title"></h3>
       <p class="pm-dialog-sub" id="pm-issued-detail-meta"></p>
+      <div class="pm-issued-detail-storage" id="pm-issued-detail-storage" hidden></div>
+      <section class="pm-issued-detail-section" aria-labelledby="pm-issued-detail-cal-heading">
+        <h4 class="pm-edit-section-title" id="pm-issued-detail-cal-heading">活動日カレンダー</h4>
+        <p class="pm-field-hint pm-issued-detail-cal-hint">色付きの日がタスクの活動日です。点はその日に割り当てた担当者です。</p>
+        <div class="pm-task-activity-cal pm-issued-detail-cal" id="pm-issued-detail-activity-cal">
+          <div class="pm-cal-toolbar pm-task-activity-cal-toolbar">
+            <button type="button" class="pm-cal-nav" id="pm-issued-detail-cal-prev" aria-label="前月">‹</button>
+            <span class="pm-cal-month-label" id="pm-issued-detail-cal-month-text"></span>
+            <button type="button" class="pm-cal-nav" id="pm-issued-detail-cal-next" aria-label="次月">›</button>
+            <button type="button" class="pm-cal-today" id="pm-issued-detail-cal-today">今月</button>
+          </div>
+          <div class="pm-cal-weekdays pm-task-activity-weekdays" id="pm-issued-detail-cal-weekdays"></div>
+          <div class="pm-cal-grid pm-task-activity-grid pm-issued-detail-cal-grid" id="pm-issued-detail-cal-grid"></div>
+        </div>
+      </section>
       <section class="pm-issued-detail-section" aria-labelledby="pm-issued-detail-members-heading">
         <h4 class="pm-edit-section-title" id="pm-issued-detail-members-heading">割り当てメンバー</h4>
         <ul class="pm-issued-detail-assignments" id="pm-issued-detail-assignments"></ul>
@@ -357,10 +397,6 @@
       <p class="pm-dialog-sub" id="pm-issued-task-project-name"></p>
       <label class="pm-field-label" for="pm-issued-task-title">タスクの内容</label>
       <input type="text" id="pm-issued-task-title" class="pm-field-input" maxlength="200" required>
-      <label class="pm-field-label" for="pm-issued-task-child">割り当て子プロジェクト</label>
-      <select id="pm-issued-task-child" class="pm-field-select" required>
-        <option value="">選択してください</option>
-      </select>
       <label class="pm-field-label" for="pm-issued-task-due">タスク納期</label>
       <input type="date" id="pm-issued-task-due" class="pm-field-input">
       <label class="pm-field-label">タスクの活動日</label>
@@ -384,6 +420,14 @@
       <div class="pm-assignee-checks" id="pm-issued-task-assignees"></div>
       <p class="pm-field-meta" id="pm-issued-task-effort">合計割り当て工数: —</p>
       <p class="pm-field-hint">完了済みの担当者は変更できません。未完了の担当者のみ解除できます。</p>
+      <section class="pm-edit-section pm-task-storage-field" aria-labelledby="pm-issued-task-storage-heading">
+        <h4 class="pm-edit-section-title" id="pm-issued-task-storage-heading">クラウドストレージ</h4>
+        <div class="pm-task-storage-summary" id="pm-issued-task-storage-summary">フォルダ: 未設定</div>
+        <div class="pm-task-storage-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" id="pm-issued-task-storage-pick">フォルダを選択</button>
+          <button type="button" class="pm-btn pm-btn--ghost" id="pm-issued-task-storage-clear">紐づけ解除</button>
+        </div>
+      </section>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
         <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-issued-task-save">保存</button>
@@ -397,10 +441,6 @@
       <p class="pm-dialog-sub" id="pm-task-project-name"></p>
       <label class="pm-field-label" for="pm-task-title">タスクの内容</label>
       <input type="text" id="pm-task-title" class="pm-field-input" maxlength="200" required placeholder="やること">
-      <label class="pm-field-label" for="pm-task-child">割り当て子プロジェクト</label>
-      <select id="pm-task-child" class="pm-field-select" required>
-        <option value="">選択してください</option>
-      </select>
       <label class="pm-field-label" for="pm-task-due">タスク納期</label>
       <input type="date" id="pm-task-due" class="pm-field-input">
       <label class="pm-field-label">タスクの活動日</label>
@@ -418,12 +458,33 @@
       <label class="pm-field-label">担当者（複数可）</label>
       <div class="pm-assignee-checks" id="pm-task-assignees"></div>
       <p class="pm-field-meta" id="pm-task-effort">合計割り当て工数: —</p>
-      <p class="pm-field-hint">親プロジェクトの担当者から1人以上選択してください。</p>
+      <p class="pm-field-hint">プロジェクトの担当者から1人以上選択してください。</p>
+      <section class="pm-edit-section pm-task-storage-field" aria-labelledby="pm-task-storage-heading">
+        <h4 class="pm-edit-section-title" id="pm-task-storage-heading">クラウドストレージ</h4>
+        <div class="pm-task-storage-summary" id="pm-task-storage-summary">フォルダ: 未設定</div>
+        <div class="pm-task-storage-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" id="pm-task-storage-pick">フォルダを選択</button>
+          <button type="button" class="pm-btn pm-btn--ghost" id="pm-task-storage-clear">紐づけ解除</button>
+        </div>
+      </section>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
         <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-task-save">発行</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-storage-picker-dialog">
+    <div class="pm-dialog-form pm-dialog-form--tall">
+      <h3 class="pm-dialog-title">フォルダを選択</h3>
+      <div class="pm-storage-breadcrumb" id="pm-storage-modal-breadcrumb"></div>
+      <div class="pm-storage-folders" id="pm-storage-modal-folders"></div>
+      <p class="pm-storage-selected" id="pm-storage-modal-selected">選択中: —</p>
+      <div class="pm-dialog-actions">
+        <button type="button" class="pm-btn pm-btn--ghost" id="pm-storage-modal-cancel">キャンセル</button>
+        <button type="button" class="pm-btn pm-btn--primary" id="pm-storage-modal-confirm">このフォルダを選択</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="/apps/project-management/app.js" type="module"></script>
