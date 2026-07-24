@@ -2,6 +2,13 @@
 
 ScienceHUB の **シミュレーション管理 → FDSテスト** から、`.fds` ファイルを AWS EC2（既定 `t3.micro`）で試験実行するためのセットアップ手順です。
 
+## AWS CLI（先にここ）
+
+ローカルで `aws` コマンドが使える必要があります（Windows では未インストールのことが多いです）。
+
+- **手順:** [aws-cli-setup.md](./aws-cli-setup.md)（winget / 公式 MSI、`aws configure`、リージョン `ap-northeast-1`、接続確認）
+- **検証（PowerShell）:** `.\verify-aws-cli.ps1`（任意で `-Profile sciencehub-fds`）
+
 ## 概要
 
 1. 管理画面で `.fds` を選択して「テスト実行を開始」
@@ -23,7 +30,7 @@ AMI 作成は一度だけ。実行時のみ課金されます。
 ## 前提
 
 - AWS アカウント
-- AWS CLI (`aws`) がローカルで使えること
+- AWS CLI (`aws`) がローカルで使えること（[aws-cli-setup.md](./aws-cli-setup.md)）
 - ScienceHUB の R2 presigned URL 設定済み（`R2_ACCESS_KEY_ID` など）
 - 本番 URL が EC2 から到達可能（`OAUTH_REDIRECT_BASE` またはデプロイ URL）
 
@@ -62,7 +69,7 @@ sudo bash build-ami.sh
 
 3. 一時インスタンスは終了
 
-AMI 内に `/opt/fds/bin/fds` があることが必須です。
+AMI 内に `/opt/fds/bin/fds` があることが必須です。FDS 6.9.x は `Build/ompi_gnu_linux/make_fds.sh` でビルドします（古い `build_fds.sh` はありません）。リンクエラーで MKL が必要な場合は Intel oneAPI MKL を入れて `MKLROOT` を設定してから再実行してください。
 
 ## 2. Cloudflare / Wrangler シークレット
 
@@ -113,12 +120,53 @@ npm run db:migrate:remote  # 本番
 | ずっと「実行中」 | EC2 のシステムログ（user-data）。FDS バイナリパス |
 | コールバック失敗 | `FDS_JOB_CALLBACK_SECRET`、`OAUTH_REDIRECT_BASE`、SG の 443 アウトバウンド |
 | 10時間で止まる | 仕様（`FDS_JOB_MAX_RUNTIME_HOURS = 10`） |
+| `gfortran: fatal error: Killed` | **メモリ不足（OOM）**。t3.micro + `make -j4` が典型。swap を足して `make -j1` で再開（下記） |
+
+### FDS ビルドが OOM で Killed されたとき
+
+`make_fds.sh` は内部で **`-j4`** のため 1GB RAM では落ちやすい。
+
+**いまの EC2 で続きから（clone 済みなら）:**
+
+```bash
+sudo fallocate -l 2G /swapfile-fds-build || sudo dd if=/dev/zero of=/swapfile-fds-build bs=1M count=2048
+sudo chmod 600 /swapfile-fds-build && sudo mkswap /swapfile-fds-build && sudo swapon /swapfile-fds-build
+free -h
+
+cd /tmp/fds-build/fds/Build/ompi_gnu_linux
+export PATH="/usr/lib64/openmpi/bin:$PATH"
+make -j1 VPATH="../../Source" -f ../makefile ompi_gnu_linux
+```
+
+完了後、最新の `build-ami.sh` の「配置」以降を手動で実行するか、バイナリができていれば AMI 作成だけ進めてよい。
+
+**別案:** AMI 作業だけ **t3.small（2GB）** に一時変更すると swap なしでも楽。
+
+### build-ami.sh の1行目が壊れたとき
+
+`sudo bash build.sh` でも **1行目はコメントではなく実行される**（先頭が `#` だけならコメント）。`ru#!/usr/bin/env` のように `#` の前にゴミがあると、その文字列がコマンドとして実行されて失敗します。
+
+**直し方（EC2 上）:**
+
+```bash
+head -1 build.sh | od -c   # 先頭に余計な文字がないか確認
+
+printf '%s\n' '#!/bin/bash' > /tmp/h1
+tail -n +2 build-ami.sh >> /tmp/h1    # 古い build.sh なら build.sh に読み替え
+mv /tmp/h1 build-ami.sh
+chmod +x build-ami.sh
+sudo bash build-ami.sh
+```
+
+Windows からコピーした場合は **LF 改行**で再アップロードするか、リポジトリから `infra/fds-test/build-ami.sh` をそのまま `scp` してください。名前は `build-ami.sh` のままが分かりやすいです（`build.sh` にリネームしただけなら中身が古いこともあります）。
 
 ## ファイル構成
 
 ```
 infra/fds-test/
   README.md           # このファイル
+  aws-cli-setup.md    # AWS CLI インストール・初回設定
+  verify-aws-cli.ps1  # CLI / STS 検証（Windows）
   iam-policy.json     # IAM 最小権限
   setup-aws.sh        # SG / サブネット補助
   build-ami.sh        # FDS ビルド（AMI 作成前）
