@@ -2,6 +2,8 @@
  * ScienceHUB 連携 — 予約アプリ用認証・プロフィール
  */
 
+import { applySimPhoneAccountStatus } from "/js/sim-phone-profile.js";
+
 let hubUser = null;
 
 /** アプリアクセスを確認する */
@@ -106,6 +108,9 @@ export function updateAuthHeader() {
   if (label && hubUser) {
     label.textContent = hubUser.display_name || hubUser.username;
   }
+  applySimPhoneAccountStatus(document.getElementById("profile-sim-phone-status"), hubUser, {
+    variant: "app",
+  });
 }
 
 /** 予約ページの認証初期化 */
@@ -141,6 +146,9 @@ export function openProfileGateModal() {
   if (hubUser?.student_name) {
     document.getElementById("profile-student-name").value = hubUser.student_name;
   }
+  applySimPhoneAccountStatus(document.getElementById("profile-sim-phone-status"), hubUser, {
+    variant: "app",
+  });
 }
 
 /** プロフィール登録モーダルを閉じる */

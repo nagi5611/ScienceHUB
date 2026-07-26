@@ -63,6 +63,64 @@ function readXmlTag(xml: string, tag: string): string | null {
   return match?.[1] ?? null;
 }
 
+const EC2_IMAGE_STATES = new Set(["pending", "available", "failed", "invalid", "transient", "deleted"]);
+
+/** Returns the outermost EC2 Query API <item> block containing a marker string. */
+function extractEc2XmlItemBlock(xml: string, marker: string): string | null {
+  const markerPos = xml.indexOf(marker);
+  if (markerPos === -1) return null;
+
+  let start = -1;
+  let depth = 0;
+  for (let i = markerPos; i >= 0; i--) {
+    if (xml.startsWith("</item>", i)) depth += 1;
+    else if (xml.startsWith("<item>", i)) {
+      if (depth === 0) {
+        start = i;
+        break;
+      }
+      depth -= 1;
+    }
+  }
+  if (start === -1) return null;
+
+  depth = 0;
+  for (let i = start; i < xml.length; i++) {
+    if (xml.startsWith("<item>", i)) depth += 1;
+    else if (xml.startsWith("</item>", i)) {
+      depth -= 1;
+      if (depth === 0) {
+        return xml.slice(start, i + "</item>".length);
+      }
+    }
+  }
+  return null;
+}
+
+/** Reads AMI state from a DescribeImages item XML block. */
+function readEc2ImageState(itemXml: string): string {
+  const imageStateValue = readXmlTag(itemXml, "imageState");
+  if (imageStateValue && EC2_IMAGE_STATES.has(imageStateValue)) {
+    return imageStateValue;
+  }
+
+  const imageStateMatch = itemXml.match(
+    /<imageState>[\s\S]*?<name>([^<]+)<\/name>[\s\S]*?<\/imageState>/
+  );
+  if (imageStateMatch?.[1] && EC2_IMAGE_STATES.has(imageStateMatch[1])) {
+    return imageStateMatch[1];
+  }
+
+  for (const match of itemXml.matchAll(/<state>([^<]+)<\/state>/g)) {
+    const value = match[1];
+    if (value && EC2_IMAGE_STATES.has(value)) {
+      return value;
+    }
+  }
+
+  return readXmlTag(itemXml, "state") ?? "unknown";
+}
+
 /** Sends a signed EC2 Query API request. */
 async function ec2Request(env: AwsEc2Env, params: Record<string, string>): Promise<string> {
   const body = new URLSearchParams({
@@ -117,6 +175,82 @@ export async function runEc2Instance(env: AwsEc2Env, input: RunEc2InstanceInput)
   return instanceId;
 }
 
+/** Describes an AMI by ID (image state: pending | available | failed). */
+export async function describeEc2Image(
+  env: AwsEc2Env,
+  imageId: string
+): Promise<{ imageId: string; state: string; stateReason: string | null } | null> {
+  const xml = await ec2Request(env, {
+    Action: "DescribeImages",
+    "ImageId.1": imageId,
+  });
+
+  const item = extractEc2XmlItemBlock(xml, `<imageId>${imageId}</imageId>`);
+  if (!item) return null;
+
+  const state = readEc2ImageState(item);
+  const reasonMatch = item.match(/<stateReason>[\s\S]*?<message>([^<]*)<\/message>/);
+  return {
+    imageId,
+    state,
+    stateReason: reasonMatch?.[1]?.trim() || null,
+  };
+}
+
+const AMI_WAIT_INTERVAL_MS = 5000;
+
+/** Thrown when RunInstances cannot proceed because the AMI is not yet available. */
+export class Ec2AmiNotReadyError extends Error {
+  readonly code = "AMI_NOT_READY" as const;
+  readonly amiId: string;
+  readonly amiState: string;
+
+  constructor(amiId: string, amiState: string) {
+    super(
+      `AMI '${amiId}' はまだ ${amiState} です。EC2 コンソールで「利用可能」になるまで待ってから再実行してください（通常 2〜10 分）。`
+    );
+    this.name = "Ec2AmiNotReadyError";
+    this.amiId = amiId;
+    this.amiState = amiState;
+  }
+}
+
+/** Waits until an AMI is available or throws. */
+export async function waitForEc2AmiAvailable(
+  env: AwsEc2Env,
+  imageId: string,
+  options: {
+    maxWaitMs?: number;
+    onStatus?: (state: string) => void;
+  } = {}
+): Promise<void> {
+  const maxWaitMs = options.maxWaitMs ?? 20_000;
+  const deadline = Date.now() + maxWaitMs;
+
+  while (Date.now() < deadline) {
+    const image = await describeEc2Image(env, imageId);
+    const state = image?.state ?? "unknown";
+    options.onStatus?.(state);
+
+    if (state === "available") {
+      return;
+    }
+    if (state === "failed" || state === "invalid") {
+      throw new Error(`AMI '${imageId}' は ${state} のため使用できません。AMI を作り直してください。`);
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(AMI_WAIT_INTERVAL_MS, remaining)));
+  }
+
+  const final = await describeEc2Image(env, imageId);
+  const finalState = final?.state ?? "unknown";
+  if (finalState !== "available") {
+    throw new Ec2AmiNotReadyError(imageId, finalState);
+  }
+}
+
 /** Describes an EC2 instance by ID. */
 export async function describeEc2Instance(
   env: AwsEc2Env,
@@ -127,14 +261,9 @@ export async function describeEc2Instance(
     "InstanceId.1": instanceId,
   });
 
-  const itemMatch = xml.match(
-    new RegExp(
-      `<item>[\\s\\S]*?<instanceId>${instanceId}</instanceId>[\\s\\S]*?</item>`
-    )
-  );
-  if (!itemMatch) return null;
+  const item = extractEc2XmlItemBlock(xml, `<instanceId>${instanceId}</instanceId>`);
+  if (!item) return null;
 
-  const item = itemMatch[0];
   const stateMatch = item.match(/<instanceState>[\s\S]*?<name>([^<]+)<\/name>[\s\S]*?<\/instanceState>/);
   return {
     instanceId,

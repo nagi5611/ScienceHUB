@@ -1,5 +1,5 @@
 /**
- * プロジェクト管理 — グループ単位の管理者判定・親子プロジェクト・活動可能日
+ * プロジェクト管理 — グループ単位の管理者判定・プロジェクト・活動可能日
  */
 
 import { createId, now } from "./types";
@@ -175,12 +175,16 @@ export interface PmProject {
   issued_tasks: PmIssuedTaskBatch[];
 }
 
+/** @deprecated PmProject を使用 */
 export type PmParentProject = PmProject;
 
 export type PmActivityAction =
+  | "created_project"
   | "created_parent"
   | "created_child"
+  | "completed_project"
   | "completed_child"
+  | "reopened_project"
   | "reopened_child"
   | "deleted_project"
   | "created_task"
@@ -219,7 +223,7 @@ export interface PmDashboard {
   tasks: PmTask[];
   /** 現ユーザーに振られた達成済みタスク（直近） */
   completed_tasks: PmTask[];
-  projects: PmParentProject[];
+  projects: PmProject[];
   members: PmMember[];
   availability: PmAvailabilityEntry[];
   /** 表示月のグループメンバー活動可能日（閲覧用） */
@@ -437,18 +441,25 @@ async function isHubAdminUser(db: D1Database, userId: string): Promise<boolean> 
   return userHasAdminRole(db, userId);
 }
 
-/** グループの管理者資格の最低 weight を取得 */
-export async function getMinEligibleWeight(
+/** グループの管理者設定行を取得 */
+async function getPmAdminSettingsRow(
   db: D1Database,
   groupId: string
-): Promise<number> {
-  const row = await db
+): Promise<AdminSettingsRow | null> {
+  return db
     .prepare(
       "SELECT group_id, min_eligible_weight FROM pm_admin_settings WHERE group_id = ?"
     )
     .bind(groupId)
     .first<AdminSettingsRow>();
+}
 
+/** グループの管理者資格の最低 weight を取得 */
+export async function getMinEligibleWeight(
+  db: D1Database,
+  groupId: string
+): Promise<number> {
+  const row = await getPmAdminSettingsRow(db, groupId);
   return row?.min_eligible_weight ?? 0;
 }
 
@@ -642,6 +653,7 @@ async function toGroupSummary(
     membership.group_id,
     weight
   );
+  const settings = await getPmAdminSettingsRow(db, membership.group_id);
 
   return {
     id: membership.group_id,
@@ -657,7 +669,7 @@ async function toGroupSummary(
     },
     is_admin: admin.isAdmin,
     max_weight: admin.maxWeight,
-    min_eligible_weight: admin.minEligibleWeight,
+    min_eligible_weight: settings?.min_eligible_weight ?? admin.minEligibleWeight,
   };
 }
 
@@ -721,7 +733,7 @@ async function listAssigneesByProjects(
   return map;
 }
 
-/** 親プロジェクトのリーダー一覧を取得 */
+/** プロジェクトのリーダー一覧を取得 */
 async function listLeadersByProjects(
   db: D1Database,
   projectIds: string[]
@@ -753,7 +765,7 @@ async function listLeadersByProjects(
   return map;
 }
 
-/** 親プロジェクトの担当者一覧 */
+/** プロジェクトの担当者一覧 */
 async function listParentMembersByProjects(
   db: D1Database,
   parentProjectIds: string[]
@@ -785,7 +797,7 @@ async function listParentMembersByProjects(
   return map;
 }
 
-/** 親プロジェクトのリーダー ID 集合 */
+/** プロジェクトのリーダー ID 集合 */
 async function listParentLeaderIds(
   db: D1Database,
   parentProjectId: string
@@ -995,7 +1007,7 @@ export async function listGroupOpenTasks(
   return (result.results ?? []).map((row) => toPmTask(row, today));
 }
 
-/** 親プロジェクトごとの発行タスクをバッチ単位で取得 */
+/** プロジェクトごとの発行タスクをバッチ単位で取得 */
 async function listIssuedTasksByParents(
   db: D1Database,
   parentIds: string[]
@@ -1484,7 +1496,7 @@ async function assertCanManageIssuedBatch(
 
   const leaderIds = await listParentLeaderIds(db, parentProjectId);
   if (!leaderIds.has(userId)) {
-    throw new Error("親プロジェクトのリーダーのみ発行タスクを編集できます");
+    throw new Error("プロジェクトのリーダーのみ発行タスクを編集できます");
   }
 }
 
@@ -1521,7 +1533,7 @@ async function taskMutationResult(
   groupId: string,
   userId: string
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -1979,12 +1991,12 @@ export async function listProjects(
   return items;
 }
 
-/** 親または子プロジェクトを作成（管理者のみ） */
+/** プロジェクトを作成（管理者のみ） */
 export async function createProject(
   db: D1Database,
   userId: string,
-  input: { group_id: string; name: string; parent_id?: string | null }
-): Promise<PmParentProject[]> {
+  input: { group_id: string; name: string }
+): Promise<PmProject[]> {
   const name = input.name.trim();
   if (!name) {
     throw new Error("プロジェクト名を入力してください");
@@ -1999,10 +2011,6 @@ export async function createProject(
     input.group_id
   );
   await assertGroupAdmin(db, userId, membership);
-
-  if (input.parent_id?.trim()) {
-    throw new Error("子プロジェクトは廃止されました");
-  }
 
   const posRow = await db
     .prepare(
@@ -2030,7 +2038,7 @@ export async function createProject(
     group_id: input.group_id,
     parent_project_id: id,
     actor_user_id: userId,
-    action: "created_parent",
+    action: "created_project",
     target_type: "parent",
     target_id: id,
     target_name: name,
@@ -2039,12 +2047,12 @@ export async function createProject(
   return listProjects(db, input.group_id, userId);
 }
 
-/** プロジェクトを削除（管理者のみ・子も CASCADE） */
+/** プロジェクトを削除（管理者のみ） */
 export async function deleteProject(
   db: D1Database,
   userId: string,
   projectId: string
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2066,10 +2074,10 @@ export async function deleteProject(
 
   await recordActivity(db, {
     group_id: project.group_id,
-    parent_project_id: project.parent_id ?? project.id,
+    parent_project_id: project.id,
     actor_user_id: userId,
     action: "deleted_project",
-    target_type: project.parent_id ? "child" : "parent",
+    target_type: "parent",
     target_id: projectId,
     target_name: project.name,
   });
@@ -2083,15 +2091,15 @@ export async function deleteProject(
 }
 
 /**
- * 子プロジェクトの開始予定日・納期を更新。
+ * プロジェクトの開始予定日・納期を更新。
  * グループメンバーなら誰でも編集可（担当外も可）。
  */
-export async function updateChildSchedule(
+export async function updateProjectSchedule(
   db: D1Database,
   userId: string,
   projectId: string,
   input: { due_date?: string | null; start_date?: string | null }
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2151,25 +2159,28 @@ export async function updateChildSchedule(
   return listProjects(db, project.group_id, userId);
 }
 
-/** @deprecated updateChildSchedule を使用 */
+/** @deprecated updateProjectSchedule を使用 */
+export const updateChildSchedule = updateProjectSchedule;
+
+/** @deprecated updateProjectSchedule を使用 */
 export async function updateChildDueDate(
   db: D1Database,
   userId: string,
   projectId: string,
   dueDate: string | null
-): Promise<PmParentProject[]> {
-  return updateChildSchedule(db, userId, projectId, { due_date: dueDate });
+): Promise<PmProject[]> {
+  return updateProjectSchedule(db, userId, projectId, { due_date: dueDate });
 }
 
 /**
- * 子プロジェクトを達成済み／未達成に切り替え（管理者のみ）。
+ * プロジェクトを達成済み／未達成に切り替え（管理者のみ）。
  */
-export async function setChildCompleted(
+export async function setProjectCompleted(
   db: D1Database,
   userId: string,
   projectId: string,
   completed: boolean
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2202,16 +2213,19 @@ export async function setChildCompleted(
 
   await recordActivity(db, {
     group_id: project.group_id,
-    parent_project_id: project.parent_id,
+    parent_project_id: project.id,
     actor_user_id: userId,
-    action: completed ? "completed_child" : "reopened_child",
-    target_type: "child",
+    action: completed ? "completed_project" : "reopened_project",
+    target_type: "parent",
     target_id: projectId,
     target_name: project.name,
   });
 
   return listProjects(db, project.group_id, userId);
 }
+
+/** @deprecated setProjectCompleted を使用 */
+export const setChildCompleted = setProjectCompleted;
 
 /** グループ内クラウドストレージの論理パスを正規化（空は null） */
 async function normalizeGroupStoragePath(
@@ -2240,15 +2254,15 @@ async function normalizeGroupStoragePath(
 }
 
 /**
- * 子プロジェクトにグループストレージのディレクトリを紐づける（管理者のみ）。
+ * プロジェクトにグループストレージのディレクトリを紐づける（管理者のみ）。
  * path は論理パス（例: g/{groupSlug}/docs）。null で解除。
  */
-export async function setChildStoragePath(
+export async function setProjectStoragePath(
   db: D1Database,
   userId: string,
   projectId: string,
   storagePath: string | null
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2288,6 +2302,9 @@ export async function setChildStoragePath(
   return listProjects(db, project.group_id, userId);
 }
 
+/** @deprecated setProjectStoragePath を使用 */
+export const setChildStoragePath = setProjectStoragePath;
+
 /**
  * グループのストレージルート論理パスを返す。
  */
@@ -2306,15 +2323,15 @@ export async function getGroupStorageRootPath(
 }
 
 /**
- * 子プロジェクトの担当メンバーを設定（管理者のみ）。
+ * プロジェクトの担当メンバーを設定（管理者のみ）。
  * グループメンバー以外は指定不可。
  */
-export async function setChildAssignees(
+export async function setProjectAssignees(
   db: D1Database,
   userId: string,
   projectId: string,
   assigneeIds: string[]
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2372,16 +2389,19 @@ export async function setChildAssignees(
   return listProjects(db, project.group_id, userId);
 }
 
+/** @deprecated setProjectAssignees を使用 */
+export const setChildAssignees = setProjectAssignees;
+
 /**
- * 親プロジェクトの進捗率を手動設定（管理者のみ）。
+ * プロジェクトの進捗率を手動設定（管理者のみ）。
  * progressPercent が null の場合は自動算出に戻す。
  */
-export async function setParentProgress(
+export async function setProjectProgress(
   db: D1Database,
   userId: string,
   parentProjectId: string,
   progressPercent: number | null
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id, progress_override
@@ -2394,7 +2414,7 @@ export async function setParentProgress(
     throw new Error("プロジェクトが見つかりません");
   }
   if (project.parent_id) {
-    throw new Error("親プロジェクトのみ進捗を設定できます");
+    throw new Error("プロジェクトのみ進捗を設定できます");
   }
 
   const membership = await requireGroupMembership(
@@ -2427,16 +2447,19 @@ export async function setParentProgress(
   return listProjects(db, project.group_id, userId);
 }
 
+/** @deprecated setProjectProgress を使用 */
+export const setParentProgress = setProjectProgress;
+
 /**
- * 親プロジェクトのリーダーを設定（管理者のみ）。
+ * プロジェクトのリーダーを設定（管理者のみ）。
  * leaderUserIds が空配列の場合は全員解除。グループメンバーのみ指定可。
  */
-export async function setParentLeaders(
+export async function setProjectLeaders(
   db: D1Database,
   userId: string,
   parentProjectId: string,
   leaderUserIds: string[]
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2449,7 +2472,7 @@ export async function setParentLeaders(
     throw new Error("プロジェクトが見つかりません");
   }
   if (project.parent_id) {
-    throw new Error("親プロジェクトのみリーダーを設定できます");
+    throw new Error("プロジェクトのみリーダーを設定できます");
   }
 
   const membership = await requireGroupMembership(
@@ -2503,16 +2526,19 @@ export async function setParentLeaders(
   return listProjects(db, project.group_id, userId);
 }
 
+/** @deprecated setProjectLeaders を使用 */
+export const setParentLeaders = setProjectLeaders;
+
 /**
- * @deprecated setParentLeaders を使用
+ * @deprecated setProjectLeaders を使用
  */
 export async function setParentLeader(
   db: D1Database,
   userId: string,
   parentProjectId: string,
   leaderUserId: string | null
-): Promise<PmParentProject[]> {
-  return setParentLeaders(
+): Promise<PmProject[]> {
+  return setProjectLeaders(
     db,
     userId,
     parentProjectId,
@@ -2521,7 +2547,7 @@ export async function setParentLeader(
 }
 
 /**
- * 親プロジェクトの担当者 ID 集合を取得（タスク発行対象）。
+ * プロジェクトの担当者 ID 集合を取得（タスク発行対象）。
  */
 async function listParentMemberIds(
   db: D1Database,
@@ -2538,15 +2564,15 @@ async function listParentMemberIds(
 }
 
 /**
- * 親プロジェクトの担当者を設定（リーダーのみ）。
+ * プロジェクトの担当者を設定（リーダーのみ）。
  * memberUserIds が空配列の場合は全員解除。グループメンバーのみ指定可。
  */
-export async function setParentMembers(
+export async function setProjectMembers(
   db: D1Database,
   userId: string,
   parentProjectId: string,
   memberUserIds: string[]
-): Promise<PmParentProject[]> {
+): Promise<PmProject[]> {
   const project = await db
     .prepare(
       `SELECT id, group_id, parent_id, name, position, due_date, start_date, completed_at, created_at, storage_path, leader_user_id
@@ -2559,7 +2585,7 @@ export async function setParentMembers(
     throw new Error("プロジェクトが見つかりません");
   }
   if (project.parent_id) {
-    throw new Error("親プロジェクトのみ担当者を設定できます");
+    throw new Error("プロジェクトのみ担当者を設定できます");
   }
 
   const membership = await requireGroupMembership(db, userId, project.group_id);
@@ -2571,7 +2597,7 @@ export async function setParentMembers(
   );
   const leaderIds = await listParentLeaderIds(db, parentProjectId);
   if (!admin.isAdmin && !leaderIds.has(userId)) {
-    throw new Error("親プロジェクトのリーダーのみ担当者を設定できます");
+    throw new Error("プロジェクトのリーダーのみ担当者を設定できます");
   }
 
   const uniqueIds = [
@@ -2611,9 +2637,11 @@ export async function setParentMembers(
   return listProjects(db, project.group_id, userId);
 }
 
+/** @deprecated setProjectMembers を使用 */
+export const setParentMembers = setProjectMembers;
+
 /**
  * タスクを作成する。
- * 自分への追加、管理者による他メンバーへの追加、リーダーによる親メンバーへの発行が可能。
  */
 export async function createTask(
   db: D1Database,
@@ -2632,7 +2660,7 @@ export async function createTask(
     storage_path?: string | null;
   }
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -2676,10 +2704,10 @@ export async function createTask(
       .bind(parentProjectId)
       .first<ProjectRow>();
     if (!parent) {
-      throw new Error("親プロジェクトが見つかりません");
+      throw new Error("プロジェクトが見つかりません");
     }
     if (parent.parent_id) {
-      throw new Error("親プロジェクト ID が不正です");
+      throw new Error("プロジェクト ID が不正です");
     }
     groupId = parent.group_id;
   }
@@ -2729,7 +2757,7 @@ export async function createTask(
       }
       if (!parentMemberIds.has(assigneeId)) {
         throw new Error(
-          "この親プロジェクトの担当者にのみタスクを発行できます"
+          "このプロジェクトの担当者にのみタスクを発行できます"
         );
       }
     }
@@ -2813,7 +2841,7 @@ export async function updateIssuedTaskBatch(
     storage_path?: string | null;
   }
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -2854,7 +2882,7 @@ export async function updateIssuedTaskBatch(
 
   const parentProjectId = tasks[0]!.parent_project_id;
   if (!parentProjectId) {
-    throw new Error("親プロジェクトに紐づいていないタスクは編集できません");
+    throw new Error("プロジェクトに紐づいていないタスクは編集できません");
   }
 
   const groupId = tasks[0]!.group_id;
@@ -2953,7 +2981,7 @@ export async function updateIssuedTaskBatch(
     for (const assigneeId of desiredIds) {
       await assertAssigneeInGroup(db, groupId, assigneeId);
       if (!parentMemberIds.has(assigneeId)) {
-        throw new Error("親プロジェクトの担当者のみ割り当てできます");
+        throw new Error("プロジェクトの担当者のみ割り当てできます");
       }
     }
 
@@ -3047,7 +3075,7 @@ export async function setIssuedTaskActivityDayAssignees(
     acknowledge_conflicts?: boolean;
   }
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -3105,7 +3133,7 @@ export async function deleteIssuedTaskBatch(
   userId: string,
   issuedTaskId: string
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -3135,7 +3163,7 @@ export async function deleteIssuedTaskBatch(
 
   const parentProjectId = tasks[0]!.parent_project_id;
   if (!parentProjectId) {
-    throw new Error("親プロジェクトに紐づいていないタスクは削除できません");
+    throw new Error("プロジェクトに紐づいていないタスクは削除できません");
   }
 
   await assertCanManageIssuedBatch(
@@ -3169,7 +3197,7 @@ export async function updateTask(
     storage_path?: string | null;
   }
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -3271,7 +3299,7 @@ export async function deleteTask(
   userId: string,
   taskId: string
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -3307,7 +3335,7 @@ export async function completeTask(
   userId: string,
   taskId: string
 ): Promise<{
-  projects: PmParentProject[];
+  projects: PmProject[];
   tasks: PmTask[];
   completed_tasks: PmTask[];
   member_board: PmMemberBoard[];
@@ -3645,8 +3673,9 @@ export async function updateAdminSettings(
   db: D1Database,
   userId: string,
   groupId: string,
-  minEligibleWeight: number
+  input: { min_eligible_weight: number }
 ): Promise<PmGroupSummary> {
+  const minEligibleWeight = input.min_eligible_weight;
   if (!Number.isInteger(minEligibleWeight) || minEligibleWeight < 0) {
     throw new Error("min_eligible_weight は 0 以上の整数である必要があります");
   }

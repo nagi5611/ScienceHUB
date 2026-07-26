@@ -3155,3 +3155,318 @@ tr:hover td {
 .dev-sheet td:nth-child(8) { width: 10rem; }
 .dev-sheet th:nth-child(9),
 .dev-sheet td:nth-child(9) { width: 10rem; }
+
+/* Simulation request hub */
+.sr-hub-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .sr-hub-layout { grid-template-columns: 1fr; }
+}
+
+.sr-mini-cal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.sr-mini-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.sr-mini-weekday {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--color-muted);
+}
+
+.sr-mini-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.sr-mini-day {
+  aspect-ratio: 1;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.sr-mini-day.is-covered {
+  border-color: #16a34a;
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.sr-mini-day.is-empty {
+  border-color: #fca5a5;
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.sim-type-list { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+
+.sim-type-card {
+  flex: 1 1 200px;
+  max-width: 320px;
+  text-align: left;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: #fff;
+  cursor: pointer;
+}
+
+.sim-type-card.is-selected { border-color: var(--color-primary); }
+
+.fds-request-admin-list { list-style: none; margin: 0; padding: 0; }
+
+.fds-request-admin-item {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.fds-request-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.phone-verification-banner {
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.phone-verification-banner.hidden {
+  display: none;
+}
+
+.phone-verification-banner p {
+  margin: 0 0 0.75rem;
+}
+
+.profile-sim-phone-status-wrap {
+  margin-bottom: 1rem;
+}
+
+.profile-sim-phone-status--ok {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border-radius: var(--radius);
+  background: rgb(21 128 61 / 0.08);
+  border: 1px solid rgb(21 128 61 / 0.25);
+}
+
+.profile-sim-phone-status--ok .profile-sim-phone-expiry {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.phone-consent-label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  margin: 1rem 0;
+  cursor: pointer;
+}
+
+.phone-consent-label input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.fds-panel--locked .fds-request-form {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+#recaptcha-container {
+  min-height: 78px;
+  margin: 0.75rem 0;
+}
+
+/* FDS 一次審査（AI） */
+.fds-primary-review-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.fds-primary-review-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 22rem;
+  padding: 1.75rem 1.5rem;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.fds-primary-review-overlay-text {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.fds-primary-review-overlay-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.fds-primary-review-spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: fds-primary-review-spin 0.75s linear infinite;
+}
+
+@keyframes fds-primary-review-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fds-primary-review-block {
+  margin: 1rem 0 1.25rem;
+  padding: 1rem 1.125rem;
+  border-radius: var(--radius);
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+}
+
+.fds-primary-review-block-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #991b1b;
+}
+
+.fds-primary-review-issues {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: #7f1d1d;
+}
+
+.fds-primary-review-issues li + li {
+  margin-top: 0.35rem;
+}
+
+.fds-request-list-toggle {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  position: relative;
+}
+
+.fds-request-list-toggle--static {
+  cursor: default;
+}
+
+.fds-request-list-item {
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.75rem 0;
+}
+
+.fds-request-list-item:last-child {
+  border-bottom: none;
+}
+
+.fds-request-list-item.is-expanded .fds-request-list-chevron {
+  transform: rotate(90deg);
+}
+
+.fds-request-list-chevron {
+  position: absolute;
+  right: 0;
+  top: 0.35rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid var(--color-muted);
+  border-bottom: 2px solid var(--color-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+
+.fds-request-detail-panel {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: var(--radius);
+}
+
+.fds-request-detail-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.fds-request-detail-error {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.fds-request-status--primary_reviewing {
+  color: #b45309;
+}
+
+.fds-request-status--primary_failed,
+.fds-request-status--primary_error {
+  color: #b91c1c;
+}
+
+.fds-request-status--pending_approval {
+  color: #1d4ed8;
+}
+
+.fds-request-status--execution_running,
+.fds-request-status--approved {
+  color: #b45309;
+}
+
+.fds-request-status--execution_succeeded {
+  color: #166534;
+  font-weight: 600;
+}
+
+.fds-request-status--execution_failed {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.fds-request-list-meta {
+  margin-top: 0.5rem;
+}
+

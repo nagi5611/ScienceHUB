@@ -2366,6 +2366,25 @@ tr:hover td {
   white-space: nowrap;
 }
 
+.profile-sim-phone-status-wrap {
+  margin-bottom: 1rem;
+}
+
+.profile-sim-phone-status--ok {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border-radius: var(--radius);
+  background: rgb(21 128 61 / 0.08);
+  border: 1px solid rgb(21 128 61 / 0.25);
+}
+
+.profile-sim-phone-status--ok .profile-sim-phone-expiry {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
 .auth-modal-overlay {
   align-items: center;
   justify-content: center;

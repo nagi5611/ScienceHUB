@@ -20,7 +20,14 @@ function normalizePath(pathname: string): string {
 }
 
 function isPublicAsset(path: string): boolean {
-  return PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
+  if (PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    return true;
+  }
+  // 共有ページなどから読み込む ES モジュール（HTML は引き続き認証必須）
+  if (/^\/apps\/[^/]+\/.+\.js$/.test(path)) {
+    return true;
+  }
+  return false;
 }
 
 function isProtectedPage(path: string): boolean {

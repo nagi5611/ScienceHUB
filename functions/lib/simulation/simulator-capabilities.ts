@@ -3,6 +3,10 @@
 export interface SimulatorCapabilities {
   can_record_result_video: boolean;
   nozzle_sizes_mm: string[];
+  /** FDS 用 EC2 インスタンスタイプ（例: c7a.xlarge） */
+  ec2_instance_type?: string | null;
+  /** EC2 vCPU 数（表示・照合用） */
+  vcpus?: number | null;
 }
 
 export const DEFAULT_PRINTER_CAPABILITIES: SimulatorCapabilities = {
@@ -32,7 +36,19 @@ export function normalizeSimulatorCapabilities(
 
   return {
     can_record_result_video: Boolean(input?.can_record_result_video),
-    nozzle_sizes_mm: nozzleSizes.length ? dedupeNozzleSizes(nozzleSizes) : ['0.4'],
+    nozzle_sizes_mm: nozzleSizes.length
+      ? dedupeNozzleSizes(nozzleSizes)
+      : input?.ec2_instance_type
+        ? []
+        : ['0.4'],
+    ec2_instance_type:
+      typeof input?.ec2_instance_type === 'string' && input.ec2_instance_type.trim()
+        ? input.ec2_instance_type.trim()
+        : null,
+    vcpus:
+      typeof input?.vcpus === 'number' && Number.isFinite(input.vcpus) && input.vcpus > 0
+        ? Math.floor(input.vcpus)
+        : null,
   };
 }
 
@@ -52,7 +68,11 @@ export function validateSimulatorCapabilitiesInput(
   }
 
   if (nozzleSizes.length === 0) {
-    return { error: 'ノズル径を1つ以上入力してください' };
+    const ec2Type =
+      typeof body.ec2_instance_type === 'string' ? body.ec2_instance_type.trim() : '';
+    if (!ec2Type) {
+      return { error: 'ノズル径を1つ以上入力してください' };
+    }
   }
 
   if (nozzleSizes.length > 8) {
@@ -75,7 +95,13 @@ export function validateSimulatorCapabilitiesInput(
   return {
     capabilities: {
       can_record_result_video: Boolean(body.can_record_result_video),
-      nozzle_sizes_mm: dedupeNozzleSizes(normalizedSizes),
+      nozzle_sizes_mm: normalizedSizes.length ? dedupeNozzleSizes(normalizedSizes) : [],
+      ec2_instance_type:
+        typeof body.ec2_instance_type === 'string' && body.ec2_instance_type.trim()
+          ? body.ec2_instance_type.trim()
+          : null,
+      vcpus:
+        typeof body.vcpus === 'number' && Number.isFinite(body.vcpus) ? Math.floor(body.vcpus) : null,
     },
   };
 }

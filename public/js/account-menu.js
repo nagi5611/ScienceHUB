@@ -4,6 +4,8 @@
 
 import { resizeImageToPng } from "./image-resize.js";
 import { applyAvatarToElement } from "./user-avatar.js";
+import { applySimPhoneAccountStatus } from "./sim-phone-profile.js";
+import { initHubPhoneVerification, openHubPhoneVerificationModal } from "./hub-phone-verification.js";
 
 const NOTIFY_STORAGE_KEY = "sciencehub_notify_prefs";
 
@@ -124,6 +126,9 @@ export function initAccountMenu() {
     });
 
     updatePasswordPanel(user);
+    applySimPhoneAccountStatus(document.getElementById("profile-sim-phone-status"), user, {
+      variant: "hub",
+    });
   }
 
   /** プロフィールのアイコン表示を更新 */
@@ -160,6 +165,9 @@ export function initAccountMenu() {
     document.getElementById("profile-email").value = user.email ?? "";
     document.getElementById("profile-username").textContent = user.username ?? "";
     applyProfileIcon(user);
+    applySimPhoneAccountStatus(document.getElementById("profile-sim-phone-status"), user, {
+      variant: "hub",
+    });
   }
 
   /** 通知設定フォームを反映 */
@@ -382,6 +390,24 @@ export function initAccountMenu() {
   notifyForm?.addEventListener("submit", handleNotifySubmit);
   passwordForm?.addEventListener("submit", handlePasswordSubmit);
   iconInput?.addEventListener("change", handleIconChange);
+
+  const simPhoneStatusEl = document.getElementById("profile-sim-phone-status");
+  simPhoneStatusEl?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-hub-phone-verify]");
+    if (!btn) return;
+    e.preventDefault();
+    openHubPhoneVerificationModal();
+  });
+
+  initHubPhoneVerification({
+    onVerified: async () => {
+      const user = await fetchUser();
+      if (!user) return;
+      currentUser = user;
+      renderAccountHeader(user);
+      fillProfileForm(user);
+    },
+  });
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {

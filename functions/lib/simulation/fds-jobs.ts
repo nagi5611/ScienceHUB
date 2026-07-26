@@ -9,6 +9,27 @@ export type FdsJobStatus =
   | "cancelled"
   | "timed_out";
 
+/** User-facing label when an FDS job run has finished or is in progress. */
+export function fdsJobStatusDisplayLabel(status: FdsJobStatus): string {
+  switch (status) {
+    case "pending":
+      return "待機中";
+    case "launching":
+      return "起動中";
+    case "running":
+      return "実行中";
+    case "succeeded":
+      return "完了_成功";
+    case "failed":
+    case "timed_out":
+      return "完了_失敗";
+    case "cancelled":
+      return "キャンセル";
+    default:
+      return status;
+  }
+}
+
 export interface FdsJob {
   id: string;
   title: string;
@@ -23,6 +44,8 @@ export interface FdsJob {
   status_message: string | null;
   ec2_instance_id: string | null;
   ec2_instance_type: string;
+  max_runtime_hours: number;
+  mpi_processes: number;
   launched_at: string | null;
   finished_at: string | null;
   created_by_user_id: string;
@@ -40,16 +63,26 @@ export interface FdsJobApiModel {
   status_message: string | null;
   ec2_instance_id: string | null;
   ec2_instance_type: string;
+  max_runtime_hours: number;
+  mpi_processes: number;
   launched_at: string | null;
   finished_at: string | null;
   created_at: string;
   has_output: boolean;
   has_log: boolean;
+  ec2_instance_state: string | null;
+  ec2_launch_time: string | null;
 }
 
 export const FDS_JOB_MAX_RUNTIME_HOURS = 10;
 export const FDS_DEFAULT_INSTANCE_TYPE = "t3.micro";
 export const FDS_MAX_INPUT_BYTES = 50 * 1024 * 1024;
+
+/** Artifact availability flags for API formatting. */
+export interface FdsJobArtifactFlags {
+  hasOutput: boolean;
+  hasLog: boolean;
+}
 
 /** Validates an FDS input filename. */
 export function validateFdsFilename(filename: string): string | null {
@@ -83,8 +116,22 @@ export function generateFdsLogR2Key(jobId: string): string {
   return `fds-jobs/${jobId}/output/runner.log`;
 }
 
+/** Live EC2 fields attached on detail API responses. */
+export interface FdsJobLiveEc2 {
+  ec2_instance_state: string | null;
+  ec2_launch_time: string | null;
+}
+
 /** Formats a job for API responses. */
-export function formatFdsJobForApi(job: FdsJob): FdsJobApiModel {
+export function formatFdsJobForApi(
+  job: FdsJob,
+  artifacts?: Partial<FdsJobArtifactFlags>,
+  liveEc2?: Partial<FdsJobLiveEc2>
+): FdsJobApiModel {
+  const hasOutput =
+    artifacts?.hasOutput ?? (job.output_size_bytes !== null && job.output_size_bytes > 0);
+  const hasLog = artifacts?.hasLog ?? false;
+
   return {
     id: job.id,
     title: job.title,
@@ -96,11 +143,15 @@ export function formatFdsJobForApi(job: FdsJob): FdsJobApiModel {
     status_message: job.status_message,
     ec2_instance_id: job.ec2_instance_id,
     ec2_instance_type: job.ec2_instance_type,
+    max_runtime_hours: job.max_runtime_hours ?? FDS_JOB_MAX_RUNTIME_HOURS,
+    mpi_processes: job.mpi_processes ?? 1,
     launched_at: job.launched_at,
     finished_at: job.finished_at,
     created_at: job.created_at,
-    has_output: Boolean(job.output_r2_key),
-    has_log: Boolean(job.log_r2_key),
+    has_output: hasOutput,
+    has_log: hasLog,
+    ec2_instance_state: liveEc2?.ec2_instance_state ?? null,
+    ec2_launch_time: liveEc2?.ec2_launch_time ?? null,
   };
 }
 
@@ -128,16 +179,22 @@ export async function createFdsJob(
     inputFilename: string;
     inputSizeBytes: number;
     instanceType: string;
+    maxRuntimeHours?: number;
+    mpiProcesses?: number;
     createdByUserId: string;
     createdAt: string;
   }
 ): Promise<FdsJob> {
+  const maxRuntimeHours = data.maxRuntimeHours ?? FDS_JOB_MAX_RUNTIME_HOURS;
+  const mpiProcesses = data.mpiProcesses ?? 1;
+
   await db
     .prepare(
       `INSERT INTO sim_fds_jobs (
         id, title, input_r2_key, input_filename, input_size_bytes,
-        status, ec2_instance_type, created_by_user_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+        status, ec2_instance_type, max_runtime_hours, mpi_processes,
+        created_by_user_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -146,6 +203,8 @@ export async function createFdsJob(
       data.inputFilename,
       data.inputSizeBytes,
       data.instanceType,
+      maxRuntimeHours,
+      mpiProcesses,
       data.createdByUserId,
       data.createdAt
     )

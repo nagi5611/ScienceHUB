@@ -206,7 +206,7 @@ export async function validateSimulatorReservationSlot(
 
     const shiftOk = await isSimulatorAvailableOnDate(db, simulatorId, desiredDate);
     if (!shiftOk) {
-      return 'この日は選択したシミュレーターが稼働予定に入っていません';
+      return 'この日は選択したシミュレーターは利用できません';
     }
   }
 

@@ -164,3 +164,78 @@ export async function notifyReservationApplication(
     console.error('Discord webhook error:', err);
   }
 }
+
+/** Notifies staff via Discord when an FDS request enters secondary review (pending_approval). */
+export async function notifyFdsSecondaryReviewPending(
+  webhookUrl: string | undefined,
+  adminUrl: string,
+  mentionUserIds: string[],
+  request: {
+    id: string;
+    title: string;
+    input_filename: string;
+    mpi_processes: number;
+    max_runtime_hours: number;
+    desired_date: string | null;
+    primary_review_forced: boolean;
+    primary_review_issues: string[];
+  }
+): Promise<void> {
+  if (!webhookUrl) return;
+
+  const mentionParts = mentionUserIds.map((id) => `<@${id}>`);
+  const headline = request.primary_review_forced
+    ? 'FDS 依頼が二次審査待ちです（一次審査を経た強制申請）'
+    : 'FDS 依頼が二次審査待ちです（一次審査通過）';
+
+  const issueFields =
+    request.primary_review_forced && request.primary_review_issues.length
+      ? [
+          {
+            name: '一次審査の指摘（抜粋）',
+            value: request.primary_review_issues.slice(0, 5).join('\n').slice(0, 1000),
+            inline: false,
+          },
+        ]
+      : [];
+
+  const payload = {
+    content: [...mentionParts, headline, adminUrl].filter(Boolean).join('\n'),
+    allowed_mentions: { users: mentionUserIds },
+    embeds: [
+      {
+        title: 'FDS シミュレーション依頼 — 二次審査',
+        color: request.primary_review_forced ? 0xf59e0b : 0x22c55e,
+        fields: [
+          { name: 'タイトル', value: request.title, inline: true },
+          { name: 'ファイル', value: request.input_filename, inline: true },
+          { name: 'MPI', value: String(request.mpi_processes), inline: true },
+          {
+            name: '最大実行時間',
+            value: `${request.max_runtime_hours} 時間`,
+            inline: true,
+          },
+          ...(request.desired_date
+            ? [{ name: '希望日', value: request.desired_date, inline: true }]
+            : []),
+          { name: '依頼 ID', value: request.id, inline: false },
+          ...issueFields,
+        ],
+        footer: { text: '管理画面の FDS タブで認可してください' },
+      },
+    ],
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('FDS Discord webhook failed:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('FDS Discord webhook error:', err);
+  }
+}

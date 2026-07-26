@@ -1,0 +1,396 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ萓晞ｼ 窶・ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/apps/simulation-request.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="/" class="site-title">ScienceHUB <span>繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ萓晞ｼ</span></a>
+      <div class="header-actions">
+        <button type="button" class="auth-header-btn auth-header-btn-muted" id="auth-dashboard-btn">繝繝・す繝･繝懊・繝・/button>
+        <div id="auth-user-menu" class="auth-user-menu">
+          <span class="auth-user-label" id="auth-user-label"></span>
+          <button type="button" class="auth-header-btn auth-header-btn-muted" id="auth-profile-btn">萓晞ｼ閠・ュ蝣ｱ</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div id="page-toast" class="page-toast hidden"></div>
+
+    <h1 class="page-heading">繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ萓晞ｼ</h1>
+    <p class="page-subheading">繧ｫ繝ｬ繝ｳ繝繝ｼ縺九ｉ蟶梧悍螳滓命譌･繧偵け繝ｪ繝・け縺励※莠育ｴ・＠縺ｦ縺上□縺輔＞縲ゅち繧､繝医Ν繧偵け繝ｪ繝・け縺吶ｋ縺ｨ隧ｳ邏ｰ縺ｮ遒ｺ隱阪・蜿悶ｊ豸医＠縺後〒縺阪∪縺吶・/p>
+    <p class="contact-notice">莠育ｴ・・蜿悶ｊ豸医＠縺後〒縺阪↑縺・ｴ蜷医↑縺ｩ・・br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
+
+    <section class="card" id="calendar-section">
+      <div id="retry-mode-banner" class="retry-mode-banner hidden">
+        <p>蜀堺ｺ育ｴ・Δ繝ｼ繝峨〒縺吶よ眠縺励＞蟶梧悍螳滓命譌･繧偵き繝ｬ繝ｳ繝繝ｼ縺九ｉ驕ｸ繧薙〒縺上□縺輔＞縲・/p>
+        <button class="btn btn-secondary btn-sm" id="retry-mode-cancel" type="button">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>
+      </div>
+      <div class="calendar-sticky-header">
+        <div class="calendar-toolbar">
+          <div class="calendar-header calendar-header-desktop">
+            <button class="btn btn-secondary btn-sm" id="prev-month" type="button">竊・蜑肴怦</button>
+            <span class="calendar-month-label" id="calendar-month-label"></span>
+            <button class="btn btn-secondary btn-sm" id="next-month" type="button">鄙梧怦 竊・/button>
+          </div>
+
+          <div class="calendar-header-mobile">
+            <button class="calendar-nav-btn" id="prev-month-mobile" type="button" aria-label="蜑肴怦">窶ｹ</button>
+            <button class="calendar-mobile-month" id="calendar-month-label-mobile" type="button">
+              <span id="calendar-month-label-mobile-text"></span>
+              <span class="calendar-mobile-month-caret" aria-hidden="true">笆ｾ</span>
+            </button>
+            <div class="calendar-mobile-actions">
+              <div class="calendar-today-group">
+                <span class="calendar-today-label">莉頑律・・/span>
+                <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="莉頑怦縺ｸ">
+                  <span class="calendar-today-icon" aria-hidden="true"></span>
+                  <span id="today-day-num"></span>
+                </button>
+              </div>
+              <button class="calendar-nav-btn" id="next-month-mobile" type="button" aria-label="鄙梧怦">窶ｺ</button>
+            </div>
+          </div>
+
+          <div class="calendar-month-chips" id="calendar-month-chips" role="tablist" aria-label="譛医ｒ驕ｸ謚・></div>
+        </div>
+
+        <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
+      </div>
+
+      <div class="calendar-grid-wrap">
+        <div class="calendar-grid" id="calendar-grid"></div>
+      </div>
+
+      <details class="calendar-mobile-hint">
+        <summary>莠育ｴ・・繝ｫ繝ｼ繝ｫ繝ｻ蜃｡萓・/summary>
+        <div class="calendar-legend">
+          <div class="legend-item"><span class="legend-dot shift-covered"></span> 蟇ｾ蠢懷庄・育ｷ托ｼ・/div>
+          <div class="legend-item"><span class="legend-dot shift-empty"></span> 蟇ｾ蠢應ｸ榊庄・郁ｵ､・・/div>
+        </div>
+        <p class="hint calendar-hint-text">蠖捺律繝ｻ鄙梧律縺ｯ莠育ｴ・〒縺阪∪縺帙ｓ縲ょｯｾ蠢應ｸ榊庄縺ｮ譌･縺ｯ莠育ｴ・〒縺阪∪縺帙ｓ縲ゅせ繝｢繝ｼ繝ｫ縺悟・縺｣縺ｦ縺・ｋ譌･縺ｯ繝溘ョ繧｣繧｢繝繝ｻ繝ｩ繝ｼ繧ｸ縺ｯ驕ｸ縺ｹ縺ｾ縺帙ｓ縲ゆｺ育ｴ・錐繧偵ち繝・・縺吶ｋ縺ｨ隧ｳ邏ｰ縺碁幕縺阪∪縺吶・/p>
+      </details>
+      <div class="calendar-legend calendar-legend-desktop">
+        <div class="legend-item"><span class="legend-dot shift-covered"></span> 蟇ｾ蠢懷庄・育ｷ第棧・・/div>
+        <div class="legend-item"><span class="legend-dot shift-empty"></span> 蟇ｾ蠢應ｸ榊庄・郁ｵ､譫繝ｻ莠育ｴ・ｸ榊庄・・/div>
+      </div>
+      <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">蠖捺律繝ｻ鄙梧律縺ｯ莠育ｴ・〒縺阪∪縺帙ｓ縲ょｯｾ蠢應ｸ榊庄縺ｮ譌･縺ｯ莠育ｴ・〒縺阪∪縺帙ｓ縲ゅせ繝｢繝ｼ繝ｫ縺悟・縺｣縺ｦ縺・ｋ譌･縺ｯ繝溘ョ繧｣繧｢繝繝ｻ繝ｩ繝ｼ繧ｸ縺ｯ驕ｸ縺ｹ縺ｾ縺帙ｓ縲・/p>
+    </section>
+
+    <section class="card" id="user-list-section">
+      <h2 class="section-heading">逶ｴ霑代・莠育ｴ・ｸ隕ｧ</h2>
+      <div id="user-list-mount">
+        <p class="hint">隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ...</p>
+      </div>
+    </section>
+
+    <section class="card" id="result-videos-section">
+      <h2 class="section-heading">邨先棡蜍慕判</h2>
+      <p class="hint">螳溯｡御ｸｭ縺ｮ謦ｮ蠖ｱ繧貞ｸ梧悍縺励◆莠育ｴ・〒縲∝虚逕ｻ縺後い繝・・繝ｭ繝ｼ繝峨＆繧後◆繧ゅ・繧偵ム繧ｦ繝ｳ繝ｭ繝ｼ繝峨〒縺阪∪縺吶・/p>
+      <div id="result-videos-mount">
+        <p class="hint">隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ...</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="form-modal">
+    <div class="modal modal-lg" id="form-modal-dialog">
+      <div class="modal-header">
+        <h2 id="form-modal-title">莠育ｴ・ヵ繧ｩ繝ｼ繝</h2>
+        <button class="modal-close" id="form-modal-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="form-alert"></div>
+
+        <section id="form-step-simulator" class="form-step">
+          <h3 class="form-section-title">繧ｷ繝溘Η繝ｬ繝ｼ繧ｿ繝ｼ讖溽ｨｮ繧帝∈謚・/h3>
+          <p class="hint" id="form-step-simulator-hint">菴ｿ逕ｨ縺吶ｋ繧ｷ繝溘Η繝ｬ繝ｼ繧ｿ繝ｼ縺ｮ讖溽ｨｮ繧帝∈繧薙〒縺上□縺輔＞縲り｡ｨ遉ｺ縺輔ｌ縺ｦ縺・ｋ縲御ｺ育ｴ・ｾ・■縲阪・縲・∈謚槭＠縺滓律縺ｮ逕ｳ隲倶ｸｭ・亥女鬆伜ｾ・■・我ｻｶ謨ｰ縺ｧ縺吶ゅΓ繝ｳ繝・リ繝ｳ繧ｹ荳ｭ繝ｻ蛻ｩ逕ｨ荳榊庄縺ｮ讖溽ｨｮ縺ｯ驕ｸ謚槭〒縺阪∪縺帙ｓ縲・/p>
+          <div id="simulator-picker" class="simulator-picker" role="listbox" aria-label="繧ｷ繝溘Η繝ｬ繝ｼ繧ｿ繝ｼ讖溽ｨｮ"></div>
+          <p class="hint hidden" id="simulator-picker-empty">蛻ｩ逕ｨ蜿ｯ閭ｽ縺ｪ繧ｷ繝溘Η繝ｬ繝ｼ繧ｿ繝ｼ縺檎匳骭ｲ縺輔ｌ縺ｦ縺・∪縺帙ｓ縲らｮ｡逅・・↓縺雁撫縺・粋繧上○縺上□縺輔＞縲・/p>
+          <p class="hint hidden" id="simulator-picker-all-unavailable">迴ｾ蝨ｨ縲∽ｺ育ｴ・庄閭ｽ縺ｪ繧ｷ繝溘Η繝ｬ繝ｼ繧ｿ繝ｼ縺後≠繧翫∪縺帙ｓ縲ゅ＠縺ｰ繧峨￥縺励※縺九ｉ蜀榊ｺｦ縺願ｩｦ縺励￥縺縺輔＞縲・/p>
+        </section>
+
+        <form id="reservation-form" class="form-step hidden">
+          <input type="hidden" id="desired_date" name="desired_date" />
+          <input type="hidden" id="simulator_id" name="simulator_id" />
+
+          <div id="selected-simulator-display" class="selected-simulator-display"></div>
+
+          <p class="selected-date-display" id="selected-date-display"></p>
+          <p class="hint hidden" id="retry-identity-hint">蜀堺ｺ育ｴ・・縺溘ａ縲√・繝ｼ繝繝ｫ繝ｼ繝繝ｻ蜃ｺ蟶ｭ逡ｪ蜿ｷ繝ｻ蜷榊燕繧貞・蜈･蜉帙＠縺ｦ縺上□縺輔＞縲・/p>
+          <p class="hint hidden" id="logged-in-identity-note"></p>
+          <button class="btn btn-secondary btn-sm hidden" id="restore-draft-btn" type="button">蜑榊屓縺ｮ蜈･蜉帙ｒ蜿肴丐</button>
+
+          <div id="requester-info-section">
+          <h3 class="form-section-title">萓晞ｼ閠・ュ蝣ｱ</h3>
+          <div class="form-row">
+            <div class="form-group combobox-wrap">
+              <label for="homeroom">繝帙・繝繝ｫ繝ｼ繝</label>
+              <input type="text" id="homeroom" name="homeroom" autocomplete="off" placeholder="萓・ 301" required />
+              <ul class="combobox-list hidden" id="homeroom-list"></ul>
+            </div>
+            <div class="form-group">
+              <label for="student_number">蜃ｺ蟶ｭ逡ｪ蜿ｷ</label>
+              <input type="number" id="student_number" name="student_number" min="1" max="50" required />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="student_name">蜷榊燕</label>
+            <input type="text" id="student_name" name="student_name" placeholder="譚ｾ螻ｱ螟ｪ驛・ required />
+            <p class="hint">蜷榊燕繝ｻHR繝ｻ蜃ｺ蟶ｭ逡ｪ蜿ｷ縺ｯ蜈ｬ髢九＆繧後∪縺帙ｓ・亥叙繧頑ｶ医＠譎ゅ・譛ｬ莠ｺ遒ｺ隱阪↓菴ｿ逕ｨ・・/p>
+          </div>
+          </div>
+
+          <div class="form-group">
+            <label>逶ｮ逧・/label>
+            <div class="radio-group">
+              <label><input type="radio" name="purpose" value="ss_s_tan" required /> SS繝ｻS謗｢</label>
+              <label><input type="radio" name="purpose" value="club" /> 驛ｨ豢ｻ</label>
+              <label><input type="radio" name="purpose" value="other" /> 縺昴・莉・/label>
+            </div>
+          </div>
+
+          <div class="form-group hidden" id="purpose-other-group">
+            <label for="purpose_other">縺昴・莉悶・蜀・ｮｹ</label>
+            <input type="text" id="purpose_other" name="purpose_other" placeholder="逶ｮ逧・ｒ險倩ｿｰ縺励※縺上□縺輔＞" />
+          </div>
+
+          <div class="form-group">
+            <label for="title">繧ｿ繧､繝医Ν</label>
+            <input type="text" id="title" name="title" placeholder="豁ｯ霆顔少_逅・ｴ豁ｯ霆・ required maxlength="40" />
+            <p class="hint">繧ｫ繝ｬ繝ｳ繝繝ｼ縺ｫ陦ｨ遉ｺ縺輔ｌ繧句錐蜑阪〒縺呻ｼ医げ繝ｬ繝ｼ陦ｨ遉ｺ・・/p>
+          </div>
+
+          <div class="form-group">
+            <label for="summary">讎りｦ・ｼ井ｻｻ諢擾ｼ・/label>
+            <textarea id="summary" name="summary" placeholder="繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ蜀・ｮｹ縺ｮ讎りｦ√ｄ逕ｨ騾斐ｒ險伜・縺ｧ縺阪∪縺・></textarea>
+          </div>
+
+          <h3 class="form-section-title">繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ險ｭ螳・/h3>
+          <div class="form-group">
+            <label>繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ隕乗ｨ｡</label>
+            <div class="radio-group" id="print-scale-group">
+              <label id="scale-label-small"><input type="radio" name="sim_scale" value="small" required /> 繧ｹ繝｢繝ｼ繝ｫ・・譌･2莉ｶ縺ｾ縺ｧ繝ｻ螳溯｡梧凾髢謎ｸ企剞2譎る俣・・/label>
+              <label id="scale-label-medium"><input type="radio" name="sim_scale" value="medium" /> 繝溘ョ繧｣繧｢繝・・譌･1莉ｶ・・/label>
+              <label id="scale-label-large"><input type="radio" name="sim_scale" value="large" /> 繝ｩ繝ｼ繧ｸ・・譌･1莉ｶ・・/label>
+            </div>
+            <div class="warning hidden" id="small-warning">
+              繧ｹ繝｢繝ｼ繝ｫ萓晞ｼ縺ｯ螳溯｡梧凾髢薙・荳企剞縺・譎る俣縺ｧ縺吶・譎る俣繧定ｶ・∴縺溷ｴ蜷医・蠑ｷ蛻ｶ逧・↓邨ゆｺ・＠縺ｾ縺吶・            </div>
+            <p class="hint hidden" id="scale-restriction-hint"></p>
+          </div>
+
+          <div class="form-group">
+            <label for="sim_notes">螳溯｡梧凾縺ｮ豕ｨ諢冗せ・井ｻｻ諢擾ｼ・/label>
+            <textarea id="sim_notes" name="sim_notes" rows="4" placeholder="鬮倥＆20cm譛ｪ貅&#10;髟ｷ霎ｺ25cm縺ｫ蜷医ｏ縺帙ｋ&#10;繧ｵ繝昴・繧ｿ繝ｼ譛峨・tree&#10;蜈・｡ｫ邇・0%"></textarea>
+          </div>
+
+          <div class="form-group hidden" id="request-result-video-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="request_result_video" name="request_result_video" value="1" />
+              螳溯｡御ｸｭ縺ｮ謦ｮ蠖ｱ繧貞ｸ梧悍縺吶ｋ
+            </label>
+            <p class="hint">驕ｸ謚槭＠縺滓ｩ溽ｨｮ縺悟虚逕ｻ謦ｮ蠖ｱ縺ｫ蟇ｾ蠢懊＠縺ｦ縺・ｋ蝣ｴ蜷医・縺ｿ蛻ｩ逕ｨ縺ｧ縺阪∪縺吶よ聴蠖ｱ蠕後∝虚逕ｻ縺ｯ縺薙・繝壹・繧ｸ縺九ｉ繝繧ｦ繝ｳ繝ｭ繝ｼ繝峨〒縺阪∪縺吶・/p>
+          </div>
+
+          <div class="form-group">
+            <label>繝輔ぃ繧､繝ｫ・・TL / g-code・・/label>
+            <div class="upload-zone" id="upload-zone">
+              <input type="file" id="print-file" accept=".stl,.gcode,.gco,.nc" />
+              <div class="upload-icon">刀</div>
+              <p>繧ｯ繝ｪ繝・け縺ｾ縺溘・繝峨Λ繝・げ&繝峨Ο繝・・縺ｧ繝輔ぃ繧､繝ｫ繧帝∈謚・/p>
+              <p class="upload-info">.stl / .gcode / .gco / .nc 蟇ｾ蠢・/ 20MB莉･荳翫・繝槭Ν繝√ヱ繝ｼ繝・/ 譛螟ｧ200MB</p>
+            </div>
+            <div class="progress-bar hidden" id="upload-progress">
+              <div class="progress-bar-fill" id="upload-progress-fill"></div>
+            </div>
+            <p id="upload-status" class="upload-info"></p>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer" id="form-modal-footer">
+        <button class="btn btn-secondary hidden" id="form-back-btn" type="button">讖溽ｨｮ驕ｸ謚槭↓謌ｻ繧・/button>
+        <button class="btn btn-secondary" id="form-cancel-btn" type="button">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>
+        <button class="btn btn-primary hidden" id="form-next-btn" type="button" disabled>谺｡縺ｸ</button>
+        <button class="btn btn-primary hidden" id="submit-btn" type="submit" form="reservation-form">莠育ｴ・ｒ逕ｳ隲・/button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="edit-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="edit-modal-title">莠育ｴ・・螳ｹ繧剃ｿｮ豁｣</h2>
+        <button class="modal-close" id="edit-modal-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="edit-alert"></div>
+        <form id="edit-reservation-form">
+          <div class="form-group" id="edit-simulator-group">
+            <label for="edit-simulator-select">繧ｷ繝溘Η繝ｬ繝ｼ繧ｿ繝ｼ讖溽ｨｮ</label>
+            <select id="edit-simulator-select" name="simulator_id" required></select>
+          </div>
+
+          <p class="hint">菫ｮ豁｣蠕後・逕ｳ隲倶ｸｭ縺ｫ謌ｻ繧翫∫ｮ｡逅・・・蜀肴価隱阪′蠢・ｦ√〒縺吶・/p>
+
+          <h3 class="form-section-title">譛ｬ莠ｺ遒ｺ隱・/h3>
+          <div id="edit-identity-section">
+          <div class="form-row">
+            <div class="form-group combobox-wrap">
+              <label for="edit-homeroom">繝帙・繝繝ｫ繝ｼ繝</label>
+              <input type="text" id="edit-homeroom" name="homeroom" autocomplete="off" placeholder="萓・ 301" required />
+              <ul class="combobox-list hidden" id="edit-homeroom-list"></ul>
+            </div>
+            <div class="form-group">
+              <label for="edit-student-number">蜃ｺ蟶ｭ逡ｪ蜿ｷ</label>
+              <input type="number" id="edit-student-number" name="student_number" min="1" max="50" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-student-name">蜷榊燕</label>
+            <input type="text" id="edit-student-name" name="student_name" required />
+            <p class="hint">莠育ｴ・凾縺ｫ蜈･蜉帙＠縺溷・螳ｹ縺ｨ荳閾ｴ縺励※縺・ｋ蠢・ｦ√′縺ゅｊ縺ｾ縺・/p>
+          </div>
+          </div>
+
+          <h3 class="form-section-title">菫ｮ豁｣蜀・ｮｹ</h3>
+          <div class="form-group">
+            <label for="edit-desired-date">蟶梧悍螳滓命譌･</label>
+            <input type="date" id="edit-desired-date" name="desired_date" required />
+          </div>
+
+          <div class="form-group">
+            <label>逶ｮ逧・/label>
+            <div class="radio-group">
+              <label><input type="radio" name="purpose" value="ss_s_tan" required /> SS繝ｻS謗｢</label>
+              <label><input type="radio" name="purpose" value="club" /> 驛ｨ豢ｻ</label>
+              <label><input type="radio" name="purpose" value="other" /> 縺昴・莉・/label>
+            </div>
+          </div>
+
+          <div class="form-group hidden" id="edit-purpose-other-group">
+            <label for="edit-purpose-other">縺昴・莉悶・蜀・ｮｹ</label>
+            <input type="text" id="edit-purpose-other" name="purpose_other" />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-title">繧ｿ繧､繝医Ν</label>
+            <input type="text" id="edit-title" name="title" required maxlength="40" />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-summary">讎りｦ・ｼ井ｻｻ諢擾ｼ・/label>
+            <textarea id="edit-summary" name="summary"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ隕乗ｨ｡</label>
+            <div class="radio-group" id="edit-print-scale-group">
+              <label id="edit-scale-label-small"><input type="radio" name="sim_scale" value="small" required /> 繧ｹ繝｢繝ｼ繝ｫ</label>
+              <label id="edit-scale-label-medium"><input type="radio" name="sim_scale" value="medium" /> 繝溘ョ繧｣繧｢繝</label>
+              <label id="edit-scale-label-large"><input type="radio" name="sim_scale" value="large" /> 繝ｩ繝ｼ繧ｸ</label>
+            </div>
+            <p class="hint hidden" id="edit-scale-restriction-hint"></p>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-sim-notes">螳溯｡梧凾縺ｮ豕ｨ諢冗せ・井ｻｻ諢擾ｼ・/label>
+            <textarea id="edit-sim-notes" name="sim_notes" rows="4"></textarea>
+          </div>
+
+          <div class="form-group hidden" id="edit-request-result-video-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="edit-request-result-video" name="request_result_video" value="1" />
+              螳溯｡御ｸｭ縺ｮ謦ｮ蠖ｱ繧貞ｸ梧悍縺吶ｋ
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>繝輔ぃ繧､繝ｫ・・TL / g-code・・/label>
+            <p class="hint" id="edit-current-file"></p>
+            <div class="upload-zone" id="edit-upload-zone">
+              <input type="file" id="edit-print-file" accept=".stl,.gcode,.gco,.nc" />
+              <div class="upload-icon">刀</div>
+              <p>螟画峩縺吶ｋ蝣ｴ蜷医・縺ｿ繝輔ぃ繧､繝ｫ繧帝∈謚・/p>
+            </div>
+            <div class="progress-bar hidden" id="edit-upload-progress">
+              <div class="progress-bar-fill" id="edit-upload-progress-fill"></div>
+            </div>
+            <p id="edit-upload-status" class="upload-info"></p>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="edit-cancel-btn" type="button">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>
+        <button class="btn btn-primary" id="edit-submit-btn" type="submit" form="edit-reservation-form">菫ｮ豁｣繧剃ｿ晏ｭ・/button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="detail-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="detail-modal-title">莠育ｴ・ｩｳ邏ｰ</h2>
+        <button class="modal-close" id="detail-modal-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body" id="detail-modal-body"></div>
+      <div class="modal-footer" id="detail-modal-footer">
+        <p class="contact-notice contact-notice-modal">蜿悶ｊ豸医＠縺ｧ縺阪↑縺・ｴ蜷茨ｼ・br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
+        <button class="btn btn-secondary" id="detail-close-btn" type="button">髢峨§繧・/button>
+        <button class="btn btn-secondary hidden" id="detail-edit-toggle-btn" type="button">莠育ｴ・・螳ｹ繧剃ｿｮ豁｣</button>
+        <button class="btn btn-secondary" id="detail-cancel-toggle-btn" type="button">莠育ｴ・ｒ蜿悶ｊ豸医☆</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="profile-gate-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>萓晞ｼ閠・ュ蝣ｱ縺ｮ逋ｻ骭ｲ</h2>
+        <button class="modal-close" id="profile-gate-close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">蛻晏屓莠育ｴ・燕縺ｫ縲√・繝ｼ繝繝ｫ繝ｼ繝繝ｻ蜃ｺ蟶ｭ逡ｪ蜿ｷ繝ｻ蜷榊燕繧堤匳骭ｲ縺励※縺上□縺輔＞縲よｬ｡蝗樔ｻ･髯阪・閾ｪ蜍募・蜉帙＆繧後∪縺吶・/p>
+        <div id="profile-gate-alert"></div>
+        <form id="profile-gate-form">
+          <div class="form-row">
+            <div class="form-group combobox-wrap">
+              <label for="profile-homeroom">繝帙・繝繝ｫ繝ｼ繝</label>
+              <input type="text" id="profile-homeroom" autocomplete="off" placeholder="萓・ 301" required />
+              <ul class="combobox-list hidden" id="profile-homeroom-list"></ul>
+            </div>
+            <div class="form-group">
+              <label for="profile-student-number">蜃ｺ蟶ｭ逡ｪ蜿ｷ</label>
+              <input type="number" id="profile-student-number" min="1" max="99" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="profile-student-name">蜷榊燕</label>
+            <input type="text" id="profile-student-name" placeholder="譚ｾ螻ｱ螟ｪ驛・ required />
+          </div>
+          <button type="submit" class="btn btn-primary">菫晏ｭ倥＠縺ｦ邯壹￠繧・/button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

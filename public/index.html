@@ -264,6 +264,8 @@
               <input type="email" class="hub-profile-input" id="profile-email" required>
             </label>
 
+            <div id="profile-sim-phone-status" class="hub-profile-sim-phone-wrap" hidden></div>
+
             <div class="hub-profile-actions">
               <button type="submit" class="hub-profile-save" id="profile-save-btn">保存</button>
             </div>
@@ -310,6 +312,60 @@
             </div>
           </form>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- 電話番号 SMS 認証（アカウント設定） -->
+  <div class="hub-profile-modal hub-phone-verification-modal" id="hub-phone-verification-modal" aria-hidden="true" role="dialog" aria-labelledby="hub-phone-verification-title">
+    <div class="hub-profile-modal-backdrop" id="hub-phone-verification-backdrop"></div>
+    <div class="hub-profile-modal-dialog hub-phone-verification-dialog">
+      <header class="hub-profile-modal-header">
+        <h2 class="hub-profile-modal-title" id="hub-phone-verification-title">電話番号の認証</h2>
+        <button type="button" class="hub-profile-modal-close" id="hub-phone-verification-close" aria-label="閉じる">×</button>
+      </header>
+      <div class="hub-profile-modal-body hub-phone-verification-body">
+        <p class="hub-phone-verification-hint">シミュレーション依頼（FDS）の本人確認のため、日本国内の携帯電話番号に認証コードを SMS で送信します。認証の有効期限は <strong>1年</strong>で、期限後は再認証が必要です。</p>
+        <div id="hub-phone-verification-alert" class="hub-profile-alert hidden" role="alert" hidden></div>
+        <div id="hub-phone-verify-phone-step">
+          <label class="hub-profile-field">
+            <span class="hub-profile-label">携帯電話番号</span>
+            <input type="tel" class="hub-profile-input" id="hub-phone-verify-number" inputmode="numeric" autocomplete="tel" placeholder="09012345678" />
+          </label>
+          <label class="hub-phone-consent-label">
+            <input type="checkbox" id="hub-phone-sms-consent" />
+            <span>
+              <a href="/docs/legal/sim-sms-consent-ja.md" target="_blank" rel="noopener noreferrer">SMS 認証への同意</a>
+              に同意し、認証コードの送信を許可します（宣伝目的の SMS は送信しません）。
+            </span>
+          </label>
+          <div id="hub-recaptcha-container" aria-live="polite"></div>
+          <p class="hub-phone-verification-hint">モーダルを開くと reCAPTCHA が表示されます。<strong>先に</strong>「私はロボットではありません」にチェックし、その後「認証コードを送信」を押してください。</p>
+          <div class="hub-profile-actions hub-phone-verification-actions">
+            <button type="button" class="hub-profile-save" id="hub-phone-send-code-btn">認証コードを送信</button>
+          </div>
+        </div>
+        <div id="hub-phone-verify-code-step" class="hidden">
+          <p id="hub-phone-verify-sent-to" class="hub-phone-verification-hint hidden"></p>
+          <details class="hub-phone-sms-troubleshoot">
+            <summary>SMS が届かないとき</summary>
+            <ul class="hub-phone-verification-hint">
+              <li>キャリアの「海外事業者からの SMS 拒否」や迷惑 SMS ブロック設定を確認してください。</li>
+              <li>Firebase Console の SMS region policy で日本（JP）が許可されているか確認してください。</li>
+            </ul>
+          </details>
+          <button type="button" class="hub-profile-cancel hub-phone-resend-btn" id="hub-phone-resend-code-btn">認証コードを再送信</button>
+          <form id="hub-phone-verify-code-form" class="hub-phone-code-form">
+            <label class="hub-profile-field">
+              <span class="hub-profile-label">認証コード（6桁）</span>
+              <input type="text" class="hub-profile-input" id="hub-phone-verify-code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required />
+            </label>
+            <div class="hub-profile-actions hub-phone-verification-actions">
+              <button type="button" class="hub-profile-cancel" id="hub-phone-verify-back-btn">戻る</button>
+              <button type="submit" class="hub-profile-save">認証を完了</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>
