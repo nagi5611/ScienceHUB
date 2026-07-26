@@ -750,6 +750,52 @@ function noteCollabDeletion(id, el) {
   pendingLocalDeletions.add(id);
 }
 
+/** 共同編集マージ用の要素シリアライズ（編集履歴は除外） */
+function collabElementPayload(el) {
+  if (!el || typeof el !== "object") return "";
+  const copy = stripStrokeWidth(structuredClone(el));
+  delete copy.editHistory;
+  return JSON.stringify(copy);
+}
+
+/** Undo/Redo 後に共同編集へ削除・復元・形状変更を反映 */
+function syncCollabAfterUndoRedo(beforeElements, afterElements) {
+  if (!collab?.isOpen()) return;
+
+  const beforeById = new Map();
+  for (const el of beforeElements) {
+    if (el?.id) beforeById.set(el.id, el);
+  }
+  const afterById = new Map();
+  for (const el of afterElements) {
+    if (el?.id) afterById.set(el.id, el);
+  }
+
+  for (const [id, prev] of beforeById) {
+    if (!afterById.has(id)) {
+      noteCollabDeletion(id, prev);
+    }
+  }
+
+  for (const el of afterElements) {
+    if (!el?.id) continue;
+    const prev = beforeById.get(el.id);
+    if (!prev) {
+      pendingLocalDeletions.delete(el.id);
+      const tomb = collabTombstones[el.id];
+      if (tomb !== undefined) {
+        el.collabVersion = Math.max(getElementCollabVersion(el), tomb) + 1;
+      } else {
+        bumpElementCollabVersion(el);
+      }
+      continue;
+    }
+    if (collabElementPayload(prev) !== collabElementPayload(el)) {
+      bumpElementCollabVersion(el);
+    }
+  }
+}
+
 /** 共同編集ブロードキャスト用シーン */
 function buildCollabBroadcastScene() {
   return {
@@ -977,12 +1023,15 @@ function pushHistory() {
 function undo() {
   if (!undoStack.length) return;
   historySuspended = true;
-  redoStack.push(snapshotElements());
+  const beforeElements = snapshotElements();
+  redoStack.push(beforeElements);
   elements = undoStack.pop();
+  syncCollabAfterUndoRedo(beforeElements, elements);
   clearSelection();
   render();
   historySuspended = false;
   markDirty();
+  broadcastCollabScene({ force: true });
   saveStatusEl.textContent = "元に戻しました";
 }
 
@@ -990,12 +1039,15 @@ function undo() {
 function redo() {
   if (!redoStack.length) return;
   historySuspended = true;
-  undoStack.push(snapshotElements());
+  const beforeElements = snapshotElements();
+  undoStack.push(beforeElements);
   elements = redoStack.pop();
+  syncCollabAfterUndoRedo(beforeElements, elements);
   clearSelection();
   render();
   historySuspended = false;
   markDirty();
+  broadcastCollabScene({ force: true });
   saveStatusEl.textContent = "やり直しました";
 }
 
@@ -2851,6 +2903,7 @@ function renderPeersList() {
   }
 }
 
+/** 共同編集中にドラッグした範囲を削除 */
 /** 共同編集者ポップオーバーを開く */
 function openPeersPopover() {
   if (collabConnectionState !== "connected" || !lastCollabPeers.length) return;
