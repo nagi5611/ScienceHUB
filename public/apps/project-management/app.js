@@ -1012,6 +1012,7 @@ async function loadDashboard(groupId = null) {
 
     dashboard = await response.json();
     selectedGroupId = dashboard.group?.id ?? null;
+    storageGroupRoot = "";
     availabilityMap = new Map(
       (dashboard.availability ?? []).map((a) => [a.date, a.status])
     );
@@ -1895,6 +1896,8 @@ function openMemberTaskDialog(assigneeId) {
   inputTitle.value = "";
   inputDue.value = "";
   inputStatus.value = "pending";
+  resetTaskStorageState(memberTaskStorage, null);
+  renderTaskStorageSummary("pm-member-task-storage-summary", memberTaskStorage);
 
   dialog.showModal();
   inputTitle.focus();
@@ -1929,6 +1932,8 @@ function openMemberTaskEditDialog(taskId) {
   inputTitle.value = task.title;
   inputDue.value = task.due_date ?? "";
   inputStatus.value = task.status === "active" ? "active" : "pending";
+  resetTaskStorageState(memberTaskStorage, task.storage_path);
+  renderTaskStorageSummary("pm-member-task-storage-summary", memberTaskStorage);
 
   dialog.showModal();
   inputTitle.focus();
@@ -1976,6 +1981,7 @@ async function handleSaveMemberTask() {
             title,
             due_date: dueDate,
             status,
+            storage_path: resolveTaskStoragePayload(memberTaskStorage),
           }),
         }
       );
@@ -1999,6 +2005,7 @@ async function handleSaveMemberTask() {
           title,
           due_date: dueDate,
           status,
+          storage_path: resolveTaskStoragePayload(memberTaskStorage),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2172,6 +2179,139 @@ function renderStorageLink(storagePath) {
     </span>
     <span class="pm-storage-link-path">${escapeHtml(label)}</span>
   </a>`;
+}
+
+/** タスク用ストレージ状態を初期化 */
+function resetTaskStorageState(state, existingPath) {
+  state.clear = false;
+  state.path = existingPath ?? "";
+}
+
+/** タスク用ストレージの表示を更新 */
+function renderTaskStorageSummary(summaryElId, state) {
+  const el = document.getElementById(summaryElId);
+  if (!el) return;
+  if (state.clear || !state.path) {
+    el.textContent = "フォルダ: 未設定";
+    return;
+  }
+  el.innerHTML = `フォルダ: ${renderStorageLink(state.path)}`;
+}
+
+/** 保存用の storage_path（解除時は null） */
+function resolveTaskStoragePayload(state) {
+  if (state.clear) return null;
+  return state.path?.trim() ? state.path.trim() : null;
+}
+
+/** ストレージピッカー UI 要素 */
+function getStoragePickerElements() {
+  const modal = storagePickerUi === "modal";
+  return {
+    folders: document.getElementById(
+      modal ? "pm-storage-modal-folders" : "pm-storage-folders"
+    ),
+    crumb: document.getElementById(
+      modal ? "pm-storage-modal-breadcrumb" : "pm-storage-breadcrumb"
+    ),
+    selected: document.getElementById(
+      modal ? "pm-storage-modal-selected" : "pm-storage-selected"
+    ),
+  };
+}
+
+function isStoragePickerCleared() {
+  return storagePickerUi === "modal" ? modalStorageClear : editClearStorage;
+}
+
+function setStoragePickerCleared(cleared) {
+  if (storagePickerUi === "modal") {
+    modalStorageClear = cleared;
+  } else {
+    editClearStorage = cleared;
+  }
+}
+
+/** グループのストレージルートを取得 */
+async function ensureStorageGroupRoot() {
+  if (!selectedGroupId) {
+    throw new Error("グループが選択されていません");
+  }
+  if (storageGroupRoot) return storageGroupRoot;
+  const response = await fetch(
+    `/api/project-management/storage-root?group_id=${encodeURIComponent(selectedGroupId)}`,
+    { credentials: "same-origin" }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "ストレージルートの取得に失敗しました");
+  }
+  storageGroupRoot = data.path ?? "";
+  return storageGroupRoot;
+}
+
+/** タスク編集用のフォルダ選択モーダルを開く */
+async function openTaskStoragePickerModal(existingPath, onConfirm) {
+  const dialog = document.getElementById("pm-storage-picker-dialog");
+  if (!dialog || !onConfirm) return;
+  try {
+    storagePickerUi = "modal";
+    storagePickerOnConfirm = onConfirm;
+    modalStorageClear = false;
+    const root = await ensureStorageGroupRoot();
+    const startPath =
+      existingPath && existingPath.startsWith(root) ? existingPath : root;
+    storagePickerPath = startPath;
+    await loadStoragePicker(startPath);
+    dialog.showModal();
+  } catch (error) {
+    storagePickerUi = "inline";
+    storagePickerOnConfirm = null;
+    showToast(
+      error instanceof Error ? error.message : "ストレージの読み込みに失敗しました",
+      true
+    );
+  }
+}
+
+/** フォルダ選択モーダルを閉じる */
+function closeTaskStoragePickerModal() {
+  storagePickerUi = "inline";
+  storagePickerOnConfirm = null;
+  modalStorageClear = false;
+  document.getElementById("pm-storage-picker-dialog")?.close();
+}
+
+/** フォルダ選択を確定 */
+function confirmTaskStoragePickerModal() {
+  const path = isStoragePickerCleared() ? null : storagePickerPath || null;
+  const cleared = isStoragePickerCleared();
+  const onConfirm = storagePickerOnConfirm;
+  closeTaskStoragePickerModal();
+  if (onConfirm) {
+    onConfirm({ path: path ?? "", cleared });
+  }
+}
+
+function bindTaskStorageFieldControls({
+  pickBtnId,
+  clearBtnId,
+  summaryElId,
+  state,
+}) {
+  document.getElementById(pickBtnId)?.addEventListener("click", () => {
+    const existing = state.clear ? "" : state.path || "";
+    void openTaskStoragePickerModal(existing, ({ path, cleared }) => {
+      state.clear = cleared;
+      state.path = cleared ? "" : path;
+      renderTaskStorageSummary(summaryElId, state);
+    });
+  });
+  document.getElementById(clearBtnId)?.addEventListener("click", () => {
+    state.clear = true;
+    state.path = "";
+    renderTaskStorageSummary(summaryElId, state);
+  });
 }
 
 /** Excalidraw プロジェクトノートへのリンク HTML */
@@ -2939,10 +3079,9 @@ async function handleSetCompleted(projectId, completed) {
 /** ストレージフォルダ一覧を読み込む */
 async function loadStoragePicker(path) {
   storagePickerPath = path;
-  editClearStorage = false;
-  const foldersEl = document.getElementById("pm-storage-folders");
-  const crumbEl = document.getElementById("pm-storage-breadcrumb");
-  const selectedEl = document.getElementById("pm-storage-selected");
+  setStoragePickerCleared(false);
+  const { folders: foldersEl, crumb: crumbEl, selected: selectedEl } =
+    getStoragePickerElements();
   if (!foldersEl || !crumbEl || !selectedEl) return;
 
   selectedEl.textContent = `選択中: ${path}`;
@@ -2990,7 +3129,7 @@ async function loadStoragePicker(path) {
 
 /** ストレージパンくず */
 function renderStorageBreadcrumb(path) {
-  const crumbEl = document.getElementById("pm-storage-breadcrumb");
+  const { crumb: crumbEl } = getStoragePickerElements();
   if (!crumbEl || !storageGroupRoot) return;
 
   const relative = path.startsWith(storageGroupRoot)
@@ -3298,6 +3437,9 @@ function openTaskDialog(parentId) {
   taskActivityCalYear = currentYear;
   taskActivityCalMonth = currentMonth;
 
+  resetTaskStorageState(issueTaskStorage, null);
+  renderTaskStorageSummary("pm-task-storage-summary", issueTaskStorage);
+
   dialog.showModal();
   renderTaskActivityCalendar("task", []);
   updateTaskIssueEffortPreview();
@@ -3336,6 +3478,7 @@ async function handleCreateTask() {
         due_date: dueEl?.value || null,
         assignee_ids: assigneeIds,
         activity_dates: [...taskActivitySelectedDates].sort(),
+        storage_path: resolveTaskStoragePayload(issueTaskStorage),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -3425,6 +3568,9 @@ function openIssuedTaskEditDialog(parentId, batchId) {
   taskActivityCalYear = currentYear;
   taskActivityCalMonth = currentMonth;
 
+  resetTaskStorageState(issueTaskStorage, batch.storage_path);
+  renderTaskStorageSummary("pm-issued-task-storage-summary", issueTaskStorage);
+
   dialog.showModal();
   renderTaskActivityCalendar("issued", batch.activity_dates ?? []);
   updateTaskIssueEffortPreview({
@@ -3477,6 +3623,7 @@ async function handleSaveIssuedTask() {
           status: statusEl.value === "active" ? "active" : "pending",
           assignee_ids: assigneeIds,
           activity_dates: [...taskActivitySelectedDates].sort(),
+          storage_path: resolveTaskStoragePayload(issueTaskStorage),
         }),
       }
     );
@@ -3812,6 +3959,32 @@ function bindEvents() {
     storagePickerPath = "";
     const selectedEl = document.getElementById("pm-storage-selected");
     if (selectedEl) selectedEl.textContent = "選択中: （紐づけなし）";
+  });
+
+  document
+    .getElementById("pm-storage-modal-cancel")
+    ?.addEventListener("click", closeTaskStoragePickerModal);
+  document
+    .getElementById("pm-storage-modal-confirm")
+    ?.addEventListener("click", confirmTaskStoragePickerModal);
+
+  bindTaskStorageFieldControls({
+    pickBtnId: "pm-member-task-storage-pick",
+    clearBtnId: "pm-member-task-storage-clear",
+    summaryElId: "pm-member-task-storage-summary",
+    state: memberTaskStorage,
+  });
+  bindTaskStorageFieldControls({
+    pickBtnId: "pm-task-storage-pick",
+    clearBtnId: "pm-task-storage-clear",
+    summaryElId: "pm-task-storage-summary",
+    state: issueTaskStorage,
+  });
+  bindTaskStorageFieldControls({
+    pickBtnId: "pm-issued-task-storage-pick",
+    clearBtnId: "pm-issued-task-storage-clear",
+    summaryElId: "pm-issued-task-storage-summary",
+    state: issueTaskStorage,
   });
 
   document.getElementById("pm-edit-complete")?.addEventListener("click", () => {
