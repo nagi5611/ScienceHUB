@@ -23,6 +23,10 @@ interface DesignSceneState {
   tombstones: Record<string, number>;
 }
 
+const FULL_SYNC_INTERVAL_MS = 10_000;
+/** 定期完全同期の送信元（クライアント ID ではない） */
+const FULL_SYNC_FROM = "__full_sync__";
+
 const COLORS = [
   "#e03131",
   "#2f9e44",
@@ -209,6 +213,30 @@ export class DesignCollabRoom extends DurableObject<DesignCollabEnv> {
     this.broadcast(JSON.stringify({ type: "presence", peers: this.listPeers() }));
   }
 
+  private async scheduleFullSyncAlarm(): Promise<void> {
+    const existing = await this.ctx.storage.getAlarm();
+    if (existing != null) return;
+    await this.ctx.storage.setAlarm(Date.now() + FULL_SYNC_INTERVAL_MS);
+  }
+
+  private broadcastFullScene(): void {
+    if (this.ctx.getWebSockets().length === 0) return;
+    this.broadcast(
+      JSON.stringify({
+        type: "scene",
+        scene: this.scene,
+        from: FULL_SYNC_FROM,
+        fullSync: true,
+      })
+    );
+  }
+
+  async alarm(): Promise<void> {
+    await this.ensureLoaded();
+    this.broadcastFullScene();
+    await this.ctx.storage.setAlarm(Date.now() + FULL_SYNC_INTERVAL_MS);
+  }
+
   private applyIncomingScene(incoming: DesignSceneState): void {
     this.scene.tombstones = mergeCollabTombstones(
       this.scene.tombstones,
@@ -290,6 +318,7 @@ export class DesignCollabRoom extends DurableObject<DesignCollabEnv> {
         })
       );
       this.broadcastPresence();
+      void this.scheduleFullSyncAlarm();
 
       return new Response(null, { status: 101, webSocket: client });
     }

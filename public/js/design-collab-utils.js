@@ -98,8 +98,9 @@ export function reconcileDesignElements(local, remote, options = {}) {
     }
   };
 
-  for (const el of localElements) consider(el, false);
-  for (const el of remoteElements) consider(el, true);
+  const preferLocalOnTie = options.preferLocalOnTie === true;
+  for (const el of localElements) consider(el, preferLocalOnTie);
+  for (const el of remoteElements) consider(el, !preferLocalOnTie);
 
   const result = [...merged.values()];
   for (const el of localElements) {

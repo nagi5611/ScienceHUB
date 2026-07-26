@@ -176,6 +176,8 @@ let collabPointerTimer = null;
 let remotePointerRenderRaf = null;
 let applyingRemote = false;
 let collabBroadcastTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let collabFullSyncTimer = null;
 /** @type {ReturnType<typeof pickCollabScene> | null} */
 let pendingRemoteScene = null;
 let lastCollabFingerprint = "";
@@ -184,6 +186,7 @@ let collabTombstones = {};
 /** @type {Set<string>} */
 let pendingLocalDeletions = new Set();
 const COLLAB_BROADCAST_MS = 200;
+const COLLAB_FULL_SYNC_MS = 10_000;
 const COLLAB_POINTER_MS = 50;
 const REMOTE_POINTER_STALE_MS = 6000;
 /** 線描画時の端オートパン（画面端からの距離・px） */
@@ -2555,6 +2558,29 @@ function markDirty() {
   scheduleCollabBroadcast();
 }
 
+/** ドラッグ・テキスト入力中に届いたリモートシーンをマージして保留 */
+function queuePendingRemoteCollabScene(scene) {
+  const incoming = pickCollabScene(scene);
+  if (!pendingRemoteScene) {
+    pendingRemoteScene = incoming;
+    return;
+  }
+  const prev = pendingRemoteScene;
+  const remoteTombs = mergeCollabTombstones(
+    prev.tombstones,
+    incoming.tombstones
+  );
+  pendingRemoteScene = {
+    ...incoming,
+    tombstones: remoteTombs,
+    elements: reconcileDesignElements(prev.elements, incoming.elements, {
+      localTombstones: remoteTombs,
+      remoteTombstones: remoteTombs,
+      preferLocalOnTie: false,
+    }),
+  };
+}
+
 /** 共同編集のリモートシーンをマージ適用（選択・Undoは維持） */
 function mergeRemoteCollabScene(scene) {
   const remote = pickCollabScene(scene);
@@ -2564,6 +2590,7 @@ function mergeRemoteCollabScene(scene) {
   let merged = reconcileDesignElements(elements, remote.elements, {
     localTombstones: collabTombstones,
     remoteTombstones: remoteTombs,
+    preferLocalOnTie: true,
   }).map(normalizeLegacyElement);
   merged = attachMergedEditHistories(elements, remote.elements, merged);
   merged = merged.filter((el) => !pendingLocalDeletions.has(el.id));
@@ -2634,6 +2661,7 @@ function flushPendingRemoteScene() {
         if (isDirty) void saveVersion(true);
       }, AUTOSAVE_MS);
     }
+    if (isDirty) scheduleCollabBroadcast();
   } finally {
     applyingRemote = false;
   }
@@ -2642,14 +2670,17 @@ function flushPendingRemoteScene() {
 /** 共同編集のリモートシーンを適用 */
 function applyCollabRemoteScene(scene) {
   if (dragState || textEditState) {
-    pendingRemoteScene = pickCollabScene(scene);
+    queuePendingRemoteCollabScene(scene);
     return;
   }
 
   applyingRemote = true;
   try {
     const changed = mergeRemoteCollabScene(scene);
-    if (!changed) return;
+    if (!changed) {
+      if (isDirty) scheduleCollabBroadcast();
+      return;
+    }
     isDirty = true;
     if (saveStatusEl) saveStatusEl.textContent = "未保存";
     if (autosaveTimer) clearTimeout(autosaveTimer);
@@ -2657,6 +2688,7 @@ function applyCollabRemoteScene(scene) {
       autosaveTimer = null;
       if (isDirty) void saveVersion(true);
     }, AUTOSAVE_MS);
+    scheduleCollabBroadcast();
   } finally {
     applyingRemote = false;
   }
@@ -2876,6 +2908,7 @@ function updateCollabPeers(peers, clientId) {
   lastCollabPeers = peers ?? [];
   lastCollabClientId = clientId;
   collabConnectionState = "connected";
+  startCollabFullSyncTimer();
 
   const peerIds = new Set(lastCollabPeers.map((p) => p.clientId));
   for (const id of remotePointers.keys()) {
@@ -2883,6 +2916,23 @@ function updateCollabPeers(peers, clientId) {
   }
 
   renderPeersStatus();
+}
+
+/** 10 秒ごとにローカル全体をサーバーへ送り、ドリフトを解消 */
+function startCollabFullSyncTimer() {
+  stopCollabFullSyncTimer();
+  collabFullSyncTimer = setInterval(() => {
+    if (!collab?.isOpen() || applyingRemote) return;
+    broadcastCollabScene({ force: true });
+  }, COLLAB_FULL_SYNC_MS);
+}
+
+/** 定期完全同期タイマーを停止 */
+function stopCollabFullSyncTimer() {
+  if (collabFullSyncTimer) {
+    clearInterval(collabFullSyncTimer);
+    collabFullSyncTimer = null;
+  }
 }
 
 /** 共同編集 WebSocket を切断 */
@@ -2895,6 +2945,7 @@ function disconnectCollab() {
     clearTimeout(collabBroadcastTimer);
     collabBroadcastTimer = null;
   }
+  stopCollabFullSyncTimer();
   pendingRemoteScene = null;
   collabTombstones = {};
   pendingLocalDeletions = new Set();
@@ -2953,11 +3004,12 @@ function connectCollab({ projectId, token } = {}) {
 }
 
 /** 共同編集へシーンを送信 */
-function broadcastCollabScene() {
+function broadcastCollabScene(options = {}) {
+  const force = options.force === true;
   if (!collab || applyingRemote) return;
   const scene = buildCollabBroadcastScene();
   const fingerprint = designSceneFingerprint(scene);
-  if (fingerprint === lastCollabFingerprint) return;
+  if (!force && fingerprint === lastCollabFingerprint) return;
   lastCollabFingerprint = fingerprint;
   collab.broadcastScene(scene);
 }
