@@ -22,14 +22,14 @@ import {
   createProject,
   deleteProject,
   setAvailability,
-  updateChildSchedule,
-  setChildAssignees,
-  setChildCompleted,
-  setChildStoragePath,
+  updateProjectSchedule,
+  setProjectAssignees,
+  setProjectCompleted,
+  setProjectStoragePath,
   setParentLeader,
-  setParentLeaders,
-  setParentMembers,
-  setParentProgress,
+  setProjectLeaders,
+  setProjectMembers,
+  setProjectProgress,
   createTask,
   completeTask,
   updateTask,
@@ -92,7 +92,6 @@ interface AdminSettingsBody {
 interface CreateProjectBody {
   group_id?: string;
   name?: string;
-  parent_id?: string | null;
 }
 
 interface AvailabilityBody {
@@ -301,7 +300,9 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         db,
         auth.id,
         groupId,
-        body.min_eligible_weight
+        {
+          min_eligible_weight: body.min_eligible_weight,
+        }
       );
       return Response.json({ group });
     } catch (error) {
@@ -362,7 +363,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
             400
           );
         }
-        projects = await setParentProgress(
+        projects = await setProjectProgress(
           db,
           auth.id,
           projectId,
@@ -372,7 +373,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         if (!Array.isArray(body.leader_user_ids)) {
           return jsonError("leader_user_ids は配列で指定してください", 400);
         }
-        projects = await setParentLeaders(
+        projects = await setProjectLeaders(
           db,
           auth.id,
           projectId,
@@ -382,7 +383,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         if (!Array.isArray(body.member_user_ids)) {
           return jsonError("member_user_ids は配列で指定してください", 400);
         }
-        projects = await setParentMembers(
+        projects = await setProjectMembers(
           db,
           auth.id,
           projectId,
@@ -399,7 +400,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         if (!Array.isArray(body.assignee_ids)) {
           return jsonError("assignee_ids は配列で指定してください", 400);
         }
-        projects = await setChildAssignees(
+        projects = await setProjectAssignees(
           db,
           auth.id,
           projectId,
@@ -409,14 +410,14 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         if (typeof body.completed !== "boolean") {
           return jsonError("completed は boolean で指定してください", 400);
         }
-        projects = await setChildCompleted(
+        projects = await setProjectCompleted(
           db,
           auth.id,
           projectId,
           body.completed
         );
       } else if (body.storage_path !== undefined) {
-        projects = await setChildStoragePath(
+        projects = await setProjectStoragePath(
           db,
           auth.id,
           projectId,
@@ -426,7 +427,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         body.due_date !== undefined ||
         body.start_date !== undefined
       ) {
-        projects = await updateChildSchedule(db, auth.id, projectId, {
+        projects = await updateProjectSchedule(db, auth.id, projectId, {
           due_date: body.due_date,
           start_date: body.start_date,
         });
@@ -581,7 +582,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     try {
-      const result = await createTask(db, auth.id, {
+      const result = await createTask(
+        db,
+        auth.id,
+        {
         group_id: groupId || undefined,
         parent_project_id: parentId || null,
         child_project_id: body.child_project_id,
@@ -592,7 +596,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         assignee_ids: assigneeIds,
         activity_dates: body.activity_dates,
         storage_path: body.storage_path,
-      });
+      }
+      );
       return Response.json(result);
     } catch (error) {
       return toErrorResponse(error, "タスクの作成に失敗しました");
@@ -637,7 +642,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const projects = await createProject(db, auth.id, {
       group_id: groupId,
       name,
-      parent_id: body.parent_id ?? null,
     });
     return Response.json({ projects });
   } catch (error) {

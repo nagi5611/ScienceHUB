@@ -20,7 +20,7 @@
   <section id="admin-section">
     <header class="admin-mobile-topbar" id="admin-mobile-topbar" aria-hidden="true">
       <a href="/" class="admin-mobile-topbar-title">シミュレーション 管理</a>
-      <span class="admin-mobile-panel-title" id="admin-mobile-panel-title">カレンダー</span>
+      <span class="admin-mobile-panel-title" id="admin-mobile-panel-title">ダッシュボード</span>
       <button class="btn btn-secondary btn-sm" id="admin-mobile-logout" type="button">戻る</button>
     </header>
 
@@ -32,7 +32,7 @@
             <path d="M16 2v4M8 2v4M3 10h18" />
           </svg>
         </span>
-        <span>カレンダー</span>
+        <span>ホーム</span>
       </button>
       <button class="admin-mobile-nav-item" data-panel="history" type="button">
         <span class="admin-mobile-nav-icon" aria-hidden="true">
@@ -71,6 +71,14 @@
         </span>
         <span>シフト</span>
       </button>
+      <button class="admin-mobile-nav-item" data-panel="phone-verification" type="button">
+        <span class="admin-mobile-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+          </svg>
+        </span>
+        <span>電話認証</span>
+      </button>
       <button class="admin-mobile-nav-item" data-panel="fds-test" type="button">
         <span class="admin-mobile-nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -88,77 +96,24 @@
           <p class="admin-sidebar-label">管理者メニュー</p>
         </div>
         <nav class="admin-menu">
-          <button class="admin-menu-item active" data-panel="dashboard" type="button">カレンダー</button>
+          <button class="admin-menu-item active" data-panel="dashboard" type="button">ダッシュボード</button>
           <button class="admin-menu-item" data-panel="history" type="button">依頼履歴</button>
           <button class="admin-menu-item" data-panel="members" type="button">メンバー一覧</button>
           <button class="admin-menu-item" data-panel="simulators" type="button">シミュレーター管理</button>
           <button class="admin-menu-item" data-panel="shifts" type="button">シフト管理表</button>
+          <button class="admin-menu-item" data-panel="phone-verification" type="button">電話認証</button>
           <button class="admin-menu-item" data-panel="fds-test" type="button">FDSテスト</button>
         </nav>
         <button class="btn btn-secondary btn-sm admin-logout" id="logout-btn" type="button">ダッシュボード</button>
       </aside>
 
       <div class="admin-main">
+        <p class="contact-notice admin-contact-strip">運用の連絡先: <a href="mailto:nagi@mmh-virtual.jp">nagi@mmh-virtual.jp</a></p>
         <div class="admin-panel" id="panel-dashboard">
-          <h1 class="page-heading">予約カレンダー</h1>
-          <p class="page-subheading">公開カレンダーと同じ表示です。空いている日付をクリックして新規予約を追加できます（当日・翌日も可）。予約枠をクリックすると詳細確認・削除ができます。</p>
+          <h1 class="page-heading">ダッシュボード</h1>
+          <p class="page-subheading">本日の実行タスクを確認できます。予約の詳細は依頼履歴から開いてください。</p>
 
-          <section class="card" id="admin-calendar-section">
-            <div class="calendar-sticky-header">
-              <div class="calendar-toolbar">
-                <div class="calendar-header calendar-header-desktop">
-                  <button class="btn btn-secondary btn-sm" id="prev-month" type="button">← 前月</button>
-                  <span class="calendar-month-label" id="calendar-month-label"></span>
-                  <button class="btn btn-secondary btn-sm" id="next-month" type="button">翌月 →</button>
-                </div>
-
-                <div class="calendar-header-mobile">
-                  <button class="calendar-nav-btn" id="admin-prev-month-mobile" type="button" aria-label="前月">‹</button>
-                  <button class="calendar-mobile-month" id="admin-calendar-month-label-mobile" type="button">
-                    <span id="admin-calendar-month-label-mobile-text"></span>
-                    <span class="calendar-mobile-month-caret" aria-hidden="true">▾</span>
-                  </button>
-                  <div class="calendar-mobile-actions">
-                    <div class="calendar-today-group">
-                      <span class="calendar-today-label">今日：</span>
-                      <button class="calendar-today-btn" id="admin-go-today-btn" type="button" aria-label="今月へ">
-                        <span class="calendar-today-icon" aria-hidden="true"></span>
-                        <span id="admin-today-day-num"></span>
-                      </button>
-                    </div>
-                    <button class="calendar-nav-btn" id="admin-next-month-mobile" type="button" aria-label="翌月">›</button>
-                  </div>
-                </div>
-
-                <div class="calendar-month-chips" id="admin-calendar-month-chips" role="tablist" aria-label="月を選択"></div>
-              </div>
-
-              <div class="calendar-weekdays-row" id="admin-calendar-weekdays-row"></div>
-            </div>
-
-            <div class="calendar-grid-wrap">
-              <div class="calendar-grid" id="calendar-grid"></div>
-            </div>
-
-            <details class="calendar-mobile-hint">
-              <summary>凡例・操作</summary>
-              <div class="calendar-legend">
-                <div class="legend-item"><span class="legend-dot small"></span> スモール (S)</div>
-                <div class="legend-item"><span class="legend-dot medium"></span> ミディアム (M)</div>
-                <div class="legend-item"><span class="legend-dot large"></span> ラージ (L)</div>
-              </div>
-              <p class="hint calendar-hint-text">空いている日付をタップで新規予約。予約枠をタップで詳細。当日より前は予約不可。</p>
-            </details>
-
-            <div class="calendar-legend calendar-legend-desktop">
-              <div class="legend-item"><span class="legend-dot small"></span> スモール (S)</div>
-              <div class="legend-item"><span class="legend-dot medium"></span> ミディアム (M)</div>
-              <div class="legend-item"><span class="legend-dot large"></span> ラージ (L)</div>
-            </div>
-            <p class="hint calendar-hint-desktop admin-calendar-note">空いている日付をクリックすると新規予約フォームが開きます。予約済みの名前をクリックすると詳細を表示できます。当日より前の日付は予約できません。</p>
-          </section>
-
-          <section class="card admin-list-section" style="margin-top:1.5rem">
+          <section class="card admin-list-section">
             <h2 class="section-heading">本日のタスク</h2>
             <div id="today-tasks-mount">
               <p class="hint">読み込み中...</p>
@@ -179,9 +134,28 @@
 
         <div class="admin-panel hidden" id="panel-members">
           <h1 class="page-heading">メンバー一覧</h1>
-          <p class="page-subheading">実行担当として割り当てるメンバーを登録できます。</p>
+          <p class="page-subheading">実行担当の登録と、Discord 通知（Webhook・メンション先）の設定を行います。</p>
 
-          <section class="card">
+          <section class="card" id="sim-notification-settings-section">
+            <h2 class="section-heading">Discord 通知設定</h2>
+            <div id="sim-notification-settings-alert"></div>
+            <div class="form-group">
+              <label for="sim-discord-webhook">Webhook URL</label>
+              <input
+                type="url"
+                id="sim-discord-webhook"
+                class="sim-discord-webhook-input"
+                inputmode="url"
+                autocomplete="off"
+                placeholder="https://discord.com/api/webhooks/…"
+                spellcheck="false"
+              />
+              <p class="hint">新規予約・予約変更、FDS 二次審査待ちなどをこの Webhook に送ります。空欄のときは通知しません。</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="sim-notification-settings-save">Webhook を保存</button>
+          </section>
+
+          <section class="card" style="margin-top:1.5rem">
             <h2 class="section-heading">メンバーを追加</h2>
             <div id="member-add-alert"></div>
             <form id="member-add-form">
@@ -201,7 +175,7 @@
                 </div>
                 <div class="form-group">
                   <label for="member-discord-id">DiscordユーザーID</label>
-                  <input type="text" id="member-discord-id" inputmode="numeric" pattern="\d{17,20}" placeholder="任意（朝6時のメンション用）" />
+                  <input type="text" id="member-discord-id" inputmode="numeric" pattern="\d{17,20}" placeholder="任意（Discord 通知のメンション先）" />
                 </div>
               </div>
               <button type="submit" class="btn btn-primary">追加</button>
@@ -217,6 +191,7 @@
 
           <section class="card admin-list-section" style="margin-top:1.5rem">
             <h2 class="section-heading">登録済みメンバー</h2>
+            <p class="hint">各メンバーの Discord ユーザー ID は、予約通知・FDS 二次審査通知などでメンション先として使われます（ID が入っているメンバー全員）。</p>
             <div id="members-mount">
               <p class="hint">読み込み中...</p>
             </div>
@@ -225,40 +200,13 @@
 
         <div class="admin-panel hidden" id="panel-simulators">
           <h1 class="page-heading">シミュレーター管理</h1>
-          <p class="page-subheading">予約時に選べるシミュレーター機種を登録します。名前・画像に加え、稼働ステータスやノズル径・動画撮影可否などの仕様を設定できます。</p>
+          <p class="page-subheading">FDS 実行に使える AWS EC2（c7a）インスタンスタイプを登録し、利用可能なシミュレーターとして管理します。</p>
 
-          <section class="card" id="result-video-settings-section">
-            <h2 class="section-heading">結果動画の保存先</h2>
-            <p class="hint">管理画面からアップロードする結果動画は、指定したチームのクラウドストレージフォルダに保存されます。</p>
-            <div id="result-video-settings-alert"></div>
-            <div class="form-group">
-              <label for="result-video-storage-path">保存先フォルダ</label>
-              <div class="storage-path-picker-row">
-                <input type="text" id="result-video-storage-path" readonly placeholder="未設定（参照から選択）" />
-                <button type="button" class="btn btn-secondary btn-sm" id="result-video-browse-btn">参照…</button>
-              </div>
-              <p class="hint">クラウドストレージ上のフォルダを選び、「このフォルダを選択」で確定後、下のボタンで保存してください。</p>
-            </div>
-            <button type="button" class="btn btn-primary btn-sm" id="result-video-settings-save">保存先を保存</button>
-          </section>
-
-          <section class="card">
-            <h2 class="section-heading">シミュレーターを追加</h2>
-            <div id="simulator-add-alert"></div>
-            <form id="simulator-add-form">
-              <div class="form-row">
-                <div class="form-group">
-                  <label for="simulator-name">シミュレーター名</label>
-                  <input type="text" id="simulator-name" placeholder="例: Bambu Lab X1 Carbon" required maxlength="80" />
-                </div>
-                <div class="form-group">
-                  <label for="simulator-image">機種画像（任意）</label>
-                  <input type="file" id="simulator-image" accept="image/png,image/jpeg,image/webp,image/gif" />
-                  <p class="hint">PNG / JPEG / WebP / GIF（最大2MB）</p>
-                </div>
-              </div>
-              <button type="submit" class="btn btn-primary">追加</button>
-            </form>
+          <section class="card" id="ec2-instance-catalog-section">
+            <h2 class="section-heading">シミュレーターを追加（EC2 インスタンス）</h2>
+            <p class="hint">FDS ジョブで選択可能な c7a ファミリーの一覧です。未登録の行から「利用可能として登録」を押してください。</p>
+            <div id="ec2-instance-catalog-alert"></div>
+            <div id="ec2-instance-catalog-mount"><p class="hint">読み込み中…</p></div>
           </section>
 
           <section class="card admin-list-section" style="margin-top:1.5rem">
@@ -303,48 +251,6 @@
                   </select>
                   <p class="hint">「利用不可」「メンテナンス中」の機種は、一般ユーザーの予約画面で選択できません。</p>
                 </div>
-
-                <h3 class="form-section-title">1日の処理キャパ</h3>
-                <p class="hint">この機種で1日に受け付けられるシミュレーション規模の上限です。シミュレーターごとに独立してカウントされます。</p>
-
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="simulator-edit-cap-max-small">スモール上限（単独時）</label>
-                    <input type="number" id="simulator-edit-cap-max-small" min="1" max="8" value="2" required />
-                  </div>
-                  <div class="form-group">
-                    <label for="simulator-edit-cap-max-small-with-main">スモール上限（ミディアム/ラージ併用時）</label>
-                    <input type="number" id="simulator-edit-cap-max-small-with-main" min="0" max="4" value="0" required />
-                    <p class="hint">0 = スモールとミディアム/ラージは同日不可。1以上 = 併用可（例: スモール1 + ミディアム1）</p>
-                  </div>
-                </div>
-
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="simulator-edit-cap-max-medium">ミディアム上限</label>
-                    <input type="number" id="simulator-edit-cap-max-medium" min="0" max="4" value="1" required />
-                  </div>
-                  <div class="form-group">
-                    <label for="simulator-edit-cap-max-large">ラージ上限</label>
-                    <input type="number" id="simulator-edit-cap-max-large" min="0" max="4" value="1" required />
-                  </div>
-                </div>
-
-                <h3 class="form-section-title">この機種でできること</h3>
-                <p class="hint">予約画面に表示される機種の仕様です。</p>
-
-                <div class="form-group">
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="simulator-edit-can-record-video" />
-                    実行中の動画撮影が可能
-                  </label>
-                </div>
-
-                <div class="form-group">
-                  <label for="simulator-edit-nozzle-sizes">ノズル径（mm）</label>
-                  <input type="text" id="simulator-edit-nozzle-sizes" placeholder="例: 0.4, 0.6" required />
-                  <p class="hint">カンマ区切りで入力（例: 0.4, 0.6, 0.8）</p>
-                </div>
               </form>
             </div>
             <div class="modal-footer">
@@ -354,32 +260,14 @@
           </div>
         </div>
 
-        <div class="modal-overlay" id="result-video-folder-modal">
-          <div class="modal modal-lg storage-folder-modal">
-            <div class="modal-header">
-              <h2>保存先フォルダを選択</h2>
-              <button class="modal-close" id="result-video-folder-modal-close" type="button">&times;</button>
-            </div>
-            <div class="modal-body">
-              <nav class="storage-folder-breadcrumb" id="result-video-folder-breadcrumb" aria-label="フォルダパス"></nav>
-              <div id="result-video-folder-list" class="storage-folder-list" role="listbox" aria-label="フォルダ一覧"></div>
-              <p class="hint" id="result-video-folder-hint"></p>
-            </div>
-            <div class="modal-footer">
-              <button class="btn btn-secondary" id="result-video-folder-cancel" type="button">キャンセル</button>
-              <button class="btn btn-primary" id="result-video-folder-confirm" type="button" disabled>このフォルダを選択</button>
-            </div>
-          </div>
-        </div>
-
         <div class="admin-panel hidden" id="panel-shifts">
           <h1 class="page-heading">シフト管理表</h1>
-          <p class="page-subheading">実行担当者とシミュレーターそれぞれの稼働日を設定します。メンバーまたはシミュレーターを選び、カレンダー上をクリック・ドラッグして対応可能日を登録してください。予約は「担当者がいる」かつ「シミュレーターが稼働」かつ「その機種に空きがある」日のみ可能です。</p>
+          <p class="page-subheading">実行担当者の対応可能日を登録します。シミュレーターは原則いつでも利用可能で、利用不可の日だけカレンダーに塗ってください。予約は「担当者がいる」かつ「シミュレーターが利用不可でない」かつ「その機種に空きがある」日のみ可能です。</p>
 
           <section class="card" id="shift-calendar-section">
             <p class="hint shift-toolbar-label">実行担当者</p>
             <div id="shift-member-toolbar" class="shift-member-toolbar"></div>
-            <p class="hint shift-toolbar-label">シミュレーター稼働</p>
+            <p class="hint shift-toolbar-label">シミュレーター（利用不可日の登録）</p>
             <div id="shift-simulator-toolbar" class="shift-simulator-toolbar"></div>
 
             <div class="calendar-sticky-header shift-calendar-sticky">
@@ -420,17 +308,39 @@
 
             <details class="calendar-mobile-hint">
               <summary>操作のヒント</summary>
-              <p class="hint calendar-hint-text">担当者またはシミュレーターを選び、日付をタップでON/OFF。長押しドラッグでまとめてON。</p>
+              <p class="hint calendar-hint-text">担当者はタップでシフトON/OFF。シミュレーターは機種を選び、利用不可にしたい日をタップまたはドラッグで塗る。</p>
             </details>
-            <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">担当者・シミュレーターを選んでから日付をクリックまたはドラッグ。カレンダーにはその日の担当者（色チップ）と稼働シミュレーター名が表示されます。</p>
+            <p class="hint calendar-hint-desktop" style="margin-top:1rem;margin-bottom:0">担当者を選んで対応日を登録。シミュレーターは機種を選び、利用不可の日だけクリックまたはドラッグで赤く塗ります。カレンダーには担当者（色チップ）と、その日に利用不可のシミュレーター（×付き）が表示されます。</p>
+          </section>
+        </div>
+
+        <div class="admin-panel hidden" id="panel-phone-verification">
+          <h1 class="page-heading">電話番号認証</h1>
+          <p class="page-subheading">FDS 依頼用 SMS 認証の登録状況を確認し、ユーザーごとに認証を取り消せます。取り消すと電話番号と認証日時が削除され、再度 SMS 認証が必要になります。</p>
+
+          <section class="card admin-list-section">
+            <div class="section-heading-row">
+              <h2 class="section-heading">認証記録のあるユーザー</h2>
+              <button type="button" class="btn btn-secondary btn-sm" id="sim-phone-admin-refresh-btn">更新</button>
+            </div>
+            <div id="sim-phone-admin-alert" class="alert hidden" role="alert" hidden></div>
+            <div id="sim-phone-admin-mount"><p class="hint">読み込み中...</p></div>
           </section>
         </div>
 
         <div class="admin-panel hidden" id="panel-fds-test">
-          <h1 class="page-heading">FDS テスト実行</h1>
-          <p class="page-subheading">AWS EC2 上で FDS を試験実行します（テスト用パイプライン）。1ジョブあたり最大10時間・既定は t3.micro です。</p>
+          <h1 class="page-heading">FDS</h1>
+          <p class="page-subheading">依頼者からの FDS シミュレーション依頼の承認と、管理者向けテスト実行です。</p>
 
-          <section class="card" id="fds-config-section">
+          <section class="card" id="fds-requests-section">
+            <div class="section-heading-row">
+              <h2 class="section-heading">二次審査待ちの依頼</h2>
+              <button type="button" class="btn btn-secondary btn-sm" id="fds-requests-refresh-btn">更新</button>
+            </div>
+            <div id="fds-requests-queue-mount"><p class="hint">読み込み中...</p></div>
+          </section>
+
+          <section class="card" id="fds-config-section" style="margin-top:1.5rem">
             <h2 class="section-heading">接続状態</h2>
             <div id="fds-config-mount"><p class="hint">読み込み中...</p></div>
           </section>
@@ -438,7 +348,7 @@
           <section class="card" style="margin-top:1.5rem">
             <h2 class="section-heading">新規テスト実行</h2>
             <div id="fds-run-alert"></div>
-            <form id="fds-run-form">
+            <form id="fds-run-form" action="#" method="post" novalidate>
               <div class="form-group">
                 <label for="fds-title">タイトル（任意）</label>
                 <input type="text" id="fds-title" name="title" placeholder="例: 禁煙室ミニケース" maxlength="80" />
@@ -448,8 +358,12 @@
                 <input type="file" id="fds-file" name="file" accept=".fds" required />
                 <p class="hint">超軽量の検証用ケースから試してください。最大 50MB。</p>
               </div>
-              <button type="submit" class="btn btn-primary" id="fds-run-btn">テスト実行を開始</button>
+              <button type="button" class="btn btn-primary" id="fds-run-btn">テスト実行を開始</button>
             </form>
+            <div class="fds-run-log-wrap" id="fds-run-log-wrap" hidden>
+              <h3 class="fds-run-log-heading">実行ログ</h3>
+              <pre class="fds-run-log" id="fds-run-log" aria-live="polite"></pre>
+            </div>
           </section>
 
           <section class="card admin-list-section" style="margin-top:1.5rem">
@@ -457,7 +371,13 @@
               <h2 class="section-heading">ジョブ履歴</h2>
               <button type="button" class="btn btn-secondary btn-sm" id="fds-refresh-btn">更新</button>
             </div>
-            <div id="fds-jobs-mount"><p class="hint">読み込み中...</p></div>
+            <p class="hint" style="margin-top:0">行をクリックすると右側にリアルタイム状態（EC2 含む）を表示します。実行中は自動更新します。</p>
+            <div class="fds-jobs-split">
+              <div id="fds-jobs-list-mount"><p class="hint">読み込み中...</p></div>
+              <aside id="fds-job-detail-mount" class="fds-job-detail-panel" aria-live="polite">
+                <p class="hint fds-job-detail-placeholder">ジョブを選択してください。</p>
+              </aside>
+            </div>
           </section>
         </div>
       </div>

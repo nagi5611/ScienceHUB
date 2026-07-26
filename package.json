@@ -25,11 +25,13 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250701.0",
-    "sharp": "^0.34.3",
+    "sharp": "^0.35.3",
     "typescript": "^5.8.3",
     "wrangler": "^4.24.4"
   },
   "dependencies": {
-    "aws4fetch": "^1.0.20"
+    "aws4fetch": "^1.0.20",
+    "firebase": "^12.16.0",
+    "jose": "^6.2.4"
   }
 }

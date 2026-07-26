@@ -36,6 +36,7 @@ export async function apiRequest(path, options = {}) {
 /** Performs a multipart form API request. */
 export async function apiFormRequest(path, formData, options = {}) {
   const res = await fetch(`${API_BASE}/${path}`, {
+    method: 'POST',
     credentials: 'include',
     body: formData,
     ...options,

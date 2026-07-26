@@ -42,8 +42,8 @@ const STATUS_LABELS = {
   applied: '申請中',
   accepted: '受領済み',
   running: '実行中',
-  delivered: '完了',
-  failed: '実行失敗',
+  delivered: '完了_成功',
+  failed: '完了_失敗',
   cancelled: 'キャンセル',
 };
 const PURPOSE_LABELS = { ss_s_tan: 'SS・S探', club: '部活', other: 'その他' };
@@ -260,7 +260,7 @@ function renderSimulatorPicker(preselectedId = '') {
         ? ''
         : `<p class="simulator-picker-unavailable-note">${escapeHtml(
             simulator.shift_available === false
-              ? 'この日は稼働予定がありません'
+              ? 'この日は利用できません'
               : `${getSimulatorStatusLabel(simulator.status)}のため予約できません`
           )}</p>`;
 
@@ -326,7 +326,7 @@ async function selectSimulator(simulatorId) {
   if (!simulator || !isSimulatorOperational(simulator)) {
     showFormAlert(
       simulator?.shift_available === false
-        ? 'この日は選択したシミュレーターの稼働予定がありません'
+        ? 'この日は選択したシミュレーターは利用できません'
         : `${getSimulatorStatusLabel(simulator?.status)}の機種は予約できません`,
       'error'
     );
@@ -416,7 +416,7 @@ async function goToFormDetailsStep() {
   if (!simulator || !isSimulatorOperational(simulator)) {
     showFormAlert(
       simulator?.shift_available === false
-        ? 'この日は選択したシミュレーターの稼働予定がありません'
+        ? 'この日は選択したシミュレーターは利用できません'
         : `${getSimulatorStatusLabel(simulator?.status)}の機種は予約できません`,
       'error'
     );
@@ -768,7 +768,7 @@ async function openFormForDate(dateStr) {
   }
 
   if (!availability.simulatorAvailable) {
-    showPageToast('この日は稼働予定のシミュレーターがありません');
+    showPageToast('この日は利用できるシミュレーターがありません');
     return;
   }
 
@@ -1576,7 +1576,7 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
       cell.addEventListener('click', () => showPageToast('この日は対応可能な実行担当者がいません'));
     } else if (dateStr >= earliestBookable && !hasSimulator) {
       cell.classList.add('no-simulator');
-      cell.addEventListener('click', () => showPageToast('この日は稼働予定のシミュレーターがありません'));
+      cell.addEventListener('click', () => showPageToast('この日は利用できるシミュレーターがありません'));
     } else if (dateStr >= earliestBookable && hasStaff && hasSimulator) {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openFormForDate(dateStr));

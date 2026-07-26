@@ -39,7 +39,15 @@ export function normalizeSimulatorCapabilities(capabilities) {
 
   return {
     can_record_result_video: Boolean(capabilities.can_record_result_video),
-    nozzle_sizes_mm: sizes.length ? sizes : ['0.4'],
+    nozzle_sizes_mm: sizes.length ? sizes : capabilities.ec2_instance_type ? [] : ['0.4'],
+    ec2_instance_type:
+      typeof capabilities.ec2_instance_type === 'string' && capabilities.ec2_instance_type.trim()
+        ? capabilities.ec2_instance_type.trim()
+        : null,
+    vcpus:
+      typeof capabilities.vcpus === 'number' && Number.isFinite(capabilities.vcpus)
+        ? capabilities.vcpus
+        : null,
   };
 }
 
@@ -55,9 +63,18 @@ export function buildSimulatorCapabilityBadges(capabilities, { escapeHtml }) {
   const caps = normalizeSimulatorCapabilities(capabilities);
   const badges = [];
 
-  badges.push(
-    `<span class="simulator-cap-badge">ノズル ${escapeHtml(formatNozzleSizes(caps.nozzle_sizes_mm))}</span>`
-  );
+  if (caps.ec2_instance_type) {
+    badges.push(
+      `<span class="simulator-cap-badge simulator-cap-badge-accent">EC2 ${escapeHtml(caps.ec2_instance_type)}</span>`
+    );
+    if (caps.vcpus) {
+      badges.push(`<span class="simulator-cap-badge">${escapeHtml(String(caps.vcpus))} vCPU</span>`);
+    }
+  } else {
+    badges.push(
+      `<span class="simulator-cap-badge">ノズル ${escapeHtml(formatNozzleSizes(caps.nozzle_sizes_mm))}</span>`
+    );
+  }
 
   if (caps.can_record_result_video) {
     badges.push('<span class="simulator-cap-badge simulator-cap-badge-accent">動画撮影可</span>');

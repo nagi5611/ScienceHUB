@@ -31,7 +31,22 @@
       <h1 class="design-title design-title--share" id="project-title">共有設計</h1>
       <div class="design-header-actions">
         <span class="design-status" id="save-status" aria-live="polite"></span>
-        <span class="design-peers" id="peers-status" aria-live="polite"></span>
+        <div class="design-peers-wrap">
+          <button
+            type="button"
+            class="design-peers"
+            id="peers-status"
+            aria-live="polite"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="peers-popover"
+            hidden
+          ></button>
+          <div class="design-peers-popover" id="peers-popover" hidden role="dialog" aria-label="共同編集者">
+            <p class="design-peers-popover-title">共同編集者</p>
+            <ul class="design-peers-list" id="peers-list"></ul>
+          </div>
+        </div>
         <span class="design-share-badge">共同編集</span>
       </div>
     </header>

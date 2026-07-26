@@ -109,6 +109,9 @@ cat >"${INSTALL_ROOT}/bin/fds" <<'WRAP'
 #!/bin/bash
 export PATH="/usr/lib64/openmpi/bin:/opt/fds/bin:${PATH}"
 export LD_LIBRARY_PATH="/usr/lib64/openmpi/lib:${LD_LIBRARY_PATH:-}"
+# EC2 user-data は root で動く。OpenMPI 4.x は root 実行を拒否するため明示的に許可
+export OMPI_ALLOW_RUN_AS_ROOT=1
+export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 exec mpiexec -n 1 /opt/fds/lib/fds_ompi_gnu_linux "$@"
 WRAP
 chmod 0755 "${INSTALL_ROOT}/bin/fds"
@@ -119,7 +122,7 @@ export LD_LIBRARY_PATH="/usr/lib64/openmpi/lib:${LD_LIBRARY_PATH:-}"
 EOF
 
 echo "==> 動作確認"
-"${INSTALL_ROOT}/bin/fds" -v || true
+"${INSTALL_ROOT}/bin/fds" -v
 
 echo "完了: ${INSTALL_ROOT}/bin/fds"
 echo "このインスタンスから AMI を作成し、AWS_EC2_FDS_AMI_ID に設定してください。"

@@ -10,6 +10,7 @@ import { getUserOAuthProviders } from "../../lib/oauth-users";
 import { updateUserProfile, type ProfileUpdateInput } from "../../lib/profile";
 import { resolveUserAvatarUrl } from "../../lib/user-icons";
 import { isPrintProfileComplete } from "../../lib/3dprint/print-profile";
+import { getSimPhoneStatus } from "../../lib/simulation/sim-phone-verification";
 
 async function buildProfileUser(
   env: Env,
@@ -24,6 +25,8 @@ async function buildProfileUser(
     homeroom?: string | null;
     student_number?: number | null;
     student_name?: string | null;
+    phone_e164?: string | null;
+    sim_phone_verified_at?: string | null;
     updated_at: number;
   },
   sessionExtras: { roles: unknown[]; is_admin: boolean },
@@ -38,6 +41,10 @@ async function buildProfileUser(
 
   const avatarUrl = await resolveUserAvatarUrl(env, user);
   const oauthProviders = await getUserOAuthProviders(db, user.id);
+  const phoneStatus = getSimPhoneStatus({
+    phone_e164: user.phone_e164 ?? null,
+    sim_phone_verified_at: user.sim_phone_verified_at ?? null,
+  });
 
   return {
     id: user.id,
@@ -58,6 +65,11 @@ async function buildProfileUser(
       student_number: user.student_number ?? null,
       student_name: user.student_name ?? null,
     }),
+    sim_phone_verified: phoneStatus.verified,
+    sim_phone_masked: phoneStatus.phone_masked,
+    sim_phone_verified_at: phoneStatus.verified_at,
+    sim_phone_expires_at: phoneStatus.expires_at,
+    sim_phone_expired: phoneStatus.expired,
   };
 }
 
@@ -70,7 +82,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const db = getDb(context.env);
   const row = await db
     .prepare(
-      "SELECT avatar_url, updated_at, password_hash, homeroom, student_number, student_name FROM users WHERE id = ?"
+      "SELECT avatar_url, updated_at, password_hash, homeroom, student_number, student_name, phone_e164, sim_phone_verified_at FROM users WHERE id = ?"
     )
     .bind(session.id)
     .first<{
@@ -80,6 +92,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       homeroom: string | null;
       student_number: number | null;
       student_name: string | null;
+      phone_e164: string | null;
+      sim_phone_verified_at: string | null;
     }>();
 
   return Response.json({
@@ -92,6 +106,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         homeroom: row?.homeroom ?? null,
         student_number: row?.student_number ?? null,
         student_name: row?.student_name ?? null,
+        phone_e164: row?.phone_e164 ?? null,
+        sim_phone_verified_at: row?.sim_phone_verified_at ?? null,
         updated_at: row?.updated_at ?? 0,
       },
       { roles: session.roles, is_admin: session.is_admin },
@@ -140,6 +156,8 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
         homeroom: result.user.homeroom,
         student_number: result.user.student_number,
         student_name: result.user.student_name,
+        phone_e164: result.user.phone_e164 ?? null,
+        sim_phone_verified_at: result.user.sim_phone_verified_at ?? null,
         updated_at: result.user.updated_at,
       },
       { roles: auth.roles, is_admin: auth.is_admin }

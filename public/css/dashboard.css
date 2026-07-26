@@ -545,6 +545,127 @@ body.hub-modal-open {
   padding: 0.55rem 0;
 }
 
+.hub-profile-sim-phone-wrap {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.hub-profile-sim-phone--ok {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border-radius: var(--cf-radius);
+  background: rgb(21 128 61 / 0.08);
+  border: 1px solid rgb(21 128 61 / 0.25);
+  color: var(--cf-text);
+}
+
+.hub-profile-sim-phone--ok .profile-sim-phone-expiry {
+  font-size: 0.8125rem;
+  color: var(--cf-muted);
+}
+
+.hub-profile-sim-phone--warn {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border-radius: var(--cf-radius);
+  background: rgb(180 83 9 / 0.08);
+  border: 1px solid rgb(180 83 9 / 0.28);
+  color: var(--cf-text);
+}
+
+.hub-profile-sim-phone--pending {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border-radius: var(--cf-radius);
+  background: var(--cf-orange-soft);
+  border: 1px solid rgb(243 128 32 / 0.25);
+  color: var(--cf-text);
+}
+
+.hub-profile-sim-phone-btn {
+  display: inline-flex;
+  margin-top: 0.65rem;
+  border: 1px solid var(--cf-border);
+  background: var(--cf-bg);
+  color: var(--cf-text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--cf-radius);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.hub-profile-sim-phone-btn:hover {
+  border-color: var(--cf-orange);
+  background: var(--cf-orange-soft);
+}
+
+.hub-phone-verification-dialog {
+  max-width: 28rem;
+}
+
+.hub-phone-verification-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--cf-muted);
+}
+
+.hub-phone-consent-label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-size: 0.875rem;
+  margin: 0.75rem 0 1rem;
+  cursor: pointer;
+  color: var(--cf-text);
+}
+
+.hub-phone-consent-label input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+#hub-recaptcha-container {
+  min-height: 78px;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.hub-phone-verification-actions {
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.hub-phone-resend-btn {
+  margin-bottom: 0.75rem;
+}
+
+.hub-phone-sms-troubleshoot {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.hub-phone-sms-troubleshoot summary {
+  cursor: pointer;
+  color: var(--cf-orange);
+  font-weight: 500;
+}
+
+.hub-phone-code-form {
+  margin-top: 0.5rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
 .hub-profile-actions {
   display: flex;
   justify-content: flex-end;

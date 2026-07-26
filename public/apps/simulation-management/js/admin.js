@@ -13,26 +13,21 @@ import {
 import { initShiftPanel, renderShiftPanel } from './shift.js';
 import {
   buildSimulatorCapabilityBadges,
-  formatNozzleSizes,
   normalizeSimulatorCapabilities,
-  nozzleSizesToInputValue,
-  parseNozzleSizesInput,
 } from '../../simulation-request/js/simulator-capabilities.js';
 import { buildSimulatorStatusBadge } from '../../simulation-request/js/simulator-status.js';
+import { initFdsTestPanel, renderFdsTestPanel, stopFdsLivePolling } from './fds-test.js';
 import {
-  initPrintVideoFolderPicker,
-  openPrintVideoFolderPicker,
-} from './result-video-folder-picker.js';
-import { initFdsTestPanel, renderFdsTestPanel } from './fds-test.js';
-let printVideoGroupRoots = [];
-let printVideoStoragePath = '';
+  initPhoneVerificationAdminPanel,
+  renderPhoneVerificationAdminPanel,
+} from './phone-verification-admin.js';
 
 const STATUS_LABELS = {
   applied: '申請中',
   accepted: '受領済み',
   running: '実行中',
-  delivered: '完了',
-  failed: '実行失敗',
+  delivered: '完了_成功',
+  failed: '完了_失敗',
   cancelled: 'キャンセル',
 };
 
@@ -42,18 +37,20 @@ const PURPOSE_LABELS = { ss_s_tan: 'SS・S探', club: '部活', other: 'その�
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const MOBILE_ADMIN_MQ = window.matchMedia('(max-width: 768px)');
 const ADMIN_PANEL_TITLES = {
-  dashboard: 'カレンダー',
+  dashboard: 'ダッシュボード',
   history: '依頼履歴',
   members: 'メンバー',
   simulators: 'シミュレーター',
   shifts: 'シフト',
   'fds-test': 'FDSテスト',
+  'phone-verification': '電話認証',
 };
 
 let currentReservationId = null;
 let allReservations = [];
 let allMembers = [];
 let allSimulators = [];
+let ec2InstanceCatalog = [];
 let memberHomeroomField = null;
 let reservationHomeroomField = null;
 let adminSelectedDate = '';
@@ -131,8 +128,8 @@ async function init() {
     openAdminEditForm(currentReservationData);
   });
 
-  document.getElementById('prev-month').addEventListener('click', () => changeMonth(-1));
-  document.getElementById('next-month').addEventListener('click', () => changeMonth(1));
+  document.getElementById('prev-month')?.addEventListener('click', () => changeMonth(-1));
+  document.getElementById('next-month')?.addEventListener('click', () => changeMonth(1));
   document.getElementById('admin-prev-month-mobile')?.addEventListener('click', () => changeMonth(-1));
   document.getElementById('admin-next-month-mobile')?.addEventListener('click', () => changeMonth(1));
   document.getElementById('admin-go-today-btn')?.addEventListener('click', goToAdminToday);
@@ -152,13 +149,12 @@ async function init() {
     const mobile = isMobileAdminView();
     if (lastMobileAdminView !== mobile) {
       lastMobileAdminView = mobile;
-      renderAdminCalendar();
       renderTodayTasks();
       if (activePanel === 'history') renderHistory();
       if (activePanel === 'members') renderMembers();
       if (activePanel === 'simulators') {
         renderSimulators();
-        loadPrintVideoSettings();
+        void loadEc2InstanceCatalog();
       }
       if (activePanel === 'shifts') renderShiftPanel();
     }
@@ -169,13 +165,17 @@ async function init() {
   memberHomeroomField = setupHomeroomCombobox('member-homeroom', 'member-homeroom-list');
   reservationHomeroomField = setupHomeroomCombobox('admin-homeroom', 'admin-homeroom-list');
   document.getElementById('member-add-form').addEventListener('submit', handleAddMember);
-  document.getElementById('simulator-add-form').addEventListener('submit', handleAddSimulator);
   setupSimulatorEditModal();
-  setupPrintVideoSettings();
   document.getElementById('calendar-test-btn')?.addEventListener('click', testGoogleCalendar);
   setupAdminFormModal();
-  initShiftPanel();
+  setupSimNotificationSettings();
   initFdsTestPanel();
+  initPhoneVerificationAdminPanel();
+  try {
+    initShiftPanel();
+  } catch (err) {
+    console.error('シフトパネルの初期化に失敗しました', err);
+  }
 
   /** Shows admin panel. */
   function showSection(isAuthed) {
@@ -195,6 +195,9 @@ async function init() {
 
 /** Switches admin panel. */
 function switchPanel(panel) {
+  if (activePanel === 'fds-test' && panel !== 'fds-test') {
+    stopFdsLivePolling();
+  }
   activePanel = panel;
   document.querySelectorAll('.admin-menu-item[data-panel], .admin-mobile-nav-item[data-panel]').forEach((b) => {
     b.classList.toggle('active', b.dataset.panel === panel);
@@ -204,13 +207,17 @@ function switchPanel(panel) {
   const titleEl = document.getElementById('admin-mobile-panel-title');
   if (titleEl) titleEl.textContent = ADMIN_PANEL_TITLES[panel] ?? panel;
   if (panel === 'history') renderHistory();
-  if (panel === 'members') renderMembers();
+  if (panel === 'members') {
+    renderMembers();
+    void loadSimNotificationSettings();
+  }
   if (panel === 'simulators') {
     renderSimulators();
-    loadPrintVideoSettings();
+    void loadEc2InstanceCatalog();
   }
   if (panel === 'shifts') renderShiftPanel();
   if (panel === 'fds-test') renderFdsTestPanel();
+  if (panel === 'phone-verification') renderPhoneVerificationAdminPanel();
   updateAdminStickyOffsets();
 }
 
@@ -225,13 +232,12 @@ async function refreshAll() {
     allReservations = resData.reservations.filter((r) => r.status !== 'cancelled');
     allMembers = membersData.members;
     allSimulators = simulatorsData.simulators;
-    await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
     if (activePanel === 'members') renderMembers();
     if (activePanel === 'simulators') {
       renderSimulators();
-      loadPrintVideoSettings();
+      void loadEc2InstanceCatalog();
     }
   } catch (err) {
     document.getElementById('today-tasks-mount').innerHTML =
@@ -330,16 +336,19 @@ function renderAdminWeekdayHeaders() {
   });
 }
 
-/** Renders admin read-only calendar. */
+/** Renders admin reservation calendar (removed from UI; no-op). */
 async function renderAdminCalendar() {
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) return;
+
   const monthLabel = `${currentYear}年${currentMonth}月`;
-  document.getElementById('calendar-month-label').textContent = monthLabel;
+  const calendarMonthLabel = document.getElementById('calendar-month-label');
+  if (calendarMonthLabel) calendarMonthLabel.textContent = monthLabel;
   const mobileLabel = document.getElementById('admin-calendar-month-label-mobile-text');
   if (mobileLabel) mobileLabel.textContent = monthLabel;
   updateAdminTodayButton();
   renderAdminMonthChips();
 
-  const grid = document.getElementById('calendar-grid');
   grid.innerHTML = '';
   renderAdminWeekdayHeaders();
 
@@ -984,7 +993,7 @@ function adminMemberCardHtml(m) {
       </div>
       <div class="form-group admin-member-discord-field">
         <label for="member-discord-${m.id}">Discord ID</label>
-        <input type="text" id="member-discord-${m.id}" class="member-discord-input" data-member-id="${m.id}" value="${escapeHtml(m.discord_user_id ?? '')}" placeholder="任意（朝6時メンション用）" inputmode="numeric" />
+        <input type="text" id="member-discord-${m.id}" class="member-discord-input" data-member-id="${m.id}" value="${escapeHtml(m.discord_user_id ?? '')}" placeholder="Discord ユーザー ID" inputmode="numeric" />
       </div>
       <button class="btn btn-secondary btn-sm" data-member-id="${m.id}" type="button">削除</button>
     </article>`;
@@ -1160,7 +1169,7 @@ async function openDetail(id) {
         <div class="detail-row"><span class="detail-label">目的</span><span>${PURPOSE_LABELS[r.purpose]}${r.purpose_other ? `（${escapeHtml(r.purpose_other)}）` : ''}</span></div>
         <div class="detail-row"><span class="detail-label">概要</span><span>${escapeHtml(r.summary)}</span></div>
         <div class="detail-row"><span class="detail-label">シミュレーション規模</span><span>${SCALE_LABELS[r.sim_scale]}</span></div>
-        <div class="detail-row"><span class="detail-label">シミュレーター機種</span><span>${escapeHtml(r.simulator_name ?? '未指定')}${r.simulator_capabilities ? `（ノズル ${escapeHtml(formatNozzleSizes(r.simulator_capabilities.nozzle_sizes_mm))}${r.simulator_capabilities.can_record_result_video ? '・動画撮影可' : ''}）` : ''}</span></div>
+        <div class="detail-row"><span class="detail-label">シミュレーター機種</span><span>${escapeHtml(r.simulator_name ?? '未指定')}</span></div>
         ${r.sim_notes ? `<div class="detail-row"><span class="detail-label">実行時の注意点</span><span>${escapeHtml(r.sim_notes).replace(/\n/g, '<br>')}</span></div>` : ''}
         ${r.request_result_video ? `<div class="detail-row"><span class="detail-label">動画撮影</span><span>依頼者が希望</span></div>` : ''}
         <div class="detail-row"><span class="detail-label">ファイル</span><span>${escapeHtml(r.stl_filename)} (${formatSize(r.stl_size_bytes)})</span></div>
@@ -1303,101 +1312,6 @@ function populateAdminSimulatorSelect(selectedId = '') {
     .join('');
 }
 
-/** 結果動画保存先設定のイベントを登録 */
-function setupPrintVideoSettings() {
-  const saveBtn = document.getElementById('result-video-settings-save');
-  const browseBtn = document.getElementById('result-video-browse-btn');
-
-  saveBtn?.addEventListener('click', savePrintVideoSettings);
-  browseBtn?.addEventListener('click', async () => {
-    if (!printVideoGroupRoots.length) {
-      await loadPrintVideoSettings();
-    }
-    openPrintVideoFolderPicker(printVideoStoragePath);
-  });
-
-  initPrintVideoFolderPicker({
-    getGroupRoots: () => printVideoGroupRoots,
-    onSelect: (path) => {
-      printVideoStoragePath = path;
-      updatePrintVideoPathDisplay();
-    },
-  });
-}
-
-/** 保存先パス表示を更新 */
-function updatePrintVideoPathDisplay() {
-  const input = document.getElementById('result-video-storage-path');
-  if (!input) return;
-
-  if (!printVideoStoragePath) {
-    input.value = '';
-    input.placeholder = '未設定（参照から選択）';
-    return;
-  }
-
-  const roots = printVideoGroupRoots;
-  const matchedRoot = roots.find(
-    (root) =>
-      printVideoStoragePath === root.path || printVideoStoragePath.startsWith(`${root.path}/`)
-  );
-
-  if (matchedRoot && printVideoStoragePath !== matchedRoot.path) {
-    const suffix = printVideoStoragePath.slice(matchedRoot.path.length + 1);
-    input.value = `${matchedRoot.label} / ${suffix}`;
-  } else if (matchedRoot) {
-    input.value = `${matchedRoot.label}（チームルート）`;
-  } else {
-    input.value = printVideoStoragePath;
-  }
-  input.title = printVideoStoragePath;
-}
-
-/** 結果動画の保存先設定を読み込む */
-async function loadPrintVideoSettings() {
-  const alertEl = document.getElementById('result-video-settings-alert');
-  if (!document.getElementById('result-video-storage-path')) return;
-
-  try {
-    const data = await apiRequest('admin/settings/result-video');
-    printVideoGroupRoots = data.group_roots ?? [];
-    printVideoStoragePath = data.storage_path ?? '';
-
-    if (alertEl) alertEl.innerHTML = '';
-    updatePrintVideoPathDisplay();
-  } catch (err) {
-    if (alertEl) {
-      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
-    }
-  }
-}
-
-/** 結果動画の保存先設定を保存 */
-async function savePrintVideoSettings() {
-  const alertEl = document.getElementById('result-video-settings-alert');
-
-  if (!printVideoStoragePath) {
-    alert('保存先フォルダを選択してください');
-    return;
-  }
-
-  try {
-    const data = await apiRequest('admin/settings/result-video', {
-      method: 'PATCH',
-      body: JSON.stringify({ storage_path: printVideoStoragePath }),
-    });
-    printVideoStoragePath = data.storage_path ?? printVideoStoragePath;
-    if (alertEl) {
-      alertEl.innerHTML = '<p class="alert alert-success">保存先を更新しました</p>';
-    }
-    updatePrintVideoPathDisplay();
-  } catch (err) {
-    if (alertEl) {
-      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
-    }
-  }
-}
-
 /** 予約詳細から結果動画をアップロード */
 async function handleUploadPrintVideo(reservationId) {
   const fileInput = document.getElementById('admin-result-video-file');
@@ -1469,8 +1383,10 @@ function simulatorAdminCardHtml(simulator) {
     ? `<img class="simulator-admin-image" src="${escapeHtml(simulator.image_url)}" alt="" loading="lazy" />`
     : `<div class="simulator-admin-image simulator-admin-image-placeholder" aria-hidden="true">🖨️</div>`;
 
-  const videoLabel = caps.can_record_result_video ? '動画撮影可' : '動画撮影不可';
   const statusBadge = buildSimulatorStatusBadge(simulator.status ?? 'available', { escapeHtml });
+  const specLine = caps.ec2_instance_type
+    ? `EC2 ${caps.ec2_instance_type}${caps.vcpus ? ` / ${caps.vcpus} vCPU` : ''}`
+    : '';
 
   return `
     <article class="simulator-admin-card">
@@ -1481,7 +1397,7 @@ function simulatorAdminCardHtml(simulator) {
           ${statusBadge}
         </div>
         ${buildSimulatorCapabilityBadges(caps, { escapeHtml })}
-        <p class="hint simulator-admin-cap-summary">ノズル径: ${escapeHtml(formatNozzleSizes(caps.nozzle_sizes_mm))} / ${videoLabel}</p>
+        ${specLine ? `<p class="hint simulator-admin-cap-summary">${escapeHtml(specLine)}</p>` : ''}
         <div class="simulator-admin-actions">
           <button class="btn btn-primary btn-sm" data-simulator-edit="${simulator.id}" type="button">編集</button>
           <button class="btn btn-secondary btn-sm" data-simulator-delete="${simulator.id}" type="button">削除</button>
@@ -1513,37 +1429,12 @@ function setupSimulatorEditModal() {
   form.addEventListener('submit', handleSimulatorEditSave);
 }
 
-/** Applies daily capacity fields to the simulator edit form. */
-function applyDailyCapacityToForm(capacity) {
-  const cap = capacity ?? {
-    max_small: 2,
-    max_small_with_main: 0,
-    max_medium: 1,
-    max_large: 1,
-  };
-  document.getElementById('simulator-edit-cap-max-small').value = cap.max_small ?? 2;
-  document.getElementById('simulator-edit-cap-max-small-with-main').value = cap.max_small_with_main ?? 0;
-  document.getElementById('simulator-edit-cap-max-medium').value = cap.max_medium ?? 1;
-  document.getElementById('simulator-edit-cap-max-large').value = cap.max_large ?? 1;
-}
-
-/** Reads daily capacity from the simulator edit form. */
-function readDailyCapacityFromForm() {
-  return {
-    max_small: Number(document.getElementById('simulator-edit-cap-max-small').value),
-    max_small_with_main: Number(document.getElementById('simulator-edit-cap-max-small-with-main').value),
-    max_medium: Number(document.getElementById('simulator-edit-cap-max-medium').value),
-    max_large: Number(document.getElementById('simulator-edit-cap-max-large').value),
-  };
-}
-
 /** Opens the simulator edit modal for a simulator. */
 function openSimulatorEditModal(id) {
   const simulator = allSimulators.find((p) => p.id === id);
   if (!simulator) return;
 
   editingSimulatorId = id;
-  const caps = normalizeSimulatorCapabilities(simulator.capabilities);
   const preview = document.getElementById('simulator-edit-image-preview');
   const alertEl = document.getElementById('simulator-edit-alert');
 
@@ -1551,10 +1442,7 @@ function openSimulatorEditModal(id) {
   document.getElementById('simulator-edit-id').value = id;
   document.getElementById('simulator-edit-name').value = simulator.name;
   document.getElementById('simulator-edit-status').value = simulator.status ?? 'available';
-  document.getElementById('simulator-edit-can-record-video').checked = caps.can_record_result_video;
-  document.getElementById('simulator-edit-nozzle-sizes').value = nozzleSizesToInputValue(caps.nozzle_sizes_mm);
   document.getElementById('simulator-edit-image').value = '';
-  applyDailyCapacityToForm(simulator.daily_capacity);
 
   if (simulator.image_url) {
     preview.innerHTML = `<img src="${escapeHtml(simulator.image_url)}" alt="" />`;
@@ -1576,18 +1464,10 @@ async function handleSimulatorEditSave(e) {
 
   const name = document.getElementById('simulator-edit-name').value.trim();
   const status = document.getElementById('simulator-edit-status').value;
-  const nozzleSizes = parseNozzleSizesInput(document.getElementById('simulator-edit-nozzle-sizes').value);
-  const canRecordVideo = document.getElementById('simulator-edit-can-record-video').checked;
-  const dailyCapacity = readDailyCapacityFromForm();
   const imageInput = document.getElementById('simulator-edit-image');
 
   if (!name) {
     alertEl.innerHTML = '<div class="alert alert-error">シミュレーター名を入力してください</div>';
-    return;
-  }
-
-  if (!nozzleSizes.length) {
-    alertEl.innerHTML = '<div class="alert alert-error">ノズル径を1つ以上入力してください</div>';
     return;
   }
 
@@ -1600,11 +1480,6 @@ async function handleSimulatorEditSave(e) {
       body: JSON.stringify({
         name,
         status,
-        daily_capacity: dailyCapacity,
-        capabilities: {
-          can_record_result_video: canRecordVideo,
-          nozzle_sizes_mm: nozzleSizes,
-        },
       }),
     });
 
@@ -1624,27 +1499,94 @@ async function handleSimulatorEditSave(e) {
   }
 }
 
-/** Handles adding a new simulator. */
-async function handleAddSimulator(e) {
-  e.preventDefault();
-  const alertEl = document.getElementById('simulator-add-alert');
-  alertEl.innerHTML = '';
-
-  const name = document.getElementById('simulator-name').value.trim();
-  const imageInput = document.getElementById('simulator-image');
-  const formData = new FormData();
-  formData.append('name', name);
-  if (imageInput.files?.[0]) {
-    formData.append('image', imageInput.files[0]);
-  }
+/** Loads EC2 instance catalog for registration UI. */
+async function loadEc2InstanceCatalog() {
+  const mount = document.getElementById('ec2-instance-catalog-mount');
+  const alertEl = document.getElementById('ec2-instance-catalog-alert');
+  if (!mount) return;
 
   try {
-    await apiFormRequest('admin/simulators', formData);
-    document.getElementById('simulator-add-form').reset();
-    await refreshAll();
-    alertEl.innerHTML = '<div class="alert alert-success">シミュレーターを追加しました</div>';
+    const data = await apiRequest('admin/ec2-instances');
+    ec2InstanceCatalog = data.instances ?? [];
+    if (alertEl) alertEl.innerHTML = '';
+    renderEc2InstanceCatalog();
   } catch (err) {
-    alertEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+    mount.innerHTML = '';
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+/** Renders the EC2 instance registration table. */
+function renderEc2InstanceCatalog() {
+  const mount = document.getElementById('ec2-instance-catalog-mount');
+  if (!mount) return;
+
+  if (!ec2InstanceCatalog.length) {
+    mount.innerHTML = '<p class="hint">利用可能なインスタンスタイプがありません</p>';
+    return;
+  }
+
+  const rows = ec2InstanceCatalog
+    .map((row) => {
+      const status = row.registered
+        ? `<span class="ec2-instance-status ec2-instance-status--registered">登録済み</span>`
+        : `<span class="ec2-instance-status">未登録</span>`;
+      const action = row.registered
+        ? `<span class="hint">${escapeHtml(row.simulator_name ?? '—')}</span>`
+        : `<button type="button" class="btn btn-primary btn-sm" data-ec2-register="${escapeHtml(row.instance_type)}">利用可能として登録</button>`;
+
+      return `<tr>
+        <td><code>${escapeHtml(row.instance_type)}</code></td>
+        <td>${row.vcpus}</td>
+        <td>${row.memory_gib ?? '—'} GiB</td>
+        <td>${status}</td>
+        <td class="ec2-instance-action">${action}</td>
+      </tr>`;
+    })
+    .join('');
+
+  mount.innerHTML = `
+    <div class="ec2-instance-table-wrap">
+      <table class="ec2-instance-table">
+        <thead>
+          <tr>
+            <th>インスタンスタイプ</th>
+            <th>vCPU</th>
+            <th>RAM</th>
+            <th>状態</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  mount.querySelectorAll('[data-ec2-register]').forEach((btn) => {
+    btn.addEventListener('click', () => handleRegisterEc2Instance(btn.dataset.ec2Register));
+  });
+}
+
+/** Registers an EC2 instance type as an available simulator. */
+async function handleRegisterEc2Instance(instanceType) {
+  const alertEl = document.getElementById('ec2-instance-catalog-alert');
+  if (!instanceType) return;
+
+  try {
+    await apiRequest('admin/ec2-instances', {
+      method: 'POST',
+      body: JSON.stringify({ instance_type: instanceType }),
+    });
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-success">${escapeHtml(instanceType)} を登録しました</p>`;
+    }
+    await refreshAll();
+    await loadEc2InstanceCatalog();
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
   }
 }
 
@@ -1657,8 +1599,60 @@ async function handleDeleteSimulator(id) {
   try {
     await apiRequest(`admin/simulators/${id}`, { method: 'DELETE' });
     await refreshAll();
+    await loadEc2InstanceCatalog();
   } catch (err) {
     alert(err.message);
+  }
+}
+
+/** Wires notification settings save button. */
+function setupSimNotificationSettings() {
+  document.getElementById('sim-notification-settings-save')?.addEventListener('click', () => {
+    void saveSimNotificationSettings();
+  });
+}
+
+/** Loads Discord webhook URL into the members panel form. */
+async function loadSimNotificationSettings() {
+  const input = document.getElementById('sim-discord-webhook');
+  if (!input) return;
+
+  try {
+    const data = await apiRequest('admin/settings/notifications');
+    input.value = data.discord_webhook_url ?? '';
+  } catch (err) {
+    const alertEl = document.getElementById('sim-notification-settings-alert');
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+/** Saves Discord webhook URL from the members panel form. */
+async function saveSimNotificationSettings() {
+  const alertEl = document.getElementById('sim-notification-settings-alert');
+  const input = document.getElementById('sim-discord-webhook');
+  if (!input) return;
+
+  const discordWebhookUrl = input.value.trim();
+
+  if (alertEl) alertEl.innerHTML = '';
+
+  try {
+    const data = await apiRequest('admin/settings/notifications', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        discord_webhook_url: discordWebhookUrl,
+      }),
+    });
+    input.value = data.discord_webhook_url ?? '';
+    if (alertEl) {
+      alertEl.innerHTML = '<p class="alert alert-success">Webhook を保存しました</p>';
+    }
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
   }
 }
 

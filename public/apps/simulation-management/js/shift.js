@@ -34,6 +34,19 @@ function isMobileShiftView() {
   return MOBILE_SHIFT_MQ.matches;
 }
 
+/** Closes the member color picker when clicking outside the toolbar. */
+function closeColorMenuOnOutsideClick(event) {
+  if (!openColorMenuMemberId) return;
+  const toolbar = document.getElementById('shift-member-toolbar');
+  if (!toolbar) return;
+  const target = event.target;
+  if (target instanceof Node && toolbar.contains(target)) {
+    return;
+  }
+  openColorMenuMemberId = null;
+  renderShiftToolbar();
+}
+
 /** Initializes the shift management panel. */
 export function initShiftPanel() {
   if (initialized) return;
@@ -79,7 +92,9 @@ function openShiftRescheduleModal(payload) {
   alertEl.innerHTML = '';
 
   shiftBlockReservations = payload.reservations ?? [];
-  intro.textContent = `${payload.date} には予約が入っています。別の日付へリスケしてから、シフトを外してください。`;
+  intro.textContent = pendingSimulatorShiftRemoval
+    ? `${payload.date} には予約が入っています。別の日付へリスケしてから、利用不可にしてください。`
+    : `${payload.date} には予約が入っています。別の日付へリスケしてから、シフトを外してください。`;
 
   const minDate = todayJst();
   list.innerHTML = shiftBlockReservations
@@ -456,8 +471,8 @@ function availabilityByDate() {
   return map;
 }
 
-/** Builds simulator availability lookup keyed by date. */
-function simulatorAvailabilityByDate() {
+/** Builds simulator unavailability lookup keyed by date (for calendar chips). */
+function simulatorUnavailabilityByDate() {
   const map = {};
   const simulatorById = Object.fromEntries(shiftSimulators.map((p) => [p.id, p]));
 
@@ -470,6 +485,13 @@ function simulatorAvailabilityByDate() {
   return map;
 }
 
+/** Returns whether the selected simulator is unavailable on a date. */
+function isSimulatorUnavailableOnDate(simulatorId, dateStr) {
+  return shiftSimulatorAvailability.some(
+    (row) => row.simulator_id === simulatorId && row.date === dateStr
+  );
+}
+
 /** Renders the shift calendar grid. */
 function renderShiftCalendar() {
   const grid = document.getElementById('shift-calendar-grid');
@@ -477,7 +499,7 @@ function renderShiftCalendar() {
   renderShiftWeekdayHeaders();
 
   const byDate = availabilityByDate();
-  const simulatorsByDate = simulatorAvailabilityByDate();
+  const simulatorsByDate = simulatorUnavailabilityByDate();
   const firstDay = new Date(shiftYear, shiftMonth - 1, 1);
   const lastDay = new Date(shiftYear, shiftMonth, 0).getDate();
   const startWeekday = firstDay.getDay();
@@ -537,9 +559,9 @@ function createShiftDayCell(dayNum, otherMonth, byDate, simulatorsByDate, todayS
       simulatorChips.className = 'shift-day-simulator-chips';
       for (const p of simulators) {
         const chip = document.createElement('span');
-        chip.className = 'shift-day-simulator-chip';
-        chip.textContent = isMobileShiftView() ? p.name.slice(0, 2) : p.name;
-        chip.title = p.name;
+        chip.className = 'shift-day-simulator-chip shift-day-simulator-chip-off';
+        chip.textContent = isMobileShiftView() ? p.name.slice(0, 2) : `${p.name}×`;
+        chip.title = `${p.name}（利用不可）`;
         simulatorChips.appendChild(chip);
       }
       cell.appendChild(simulatorChips);
@@ -547,6 +569,9 @@ function createShiftDayCell(dayNum, otherMonth, byDate, simulatorsByDate, todayS
 
     const canEditMember = shiftEditMode === 'member' && selectedMemberId;
     const canEditSimulator = shiftEditMode === 'simulator' && selectedSimulatorId;
+    if (canEditSimulator && isSimulatorUnavailableOnDate(selectedSimulatorId, dateStr)) {
+      cell.classList.add('shift-day-simulator-unavailable');
+    }
     if (canEditMember || canEditSimulator) {
       cell.classList.add('shift-day-editable');
       cell.addEventListener('mousedown', (e) => handleShiftDayMouseDown(e, dateStr, cell));
@@ -617,7 +642,12 @@ function handleShiftDayMouseEnter(dateStr, cell) {
 }
 
 /** Applies visual preview during drag. */
-function applyDragPreview(_dateStr, cell) {
+function applyDragPreview(dateStr, cell) {
+  if (shiftEditMode === 'simulator' && selectedSimulatorId) {
+    cell.classList.add('shift-day-simulator-unavailable');
+    cell.classList.add('shift-day-painting');
+    return;
+  }
   cell.classList.add('shift-day-painting');
 }
 
@@ -678,7 +708,7 @@ async function handleShiftMouseUp() {
           body: JSON.stringify({
             simulator_id: selectedSimulatorId,
             dates,
-            available: true,
+            available: false,
           }),
         });
       } else {

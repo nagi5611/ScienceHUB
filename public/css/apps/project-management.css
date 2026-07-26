@@ -1173,7 +1173,7 @@ body.pm-app {
   color: inherit;
 }
 
-/* 親子プロジェクト */
+/* プロジェクト一覧 */
 .pm-project-list {
   display: flex;
   flex-direction: column;

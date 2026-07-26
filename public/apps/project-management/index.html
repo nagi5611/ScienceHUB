@@ -127,7 +127,7 @@
         <div class="pm-section-head">
           <h2 class="pm-section-title" id="pm-projects-heading">プロジェクト一覧</h2>
           <div class="pm-section-head-actions">
-            <button type="button" class="pm-btn pm-btn--primary" id="pm-add-parent" hidden>
+            <button type="button" class="pm-btn pm-btn--primary" id="pm-add-project" hidden>
               + 新規
             </button>
           </div>
@@ -239,10 +239,10 @@
     </div>
   </div>
 
-  <dialog class="pm-dialog pm-dialog--wide" id="pm-edit-child-dialog">
-    <form method="dialog" class="pm-dialog-form" id="pm-edit-child-form">
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-edit-project-dialog">
+    <form method="dialog" class="pm-dialog-form" id="pm-edit-project-form">
       <h3 class="pm-dialog-title">プロジェクトの編集</h3>
-      <p class="pm-dialog-sub" id="pm-edit-child-name"></p>
+      <p class="pm-dialog-sub" id="pm-edit-project-name"></p>
 
       <section class="pm-edit-section" aria-labelledby="pm-edit-schedule-heading">
         <h4 class="pm-edit-section-title" id="pm-edit-schedule-heading">日程</h4>
@@ -281,7 +281,7 @@
 
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
-        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-edit-child-save">保存</button>
+        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-edit-project-save">保存</button>
       </div>
     </form>
   </dialog>
@@ -310,7 +310,7 @@
       <p class="pm-dialog-sub" id="pm-leader-project-name"></p>
       <label class="pm-field-label">リーダー（複数可）</label>
       <div class="pm-assignee-checks" id="pm-leader-checks"></div>
-      <p class="pm-field-hint">グループメンバーから複数人を指定できます。リーダーは親プロジェクトの担当者にタスクを発行できます。</p>
+      <p class="pm-field-hint">グループメンバーから複数人を指定できます。リーダーはプロジェクトの担当者にタスクを発行できます。</p>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
         <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-leader-save">保存</button>
@@ -346,16 +346,16 @@
     </form>
   </dialog>
 
-  <dialog class="pm-dialog pm-dialog--wide" id="pm-parent-members-dialog">
-    <form method="dialog" class="pm-dialog-form pm-dialog-form--tall" id="pm-parent-members-form">
+  <dialog class="pm-dialog pm-dialog--wide" id="pm-project-members-dialog">
+    <form method="dialog" class="pm-dialog-form pm-dialog-form--tall" id="pm-project-members-form">
       <h3 class="pm-dialog-title">担当者を設定</h3>
-      <p class="pm-dialog-sub" id="pm-parent-members-project-name"></p>
+      <p class="pm-dialog-sub" id="pm-project-members-project-name"></p>
       <label class="pm-field-label">担当者（複数可）</label>
-      <div class="pm-assignee-checks" id="pm-parent-members-checks"></div>
-      <p class="pm-field-hint">グループに所属するユーザーを親プロジェクトの担当者として追加できます。タスク発行時に選択できます。</p>
+      <div class="pm-assignee-checks" id="pm-project-members-checks"></div>
+      <p class="pm-field-hint">グループに所属するユーザーをプロジェクトの担当者として追加できます。タスク発行時に選択できます。</p>
       <div class="pm-dialog-actions">
         <button type="submit" class="pm-btn pm-btn--ghost" value="cancel" formnovalidate>キャンセル</button>
-        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-parent-members-save">保存</button>
+        <button type="submit" class="pm-btn pm-btn--primary" value="save" id="pm-project-members-save">保存</button>
       </div>
     </form>
   </dialog>

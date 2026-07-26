@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local wrangler pages dev (do not commit .dev.vars)
+
+FIREBASE_PROJECT_ID=
+FIREBASE_WEB_API_KEY=
+FIREBASE_APP_ID=
+FIREBASE_AUTH_DOMAIN=
+SIM_SMS_CONSENT_VERSION=2026-03-25-ja-v1

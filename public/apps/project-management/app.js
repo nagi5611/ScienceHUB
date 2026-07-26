@@ -1,6 +1,6 @@
 /**
  * プロジェクト管理 — ダッシュボード UI
- * 親子プロジェクト CRUD + 活動予定日ミニカレンダー
+ * プロジェクト CRUD + 活動予定日ミニカレンダー
  */
 
 const APP_PATH = "/apps/project-management/";
@@ -75,13 +75,13 @@ function isAdmin() {
   return Boolean(dashboard?.group?.is_admin);
 }
 
-/** 親プロジェクトを ID で探す */
-function findParentProject(parentId) {
-  return (dashboard?.projects ?? []).find((p) => p.id === parentId) ?? null;
+/** プロジェクトを ID で探す */
+function findProject(projectId) {
+  return (dashboard?.projects ?? []).find((p) => p.id === projectId) ?? null;
 }
 
 /** @type {string | null} */
-let selectedParentId = null;
+let selectedProjectId = null;
 
 /** @type {string | null} */
 let memberTaskAssigneeId = null;
@@ -92,32 +92,34 @@ let editingMemberTaskId = null;
 /** ハッシュ状態を取得 */
 function parseHashState() {
   const raw = location.hash.replace(/^#/, "").trim();
-  if (!raw) return { parent: null, view: null };
+  if (!raw) return { project: null, view: null };
   const params = new URLSearchParams(raw);
+  const project =
+    params.get("project")?.trim() || params.get("parent")?.trim() || null;
   return {
-    parent: params.get("parent"),
+    project,
     view: params.get("view"),
   };
 }
 
 /** 現在のビュー */
 function getCurrentView() {
-  const { parent, view } = parseHashState();
+  const { project, view } = parseHashState();
   if (view === "members") return "members";
-  if (parent) return "detail";
+  if (project) return "detail";
   return "list";
 }
 
-/** ハッシュから親プロジェクト ID を取得 */
-function parseHashParent() {
-  return parseHashState().parent;
+/** ハッシュからプロジェクト ID を取得 */
+function parseHashProject() {
+  return parseHashState().project;
 }
 
-/** 親プロジェクト詳細へ遷移 */
-function navigateToParent(parentId) {
-  selectedParentId = parentId;
-  if (parentId) {
-    location.hash = `parent=${encodeURIComponent(parentId)}`;
+/** プロジェクト詳細へ遷移 */
+function navigateToProject(projectId) {
+  selectedProjectId = projectId;
+  if (projectId) {
+    location.hash = `project=${encodeURIComponent(projectId)}`;
   } else {
     history.replaceState(null, "", location.pathname + location.search);
   }
@@ -126,14 +128,14 @@ function navigateToParent(parentId) {
 
 /** メンバー全員のタスク一覧へ遷移 */
 function navigateToMembers() {
-  selectedParentId = null;
+  selectedProjectId = null;
   location.hash = "view=members";
   renderView();
 }
 
 /** 一覧へ戻る */
 function navigateToList() {
-  selectedParentId = null;
+  selectedProjectId = null;
   history.replaceState(null, "", location.pathname + location.search);
   renderView();
 }
@@ -172,7 +174,7 @@ function formatLeadersLabel(parent) {
   return leaders.map((l) => l.display_name).join("、");
 }
 
-/** 親プロジェクト担当者の表示名 */
+/** プロジェクト担当者の表示名 */
 function formatMembersLabel(parent) {
   const members = parent.members ?? [];
   if (members.length === 0) return "担当者未設定";
@@ -195,7 +197,7 @@ function issuedAssignmentStatusClass(assignment) {
 
 /** 発行タスクバッチを検索 */
 function findIssuedBatch(parentId, issuedTaskId) {
-  const parent = findParentProject(parentId);
+  const parent = findProject(parentId);
   return (
     parent?.issued_tasks?.find((batch) => batch.issued_task_id === issuedTaskId) ??
     null
@@ -223,7 +225,7 @@ function renderIssuedTaskRow(batch, parentId, options = {}) {
       : "";
 
   return `<li>
-    <button type="button" class="pm-issued-task-row" data-open-issued-detail="${escapeHtml(batch.issued_task_id)}" data-issued-parent="${escapeHtml(parentId)}">
+    <button type="button" class="pm-issued-task-row" data-open-issued-detail="${escapeHtml(batch.issued_task_id)}" data-issued-project="${escapeHtml(parentId)}">
       <span class="pm-issued-task-row-main">
         <span class="pm-issued-task-row-title">${escapeHtml(batch.title)}</span>
         <span class="pm-issued-task-row-meta">${projectPrefix}納期 ${escapeHtml(dueLabel)} · 担当 ${assignments.length}名 · ${completedCount}/${assignments.length} 完了</span>
@@ -259,7 +261,7 @@ function renderIssuedTasks(parent) {
   listEl.querySelectorAll("[data-open-issued-detail]").forEach((btn) => {
     btn.addEventListener("click", () => {
       openIssuedTaskDetailDialog(
-        btn.getAttribute("data-issued-parent"),
+        btn.getAttribute("data-issued-project"),
         btn.getAttribute("data-open-issued-detail")
       );
     });
@@ -269,12 +271,12 @@ function renderIssuedTasks(parent) {
 /** 発行タスク詳細ダイアログを開く */
 function openIssuedTaskDetailDialog(parentId, batchId) {
   if (!parentId || !batchId) return;
-  const parent = findParentProject(parentId);
+  const parent = findProject(parentId);
   const batch = findIssuedBatch(parentId, batchId);
   if (!parent || !batch) return;
   if (!parent.is_leader && !isAdmin()) return;
 
-  viewingIssuedParentId = parentId;
+  viewingIssuedProjectId = parentId;
   viewingIssuedBatchId = batchId;
 
   const titleEl = document.getElementById("pm-issued-detail-title");
@@ -535,7 +537,7 @@ async function refreshIssuedDayConflictPreview() {
 async function saveIssuedDayAssignees(acknowledgeConflicts = false) {
   const dateStr = issuedDetailAssignEditingDate;
   const batchId = viewingIssuedBatchId;
-  const parentId = viewingIssuedParentId;
+  const parentId = viewingIssuedProjectId;
   if (!dateStr || !batchId) return;
 
   const checks = document.querySelectorAll(
@@ -729,7 +731,7 @@ function bindIssuedDetailCalNav() {
 function closeIssuedTaskDetailDialog() {
   document.getElementById("pm-issued-task-detail-dialog")?.close();
   viewingIssuedBatchId = null;
-  viewingIssuedParentId = null;
+  viewingIssuedProjectId = null;
   issuedDetailActivityDates = new Set();
   issuedDetailAssigneeIds = new Set();
   issuedDetailDayAssignments = new Map();
@@ -740,7 +742,7 @@ function closeIssuedTaskDetailDialog() {
 /** 発行タスクを削除 */
 async function handleDeleteIssuedTask() {
   if (!viewingIssuedBatchId) return;
-  const batch = findIssuedBatch(viewingIssuedParentId, viewingIssuedBatchId);
+  const batch = findIssuedBatch(viewingIssuedProjectId, viewingIssuedBatchId);
   if (!batch) return;
 
   const ok = window.confirm(
@@ -849,7 +851,7 @@ function renderOverviewKpis() {
   const items = [
     { label: "自分の未完了タスク", value: s.myOpen },
     { label: "進行中（自分）", value: s.myActive, good: true },
-    { label: "親プロジェクト", value: s.projects },
+    { label: "プロジェクト", value: s.projects },
     { label: "達成済み（自分）", value: s.myCompleted },
   ];
   row.innerHTML = items
@@ -916,9 +918,12 @@ function renderProgressBar(percent) {
 }
 
 const ACTIVITY_LABELS = {
+  created_project: "を作成しました",
   created_parent: "を作成しました",
   created_child: "を作成しました",
+  completed_project: "を達成済みにしました",
   completed_child: "を達成済みにしました",
+  reopened_project: "を進行中に戻しました",
   reopened_child: "を進行中に戻しました",
   deleted_project: "を削除しました",
   created_task: "タスクを発行しました",
@@ -1072,7 +1077,7 @@ function renderOpenTaskItem(task) {
     ? " pm-task-item--clickable"
     : "";
   const parentAttr = task.parent_project_id
-    ? ` data-open-parent="${escapeHtml(task.parent_project_id)}"`
+    ? ` data-open-project="${escapeHtml(task.parent_project_id)}"`
     : "";
   return `<li class="pm-task-item${urgencyClass}${clickableClass}" data-task-id="${escapeHtml(task.id)}"${parentAttr}>
     <div class="pm-task-main">
@@ -1101,7 +1106,7 @@ function renderCompletedTaskItem(task) {
     ? " pm-task-item--clickable"
     : "";
   const parentAttr = task.parent_project_id
-    ? ` data-open-parent="${escapeHtml(task.parent_project_id)}"`
+    ? ` data-open-project="${escapeHtml(task.parent_project_id)}"`
     : "";
   const metaParts = [projectLabel, due, completed, from].filter(Boolean);
   return `<li class="pm-task-item pm-task-item--completed${clickableClass}" data-task-id="${escapeHtml(task.id)}"${parentAttr}>
@@ -1115,10 +1120,10 @@ function renderCompletedTaskItem(task) {
 
 /** タスク一覧のクリック操作をバインド */
 function bindTaskListInteractions(scope) {
-  scope.querySelectorAll("[data-open-parent]").forEach((item) => {
+  scope.querySelectorAll("[data-open-project]").forEach((item) => {
     item.addEventListener("click", (e) => {
       if (e.target.closest("[data-complete-task]")) return;
-      navigateToParent(item.getAttribute("data-open-parent"));
+      navigateToProject(item.getAttribute("data-open-project"));
     });
   });
 
@@ -1649,25 +1654,25 @@ let editingDueProjectId = null;
 /** @type {string | null} */
 let editingStorageProjectId = null;
 /** @type {string | null} */
-let editingChildProjectId = null;
+let editingProjectId = null;
 /** 編集ダイアログでフォルダ紐づけを解除するか */
 let editClearStorage = false;
 /** @type {string | null} */
-let editingLeaderParentId = null;
+let editingLeaderProjectId = null;
 /** @type {string | null} */
-let editingParentMembersId = null;
+let editingProjectMembersId = null;
 /** @type {string | null} */
-let editingProgressParentId = null;
+let editingProgressProjectId = null;
 /** @type {string | null} */
-let creatingTaskParentId = null;
+let creatingTaskProjectId = null;
 /** @type {string | null} */
 let editingIssuedBatchId = null;
 /** @type {string | null} */
-let editingIssuedParentId = null;
+let editingIssuedProjectId = null;
 /** @type {string | null} */
 let viewingIssuedBatchId = null;
 /** @type {string | null} */
-let viewingIssuedParentId = null;
+let viewingIssuedProjectId = null;
 /** 発行タスク詳細カレンダー */
 let issuedDetailCalYear = 2026;
 let issuedDetailCalMonth = 7;
@@ -1721,7 +1726,7 @@ function renderView() {
   if (!listView || !detailView || !membersView || !dashboard) return;
 
   const hash = parseHashState();
-  selectedParentId = hash.parent;
+  selectedProjectId = hash.project;
   const view = getCurrentView();
 
   if (view === "members") {
@@ -1732,17 +1737,17 @@ function renderView() {
     return;
   }
 
-  const parent = selectedParentId ? findParentProject(selectedParentId) : null;
-  if (selectedParentId && !parent) {
-    selectedParentId = null;
+  const project = selectedProjectId ? findProject(selectedProjectId) : null;
+  if (selectedProjectId && !project) {
+    selectedProjectId = null;
     history.replaceState(null, "", location.pathname + location.search);
   }
 
-  if (view === "detail" && parent) {
+  if (view === "detail" && project) {
     listView.hidden = true;
     detailView.hidden = false;
     membersView.hidden = true;
-    renderDetailView(parent);
+    renderDetailView(project);
     return;
   }
 
@@ -2056,7 +2061,7 @@ async function handleDeleteMemberTask(taskId) {
 /** プロジェクトカードグリッド */
 function renderProjectCards() {
   const container = document.getElementById("pm-project-cards");
-  const addParentBtn = document.getElementById("pm-add-parent");
+  const addParentBtn = document.getElementById("pm-add-project");
   if (!container || !dashboard) return;
 
   if (addParentBtn) addParentBtn.hidden = !isAdmin();
@@ -2065,7 +2070,7 @@ function renderProjectCards() {
   if (projects.length === 0) {
     container.innerHTML = `<p class="pm-empty">${
       isAdmin()
-        ? "親プロジェクトがありません。「+ 新規」から作成できます。"
+        ? "プロジェクトがありません。「+ 新規」から作成できます。"
         : "プロジェクトはまだありません。"
     }</p>`;
     return;
@@ -2078,7 +2083,7 @@ function renderProjectCards() {
         ? formatDate(parent.latest_due_date)
         : formatUpdateLabel(parent);
       const percent = parent.progress_percent ?? 0;
-      return `<button type="button" class="pm-project-card" data-open-parent="${escapeHtml(parent.id)}">
+      return `<button type="button" class="pm-project-card" data-open-project="${escapeHtml(parent.id)}">
         <h3 class="pm-project-card-title">${escapeHtml(parent.name)}</h3>
         <p class="pm-project-card-desc">説明なし</p>
         ${renderProgressBar(percent)}
@@ -2090,9 +2095,9 @@ function renderProjectCards() {
     })
     .join("");
 
-  container.querySelectorAll("[data-open-parent]").forEach((btn) => {
+  container.querySelectorAll("[data-open-project]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      navigateToParent(btn.getAttribute("data-open-parent"));
+      navigateToProject(btn.getAttribute("data-open-project"));
     });
   });
 }
@@ -2141,7 +2146,7 @@ function renderIssuedTasksOverview() {
   container.querySelectorAll("[data-open-issued-detail]").forEach((btn) => {
     btn.addEventListener("click", () => {
       openIssuedTaskDetailDialog(
-        btn.getAttribute("data-issued-parent"),
+        btn.getAttribute("data-issued-project"),
         btn.getAttribute("data-open-issued-detail")
       );
     });
@@ -2246,49 +2251,49 @@ async function openProjectNote(projectId) {
   );
 }
 
-/** 親プロジェクト詳細画面 */
-function renderDetailView(parent) {
+/** プロジェクト詳細画面 */
+function renderDetailView(project) {
   const breadcrumbName = document.getElementById("pm-detail-breadcrumb-name");
   const header = document.getElementById("pm-detail-header");
   const projectBody = document.getElementById("pm-detail-project-body");
   const timelineList = document.getElementById("pm-detail-timeline-list");
   if (!breadcrumbName || !header || !projectBody || !timelineList) return;
 
-  breadcrumbName.textContent = parent.name;
+  breadcrumbName.textContent = project.name;
 
-  const leaderName = formatLeadersLabel(parent);
-  const membersName = formatMembersLabel(parent);
-  const percent = parent.progress_percent ?? 0;
+  const leaderName = formatLeadersLabel(project);
+  const membersName = formatMembersLabel(project);
+  const percent = project.progress_percent ?? 0;
   const admin = isAdmin();
 
   header.innerHTML = `
     <div class="pm-detail-header-main">
-      <h2 class="pm-detail-title">${escapeHtml(parent.name)}</h2>
+      <h2 class="pm-detail-title">${escapeHtml(project.name)}</h2>
       <p class="pm-detail-leader">リーダー: ${escapeHtml(leaderName)}</p>
       <p class="pm-detail-members">担当者: ${escapeHtml(membersName)}</p>
       ${renderProjectResourceLinks({
-        storagePath: parent.storage_path,
-        noteId: parent.excalidraw_note_id,
-        projectId: parent.id,
+        storagePath: project.storage_path,
+        noteId: project.excalidraw_note_id,
+        projectId: project.id,
       })}
       ${renderProgressBar(percent)}
     </div>
     <div class="pm-detail-header-actions">
       ${
         admin
-          ? `<button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-edit-progress" data-parent-id="${escapeHtml(parent.id)}">進捗</button>`
+          ? `<button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-edit-progress" data-project-id="${escapeHtml(project.id)}">進捗</button>`
           : ""
       }
       ${
-        parent.is_leader
-          ? `<button type="button" class="pm-btn pm-btn--primary" id="pm-detail-add-task" data-parent-id="${escapeHtml(parent.id)}">タスクを発行</button>
-             <button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-set-members" data-parent-id="${escapeHtml(parent.id)}">担当者</button>`
+        project.is_leader
+          ? `<button type="button" class="pm-btn pm-btn--primary" id="pm-detail-add-task" data-project-id="${escapeHtml(project.id)}">タスクを発行</button>
+             <button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-set-members" data-project-id="${escapeHtml(project.id)}">担当者</button>`
           : ""
       }
       ${
         admin
-          ? `<button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-set-leader" data-parent-id="${escapeHtml(parent.id)}">リーダー</button>
-             <button type="button" class="pm-btn pm-btn--danger" id="pm-detail-delete-parent" data-parent-id="${escapeHtml(parent.id)}">削除</button>`
+          ? `<button type="button" class="pm-btn pm-btn--ghost" id="pm-detail-set-leader" data-project-id="${escapeHtml(project.id)}">リーダー</button>
+             <button type="button" class="pm-btn pm-btn--danger" id="pm-detail-delete-project" data-project-id="${escapeHtml(project.id)}">削除</button>`
           : ""
       }
     </div>
@@ -2296,37 +2301,37 @@ function renderDetailView(parent) {
 
   document
     .getElementById("pm-detail-edit-progress")
-    ?.addEventListener("click", () => openProgressDialog(parent.id));
+    ?.addEventListener("click", () => openProgressDialog(project.id));
   document
     .getElementById("pm-detail-add-task")
-    ?.addEventListener("click", () => openTaskDialog(parent.id));
+    ?.addEventListener("click", () => openTaskDialog(project.id));
   document
     .getElementById("pm-detail-set-members")
-    ?.addEventListener("click", () => openParentMembersDialog(parent.id));
+    ?.addEventListener("click", () => openProjectMembersDialog(project.id));
   document
     .getElementById("pm-detail-set-leader")
-    ?.addEventListener("click", () => openLeaderDialog(parent.id));
+    ?.addEventListener("click", () => openLeaderDialog(project.id));
   document
-    .getElementById("pm-detail-delete-parent")
-    ?.addEventListener("click", () => handleDeleteProject(parent.id));
+    .getElementById("pm-detail-delete-project")
+    ?.addEventListener("click", () => handleDeleteProject(project.id));
 
   const editBtn = document.getElementById("pm-detail-edit-project");
   if (editBtn) {
     editBtn.hidden = !admin;
-    editBtn.onclick = admin ? () => openEditChildDialog(parent.id) : null;
+    editBtn.onclick = admin ? () => openEditProjectDialog(project.id) : null;
   }
 
   bindNoteLinkHandlers(header);
 
-  const startLabel = formatDate(parent.effective_start_date);
-  const dueLabel = parent.due_date ? formatDate(parent.due_date) : "未設定";
+  const startLabel = formatDate(project.effective_start_date);
+  const dueLabel = project.due_date ? formatDate(project.due_date) : "未設定";
   const effortLabel =
-    parent.effort_days === null || parent.effort_days === undefined
+    project.effort_days === null || project.effort_days === undefined
       ? "—"
-      : `${parent.effort_days}日`;
-  const statusLabel = parent.is_completed
+      : `${project.effort_days}日`;
+  const statusLabel = project.is_completed
     ? "達成済み"
-    : parent.is_active
+    : project.is_active
       ? "進行中"
       : "開始前";
 
@@ -2340,32 +2345,32 @@ function renderDetailView(parent) {
   `;
 
   const activities = (dashboard?.recent_activity ?? []).filter(
-    (a) => a.parent_project_id === parent.id
+    (a) => a.parent_project_id === project.id
   );
   timelineList.innerHTML = renderActivityItems(
     activities,
     "このプロジェクトの履歴はありません"
   );
 
-  renderIssuedTasks(parent);
+  renderIssuedTasks(project);
 }
 
 /** プロジェクト編集ダイアログを開く */
-async function openEditChildDialog(projectId) {
+async function openEditProjectDialog(projectId) {
   if (!projectId) return;
-  const project = findParentProject(projectId);
+  const project = findProject(projectId);
   if (!project) return;
 
-  editingChildProjectId = projectId;
+  editingProjectId = projectId;
   editingDueProjectId = projectId;
   editingAssigneeProjectId = projectId;
   editingStorageProjectId = projectId;
   editClearStorage = false;
 
-  const nameEl = document.getElementById("pm-edit-child-name");
+  const nameEl = document.getElementById("pm-edit-project-name");
   const startInput = document.getElementById("pm-start-input");
   const dueInput = document.getElementById("pm-due-input");
-  const dialog = document.getElementById("pm-edit-child-dialog");
+  const dialog = document.getElementById("pm-edit-project-dialog");
   const assigneeSection = document.getElementById("pm-edit-assignee-section");
   const storageSection = document.getElementById("pm-edit-storage-section");
   const statusSection = document.getElementById("pm-edit-status-section");
@@ -2816,10 +2821,10 @@ function scheduleTaskIssueEffortPreview(options) {
   );
 }
 
-/** 子プロジェクト編集を一括保存 */
-async function handleSaveEditChild() {
-  if (!editingChildProjectId) return;
-  const projectId = editingChildProjectId;
+/** プロジェクト編集を一括保存 */
+async function handleSaveEditProject() {
+  if (!editingProjectId) return;
+  const projectId = editingProjectId;
   const dueInput = document.getElementById("pm-due-input");
   const startInput = document.getElementById("pm-start-input");
   const dueDate = dueInput?.value || null;
@@ -2893,13 +2898,13 @@ async function handleSaveEditChild() {
   } catch {
     showToast("更新に失敗しました", true);
   } finally {
-    clearEditChildState();
+    clearEditProjectState();
   }
 }
 
 /** 編集ダイアログの状態をクリア */
-function clearEditChildState() {
-  editingChildProjectId = null;
+function clearEditProjectState() {
+  editingProjectId = null;
   editingDueProjectId = null;
   editingAssigneeProjectId = null;
   editingStorageProjectId = null;
@@ -2927,8 +2932,8 @@ async function handleSetCompleted(projectId, completed) {
       showToast(data.error || "更新に失敗しました", true);
       return;
     }
-    document.getElementById("pm-edit-child-dialog")?.close();
-    clearEditChildState();
+    document.getElementById("pm-edit-project-dialog")?.close();
+    clearEditProjectState();
     await loadDashboard(selectedGroupId);
     showToast(completed ? "達成済みにしました" : "進行中に戻しました");
   } catch {
@@ -3017,10 +3022,10 @@ function renderStorageBreadcrumb(path) {
 /** 進捗編集ダイアログを開く（管理者） */
 function openProgressDialog(parentId) {
   if (!isAdmin() || !parentId) return;
-  const parent = findParentProject(parentId);
+  const parent = findProject(parentId);
   if (!parent) return;
 
-  editingProgressParentId = parentId;
+  editingProgressProjectId = parentId;
   const nameEl = document.getElementById("pm-progress-project-name");
   const slider = document.getElementById("pm-progress-slider");
   const valueLabel = document.getElementById("pm-progress-value-label");
@@ -3053,14 +3058,14 @@ function syncProgressSliderLabel() {
 
 /** 進捗を保存（手動値） */
 async function handleSaveProgress() {
-  if (!editingProgressParentId) return;
+  if (!editingProgressProjectId) return;
   const slider = document.getElementById("pm-progress-slider");
   if (!slider) return;
   const percent = Number(slider.value);
 
   try {
     const response = await fetch(
-      `/api/project-management/projects/${encodeURIComponent(editingProgressParentId)}`,
+      `/api/project-management/projects/${encodeURIComponent(editingProgressProjectId)}`,
       {
         method: "PUT",
         credentials: "same-origin",
@@ -3079,17 +3084,17 @@ async function handleSaveProgress() {
   } catch {
     showToast("進捗の更新に失敗しました", true);
   } finally {
-    editingProgressParentId = null;
+    editingProgressProjectId = null;
   }
 }
 
 /** 進捗を自動算出に戻す */
 async function handleResetProgress() {
-  if (!editingProgressParentId) return;
+  if (!editingProgressProjectId) return;
 
   try {
     const response = await fetch(
-      `/api/project-management/projects/${encodeURIComponent(editingProgressParentId)}`,
+      `/api/project-management/projects/${encodeURIComponent(editingProgressProjectId)}`,
       {
         method: "PUT",
         credentials: "same-origin",
@@ -3109,17 +3114,17 @@ async function handleResetProgress() {
   } catch {
     showToast("進捗のリセットに失敗しました", true);
   } finally {
-    editingProgressParentId = null;
+    editingProgressProjectId = null;
   }
 }
 
 /** リーダー指定ダイアログを開く（管理者） */
 function openLeaderDialog(parentId) {
   if (!isAdmin() || !parentId) return;
-  const parent = findParentProject(parentId);
+  const parent = findProject(parentId);
   if (!parent) return;
 
-  editingLeaderParentId = parentId;
+  editingLeaderProjectId = parentId;
   const nameEl = document.getElementById("pm-leader-project-name");
   const checksEl = document.getElementById("pm-leader-checks");
   const dialog = document.getElementById("pm-leader-dialog");
@@ -3157,7 +3162,7 @@ function openLeaderDialog(parentId) {
 
 /** リーダーを保存 */
 async function handleSaveLeader() {
-  if (!editingLeaderParentId) return;
+  if (!editingLeaderProjectId) return;
   const checks = document.querySelectorAll(
     "#pm-leader-checks input[type=checkbox]:checked"
   );
@@ -3165,7 +3170,7 @@ async function handleSaveLeader() {
 
   try {
     const response = await fetch(
-      `/api/project-management/projects/${encodeURIComponent(editingLeaderParentId)}`,
+      `/api/project-management/projects/${encodeURIComponent(editingLeaderProjectId)}`,
       {
         method: "PUT",
         credentials: "same-origin",
@@ -3184,25 +3189,25 @@ async function handleSaveLeader() {
   } catch {
     showToast("リーダーの設定に失敗しました", true);
   } finally {
-    editingLeaderParentId = null;
+    editingLeaderProjectId = null;
   }
 }
 
-/** 親プロジェクト担当者ダイアログを開く（リーダー） */
-function openParentMembersDialog(parentId) {
-  if (!parentId) return;
-  const parent = findParentProject(parentId);
-  if (!parent || !parent.is_leader) return;
+/** プロジェクト担当者ダイアログを開く（リーダー） */
+function openProjectMembersDialog(projectId) {
+  if (!projectId) return;
+  const project = findProject(projectId);
+  if (!project || !project.is_leader) return;
 
-  editingParentMembersId = parentId;
-  const nameEl = document.getElementById("pm-parent-members-project-name");
-  const checksEl = document.getElementById("pm-parent-members-checks");
-  const dialog = document.getElementById("pm-parent-members-dialog");
+  editingProjectMembersId = projectId;
+  const nameEl = document.getElementById("pm-project-members-project-name");
+  const checksEl = document.getElementById("pm-project-members-checks");
+  const dialog = document.getElementById("pm-project-members-dialog");
   if (!nameEl || !checksEl || !dialog) return;
 
-  nameEl.textContent = parent.name;
+  nameEl.textContent = project.name;
   const groupMembers = dashboard.members ?? [];
-  const selected = new Set((parent.members ?? []).map((m) => m.id));
+  const selected = new Set((project.members ?? []).map((m) => m.id));
 
   if (groupMembers.length === 0) {
     checksEl.innerHTML = `<p class="pm-empty">グループメンバーがいません</p>`;
@@ -3223,17 +3228,17 @@ function openParentMembersDialog(parentId) {
   dialog.showModal();
 }
 
-/** 親プロジェクト担当者を保存 */
-async function handleSaveParentMembers() {
-  if (!editingParentMembersId) return;
+/** プロジェクト担当者を保存 */
+async function handleSaveProjectMembers() {
+  if (!editingProjectMembersId) return;
   const checks = document.querySelectorAll(
-    "#pm-parent-members-checks input[type=checkbox]:checked"
+    "#pm-project-members-checks input[type=checkbox]:checked"
   );
   const memberUserIds = [...checks].map((el) => el.value);
 
   try {
     const response = await fetch(
-      `/api/project-management/projects/${encodeURIComponent(editingParentMembersId)}`,
+      `/api/project-management/projects/${encodeURIComponent(editingProjectMembersId)}`,
       {
         method: "PUT",
         credentials: "same-origin",
@@ -3252,17 +3257,17 @@ async function handleSaveParentMembers() {
   } catch {
     showToast("担当者の設定に失敗しました", true);
   } finally {
-    editingParentMembersId = null;
+    editingProjectMembersId = null;
   }
 }
 
 /** タスク発行ダイアログを開く（リーダー） */
 function openTaskDialog(parentId) {
   if (!parentId) return;
-  const parent = findParentProject(parentId);
+  const parent = findProject(parentId);
   if (!parent || !parent.is_leader) return;
 
-  creatingTaskParentId = parentId;
+  creatingTaskProjectId = parentId;
   const nameEl = document.getElementById("pm-task-project-name");
   const titleEl = document.getElementById("pm-task-title");
   const dueEl = document.getElementById("pm-task-due");
@@ -3306,7 +3311,7 @@ function openTaskDialog(parentId) {
 
 /** タスクを発行 */
 async function handleCreateTask() {
-  if (!creatingTaskParentId) return;
+  if (!creatingTaskProjectId) return;
   const titleEl = document.getElementById("pm-task-title");
   const dueEl = document.getElementById("pm-task-due");
   if (!titleEl) return;
@@ -3331,7 +3336,7 @@ async function handleCreateTask() {
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        parent_project_id: creatingTaskParentId,
+        parent_project_id: creatingTaskProjectId,
         title,
         due_date: dueEl?.value || null,
         assignee_ids: assigneeIds,
@@ -3354,18 +3359,18 @@ async function handleCreateTask() {
   } catch {
     showToast("タスクの発行に失敗しました", true);
   } finally {
-    creatingTaskParentId = null;
+    creatingTaskProjectId = null;
   }
 }
 
 /** 発行タスク編集ダイアログを開く */
 function openIssuedTaskEditDialog(parentId, batchId) {
   if (!parentId || !batchId) return;
-  const parent = findParentProject(parentId);
+  const parent = findProject(parentId);
   const batch = findIssuedBatch(parentId, batchId);
   if (!parent || !batch || !parent.is_leader) return;
 
-  editingIssuedParentId = parentId;
+  editingIssuedProjectId = parentId;
   editingIssuedBatchId = batchId;
 
   const nameEl = document.getElementById("pm-issued-task-project-name");
@@ -3461,7 +3466,7 @@ async function handleSaveIssuedTask() {
     return;
   }
 
-  const savedParentId = editingIssuedParentId;
+  const savedParentId = editingIssuedProjectId;
   const savedBatchId = editingIssuedBatchId;
 
   try {
@@ -3496,7 +3501,7 @@ async function handleSaveIssuedTask() {
     showToast("発行タスクの更新に失敗しました", true);
   } finally {
     editingIssuedBatchId = null;
-    editingIssuedParentId = null;
+    editingIssuedProjectId = null;
   }
 }
 
@@ -3528,10 +3533,10 @@ async function handleCompleteTask(taskId) {
   }
 }
 
-/** 親プロジェクト追加 */
-async function handleAddParent() {
+/** プロジェクト追加 */
+async function handleAddProject() {
   if (!selectedGroupId || !isAdmin()) return;
-  const name = window.prompt("親プロジェクト名");
+  const name = window.prompt("プロジェクト名");
   if (name === null) return;
   const trimmed = name.trim();
   if (!trimmed) {
@@ -3553,7 +3558,7 @@ async function handleAddParent() {
     }
     dashboard.projects = data.projects ?? [];
     await loadDashboard(selectedGroupId);
-    showToast("親プロジェクトを追加しました");
+    showToast("プロジェクトを追加しました");
   } catch {
     showToast("作成に失敗しました", true);
   }
@@ -3577,9 +3582,9 @@ async function handleDeleteProject(projectId) {
       return;
     }
     dashboard.projects = data.projects ?? [];
-    const deletedParent = selectedParentId === projectId;
+    const deletedParent = selectedProjectId === projectId;
     if (deletedParent) {
-      selectedParentId = null;
+      selectedProjectId = null;
       history.replaceState(null, "", location.pathname + location.search);
     }
     await loadDashboard(selectedGroupId);
@@ -3697,8 +3702,8 @@ function bindEvents() {
     ?.addEventListener("click", handleSaveAdmin);
 
   document
-    .getElementById("pm-add-parent")
-    ?.addEventListener("click", handleAddParent);
+    .getElementById("pm-add-project")
+    ?.addEventListener("click", handleAddProject);
 
   document
     .getElementById("pm-go-members")
@@ -3725,7 +3730,7 @@ function bindEvents() {
     ?.addEventListener("click", navigateToList);
 
   window.addEventListener("hashchange", () => {
-    selectedParentId = parseHashParent();
+    selectedProjectId = parseHashProject();
     renderView();
   });
 
@@ -3787,15 +3792,15 @@ function bindEvents() {
     .getElementById("pm-cal-bulk-weekdays")
     ?.addEventListener("change", syncWeekdayHeaderSelection);
 
-  const editChildForm = document.getElementById("pm-edit-child-form");
+  const editChildForm = document.getElementById("pm-edit-project-form");
   editChildForm?.addEventListener("submit", (e) => {
     const submitter = e.submitter;
     if (submitter?.value === "save") {
       e.preventDefault();
-      document.getElementById("pm-edit-child-dialog")?.close();
-      handleSaveEditChild();
+      document.getElementById("pm-edit-project-dialog")?.close();
+      handleSaveEditProject();
     } else {
-      clearEditChildState();
+      clearEditProjectState();
     }
   });
 
@@ -3815,18 +3820,18 @@ function bindEvents() {
   });
 
   document.getElementById("pm-edit-complete")?.addEventListener("click", () => {
-    if (editingChildProjectId) handleSetCompleted(editingChildProjectId, true);
+    if (editingProjectId) handleSetCompleted(editingProjectId, true);
   });
 
   document.getElementById("pm-edit-reopen")?.addEventListener("click", () => {
-    if (editingChildProjectId) handleSetCompleted(editingChildProjectId, false);
+    if (editingProjectId) handleSetCompleted(editingProjectId, false);
   });
 
   document.getElementById("pm-edit-delete")?.addEventListener("click", () => {
-    if (!editingChildProjectId) return;
-    const id = editingChildProjectId;
-    document.getElementById("pm-edit-child-dialog")?.close();
-    clearEditChildState();
+    if (!editingProjectId) return;
+    const id = editingProjectId;
+    document.getElementById("pm-edit-project-dialog")?.close();
+    clearEditProjectState();
     handleDeleteProject(id);
   });
 
@@ -3868,15 +3873,15 @@ function bindEvents() {
       }
     });
 
-  const parentMembersForm = document.getElementById("pm-parent-members-form");
+  const parentMembersForm = document.getElementById("pm-project-members-form");
   parentMembersForm?.addEventListener("submit", (e) => {
     const submitter = e.submitter;
     if (submitter?.value === "save") {
       e.preventDefault();
-      document.getElementById("pm-parent-members-dialog")?.close();
-      handleSaveParentMembers();
+      document.getElementById("pm-project-members-dialog")?.close();
+      handleSaveProjectMembers();
     } else {
-      editingParentMembersId = null;
+      editingProjectMembersId = null;
     }
   });
 
@@ -3888,7 +3893,7 @@ function bindEvents() {
       document.getElementById("pm-leader-dialog")?.close();
       handleSaveLeader();
     } else {
-      editingLeaderParentId = null;
+      editingLeaderProjectId = null;
     }
   });
 
@@ -3900,7 +3905,7 @@ function bindEvents() {
       document.getElementById("pm-progress-dialog")?.close();
       handleSaveProgress();
     } else {
-      editingProgressParentId = null;
+      editingProgressProjectId = null;
     }
   });
 
@@ -3920,7 +3925,7 @@ function bindEvents() {
       document.getElementById("pm-task-dialog")?.close();
       handleCreateTask();
     } else {
-      creatingTaskParentId = null;
+      creatingTaskProjectId = null;
     }
   });
 
@@ -3933,7 +3938,7 @@ function bindEvents() {
       handleSaveIssuedTask();
     } else {
       editingIssuedBatchId = null;
-      editingIssuedParentId = null;
+      editingIssuedProjectId = null;
     }
   });
 
@@ -3942,11 +3947,11 @@ function bindEvents() {
   });
 
   document.getElementById("pm-issued-detail-edit")?.addEventListener("click", () => {
-    const parentId = viewingIssuedParentId;
+    const parentId = viewingIssuedProjectId;
     const batchId = viewingIssuedBatchId;
     document.getElementById("pm-issued-task-detail-dialog")?.close();
     viewingIssuedBatchId = null;
-    viewingIssuedParentId = null;
+    viewingIssuedProjectId = null;
     if (parentId && batchId) {
       openIssuedTaskEditDialog(parentId, batchId);
     }
@@ -3959,26 +3964,26 @@ function bindEvents() {
   /** 背景クリックでダイアログを閉じる */
   const dialogCloseHandlers = {
     "pm-member-task-dialog": clearMemberTaskDialogState,
-    "pm-edit-child-dialog": clearEditChildState,
+    "pm-edit-project-dialog": clearEditProjectState,
     "pm-leader-dialog": () => {
-      editingLeaderParentId = null;
+      editingLeaderProjectId = null;
     },
-    "pm-parent-members-dialog": () => {
-      editingParentMembersId = null;
+    "pm-project-members-dialog": () => {
+      editingProjectMembersId = null;
     },
     "pm-progress-dialog": () => {
-      editingProgressParentId = null;
+      editingProgressProjectId = null;
     },
     "pm-task-dialog": () => {
-      creatingTaskParentId = null;
+      creatingTaskProjectId = null;
     },
     "pm-issued-task-dialog": () => {
       editingIssuedBatchId = null;
-      editingIssuedParentId = null;
+      editingIssuedProjectId = null;
     },
     "pm-issued-task-detail-dialog": () => {
       viewingIssuedBatchId = null;
-      viewingIssuedParentId = null;
+      viewingIssuedProjectId = null;
     },
   };
 
@@ -4003,7 +4008,7 @@ async function init() {
   currentMonth = parts[1];
 
   bindEvents();
-  selectedParentId = parseHashParent();
+  selectedProjectId = parseHashProject();
   const ok = await checkAccess();
   if (!ok) return;
   await loadDashboard();

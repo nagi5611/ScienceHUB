@@ -137,6 +137,7 @@ export function createDesignCollabConnection(options) {
     onClose,
     onError,
     onPeersChange,
+    onRemotePointer,
   } = options;
 
   let socket = null;
@@ -196,6 +197,11 @@ export function createDesignCollabConnection(options) {
 
     if (data.type === "presence") {
       onPeersChange?.(data.peers ?? [], clientId);
+      return;
+    }
+
+    if (data.type === "pointer" && data.from !== clientId) {
+      onRemotePointer?.(data);
     }
   }
 
@@ -254,13 +260,21 @@ export function createDesignCollabConnection(options) {
     },
     sendPointer(payload) {
       if (!socket || socket.readyState !== WebSocket.OPEN) return;
-      socket.send(
-        JSON.stringify({
-          type: "pointer",
-          pointer: payload.pointer,
-          selectedIds: payload.selectedIds ?? [],
-        })
-      );
+      const pointer = payload.pointer;
+      const body = {
+        type: "pointer",
+        selectedIds: payload.selectedIds ?? [],
+      };
+      if (
+        pointer &&
+        typeof pointer.x === "number" &&
+        typeof pointer.y === "number" &&
+        Number.isFinite(pointer.x) &&
+        Number.isFinite(pointer.y)
+      ) {
+        body.pointer = { x: pointer.x, y: pointer.y };
+      }
+      socket.send(JSON.stringify(body));
     },
     isOpen() {
       return socket?.readyState === WebSocket.OPEN;

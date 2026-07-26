@@ -109,7 +109,7 @@ import {
   type Simulator,
 } from "../../lib/simulation/simulators";
 import { validateSimulatorCapabilitiesInput, parseSimulatorCapabilities } from "../../lib/simulation/simulator-capabilities";
-import { validateSimulatorStatusInput, type SimulatorStatus } from "../../lib/simulation/simulator-status";
+import { validateSimulatorStatusInput, type SimulatorStatus, isSimulatorBookable, normalizeSimulatorStatus } from "../../lib/simulation/simulator-status";
 import {
   streamSimulatorImage,
   uploadSimulatorImage,
@@ -131,6 +131,11 @@ import {
 import { error, json } from "../../lib/simulation/response";
 import {
   getPrintVideoStoragePath,
+  getSimDiscordWebhookUrlFromDb,
+  getFdsDiscordMentionUserIdsFromDb,
+  resolveSimDiscordWebhookUrl,
+  setSimDiscordWebhookUrl,
+  setFdsDiscordMentionUserIds,
   setPrintVideoStoragePath,
   getManagementAccessibleGroupRoots,
   validatePrintVideoStoragePathForUser,
@@ -143,28 +148,140 @@ import {
 } from "../../lib/simulation/result-video";
 import { parseLogicalPath } from "../../lib/storage/keys";
 import { streamStorageFile } from "../../lib/storage/operations";
+import { Ec2AmiNotReadyError } from "../../lib/aws/ec2";
 import { listDirectory } from "../../lib/storage/list";
 import { authorizeStoragePath } from "../../lib/storage/permissions";
 import { handleFdsJobCallback } from "../../lib/simulation/fds-callback";
+import { syncFdsJobArtifacts } from "../../lib/simulation/fds-job-artifacts";
 import {
   cancelFdsJob,
+  fetchFdsAmiStatus,
+  fetchLiveEc2StateForJob,
   getFdsAwsConfig,
   launchFdsJobOnEc2,
   syncFdsJobFromEc2,
 } from "../../lib/simulation/fds-ec2-runner";
 import {
   createFdsJob,
+  deleteFdsJob,
   FDS_DEFAULT_INSTANCE_TYPE,
+  FDS_JOB_MAX_RUNTIME_HOURS,
   FDS_MAX_INPUT_BYTES,
   formatFdsJobForApi,
   generateFdsInputR2Key,
   getFdsJobById,
   listFdsJobs,
+  updateFdsJobStatus,
   validateFdsFilename,
+  type FdsJob,
 } from "../../lib/simulation/fds-jobs";
+import {
+  clampMpiProcesses,
+  FDS_MAX_MPI_PROCESSES,
+  FDS_MIN_MPI_PROCESSES,
+  pickC7aInstanceType,
+} from "../../lib/simulation/fds-instance-sizing";
+import {
+  buildEc2InstanceCatalog,
+  registerEc2InstanceAsSimulator,
+} from "../../lib/simulation/ec2-simulator-catalog";
+import {
+  createFdsRequest,
+  formatFdsRequestForApiEnriched,
+  forceSecondaryFdsRequest,
+  getFdsRequestById,
+  listFdsRequestsAdmin,
+  listFdsRequestsForUser,
+  listPendingFdsRequests,
+  markFdsRequestApproved,
+  markFdsRequestRejected,
+  retryFdsPrimaryReview,
+  runFdsPrimaryReviewJob,
+  sendFdsPendingApprovalDiscordNotification,
+  FDS_PRIMARY_REVIEW_MAX_ATTEMPTS,
+  validateFdsRequestMaxRuntimeHours,
+} from "../../lib/simulation/fds-requests";
+import {
+  extractFdsTextForReview,
+} from "../../lib/simulation/fds-primary-review";
+import { verifyFirebaseIdToken } from "../../lib/simulation/firebase-id-token";
+import {
+  assertSimPhoneE164Available,
+  checkAndIncrementDailyPhoneVerificationAttempt,
+  completePhoneVerification,
+  getActiveConsentVersion,
+  getSimPhoneStatus,
+  getSimPhoneUserRow,
+  insertPhoneVerificationLog,
+  listSimPhoneVerificationUsers,
+  parseJapanPhoneE164Input,
+  PHONE_ALREADY_REGISTERED_CODE,
+  recordPhoneVerificationConsent,
+  requireSimPhoneVerified,
+  revokeSimPhoneVerificationForUser,
+  sha256Hex,
+  SIM_PHONE_DAILY_ATTEMPT_LIMIT,
+  SIM_PHONE_DAILY_LIMIT_CODE,
+  SIM_PHONE_NOT_VERIFIED_CODE,
+  SIM_PHONE_VERIFICATION_TTL_MS,
+  simPhoneDailyLimitError,
+} from "../../lib/simulation/sim-phone-verification";
 
 const RESERVATION_APP = "simulation-request";
 const MANAGEMENT_APP = "simulation-management";
+
+/** Builds a safe Content-Disposition attachment header value. */
+function attachmentFilename(filename: string): string {
+  const safe = filename.replace(/[^\w.\-()]/g, "_").slice(0, 180) || "download";
+  return `attachment; filename="${safe}"`;
+}
+
+/** Syncs EC2/R2 state and formats an FDS job for the admin API. */
+async function formatFdsJobForAdminApi(
+  env: Env,
+  job: FdsJob,
+  options: { liveEc2?: boolean } = {}
+) {
+  const afterEc2 = await syncFdsJobFromEc2(env, job);
+  let { job: refreshed, artifacts } = await syncFdsJobArtifacts(env, afterEc2);
+  if (
+    artifacts.hasOutput &&
+    refreshed.status === "failed" &&
+    (refreshed.status_message?.includes("完了通知") ||
+      refreshed.status_message?.includes("結果 ZIP を R2"))
+  ) {
+    await updateFdsJobStatus(env.DB, refreshed.id, "succeeded", {
+      statusMessage: "FDS の実行が完了しました",
+      finishedAt: refreshed.finished_at ?? new Date().toISOString(),
+    });
+    refreshed = (await getFdsJobById(env.DB, refreshed.id)) ?? refreshed;
+  }
+  let liveEc2: { ec2_instance_state: string | null; ec2_launch_time: string | null } | undefined;
+  if (options.liveEc2) {
+    const snapshot = await fetchLiveEc2StateForJob(env, refreshed);
+    liveEc2 = {
+      ec2_instance_state: snapshot?.state ?? null,
+      ec2_launch_time: snapshot?.launchTime ?? null,
+    };
+  }
+  return formatFdsJobForApi(refreshed, artifacts, liveEc2);
+}
+
+/** Returns hashed client metadata for phone verification audit logs. */
+async function phoneVerificationAuditFromRequest(request: Request): Promise<{
+  ipHash: string | null;
+  userAgentHash: string | null;
+}> {
+  const ip =
+    request.headers.get("CF-Connecting-IP") ??
+    request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() ??
+    "";
+  const ua = request.headers.get("User-Agent") ?? "";
+  return {
+    ipHash: ip ? await sha256Hex(ip) : null,
+    userAgentHash: ua ? await sha256Hex(ua) : null,
+  };
+}
 
 /** Parses route segments from the catch-all path param. */
 function parsePath(path: string | string[] | undefined): string[] {
@@ -459,15 +576,14 @@ async function applyReservationContentEdit(
   });
 
   context.waitUntil(
-    notifyReservationModified(
-      env.DISCORD_SIMULATION_WEBHOOK_URL,
-      buildSimulationAdminUrl(getOAuthRedirectBase(context.request, env)),
-      {
-      title: String(body.title).trim(),
-      desired_date: body.desired_date,
-      sim_scale: body.sim_scale,
-      }
-    )
+    (async () => {
+      const webhookUrl = await resolveSimDiscordWebhookUrl(db, env);
+      await notifyReservationModified(webhookUrl, buildSimulationAdminUrl(getOAuthRedirectBase(context.request, env)), {
+        title: String(body.title).trim(),
+        desired_date: body.desired_date,
+        sim_scale: body.sim_scale,
+      });
+    })()
   );
 
   const updated = await getReservationById(db, reservation.id);
@@ -502,7 +618,7 @@ async function requireCompletePrintProfile(
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
-  const { request, env, params } = context;
+  const { request, env, params, waitUntil } = context;
   const url = new URL(request.url);
   const segments = parsePath(params.path as string);
   const method = request.method;
@@ -529,6 +645,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     const isAdminRoute = segments[0] === "admin";
     const isUploadRoute = segments[0] === "upload";
 
+    const isPhoneVerificationRoute = segments[0] === "phone-verification";
+
     if (isUploadRoute) {
       const resAccess = await requireAppAccess(request, env, RESERVATION_APP);
       if (!(resAccess instanceof Response)) {
@@ -542,6 +660,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (mgmtAccess instanceof Response) return mgmtAccess;
     } else if (
       segments[0] === "calendar" ||
+      segments[0] === "fds-requests" ||
       segments[0] === "reservations" ||
       segments[0] === "simulators" ||
       segments[0] === "result-videos" ||
@@ -549,6 +668,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     ) {
       const resAccess = await requireAppAccess(request, env, RESERVATION_APP);
       if (resAccess instanceof Response) return resAccess;
+    } else if (isPhoneVerificationRoute) {
+      /* ログインユーザーのみ（アカウント設定からも利用） */
     }
 
     const authUser = await requireUser(request, env);
@@ -750,11 +871,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        notifyReservationApplication(env.DISCORD_SIMULATION_WEBHOOK_URL, adminUrl, {
-          title: reservation.title,
-          desired_date: reservation.desired_date,
-          sim_scale: reservation.sim_scale,
-        })
+        (async () => {
+          const webhookUrl = await resolveSimDiscordWebhookUrl(db, env);
+          await notifyReservationApplication(webhookUrl, adminUrl, {
+            title: reservation.title,
+            desired_date: reservation.desired_date,
+            sim_scale: reservation.sim_scale,
+          });
+        })()
       );
 
       return json({ id: reservation.id, message: "予約申請を受け付けました" }, 201);
@@ -865,15 +989,34 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const memberMap = await buildMemberMap(db);
       const simulatorMap = await buildSimulatorMap(db);
       const shiftAvailability = await getAvailabilityInRange(db, start, end);
-      const simulatorAvailability = await getSimulatorAvailabilityInRange(db, start, end);
+      const simulatorUnavailability = await getSimulatorAvailabilityInRange(db, start, end);
       const staffCountByDate: Record<string, number> = {};
       const simulatorCountByDate: Record<string, number> = {};
       for (const row of shiftAvailability) {
         staffCountByDate[row.date] = (staffCountByDate[row.date] ?? 0) + 1;
       }
-      for (const row of simulatorAvailability) {
-        simulatorCountByDate[row.date] = (simulatorCountByDate[row.date] ?? 0) + 1;
+
+      const allSimulatorsForCalendar = await getAllSimulators(db);
+      const bookableSimulatorIds = new Set(
+        allSimulatorsForCalendar
+          .filter((s) => isSimulatorBookable(normalizeSimulatorStatus(s.status)))
+          .map((s) => s.id)
+      );
+      const unavailableCountByDate: Record<string, number> = {};
+      for (const row of simulatorUnavailability) {
+        if (!bookableSimulatorIds.has(row.simulator_id)) continue;
+        unavailableCountByDate[row.date] = (unavailableCountByDate[row.date] ?? 0) + 1;
       }
+      const totalBookableSimulators = bookableSimulatorIds.size;
+      for (let day = 1; day <= new Date(year, month, 0).getDate(); day++) {
+        const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const off = unavailableCountByDate[dateStr] ?? 0;
+        const availableCount = totalBookableSimulators - off;
+        if (availableCount > 0) {
+          simulatorCountByDate[dateStr] = availableCount;
+        }
+      }
+
       return json({
         year,
         month,
@@ -1011,11 +1154,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const simulatorMap = await buildSimulatorMap(db);
 
         context.waitUntil(
-          notifyReservationApplication(env.DISCORD_SIMULATION_WEBHOOK_URL, adminUrl, {
-            title: created.title,
-            desired_date: created.desired_date,
-            sim_scale: created.sim_scale,
-          })
+          (async () => {
+            const webhookUrl = await resolveSimDiscordWebhookUrl(db, env);
+            await notifyReservationApplication(webhookUrl, adminUrl, {
+              title: created.title,
+              desired_date: created.desired_date,
+              sim_scale: created.sim_scale,
+            });
+          })()
         );
 
         return json({
@@ -1063,6 +1209,409 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         isAdmin: false,
       });
       return json(mapAvailabilityResponse(result));
+    }
+
+    // GET /api/simulation/phone-verification/config
+    if (
+      method === "GET" &&
+      segments[0] === "phone-verification" &&
+      segments[1] === "config"
+    ) {
+      const projectId = env.FIREBASE_PROJECT_ID?.trim();
+      const apiKey = env.FIREBASE_WEB_API_KEY?.trim();
+      const appId = env.FIREBASE_APP_ID?.trim();
+      if (!projectId || !apiKey || !appId) {
+        return error("電話認証の設定が完了していません（管理者に連絡してください）", 503);
+      }
+      const authDomain =
+        env.FIREBASE_AUTH_DOMAIN?.trim() || `${projectId}.firebaseapp.com`;
+      const consentVersion = getActiveConsentVersion(env);
+      return json({
+        firebase: {
+          apiKey,
+          authDomain,
+          projectId,
+          appId,
+        },
+        consent_version: consentVersion,
+        consent_text_url: "/docs/legal/sim-sms-consent-ja.md",
+        verification_validity_days: Math.floor(SIM_PHONE_VERIFICATION_TTL_MS / (24 * 60 * 60 * 1000)),
+        daily_attempt_limit: SIM_PHONE_DAILY_ATTEMPT_LIMIT,
+      });
+    }
+
+    // GET /api/simulation/phone-verification/status
+    if (
+      method === "GET" &&
+      segments[0] === "phone-verification" &&
+      segments[1] === "status"
+    ) {
+      const row = await getSimPhoneUserRow(db, userId);
+      return json({ phone: getSimPhoneStatus(row) });
+    }
+
+    // POST /api/simulation/phone-verification/consent
+    if (
+      method === "POST" &&
+      segments[0] === "phone-verification" &&
+      segments[1] === "consent"
+    ) {
+      let body: { consent_version?: string; phone_e164?: string };
+      try {
+        body = await request.json<{ consent_version?: string; phone_e164?: string }>();
+      } catch {
+        return error("JSON が必要です", 400);
+      }
+      const activeVersion = getActiveConsentVersion(env);
+      const consentVersion = String(body.consent_version ?? "").trim();
+      if (consentVersion !== activeVersion) {
+        return error("同意文のバージョンが古いです。ページを再読み込みしてください", 400);
+      }
+
+      const phoneRaw = String(body.phone_e164 ?? "").trim();
+      if (phoneRaw) {
+        const phoneE164 = parseJapanPhoneE164Input(phoneRaw);
+        if (!phoneE164) {
+          return error("日本国内の携帯電話番号（090/080/070 など）の形式が正しくありません", 400);
+        }
+
+        try {
+          await assertSimPhoneE164Available(db, phoneE164, userId);
+        } catch (err) {
+          const code =
+            err instanceof Error && "code" in err
+              ? String((err as Error & { code?: string }).code)
+              : undefined;
+          if (code === PHONE_ALREADY_REGISTERED_CODE) {
+            return json({ error: (err as Error).message, code }, 409);
+          }
+          throw err;
+        }
+
+        const allowed = await checkAndIncrementDailyPhoneVerificationAttempt(db, userId);
+        if (!allowed) {
+          const limitErr = simPhoneDailyLimitError();
+          return json(
+            { error: limitErr.message, code: SIM_PHONE_DAILY_LIMIT_CODE },
+            429
+          );
+        }
+      }
+
+      const audit = await phoneVerificationAuditFromRequest(request);
+      await recordPhoneVerificationConsent(db, userId, consentVersion, audit);
+      return json({ ok: true });
+    }
+
+    // POST /api/simulation/phone-verification/complete
+    if (
+      method === "POST" &&
+      segments[0] === "phone-verification" &&
+      segments[1] === "complete"
+    ) {
+      const projectId = env.FIREBASE_PROJECT_ID?.trim();
+      if (!projectId) {
+        return error("電話認証の設定が完了していません", 503);
+      }
+
+      let body: { id_token?: string; consent_version?: string };
+      try {
+        body = await request.json<{ id_token?: string; consent_version?: string }>();
+      } catch {
+        return error("JSON が必要です", 400);
+      }
+
+      const idToken = String(body.id_token ?? "").trim();
+      if (!idToken) return error("id_token が必要です", 400);
+
+      const activeVersion = getActiveConsentVersion(env);
+      const consentVersion = String(body.consent_version ?? "").trim();
+      if (consentVersion !== activeVersion) {
+        return error("同意文のバージョンが古いです。ページを再読み込みしてください", 400);
+      }
+
+      const nowMs = Date.now();
+      const allowed = await checkAndIncrementDailyPhoneVerificationAttempt(db, userId, nowMs);
+      if (!allowed) {
+        const limitErr = simPhoneDailyLimitError();
+        return json(
+          { error: limitErr.message, code: SIM_PHONE_DAILY_LIMIT_CODE },
+          429
+        );
+      }
+
+      const audit = await phoneVerificationAuditFromRequest(request);
+
+      try {
+        const claims = await verifyFirebaseIdToken(idToken, projectId);
+        const phone = await completePhoneVerification(
+          db,
+          userId,
+          claims,
+          consentVersion,
+          audit
+        );
+        return json({ phone });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "認証に失敗しました";
+        const code =
+          err instanceof Error && "code" in err
+            ? String((err as Error & { code?: string }).code)
+            : undefined;
+        if (code === "PHONE_ALREADY_REGISTERED" || code === PHONE_ALREADY_REGISTERED_CODE) {
+          return json({ error: message, code: PHONE_ALREADY_REGISTERED_CODE }, 409);
+        }
+        await insertPhoneVerificationLog(db, {
+          userId,
+          event: "verify_failed",
+          consentVersion,
+          ipHash: audit.ipHash,
+          userAgentHash: audit.userAgentHash,
+          createdAt: new Date().toISOString(),
+        }).catch(() => {});
+        return error(message, 400);
+      }
+    }
+
+    // GET /api/simulation/fds-requests/config
+    if (method === "GET" && segments[0] === "fds-requests" && segments[1] === "config") {
+      return json({
+        max_runtime_hours: FDS_JOB_MAX_RUNTIME_HOURS,
+        min_mpi_processes: FDS_MIN_MPI_PROCESSES,
+        max_mpi_processes: FDS_MAX_MPI_PROCESSES,
+        instance_family: "c7a",
+        primary_review_max_attempts: FDS_PRIMARY_REVIEW_MAX_ATTEMPTS,
+      });
+    }
+
+    // GET /api/simulation/fds-requests/instance-preview?mpi_processes=8
+    if (
+      method === "GET" &&
+      segments[0] === "fds-requests" &&
+      segments[1] === "instance-preview"
+    ) {
+      const mpiRaw = parseInt(url.searchParams.get("mpi_processes") ?? "", 10);
+      const sizing = pickC7aInstanceType(Number.isFinite(mpiRaw) ? mpiRaw : 1);
+      return json({
+        mpi_processes: sizing.requestedCores,
+        instance_type: sizing.instanceType,
+        vcpus: sizing.vcpus,
+      });
+    }
+
+    // GET /api/simulation/fds-requests
+    if (method === "GET" && segments[0] === "fds-requests" && segments.length === 1) {
+      const rows = await listFdsRequestsForUser(db, userId);
+      const requests = await Promise.all(rows.map((row) => formatFdsRequestForApiEnriched(db, row)));
+      return json({ requests });
+    }
+
+    // GET /api/simulation/fds-requests/:id
+    if (method === "GET" && segments[0] === "fds-requests" && segments.length === 2) {
+      const row = await getFdsRequestById(db, segments[1]);
+      if (!row || row.user_id !== userId) {
+        return error("依頼が見つかりません", 404);
+      }
+      return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+    }
+
+    // POST /api/simulation/fds-requests/:id/retry-primary
+    if (
+      method === "POST" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 3 &&
+      segments[2] === "retry-primary"
+    ) {
+      try {
+        await requireSimPhoneVerified(db, userId);
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as Error & { code?: string }).code
+            : undefined;
+        if (code === SIM_PHONE_NOT_VERIFIED_CODE) {
+          return json(
+            { error: err instanceof Error ? err.message : "電話認証が必要です", code },
+            403
+          );
+        }
+        throw err;
+      }
+
+      const requestId = segments[1];
+      const existing = await getFdsRequestById(db, requestId);
+      if (!existing || existing.user_id !== userId) {
+        return error("依頼が見つかりません", 404);
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .fds ファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateFdsFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > FDS_MAX_INPUT_BYTES) {
+        return error(
+          `ファイルサイズは 1 バイト以上 ${FDS_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`,
+          400
+        );
+      }
+
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const fdsText = extractFdsTextForReview(fileBuffer);
+      const r2Key = generateFdsInputR2Key(requestId, filename);
+
+      await env.FILES.put(r2Key, fileBuffer, {
+        httpMetadata: { contentType: "text/plain; charset=utf-8" },
+      });
+
+      try {
+        const row = await retryFdsPrimaryReview(db, requestId, userId, {
+          inputR2Key: r2Key,
+          inputFilename: filename,
+          inputSizeBytes: sizeBytes,
+        });
+
+        waitUntil(
+          runFdsPrimaryReviewJob(env, db, {
+            requestId,
+            fdsText,
+            filename,
+            mpiProcesses: row.mpi_processes,
+            maxRuntimeHours: row.max_runtime_hours,
+            forceSecondary: false,
+          })
+        );
+
+        return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "再審の開始に失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // POST /api/simulation/fds-requests/:id/force-secondary
+    if (
+      method === "POST" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 3 &&
+      segments[2] === "force-secondary"
+    ) {
+      try {
+        const row = await forceSecondaryFdsRequest(db, segments[1], userId);
+        waitUntil(sendFdsPendingApprovalDiscordNotification(env, db, row.id));
+        return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "二次審査への申請に失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // POST /api/simulation/fds-requests — FDS 依頼（一次審査は非同期）
+    if (method === "POST" && segments[0] === "fds-requests" && segments.length === 1) {
+      try {
+        await requireSimPhoneVerified(db, userId);
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as Error & { code?: string }).code
+            : undefined;
+        if (code === SIM_PHONE_NOT_VERIFIED_CODE) {
+          return json(
+            { error: err instanceof Error ? err.message : "電話認証が必要です", code },
+            403
+          );
+        }
+        throw err;
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      const titleInput = String(formData.get("title") ?? "").trim();
+      const notesInput = String(formData.get("notes") ?? "").trim();
+      const desiredDate = String(formData.get("desired_date") ?? "").trim() || null;
+      const maxRuntimeRaw = parseInt(String(formData.get("max_runtime_hours") ?? ""), 10);
+      const mpiRaw = parseInt(String(formData.get("mpi_processes") ?? ""), 10);
+
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .fds ファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateFdsFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const runtimeError = validateFdsRequestMaxRuntimeHours(maxRuntimeRaw);
+      if (runtimeError) return error(runtimeError, 400);
+
+      const mpiProcesses = clampMpiProcesses(Number.isFinite(mpiRaw) ? mpiRaw : 1);
+
+      const forceSecondary =
+        String(formData.get("force_secondary") ?? "").trim() === "1" ||
+        String(formData.get("force_secondary") ?? "").trim().toLowerCase() === "true";
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > FDS_MAX_INPUT_BYTES) {
+        return error(
+          `ファイルサイズは 1 バイト以上 ${FDS_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`,
+          400
+        );
+      }
+
+      const requestId = createId("fdsreq");
+      const r2Key = generateFdsInputR2Key(requestId, filename);
+      const title = titleInput || filename.replace(/\.fds$/i, "");
+      const createdAt = new Date().toISOString();
+
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const fdsText = extractFdsTextForReview(fileBuffer);
+
+      await env.FILES.put(r2Key, fileBuffer, {
+        httpMetadata: { contentType: "text/plain; charset=utf-8" },
+      });
+
+      const row = await createFdsRequest(db, {
+        id: requestId,
+        userId,
+        title,
+        desiredDate,
+        maxRuntimeHours: maxRuntimeRaw,
+        mpiProcesses,
+        inputR2Key: r2Key,
+        inputFilename: filename,
+        inputSizeBytes: sizeBytes,
+        notes: notesInput || null,
+        createdAt,
+        status: "primary_reviewing",
+      });
+
+      waitUntil(
+        runFdsPrimaryReviewJob(env, db, {
+          requestId,
+          fdsText,
+          filename,
+          mpiProcesses,
+          maxRuntimeHours: maxRuntimeRaw,
+          forceSecondary,
+        })
+      );
+
+      return json({ request: await formatFdsRequestForApiEnriched(db, row) }, 201);
     }
 
     // --- Admin routes (management app access already verified) ---
@@ -1201,11 +1750,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        notifyReservationApplication(env.DISCORD_SIMULATION_WEBHOOK_URL, adminUrl, {
-          title: reservation.title,
-          desired_date: reservation.desired_date,
-          sim_scale: reservation.sim_scale,
-        })
+        (async () => {
+          const webhookUrl = await resolveSimDiscordWebhookUrl(db, env);
+          await notifyReservationApplication(webhookUrl, adminUrl, {
+            title: reservation.title,
+            desired_date: reservation.desired_date,
+            sim_scale: reservation.sim_scale,
+          });
+        })()
       );
 
       const memberMap = await buildMemberMap(db);
@@ -1214,6 +1766,39 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         { id: reservation.id, reservation: enrichReservationForAdmin(reservation, memberMap, simulatorMap) },
         201
       );
+    }
+
+    // GET /api/simulation/admin/settings/notifications
+    if (method === "GET" && segments[1] === "settings" && segments[2] === "notifications") {
+      const discord_webhook_url = (await getSimDiscordWebhookUrlFromDb(db)) ?? "";
+      const fds_discord_mention_user_ids = (
+        await getFdsDiscordMentionUserIdsFromDb(db)
+      ).join("\n");
+      return json({ discord_webhook_url, fds_discord_mention_user_ids });
+    }
+
+    // PATCH /api/simulation/admin/settings/notifications
+    if (method === "PATCH" && segments[1] === "settings" && segments[2] === "notifications") {
+      const body = await request.json<{
+        discord_webhook_url?: string | null;
+        fds_discord_mention_user_ids?: string | null;
+      }>();
+      try {
+        if (body.discord_webhook_url !== undefined) {
+          await setSimDiscordWebhookUrl(db, body.discord_webhook_url ?? "");
+        }
+        if (body.fds_discord_mention_user_ids !== undefined) {
+          await setFdsDiscordMentionUserIds(db, body.fds_discord_mention_user_ids ?? "");
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "通知設定が不正です";
+        return error(message, 400);
+      }
+      const discord_webhook_url = (await getSimDiscordWebhookUrlFromDb(db)) ?? "";
+      const fds_discord_mention_user_ids = (
+        await getFdsDiscordMentionUserIdsFromDb(db)
+      ).join("\n");
+      return json({ discord_webhook_url, fds_discord_mention_user_ids });
     }
 
     // GET /api/simulation/admin/settings/result-video
@@ -1477,6 +2062,33 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ members });
     }
 
+    // GET /api/simulation/admin/phone-verifications
+    if (method === "GET" && segments[1] === "phone-verifications" && segments.length === 2) {
+      const users = await listSimPhoneVerificationUsers(db);
+      return json({ users });
+    }
+
+    // POST /api/simulation/admin/phone-verifications/:userId/revoke
+    if (
+      method === "POST" &&
+      segments[1] === "phone-verifications" &&
+      segments.length === 4 &&
+      segments[3] === "revoke"
+    ) {
+      const targetUserId = segments[2];
+      const audit = await phoneVerificationAuditFromRequest(request);
+      try {
+        await revokeSimPhoneVerificationForUser(db, targetUserId, userId, audit);
+      } catch (err) {
+        const code = (err as Error & { code?: string }).code;
+        if (code === "SIM_PHONE_NOT_FOUND") {
+          return error((err as Error).message, 404);
+        }
+        throw err;
+      }
+      return json({ ok: true });
+    }
+
     // POST /api/simulation/admin/members
     if (method === "POST" && segments[1] === "members" && segments.length === 2) {
       const body = await request.json<{
@@ -1696,6 +2308,27 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ simulators: simulators.map(formatSimulatorForApi) });
     }
 
+    // GET /api/simulation/admin/ec2-instances
+    if (method === "GET" && segments[1] === "ec2-instances" && segments.length === 2) {
+      const instances = await buildEc2InstanceCatalog(db);
+      return json({ instance_family: "c7a", instances });
+    }
+
+    // POST /api/simulation/admin/ec2-instances
+    if (method === "POST" && segments[1] === "ec2-instances" && segments.length === 2) {
+      const body = await request.json<{ instance_type?: string }>();
+      const instanceType = body.instance_type?.trim() ?? "";
+      if (!instanceType) return error("instance_type は必須です");
+
+      try {
+        const simulator = await registerEc2InstanceAsSimulator(db, instanceType);
+        return json({ simulator: formatSimulatorForApi(simulator) }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "登録に失敗しました";
+        return error(message, 400);
+      }
+    }
+
     // POST /api/simulation/admin/simulators
     if (method === "POST" && segments[1] === "simulators" && segments.length === 2) {
       const contentType = request.headers.get("content-type") ?? "";
@@ -1842,11 +2475,131 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: true });
     }
 
+    // GET /api/simulation/admin/fds-requests
+    if (method === "GET" && segments[1] === "fds-requests" && segments.length === 2) {
+      const pendingOnly = url.searchParams.get("pending") === "1";
+      const rows = pendingOnly
+        ? await listPendingFdsRequests(db)
+        : await listFdsRequestsAdmin(db);
+      const requests = await Promise.all(rows.map((row) => formatFdsRequestForApiEnriched(db, row)));
+      return json({ requests });
+    }
+
+    // GET /api/simulation/admin/fds-requests/:id
+    if (method === "GET" && segments[1] === "fds-requests" && segments.length === 3) {
+      const row = await getFdsRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+    }
+
+    // GET /api/simulation/admin/fds-requests/:id/input/download
+    if (
+      method === "GET" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 5 &&
+      segments[3] === "input" &&
+      segments[4] === "download"
+    ) {
+      const row = await getFdsRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      const obj = await env.FILES.get(row.input_r2_key);
+      if (!obj) return error("入力ファイルが見つかりません", 404);
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": attachmentFilename(row.input_filename),
+        },
+      });
+    }
+
+    // POST /api/simulation/admin/fds-requests/:id/approve
+    if (
+      method === "POST" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 4 &&
+      segments[3] === "approve"
+    ) {
+      const row = await getFdsRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      if (row.status !== "pending_approval") {
+        return error("この依頼は承認できません", 400);
+      }
+
+      const jobId = createId("fds");
+      const createdAt = new Date().toISOString();
+      const job = await createFdsJob(db, {
+        id: jobId,
+        title: row.title,
+        inputR2Key: row.input_r2_key,
+        inputFilename: row.input_filename,
+        inputSizeBytes: row.input_size_bytes,
+        instanceType: row.ec2_instance_type,
+        maxRuntimeHours: row.max_runtime_hours,
+        mpiProcesses: row.mpi_processes,
+        createdByUserId: row.user_id,
+        createdAt,
+      });
+
+      const reviewedAt = new Date().toISOString();
+      await markFdsRequestApproved(db, row.id, jobId, userId, reviewedAt);
+
+      try {
+        const launched = await launchFdsJobOnEc2(env, job, getOAuthRedirectBase(request, env));
+        const approvedRow = await getFdsRequestById(db, row.id);
+        return json({
+          request: approvedRow ? await formatFdsRequestForApiEnriched(db, approvedRow) : null,
+          job: await formatFdsJobForAdminApi(env, launched.job, { liveEc2: true }),
+          launch_steps: launched.steps,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "EC2 起動に失敗しました";
+        await deleteFdsJob(db, jobId);
+        await db
+          .prepare(
+            `UPDATE sim_fds_requests
+             SET status = 'pending_approval', fds_job_id = NULL, reviewed_by_user_id = NULL, reviewed_at = NULL
+             WHERE id = ?`
+          )
+          .bind(row.id)
+          .run();
+        return error(message, 502);
+      }
+    }
+
+    // POST /api/simulation/admin/fds-requests/:id/reject
+    if (
+      method === "POST" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 4 &&
+      segments[3] === "reject"
+    ) {
+      const row = await getFdsRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      if (row.status !== "pending_approval") {
+        return error("この依頼は却下できません", 400);
+      }
+
+      let reviewMessage: string | null = null;
+      try {
+        const body = await request.json<{ message?: string }>();
+        reviewMessage = String(body.message ?? "").trim() || null;
+      } catch {
+        reviewMessage = null;
+      }
+
+      const reviewedAt = new Date().toISOString();
+      await markFdsRequestRejected(db, row.id, userId, reviewedAt, reviewMessage);
+      const updated = await getFdsRequestById(db, row.id);
+      return json({ request: updated ? await formatFdsRequestForApiEnriched(db, updated) : null });
+    }
+
     // GET /api/simulation/admin/fds-jobs/config
     if (method === "GET" && segments[1] === "fds-jobs" && segments[2] === "config") {
       const config = getFdsAwsConfig(env);
+      const ami = await fetchFdsAmiStatus(env);
       return json({
         aws: config,
+        ami,
         r2_presign: Boolean(
           env.R2_ACCESS_KEY_ID?.trim() &&
             env.R2_SECRET_ACCESS_KEY?.trim() &&
@@ -1861,11 +2614,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // GET /api/simulation/admin/fds-jobs
     if (method === "GET" && segments[1] === "fds-jobs" && segments.length === 2) {
       const jobs = await listFdsJobs(db);
-      const synced = await Promise.all(jobs.map((job) => syncFdsJobFromEc2(env, job)));
-      return json({ jobs: synced.map(formatFdsJobForApi) });
+      const formatted = await Promise.all(
+        jobs.map((job) => formatFdsJobForAdminApi(env, job, { liveEc2: false }))
+      );
+      return json({ jobs: formatted });
     }
 
-    // POST /api/simulation/admin/fds-jobs/run — .fds をアップロードして即実行
+    // POST /api/simulation/admin/fds-jobs/run — .fds をアップロードしてジョブ作成（EC2 起動は POST :id/run）
     if (method === "POST" && segments[1] === "fds-jobs" && segments[2] === "run") {
       const contentType = request.headers.get("content-type") ?? "";
       if (!contentType.includes("multipart/form-data")) {
@@ -1910,23 +2665,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         createdAt,
       });
 
-      try {
-        const callbackBase = getOAuthRedirectBase(request, env);
-        const launched = await launchFdsJobOnEc2(env, job, callbackBase);
-        return json({ job: formatFdsJobForApi(launched) }, 201);
-      } catch (launchErr) {
-        const message =
-          launchErr instanceof Error ? launchErr.message : "EC2 の起動に失敗しました";
-        return error(message, 500, { job: formatFdsJobForApi(job) });
-      }
+      return json(
+        {
+          job: await formatFdsJobForAdminApi(env, job, { liveEc2: false }),
+          launch_required: true,
+          upload_steps: [
+            { at: createdAt, message: `R2 に入力ファイルを保存しました (${r2Key})` },
+            { at: new Date().toISOString(), message: `ジョブを作成しました (ID: ${jobId})` },
+          ],
+        },
+        201
+      );
     }
 
     // GET /api/simulation/admin/fds-jobs/:id
-    if (method === "GET" && segments[1] === "fds-jobs" && segments.length === 3) {
+    if (
+      method === "GET" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 3 &&
+      segments[2] !== "config"
+    ) {
       const job = await getFdsJobById(db, segments[2]);
       if (!job) return error("ジョブが見つかりません", 404);
-      const synced = await syncFdsJobFromEc2(env, job);
-      return json({ job: formatFdsJobForApi(synced) });
+      return json({ job: await formatFdsJobForAdminApi(env, job, { liveEc2: true }) });
     }
 
     // POST /api/simulation/admin/fds-jobs/:id/run
@@ -1942,8 +2703,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("このジョブは再実行できません", 400);
       }
 
-      const launched = await launchFdsJobOnEc2(env, job, getOAuthRedirectBase(request, env));
-      return json({ job: formatFdsJobForApi(launched) });
+      try {
+        const launched = await launchFdsJobOnEc2(env, job, getOAuthRedirectBase(request, env));
+        return json({
+          job: await formatFdsJobForAdminApi(env, launched.job, { liveEc2: true }),
+          launch_steps: launched.steps,
+        });
+      } catch (launchErr) {
+        if (launchErr instanceof Ec2AmiNotReadyError) {
+          return error(launchErr.message, 503, {
+            code: launchErr.code,
+            ami_state: launchErr.amiState,
+          });
+        }
+        const message =
+          launchErr instanceof Error ? launchErr.message : "EC2 の起動に失敗しました";
+        return error(message, 500);
+      }
     }
 
     // POST /api/simulation/admin/fds-jobs/:id/cancel
@@ -1959,7 +2735,27 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("このジョブはキャンセルできません", 400);
       }
       const cancelled = await cancelFdsJob(env, job);
-      return json({ job: formatFdsJobForApi(cancelled) });
+      return json({ job: await formatFdsJobForAdminApi(env, cancelled, { liveEc2: true }) });
+    }
+
+    // GET /api/simulation/admin/fds-jobs/:id/input/download
+    if (
+      method === "GET" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "input" &&
+      segments[4] === "download"
+    ) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      const obj = await env.FILES.get(job.input_r2_key);
+      if (!obj) return error("入力ファイルが見つかりません", 404);
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": attachmentFilename(job.input_filename),
+        },
+      });
     }
 
     // GET /api/simulation/admin/fds-jobs/:id/output/download
@@ -1974,11 +2770,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!job?.output_r2_key) return error("結果ファイルがありません", 404);
       const obj = await env.FILES.get(job.output_r2_key);
       if (!obj) return error("結果ファイルが見つかりません", 404);
-      const filename = job.output_filename ?? "results.zip";
+      const base = job.input_filename.replace(/\.fds$/i, "") || job.title || job.id;
+      const filename = job.output_filename ?? `${base}-results.zip`;
       return new Response(obj.body, {
         headers: {
           "Content-Type": "application/zip",
-          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Disposition": attachmentFilename(filename),
         },
       });
     }
@@ -1998,7 +2795,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return new Response(obj.body, {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="runner.log"`,
+          "Content-Disposition": attachmentFilename(`${job.id}-runner.log`),
         },
       });
     }

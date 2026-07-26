@@ -57,6 +57,18 @@ export interface Env {
   AWS_EC2_SECURITY_GROUP_ID?: string;
   /** EC2 user-data → ScienceHUB 完了通知用 */
   FDS_JOB_CALLBACK_SECRET?: string;
+  /** Firebase / Identity Platform（シミュレーション電話認証） */
+  FIREBASE_PROJECT_ID?: string;
+  FIREBASE_WEB_API_KEY?: string;
+  FIREBASE_APP_ID?: string;
+  FIREBASE_AUTH_DOMAIN?: string;
+  /** 同意文バージョン ID（docs/legal/sim-sms-consent-ja.md と一致） */
+  SIM_SMS_CONSENT_VERSION?: string;
+  /** Google Gemini API（FDS 一次審査） */
+  GEMINI_API_KEY?: string;
+  GEMINI_FDS_REVIEW_MODEL?: string;
+  /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */
+  FDS_REVIEW_SYNTAX_REFERENCE?: string;
 }
 
 export interface RoleRow {
@@ -80,6 +92,8 @@ export interface UserRow {
   homeroom: string | null;
   student_number: number | null;
   student_name: string | null;
+  phone_e164?: string | null;
+  sim_phone_verified_at?: string | null;
   created_at: number;
   updated_at: number;
 }

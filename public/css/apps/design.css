@@ -621,6 +621,49 @@
   line-height: 1.4;
 }
 
+.design-edit-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.design-edit-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.design-edit-history-item:last-child {
+  border-bottom: none;
+}
+
+.design-edit-history-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.design-edit-history-who {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.design-edit-history-what {
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.design-edit-history-when {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
 .design-prop-field {
   display: flex;
   flex-direction: column;
@@ -906,13 +949,78 @@
   font-weight: 500;
 }
 
+.design-peers-wrap {
+  position: relative;
+  max-width: 14rem;
+}
+
 .design-peers {
+  display: block;
+  margin: 0;
+  padding: 0.15rem 0.35rem;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  font: inherit;
   font-size: 0.85rem;
   color: #64748b;
   max-width: 14rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+  cursor: default;
+}
+
+.design-peers:not(:disabled) {
+  cursor: pointer;
+}
+
+.design-peers:not(:disabled):hover {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.design-peers-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 40;
+  min-width: 11rem;
+  max-width: 16rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.design-peers-popover-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.design-peers-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.design-peers-list li {
+  padding: 0.3rem 0.15rem;
+  font-size: 0.85rem;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-peers-list li + li {
+  border-top: 1px solid #f1f5f9;
 }
 
 .design-title--share {

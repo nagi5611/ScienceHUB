@@ -13,6 +13,9 @@ import {
   reconcileDesignElements,
 } from "../../js/design-collab-utils.js";
 
+/** @type {{ userId: string, username: string }} */
+let localEditor = { userId: "local", username: "自分" };
+const MAX_ELEMENT_EDIT_HISTORY = 40;
 const APP_SLUG = "design";
 const shareConfig = window.__DESIGN_SHARE__;
 const shareToken = shareConfig?.token?.trim() || null;
@@ -114,6 +117,8 @@ function setProjectTitle(title) {
 }
 const saveStatusEl = document.getElementById("save-status");
 const peersStatusEl = document.getElementById("peers-status");
+const peersPopoverEl = document.getElementById("peers-popover");
+const peersListEl = document.getElementById("peers-list");
 const versionsPanel = document.getElementById("versions-panel");
 const versionListEl = document.getElementById("version-list");
 const propertiesPanel = document.getElementById("properties-panel");
@@ -156,6 +161,19 @@ let fontSizeSliderEditing = false;
 
 /** @type {ReturnType<typeof createDesignCollabConnection> | null} */
 let collab = null;
+/** @type {Array<{ clientId: string, username: string }>} */
+let lastCollabPeers = [];
+/** @type {string | null} */
+let lastCollabClientId = null;
+/** @type {"idle" | "connecting" | "connected" | "reconnecting" | "error"} */
+let collabConnectionState = "idle";
+let peersPopoverOpen = false;
+/** @type {Map<string, { username: string, color: string, x: number, y: number, selectedIds: string[], updatedAt: number }>} */
+let remotePointers = new Map();
+/** @type {{ x: number, y: number } | null} */
+let lastCollabPointerWorld = null;
+let collabPointerTimer = null;
+let remotePointerRenderRaf = null;
 let applyingRemote = false;
 let collabBroadcastTimer = null;
 /** @type {ReturnType<typeof pickCollabScene> | null} */
@@ -166,6 +184,8 @@ let collabTombstones = {};
 /** @type {Set<string>} */
 let pendingLocalDeletions = new Set();
 const COLLAB_BROADCAST_MS = 200;
+const COLLAB_POINTER_MS = 50;
+const REMOTE_POINTER_STALE_MS = 6000;
 /** 線描画時の端オートパン（画面端からの距離・px） */
 const AUTO_PAN_EDGE_PX = 48;
 /** 線描画時の端オートパン最大速度（キャンバス座標 / フレーム） */
@@ -175,20 +195,185 @@ let lastDrawPointerClient = null;
 /** @type {number | null} */
 let lineDrawAutoPanRaf = null;
 
+/** ログイン中の編集者情報を読み込む */
+async function loadLocalEditor() {
+  try {
+    const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+    if (response.ok) {
+      const data = await response.json();
+      const user = data?.user;
+      if (user?.id) {
+        localEditor = {
+          userId: String(user.id),
+          username: String(user.display_name || user.username || "自分"),
+        };
+      }
+    }
+  } catch {
+    /* 未ログインなど */
+  }
+  if (isShareMode) {
+    const guest = localStorage.getItem("design-guest-name")?.trim();
+    if (guest) {
+      localEditor = {
+        ...localEditor,
+        username: guest.slice(0, 40),
+      };
+    }
+  }
+}
+
+/** 線の編集履歴を記録する対象か */
+function shouldTrackLineEditHistory(el) {
+  return el?.type === "line";
+}
+
+/** 要素に編集履歴を追記 */
+function recordElementEdit(el, action, detail) {
+  if (!el || applyingRemote || !shouldTrackLineEditHistory(el)) return;
+  if (!Array.isArray(el.editHistory)) el.editHistory = [];
+  el.editHistory.push({
+    at: Date.now(),
+    userId: localEditor.userId,
+    username: localEditor.username,
+    action,
+    detail: detail || formatEditActionLabel(action),
+    collabVersion: getElementCollabVersion(el),
+  });
+  if (el.editHistory.length > MAX_ELEMENT_EDIT_HISTORY) {
+    el.editHistory = el.editHistory.slice(-MAX_ELEMENT_EDIT_HISTORY);
+  }
+}
+
+/** 編集履歴の操作ラベル */
+function formatEditActionLabel(action) {
+  switch (action) {
+    case "create":
+      return "線を作成";
+    case "move":
+      return "位置を移動";
+    case "reshape":
+      return "端点・形状を変更";
+    case "style":
+      return "色・スタイルを変更";
+    default:
+      return "編集";
+  }
+}
+
+/** 編集履歴の日時表示 */
+function formatEditHistoryTime(at) {
+  if (!at) return "";
+  return new Date(at).toLocaleString("ja-JP", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** 共同編集マージ時に編集履歴を統合 */
+function mergeElementEditHistories(localEl, remoteEl) {
+  const entries = [
+    ...(Array.isArray(localEl?.editHistory) ? localEl.editHistory : []),
+    ...(Array.isArray(remoteEl?.editHistory) ? remoteEl.editHistory : []),
+  ];
+  if (!entries.length) return undefined;
+  const byVersion = new Map();
+  for (const entry of entries) {
+    if (!entry || typeof entry.collabVersion !== "number") continue;
+    const prev = byVersion.get(entry.collabVersion);
+    if (!prev || (entry.at ?? 0) >= (prev.at ?? 0)) {
+      byVersion.set(entry.collabVersion, entry);
+    }
+  }
+  return [...byVersion.values()]
+    .sort((a, b) => a.collabVersion - b.collabVersion)
+    .slice(-MAX_ELEMENT_EDIT_HISTORY);
+}
+
+/** マージ後の要素に編集履歴を付与 */
+function attachMergedEditHistories(localElements, remoteElements, mergedElements) {
+  const localMap = new Map(
+    (localElements ?? []).filter((el) => el?.id).map((el) => [el.id, el])
+  );
+  const remoteMap = new Map(
+    (remoteElements ?? []).filter((el) => el?.id).map((el) => [el.id, el])
+  );
+  return mergedElements.map((el) => {
+    if (!el?.id) return el;
+    const history = mergeElementEditHistories(
+      localMap.get(el.id),
+      remoteMap.get(el.id)
+    );
+    if (!history?.length) return el;
+    return { ...el, editHistory: history };
+  });
+}
+
+/** 線の編集履歴 HTML */
+function buildLineEditHistoryHtml(el) {
+  const history = Array.isArray(el.editHistory)
+    ? [...el.editHistory].reverse()
+    : [];
+  if (!history.length) {
+    return `
+      <div class="design-prop-section">
+        <p class="design-prop-label">編集履歴</p>
+        <p class="design-prop-hint">この線の編集記録はまだありません。</p>
+      </div>
+    `;
+  }
+  const items = history
+    .map((entry) => {
+      const who = escapeHtml(entry.username || "不明");
+      const what = escapeHtml(entry.detail || formatEditActionLabel(entry.action));
+      const when = escapeHtml(formatEditHistoryTime(entry.at));
+      return `
+        <li class="design-edit-history-item">
+          <span class="design-edit-history-main">
+            <span class="design-edit-history-who">${who}</span>
+            <span class="design-edit-history-what">${what}</span>
+          </span>
+          <time class="design-edit-history-when">${when}</time>
+        </li>
+      `;
+    })
+    .join("");
+  return `
+    <div class="design-prop-section">
+      <p class="design-prop-label">編集履歴</p>
+      <ul class="design-edit-history">${items}</ul>
+    </div>
+  `;
+}
+
 /** アクセス権を確認 */
 async function checkAccess() {
-  if (isShareMode) return true;
+  const loginNext = encodeURIComponent(
+    `${location.pathname}${location.search}`
+  );
   const response = await fetch(`/api/apps/${APP_SLUG}/access`, {
     credentials: "same-origin",
   });
   if (response.status === 401) {
-    window.location.href =
-      "/login/?next=" + encodeURIComponent(`/apps/${APP_SLUG}/`);
+    window.location.href = `/login/?next=${loginNext}`;
     return false;
   }
   if (!response.ok) {
-    deniedEl.hidden = false;
-    loadingEl.hidden = true;
+    if (loadingEl) loadingEl.hidden = true;
+    const permissionMessage =
+      "このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。";
+    if (isShareMode) {
+      if (shareErrorEl) {
+        shareErrorEl.hidden = false;
+        const heading = shareErrorEl.querySelector("h2");
+        if (heading) heading.textContent = "アクセスできません";
+      }
+      if (shareErrorMsgEl) shareErrorMsgEl.textContent = permissionMessage;
+    } else if (deniedEl) {
+      deniedEl.hidden = false;
+    }
     return false;
   }
   return true;
@@ -549,9 +734,10 @@ function stripStrokeWidth(el) {
 }
 
 /** 要素の共同編集バージョンを進める */
-function bumpElementCollabVersion(el) {
-  if (!el) return;
+function bumpElementCollabVersion(el, action, detail) {
+  if (!el || applyingRemote) return;
   el.collabVersion = getElementCollabVersion(el) + 1;
+  if (action) recordElementEdit(el, action, detail);
 }
 
 /** 共同編集の削除トゥームストーンを記録 */
@@ -816,6 +1002,7 @@ function clearSelection() {
   lineConnectionInspect = null;
   updateDeleteBtn();
   updatePropertiesPanel();
+  notifyCollabSelectionChange();
 }
 
 /** 選択を設定 */
@@ -829,6 +1016,7 @@ function setSelection(ids) {
   }
   updateDeleteBtn();
   updatePropertiesPanel();
+  notifyCollabSelectionChange();
 }
 
 /** 選択をトグル */
@@ -837,6 +1025,7 @@ function toggleSelection(id) {
   else selectedIds.add(id);
   updateDeleteBtn();
   updatePropertiesPanel();
+  notifyCollabSelectionChange();
 }
 
 /** 範囲内の要素 ID を取得 */
@@ -1483,6 +1672,9 @@ function render() {
       dragState.currentY ?? dragState.startY
     );
   }
+  if (dragState?.type === "draw" && dragState.preview) {
+    drawElement(dragState.preview);
+  }
   if (hoverSnap) drawEndpointSnapMarker(hoverSnap.x, hoverSnap.y);
   else if (dragState?.moveSnapTarget) {
     drawEndpointSnapMarker(dragState.moveSnapTarget.x, dragState.moveSnapTarget.y);
@@ -1490,7 +1682,11 @@ function render() {
   drawLineConnectionInspect();
   ctx.restore();
 
-  renderDimensionLabels();
+  drawRemoteCollaboratorCursors();
+
+  renderDimensionLabels(
+    dragState?.type === "draw" && dragState.preview ? [dragState.preview] : []
+  );
   updateTextInputPosition();
   updateZoomUI();
   updateMeasureOverlay(
@@ -2338,16 +2534,13 @@ function getPreviewMeasureText(preview) {
   return "";
 }
 
-/** 描画プレビュー */
+/** 描画プレビュー（render 内で dragState.preview として描画） */
 function drawPreview(preview) {
+  if (dragState?.type === "draw") {
+    dragState.preview = preview ?? null;
+  }
   measureOverlayText = getPreviewMeasureText(preview);
   render();
-  if (!preview) return;
-  ctx.save();
-  applyViewTransform();
-  drawElement(preview);
-  ctx.restore();
-  renderDimensionLabels(preview ? [preview] : []);
 }
 
 /** 変更をマークして自動保存をスケジュール */
@@ -2372,6 +2565,7 @@ function mergeRemoteCollabScene(scene) {
     localTombstones: collabTombstones,
     remoteTombstones: remoteTombs,
   }).map(normalizeLegacyElement);
+  merged = attachMergedEditHistories(elements, remote.elements, merged);
   merged = merged.filter((el) => !pendingLocalDeletions.has(el.id));
 
   for (const id of [...pendingLocalDeletions]) {
@@ -2468,14 +2662,227 @@ function applyCollabRemoteScene(scene) {
   }
 }
 
-/** 参加者表示を更新 */
-function updateCollabPeers(peers, clientId) {
-  const others = (peers ?? []).filter((p) => p.clientId !== clientId);
+/** 共同編集の選択状態を送信 */
+function notifyCollabSelectionChange() {
+  if (!collab?.isOpen()) return;
+  sendCollabPointer(lastCollabPointerWorld);
+}
+
+/** 共同編集へポインタ位置を送信 */
+function sendCollabPointer(worldPoint) {
+  if (!collab?.isOpen()) return;
+  collab.sendPointer({
+    pointer: worldPoint,
+    selectedIds: [...selectedIds],
+  });
+}
+
+/** 共同編集ポインタ送信をスロットル */
+function scheduleCollabPointerFromEvent(evt) {
+  if (!collab?.isOpen()) return;
+  lastCollabPointerWorld = canvasPoint(evt);
+  if (collabPointerTimer) return;
+  collabPointerTimer = setTimeout(() => {
+    collabPointerTimer = null;
+    sendCollabPointer(lastCollabPointerWorld);
+  }, COLLAB_POINTER_MS);
+}
+
+/** リモートポインタの再描画をスケジュール */
+function scheduleRemotePointerRender() {
+  if (remotePointerRenderRaf) return;
+  remotePointerRenderRaf = requestAnimationFrame(() => {
+    remotePointerRenderRaf = null;
+    render();
+  });
+}
+
+/** リモート共同編集者のポインタを更新 */
+function handleRemotePointer(data) {
+  const from = data?.from;
+  if (!from || from === lastCollabClientId) return;
+
+  const pointer = data.pointer;
+  if (
+    !pointer ||
+    typeof pointer.x !== "number" ||
+    typeof pointer.y !== "number" ||
+    !Number.isFinite(pointer.x) ||
+    !Number.isFinite(pointer.y)
+  ) {
+    if (remotePointers.delete(from)) scheduleRemotePointerRender();
+    return;
+  }
+
+  remotePointers.set(from, {
+    username: String(data.username ?? "ゲスト"),
+    color: typeof data.color === "string" ? data.color : "#1971c2",
+    x: pointer.x,
+    y: pointer.y,
+    selectedIds: Array.isArray(data.selectedIds) ? data.selectedIds : [],
+    updatedAt: Date.now(),
+  });
+  scheduleRemotePointerRender();
+}
+
+/** 他ユーザーのカーソルを描画（画面座標・固定 px） */
+function drawCollaboratorCursor(c, screenX, screenY, color, username) {
+  c.save();
+  c.translate(screenX, screenY);
+
+  c.beginPath();
+  c.moveTo(0, 0);
+  c.lineTo(0, 16);
+  c.lineTo(4, 12);
+  c.lineTo(7, 19);
+  c.lineTo(10, 18);
+  c.lineTo(7, 11);
+  c.lineTo(12, 11);
+  c.closePath();
+  c.fillStyle = color;
+  c.fill();
+  c.strokeStyle = "#ffffff";
+  c.lineWidth = 1.25;
+  c.stroke();
+
+  const label = username.slice(0, 24) || "ゲスト";
+  c.font = '600 11px Inter, system-ui, sans-serif';
+  const textW = c.measureText(label).width;
+  const tagX = 14;
+  const tagY = 12;
+  const tagH = 16;
+  const tagW = textW + 10;
+  c.fillStyle = color;
+  c.fillRect(tagX, tagY, tagW, tagH);
+  c.fillStyle = "#ffffff";
+  c.fillText(label, tagX + 5, tagY + 12);
+
+  c.restore();
+}
+
+/** リモート共同編集者カーソルをキャンバスに描画 */
+function drawRemoteCollaboratorCursors() {
+  if (!remotePointers.size) return;
+
+  const now = Date.now();
+  const c = ctx;
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+
+  for (const [clientId, ptr] of remotePointers) {
+    if (clientId === lastCollabClientId) continue;
+    if (now - ptr.updatedAt > REMOTE_POINTER_STALE_MS) {
+      remotePointers.delete(clientId);
+      continue;
+    }
+
+    const screen = worldToScreen(ptr.x, ptr.y);
+    if (
+      screen.x < -40 ||
+      screen.y < -40 ||
+      screen.x > canvas.width + 40 ||
+      screen.y > canvas.height + 40
+    ) {
+      continue;
+    }
+
+    drawCollaboratorCursor(c, screen.x, screen.y, ptr.color, ptr.username);
+  }
+
+  c.restore();
+}
+
+/** 共同編集者ポップオーバーを閉じる */
+function closePeersPopover() {
+  peersPopoverOpen = false;
+  if (peersPopoverEl) peersPopoverEl.hidden = true;
+  peersStatusEl?.setAttribute("aria-expanded", "false");
+}
+
+/** 共同編集者一覧を描画 */
+function renderPeersList() {
+  if (!peersListEl) return;
+  peersListEl.innerHTML = "";
+  const peers = lastCollabPeers;
+  if (!peers.length) {
+    const li = document.createElement("li");
+    li.textContent = "参加者がいません";
+    peersListEl.append(li);
+    return;
+  }
+  for (const peer of peers) {
+    const li = document.createElement("li");
+    const name = peer.username?.trim() || "ゲスト";
+    li.textContent =
+      peer.clientId === lastCollabClientId ? `${name}（自分）` : name;
+    peersListEl.append(li);
+  }
+}
+
+/** 共同編集者ポップオーバーを開く */
+function openPeersPopover() {
+  if (collabConnectionState !== "connected" || !lastCollabPeers.length) return;
+  renderPeersList();
+  peersPopoverOpen = true;
+  if (peersPopoverEl) peersPopoverEl.hidden = false;
+  peersStatusEl?.setAttribute("aria-expanded", "true");
+}
+
+/** ヘッダーの共同編集表示を更新 */
+function renderPeersStatus() {
   if (!peersStatusEl) return;
+  if (collabConnectionState === "idle") {
+    peersStatusEl.hidden = true;
+    peersStatusEl.textContent = "";
+    peersStatusEl.disabled = true;
+    closePeersPopover();
+    return;
+  }
+
+  peersStatusEl.hidden = false;
+
+  if (collabConnectionState === "connecting") {
+    peersStatusEl.textContent = "接続中";
+    peersStatusEl.disabled = true;
+    closePeersPopover();
+    return;
+  }
+  if (collabConnectionState === "reconnecting") {
+    peersStatusEl.textContent = "再接続中…";
+    peersStatusEl.disabled = true;
+    closePeersPopover();
+    return;
+  }
+  if (collabConnectionState === "error") {
+    peersStatusEl.textContent = "接続エラー";
+    peersStatusEl.disabled = true;
+    closePeersPopover();
+    return;
+  }
+
+  const others = lastCollabPeers.filter(
+    (p) => p.clientId !== lastCollabClientId
+  );
   peersStatusEl.textContent =
     others.length === 0
       ? "自分のみ"
       : `共同編集: ${others.map((p) => p.username).join(", ")}`;
+  peersStatusEl.disabled = false;
+  if (peersPopoverOpen) renderPeersList();
+}
+
+/** 参加者表示を更新 */
+function updateCollabPeers(peers, clientId) {
+  lastCollabPeers = peers ?? [];
+  lastCollabClientId = clientId;
+  collabConnectionState = "connected";
+
+  const peerIds = new Set(lastCollabPeers.map((p) => p.clientId));
+  for (const id of remotePointers.keys()) {
+    if (!peerIds.has(id)) remotePointers.delete(id);
+  }
+
+  renderPeersStatus();
 }
 
 /** 共同編集 WebSocket を切断 */
@@ -2491,12 +2898,27 @@ function disconnectCollab() {
   pendingRemoteScene = null;
   collabTombstones = {};
   pendingLocalDeletions = new Set();
-  if (peersStatusEl) peersStatusEl.textContent = "";
+  lastCollabPeers = [];
+  lastCollabClientId = null;
+  collabConnectionState = "idle";
+  remotePointers.clear();
+  lastCollabPointerWorld = null;
+  if (collabPointerTimer) {
+    clearTimeout(collabPointerTimer);
+    collabPointerTimer = null;
+  }
+  if (remotePointerRenderRaf) {
+    cancelAnimationFrame(remotePointerRenderRaf);
+    remotePointerRenderRaf = null;
+  }
+  renderPeersStatus();
 }
 
 /** 共同編集 WebSocket に接続 */
 function connectCollab({ projectId, token } = {}) {
   disconnectCollab();
+  collabConnectionState = "connecting";
+  renderPeersStatus();
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
 
   collab = createDesignCollabConnection({
@@ -2513,15 +2935,19 @@ function connectCollab({ projectId, token } = {}) {
     },
     onApplyRemoteScene: applyCollabRemoteScene,
     onOpen: () => {
-      if (peersStatusEl) peersStatusEl.textContent = "接続中";
+      collabConnectionState = "connecting";
+      renderPeersStatus();
     },
     onClose: () => {
-      if (peersStatusEl) peersStatusEl.textContent = "再接続中…";
+      collabConnectionState = "reconnecting";
+      renderPeersStatus();
     },
     onError: () => {
-      if (peersStatusEl) peersStatusEl.textContent = "接続エラー";
+      collabConnectionState = "error";
+      renderPeersStatus();
     },
     onPeersChange: updateCollabPeers,
+    onRemotePointer: handleRemotePointer,
   });
   collab.connect();
 }
@@ -3076,7 +3502,9 @@ function getCommonStrokeColor(selected) {
 function applyPropertyChange(mutator) {
   pushHistory();
   mutator();
-  for (const el of getSelectedElements()) bumpElementCollabVersion(el);
+  for (const el of getSelectedElements()) {
+    bumpElementCollabVersion(el, "style", "色・スタイルを変更");
+  }
   markDirty();
   render();
   updatePropertiesPanel();
@@ -3170,6 +3598,7 @@ function buildPropertiesPanelHtml(selected) {
         }
       </div>
     `;
+    html += buildLineEditHistoryHtml(el);
   }
 
   return html;
@@ -3300,6 +3729,7 @@ canvas.addEventListener("mousedown", (evt) => {
 });
 
 canvas.addEventListener("mousemove", (evt) => {
+  scheduleCollabPointerFromEvent(evt);
   if (panDrag) return;
 
   const pt = canvasPoint(evt);
@@ -3479,7 +3909,11 @@ function finishDrag(evt) {
         undoStack.pop();
       } else if (dragState.moved) {
         for (const id of selectedIds) {
-          bumpElementCollabVersion(elements.find((el) => el.id === id));
+          bumpElementCollabVersion(
+            elements.find((el) => el.id === id),
+            "move",
+            "位置を移動"
+          );
         }
         markDirty();
       }
@@ -3493,7 +3927,9 @@ function finishDrag(evt) {
         undoStack.pop();
       } else if (dragState.moved) {
         bumpElementCollabVersion(
-          elements.find((el) => el.id === dragState.elementId)
+          elements.find((el) => el.id === dragState.elementId),
+          "reshape",
+          "端点・形状を変更"
         );
         markDirty();
       }
@@ -3527,6 +3963,9 @@ function finishDrag(evt) {
       if (el) {
         pushHistory();
         elements.push(el);
+        if (el.type === "line") {
+          recordElementEdit(el, "create", "線を作成");
+        }
         setSelection([el.id]);
       }
       dragState = null;
@@ -3545,6 +3984,12 @@ canvas.addEventListener("mouseup", (evt) => {
   finishDrag(evt);
 });
 canvas.addEventListener("mouseleave", (evt) => {
+  lastCollabPointerWorld = null;
+  if (collabPointerTimer) {
+    clearTimeout(collabPointerTimer);
+    collabPointerTimer = null;
+  }
+  sendCollabPointer(null);
   if (hoverSnap) {
     hoverSnap = null;
     render();
@@ -3929,9 +4374,37 @@ document.getElementById("cloud-dest-btn")?.addEventListener("click", () => {
   openCloudDestinationPicker();
 });
 
+peersStatusEl?.addEventListener("click", (evt) => {
+  evt.stopPropagation();
+  if (peersStatusEl.disabled || collabConnectionState !== "connected") return;
+  if (peersPopoverOpen) closePeersPopover();
+  else openPeersPopover();
+});
+
+document.addEventListener("click", (evt) => {
+  if (!peersPopoverOpen) return;
+  const target = evt.target;
+  if (
+    target instanceof Node &&
+    (peersPopoverEl?.contains(target) || peersStatusEl?.contains(target))
+  ) {
+    return;
+  }
+  closePeersPopover();
+});
+
+document.addEventListener("keydown", (evt) => {
+  if (evt.key === "Escape" && peersPopoverOpen) closePeersPopover();
+});
+
 // --- 初期化 ---
 async function initApp() {
   try {
+    const allowed = await checkAccess();
+    if (!allowed) return;
+
+    await loadLocalEditor();
+
     if (isShareMode) {
       if (!shareToken) {
         throw new Error("共有トークンがありません");
@@ -3950,9 +4423,6 @@ async function initApp() {
       loadingEl.hidden = true;
       return;
     }
-
-    const allowed = await checkAccess();
-    if (!allowed) return;
 
     recentStrokeColors = loadRecentStrokeColors();
     renderRecentStrokeColors();

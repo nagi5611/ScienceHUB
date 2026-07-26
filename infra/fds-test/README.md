@@ -71,6 +71,21 @@ sudo bash build-ami.sh
 
 AMI 内に `/opt/fds/bin/fds` があることが必須です。FDS 6.9.x は `Build/ompi_gnu_linux/make_fds.sh` でビルドします（古い `build_fds.sh` はありません）。リンクエラーで MKL が必要な場合は Intel oneAPI MKL を入れて `MKLROOT` を設定してから再実行してください。
 
+**AMI 作成前:** `sudo /opt/fds/bin/fds -v` がバージョンを表示することを確認してください（OpenMPI の root 拒否メッセージだけ出る状態のまま AMI にしない）。
+
+**AMI が `failed` になるとき（よくある原因）**
+
+- イメージ作成中に **元インスタンスを停止・終了**した
+- ルートボリュームが小さすぎる / スナップショットエラー
+- 別リージョンの AMI ID を `AWS_EC2_FDS_AMI_ID` に入れた
+
+作り直し手順: 新しい AL2023 インスタンスで `build-ami.sh` → `fds -v` 確認 → **インスタンスは起動したまま**「イメージの作成」→ 完了後に `available` を確認してから ID をシークレットに設定。
+
+```bash
+aws ec2 describe-images --owners self --region ap-northeast-1 \
+  --query "Images | sort_by(@, &CreationDate) | [-1].{Id:ImageId,State:State,Name:Name}"
+```
+
 ## 2. Cloudflare / Wrangler シークレット
 
 プロジェクトルートで設定:
@@ -116,11 +131,16 @@ npm run db:migrate:remote  # 本番
 
 | 症状 | 確認事項 |
 |------|----------|
+| `AMI 'ami-…' is pending, and cannot be run` | AMI 作成直後は **数分 pending**。EC2 → AMI で **利用可能** になるまで待つ。アプリは自動再試行する（デプロイ後）。手動なら `aws ec2 wait image-available --image-ids ami-…` |
+| `wait image-available` が **failed** で終了 | AMI 作成自体が失敗。**EC2 → AMI** で状態と理由を確認。作り直し（下記） |
+| `AMI 'ami-…' is failed, and cannot be run` | その AMI は **作成失敗または無効**。FDS 入りインスタンスから **新しい AMI を作り直し**、`AWS_EC2_FDS_AMI_ID` を更新して再デプロイ |
 | EC2 起動エラー | AMI ID、サブネット、SG、IAM 権限 |
 | ずっと「実行中」 | EC2 のシステムログ（user-data）。FDS バイナリパス |
 | コールバック失敗 | `FDS_JOB_CALLBACK_SECRET`、`OAUTH_REDIRECT_BASE`、SG の 443 アウトバウンド |
+| Smokeview で smoke が 0 KB | 実行データ ZIP に **`.s3d` / `.sf`** が無い（旧 runner は `.out/.smv/.csv` のみ）。再デプロイ後にジョブを再実行し、ZIP を**一つのフォルダに展開**してから `.smv` を開く |
 | 10時間で止まる | 仕様（`FDS_JOB_MAX_RUNTIME_HOURS = 10`） |
 | `gfortran: fatal error: Killed` | **メモリ不足（OOM）**。t3.micro + `make -j4` が典型。swap を足して `make -j1` で再開（下記） |
+| `mpiexec ... run as root` | `/opt/fds/bin/fds` に OpenMPI の root 許可が必要。AMI 前に `fds -v` が通ること |
 
 ### FDS ビルドが OOM で Killed されたとき
 
