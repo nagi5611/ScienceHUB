@@ -572,6 +572,16 @@ body.uv-app {
 
 .uv-img-list--compact .uv-img-item {
   width: 80px;
+  cursor: pointer;
+}
+
+.uv-img-list--compact .uv-img-item:hover {
+  border-color: var(--cf-orange);
+  box-shadow: 0 0 0 1px var(--cf-orange-soft);
+}
+
+.uv-img-list--compact .uv-img-item-remove {
+  cursor: pointer;
 }
 
 .uv-img-list--compact .uv-img-item img {
@@ -716,6 +726,20 @@ body.uv-app {
 .uv-img-item-remove:hover {
   background: #fee2e2;
   color: #b91c1c;
+}
+
+.uv-hint kbd {
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  font-size: 0.85em;
+  font-family: inherit;
+  border: 1px solid var(--cf-border);
+  border-radius: 4px;
+  background: var(--cf-surface);
+}
+
+.uv-tidy-output-settings {
+  margin-bottom: 0.75rem;
 }
 
 .uv-settings-grid {

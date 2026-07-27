@@ -32,7 +32,7 @@
 
     <!-- 台形補正（Algo Zoo Tidy 相当） -->
     <section class="uv-panel is-active" id="panel-tidy" role="tabpanel" aria-labelledby="tab-tidy">
-      <p class="uv-hint" style="margin-top:0">撮影した台形画像の四隅を合わせて矩形に補正します。補正した画像は結合リストに追加し、別の画像を続けて補正できます。</p>
+      <p class="uv-hint" style="margin-top:0">撮影した台形画像の四隅を合わせて矩形に補正します。四隅の間の辺上に頂点を追加するには、キャンバス上で <kbd>R</kbd> キーを押します（マウス位置の近い辺に頂点が置かれます）。オレンジの点は辺上の頂点です。</p>
 
       <article class="uv-card uv-queue-card" id="tidy-queue-card">
         <div class="uv-queue-header">
@@ -40,7 +40,7 @@
           <button type="button" class="uv-btn uv-btn--sm" id="tidy-goto-combine">結合タブを開く</button>
         </div>
         <ul class="uv-img-list is-empty uv-img-list--compact" id="tidy-queue-list" aria-label="結合待ち画像"></ul>
-        <p class="uv-hint uv-queue-hint">台形補正後に「結合リストへ追加」するとここに表示されます。並び替え・削除もできます。</p>
+        <p class="uv-hint uv-queue-hint">台形補正後に「結合リストへ追加」するとここに表示されます。サムネイルをクリックするとその画像の台形補正を開けます。並び替えは画像結合タブのリストで行えます。</p>
       </article>
 
       <div class="uv-grid-2">
@@ -62,6 +62,22 @@
 
         <article class="uv-card">
           <h2 class="uv-section-title">変換後の画像</h2>
+          <div class="uv-settings-grid uv-tidy-output-settings">
+            <label class="uv-field">
+              <span>出力の長辺</span>
+              <select id="tidy-output-long-edge">
+                <option value="original">オリジナル</option>
+                <option value="long-1200">長辺 1200px 以下</option>
+                <option value="long-2000">長辺 2000px 以下</option>
+                <option value="long-2048" selected>長辺 2048px 以下</option>
+                <option value="long-custom">長辺を指定</option>
+              </select>
+            </label>
+            <label class="uv-field" id="tidy-output-long-custom-wrap" hidden>
+              <span>長辺 (px)</span>
+              <input type="number" id="tidy-output-long-custom" min="64" max="8192" value="2048" step="1">
+            </label>
+          </div>
           <div class="uv-canvas-wrap">
             <canvas id="tidy-output-canvas"></canvas>
             <p class="uv-placeholder" id="tidy-output-placeholder">四隅のマーカーを調整するとプレビューが更新されます</p>
@@ -125,7 +141,12 @@
               <option value="original">オリジナル</option>
               <option value="long-1200">長辺 1200px</option>
               <option value="long-2000">長辺 2000px</option>
+              <option value="long-custom">長辺を指定</option>
             </select>
+          </label>
+          <label class="uv-field" id="combine-resolution-custom-wrap" hidden>
+            <span>長辺 (px)</span>
+            <input type="number" id="combine-resolution-custom" min="64" max="8192" value="2000" step="1">
           </label>
           <label class="uv-field">
             <span>パディング (px)</span>

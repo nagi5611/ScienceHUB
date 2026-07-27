@@ -1,10 +1,11 @@
 /**
  * 台形補正モジュール（Algo Zoo Tidy 相当の仕組み）
- * glfx.js の perspective 変換を使用
+ * 四隅＋辺上の頂点で Coons パッチ変形
  */
 
+import { parseLongEdgeLimit } from "./long-edge.js";
+
 const MAX_INPUT_LONG_EDGE = 2048;
-const MAX_OUTPUT_LONG_EDGE = 2048;
 const MAGNIFIER_SIZE = 140;
 const MAGNIFIER_ZOOM = 5;
 
@@ -13,7 +14,12 @@ const COLORS = {
   white: "rgb(255,255,255)",
   lightGray: "rgb(180,180,180)",
   red: "rgb(230,46,46)",
+  orange: "rgb(255,165,0)",
 };
+
+function emptyEdges() {
+  return { top: [], right: [], bottom: [], left: [] };
+}
 
 /** 2点間の距離 */
 function dist(a, b) {
@@ -63,26 +69,198 @@ function drawCheckerBoard(ctx, width, height, cell = 12) {
   }
 }
 
-/** 透視変換（glfx）— 頂点順: TL, TR, BR, BL */
-function perspectiveTransform(sourceCanvas, corners) {
-  const [tl, tr, br, bl] = corners;
-  const outW = Math.max(dist(tl, tr), dist(bl, br));
-  const outH = Math.max(dist(tl, bl), dist(tr, br));
+function polylineLength(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    sum += dist(points[i], points[i + 1]);
+  }
+  return sum;
+}
 
-  const fxCanvas = window.fx.canvas();
-  const texture = fxCanvas.texture(sourceCanvas);
-  fxCanvas
-    .draw(texture)
-    .perspective(
-      [tl[0], tl[1], tr[0], tr[1], br[0], br[1], bl[0], bl[1]],
-      [0, 0, outW, 0, outW, outH, 0, outH]
-    )
-    .update();
+/** 折れ線上の u (0〜1) の位置をサンプル */
+function samplePolyline(points, u) {
+  if (points.length === 0) return [0, 0];
+  if (points.length === 1) return [...points[0]];
+  const total = polylineLength(points);
+  if (total < 1e-6) return [...points[0]];
+
+  let target = Math.max(0, Math.min(1, u)) * total;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const segLen = dist(a, b);
+    if (target <= segLen || i === points.length - 2) {
+      const t = segLen < 1e-6 ? 0 : target / segLen;
+      return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    }
+    target -= segLen;
+  }
+  return [...points[points.length - 1]];
+}
+
+/** 四辺の折れ線（角を含む） */
+function getEdgePolylines(corners, edges) {
+  const [tl, tr, br, bl] = corners;
+  return {
+    top: [tl, ...edges.top, tr],
+    right: [tr, ...edges.right, br],
+    bottom: [bl, ...edges.bottom, br],
+    left: [tl, ...edges.left, bl],
+  };
+}
+
+/** Coons パッチで (u,v) をソース座標にマップ */
+function coonsPoint(u, v, corners, polylines) {
+  const [tl, tr, br, bl] = corners;
+  const topPt = samplePolyline(polylines.top, u);
+  const bottomPt = samplePolyline(polylines.bottom, u);
+  const leftPt = samplePolyline(polylines.left, v);
+  const rightPt = samplePolyline(polylines.right, v);
+
+  const c00 = tl;
+  const c10 = tr;
+  const c11 = br;
+  const c01 = bl;
+
+  return [
+    (1 - v) * topPt[0] +
+      v * bottomPt[0] +
+      (1 - u) * leftPt[0] +
+      u * rightPt[0] -
+      ((1 - u) * (1 - v) * c00[0] +
+        u * (1 - v) * c10[0] +
+        u * v * c11[0] +
+        (1 - u) * v * c01[0]),
+    (1 - v) * topPt[1] +
+      v * bottomPt[1] +
+      (1 - u) * leftPt[1] +
+      u * rightPt[1] -
+      ((1 - u) * (1 - v) * c00[1] +
+        u * (1 - v) * c10[1] +
+        u * v * c11[1] +
+        (1 - u) * v * c01[1]),
+  ];
+}
+
+function projectPointOnSegment(p, a, b) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-9) return { point: [a[0], a[1]], t: 0 };
+  let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { point: [a[0] + t * dx, a[1] + t * dy], t };
+}
+
+/** 最も近い辺セグメントを検索 */
+function findNearestEdgeSegment(point, corners, edges) {
+  const names = ["top", "right", "bottom", "left"];
+  const polylines = getEdgePolylines(corners, edges);
+  let best = null;
+
+  for (const name of names) {
+    const pts = polylines[name];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const proj = projectPointOnSegment(point, pts[i], pts[i + 1]);
+      const d = dist(point, proj.point);
+      if (!best || d < best.d) {
+        best = {
+          edge: name,
+          segIndex: i,
+          point: proj.point,
+          d,
+        };
+      }
+    }
+  }
+  return best;
+}
+
+/** 辺上に頂点を挿入（segIndex は getEdgePolylines のセグメント番号） */
+function insertPointOnEdge(edges, edgeName, segIndex, point, minSep = 3) {
+  const next = {
+    top: [...edges.top],
+    right: [...edges.right],
+    bottom: [...edges.bottom],
+    left: [...edges.left],
+  };
+  const insertAt = Math.max(0, Math.min(segIndex, next[edgeName].length));
+  const list = next[edgeName];
+  for (const existing of list) {
+    if (dist(existing, point) < minSep) return edges;
+  }
+  list.splice(insertAt, 0, [point[0], point[1]]);
+  return next;
+}
+
+function sampleSourceBilinear(data, width, height, x, y) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+
+  const idx = (px, py) => (py * width + px) * 4;
+  const c00 = idx(x0, y0);
+  const c10 = idx(x1, y0);
+  const c01 = idx(x0, y1);
+  const c11 = idx(x1, y1);
+
+  const out = [0, 0, 0, 0];
+  for (let k = 0; k < 4; k++) {
+    out[k] =
+      data[c00 + k] * (1 - tx) * (1 - ty) +
+      data[c10 + k] * tx * (1 - ty) +
+      data[c01 + k] * (1 - tx) * ty +
+      data[c11 + k] * tx * ty;
+  }
+  return out;
+}
+
+/** Coons メッシュで台形補正 */
+function meshWarp(sourceCanvas, corners, edges) {
+  const polylines = getEdgePolylines(corners, edges);
+  const outW = Math.max(
+    1,
+    Math.floor(Math.max(polylineLength(polylines.top), polylineLength(polylines.bottom)))
+  );
+  const outH = Math.max(
+    1,
+    Math.floor(Math.max(polylineLength(polylines.left), polylineLength(polylines.right)))
+  );
+
+  const sw = sourceCanvas.width;
+  const sh = sourceCanvas.height;
+  const srcCtx = sourceCanvas.getContext("2d");
+  const srcData = srcCtx.getImageData(0, 0, sw, sh).data;
 
   const out = document.createElement("canvas");
-  out.width = Math.max(1, Math.floor(outW));
-  out.height = Math.max(1, Math.floor(outH));
-  out.getContext("2d").drawImage(fxCanvas, 0, 0);
+  out.width = outW;
+  out.height = outH;
+  const outCtx = out.getContext("2d");
+  const imageData = outCtx.createImageData(outW, outH);
+  const outPx = imageData.data;
+
+  for (let j = 0; j < outH; j++) {
+    const v = (j + 0.5) / outH;
+    for (let i = 0; i < outW; i++) {
+      const u = (i + 0.5) / outW;
+      const [sx, sy] = coonsPoint(u, v, corners, polylines);
+      const o = (j * outW + i) * 4;
+      if (sx < 0 || sy < 0 || sx >= sw - 1 || sy >= sh - 1) {
+        outPx[o + 3] = 0;
+        continue;
+      }
+      const [r, g, b, a] = sampleSourceBilinear(srcData, sw, sh, sx, sy);
+      outPx[o] = r;
+      outPx[o + 1] = g;
+      outPx[o + 2] = b;
+      outPx[o + 3] = a;
+    }
+  }
+
+  outCtx.putImageData(imageData, 0, 0);
   return out;
 }
 
@@ -94,9 +272,15 @@ export function createTidyEditor(els) {
   const state = {
     squareCanvas: null,
     imageCanvas: null,
-    corners: [[0, 0], [0, 0], [0, 0], [0, 0]],
+    corners: [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ],
+    edges: emptyEdges(),
     cursor: [-1, -1],
-    editIndex: null,
+    editTarget: null,
     filename: "",
   };
 
@@ -134,17 +318,68 @@ export function createTidyEditor(els) {
     sourceCache = null;
   }
 
-  function setCorners(corners) {
+  function applyMesh(corners, edges) {
     state.corners = corners.map((c) => [c[0], c[1]]);
+    state.edges = {
+      top: edges.top.map((p) => [p[0], p[1]]),
+      right: edges.right.map((p) => [p[0], p[1]]),
+      bottom: edges.bottom.map((p) => [p[0], p[1]]),
+      left: edges.left.map((p) => [p[0], p[1]]),
+    };
     invalidateSourceCache();
     drawInput();
     drawOutput();
   }
 
-  function nearestCornerIndex(point) {
-    const distances = state.corners.map((c) => dist(point, c));
-    const min = Math.min(...distances);
-    return distances.indexOf(min);
+  function setCorners(corners, resetEdgePoints = false) {
+    applyMesh(corners, resetEdgePoints ? emptyEdges() : state.edges);
+  }
+
+  function cloneEdges() {
+    return {
+      top: state.edges.top.map((p) => [p[0], p[1]]),
+      right: state.edges.right.map((p) => [p[0], p[1]]),
+      bottom: state.edges.bottom.map((p) => [p[0], p[1]]),
+      left: state.edges.left.map((p) => [p[0], p[1]]),
+    };
+  }
+
+  function getCornersAndEdgesForRender() {
+    const corners = state.corners.map((c) => [c[0], c[1]]);
+    const edges = cloneEdges();
+
+    if (state.editTarget?.type === "corner") {
+      corners[state.editTarget.index] = [...state.cursor];
+    } else if (state.editTarget?.type === "edge") {
+      edges[state.editTarget.edge][state.editTarget.index] = [...state.cursor];
+    }
+
+    return { corners, edges };
+  }
+
+  /** クリック位置に最も近い制御点 */
+  function nearestControlTarget(point, canvas) {
+    const hitR = scaleDrawSize(canvas, 14);
+    const edgeHitR = scaleDrawSize(canvas, 10);
+    let best = null;
+
+    for (let i = 0; i < 4; i++) {
+      const d = dist(point, state.corners[i]);
+      if (d <= hitR && (!best || d < best.d)) {
+        best = { type: "corner", index: i, d };
+      }
+    }
+
+    for (const edgeName of ["top", "right", "bottom", "left"]) {
+      state.edges[edgeName].forEach((p, index) => {
+        const d = dist(point, p);
+        if (d <= edgeHitR && (!best || d < best.d)) {
+          best = { type: "edge", edge: edgeName, index, d };
+        }
+      });
+    }
+
+    return best;
   }
 
   function drawImageCentered(ctx, img, size) {
@@ -166,21 +401,9 @@ export function createTidyEditor(els) {
     return c;
   }
 
-  function getActiveCorners() {
-    let [tl, tr, br, bl] = state.corners;
-    if (state.editIndex !== null) {
-      const cur = state.cursor;
-      if (state.editIndex === 0) tl = cur;
-      else if (state.editIndex === 1) tr = cur;
-      else if (state.editIndex === 2) br = cur;
-      else bl = cur;
-    }
-    return [tl, tr, br, bl];
-  }
-
   /** 頂点移動時のズーム拡大鏡 */
   function updateMagnifier(clientX, clientY) {
-    if (state.editIndex === null) {
+    if (state.editTarget === null) {
       magnifier.hidden = true;
       return;
     }
@@ -244,6 +467,47 @@ export function createTidyEditor(els) {
     magnifier.hidden = false;
   }
 
+  function drawControlPoints(ctx, canvas, corners, edges) {
+    const polylines = getEdgePolylines(corners, edges);
+    const lw = Math.min(3, Math.max(2, scaleDrawSize(canvas, 2)));
+
+    ctx.strokeStyle = COLORS.red;
+    ctx.lineWidth = lw;
+    for (const name of ["top", "right", "bottom", "left"]) {
+      const pts = polylines[name];
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i][0], pts[i][1]);
+      }
+      ctx.stroke();
+    }
+
+    const cornerR = Math.min(9, Math.max(6, scaleDrawSize(canvas, 6)));
+    for (const [x, y] of corners) {
+      ctx.beginPath();
+      ctx.arc(x, y, cornerR, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.red;
+      ctx.fill();
+      ctx.strokeStyle = COLORS.white;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    const edgeR = Math.min(7, Math.max(4, scaleDrawSize(canvas, 4)));
+    for (const name of ["top", "right", "bottom", "left"]) {
+      for (const [x, y] of edges[name]) {
+        ctx.beginPath();
+        ctx.arc(x, y, edgeR, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.orange;
+        ctx.fill();
+        ctx.strokeStyle = COLORS.white;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+  }
+
   function drawInput() {
     if (!state.squareCanvas || !state.imageCanvas) return;
 
@@ -256,31 +520,17 @@ export function createTidyEditor(els) {
     const src = buildSourceCanvas();
     ctx.drawImage(src, 0, 0);
 
-    const [tl, tr, br, bl] = getActiveCorners();
-
-    const lw = Math.min(3, Math.max(2, scaleDrawSize(canvas, 2)));
-    ctx.strokeStyle = COLORS.red;
-    ctx.lineWidth = lw;
-    ctx.beginPath();
-    ctx.moveTo(tl[0], tl[1]);
-    ctx.lineTo(tr[0], tr[1]);
-    ctx.lineTo(br[0], br[1]);
-    ctx.lineTo(bl[0], bl[1]);
-    ctx.closePath();
-    ctx.stroke();
-
-    const r = Math.min(9, Math.max(6, scaleDrawSize(canvas, 6)));
-    for (const [x, y] of [tl, tr, br, bl]) {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.red;
-      ctx.fill();
-      ctx.strokeStyle = COLORS.white;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+    const { corners, edges } = getCornersAndEdgesForRender();
+    drawControlPoints(ctx, canvas, corners, edges);
 
     els.inputPlaceholder.hidden = true;
+  }
+
+  function getOutputLongEdgeLimit() {
+    return parseLongEdgeLimit(
+      els.outputLongEdgeSelect?.value,
+      els.outputLongCustomInput?.value
+    );
   }
 
   function drawOutput() {
@@ -293,8 +543,11 @@ export function createTidyEditor(els) {
 
     try {
       const src = buildSourceCanvas();
-      let result = perspectiveTransform(src, state.corners);
-      result = limitCanvasLongEdge(result, MAX_OUTPUT_LONG_EDGE);
+      let result = meshWarp(src, state.corners, state.edges);
+      const longEdgeLimit = getOutputLongEdgeLimit();
+      if (longEdgeLimit) {
+        result = limitCanvasLongEdge(result, longEdgeLimit);
+      }
 
       const out = els.outputCanvas;
       out.width = result.width;
@@ -304,48 +557,87 @@ export function createTidyEditor(els) {
       els.saveBtn.disabled = false;
       els.sendCombineBtn.disabled = false;
     } catch (err) {
-      console.error("Perspective transform failed:", err);
+      console.error("Mesh warp failed:", err);
       els.outputPlaceholder.textContent = "変換に失敗しました。四隅の位置を調整してください。";
       els.outputPlaceholder.hidden = false;
     }
+  }
+
+  /** R キー: 近い辺上に頂点を追加 */
+  function addEdgePointAtCursor() {
+    if (!hasImage || state.cursor[0] < 0) return;
+
+    const canvas = els.inputCanvas;
+    const maxDist = scaleDrawSize(canvas, 24);
+    const hit = findNearestEdgeSegment(state.cursor, state.corners, state.edges);
+    if (!hit || hit.d > maxDist) return;
+
+    const nextEdges = insertPointOnEdge(
+      state.edges,
+      hit.edge,
+      hit.segIndex,
+      hit.point,
+      scaleDrawSize(canvas, 6)
+    );
+    applyMesh(state.corners, nextEdges);
+    state.editTarget = null;
+    magnifier.hidden = true;
   }
 
   function loadFile(file) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let w = img.width;
-        let h = img.height;
-        if (Math.max(w, h) > MAX_INPUT_LONG_EDGE) {
-          const t = MAX_INPUT_LONG_EDGE / Math.max(w, h);
-          w = Math.floor(w * t);
-          h = Math.floor(h * t);
-        }
-
-        const imageCanvas = document.createElement("canvas");
-        imageCanvas.width = w;
-        imageCanvas.height = h;
-        imageCanvas.getContext("2d").drawImage(img, 0, 0, w, h);
-
-        const side = Math.max(w, h);
-        state.squareCanvas = document.createElement("canvas");
-        state.squareCanvas.width = side;
-        state.squareCanvas.height = side;
-        state.imageCanvas = imageCanvas;
-
-        setCorners(getImageCorners());
-
-        state.filename = `corrected_${getBasename(file)}`;
-        els.filenameInput.value = state.filename;
-        hasImage = true;
-        state.editIndex = null;
-        magnifier.hidden = true;
-      };
-      img.src = reader.result;
+      loadImageFromDataUrl(reader.result, getBasename(file));
     };
     reader.readAsDataURL(file);
+  }
+
+  /** データ URL から台形補正用画像を読み込む */
+  function loadImageFromDataUrl(dataUrl, basename) {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width;
+      let h = img.height;
+      if (Math.max(w, h) > MAX_INPUT_LONG_EDGE) {
+        const t = MAX_INPUT_LONG_EDGE / Math.max(w, h);
+        w = Math.floor(w * t);
+        h = Math.floor(h * t);
+      }
+
+      const imageCanvas = document.createElement("canvas");
+      imageCanvas.width = w;
+      imageCanvas.height = h;
+      imageCanvas.getContext("2d").drawImage(img, 0, 0, w, h);
+
+      const side = Math.max(w, h);
+      state.squareCanvas = document.createElement("canvas");
+      state.squareCanvas.width = side;
+      state.squareCanvas.height = side;
+      state.imageCanvas = imageCanvas;
+
+      setCorners(getImageCorners(), true);
+
+      const base = basename?.replace(/\.[^.]+$/i, "") || "image";
+      state.filename = `corrected_${base}`;
+      els.filenameInput.value = state.filename;
+      hasImage = true;
+      state.editTarget = null;
+      magnifier.hidden = true;
+    };
+    img.onerror = () => {
+      console.error("Failed to load image for tidy editor");
+    };
+    img.src = dataUrl;
+  }
+
+  /** Blob から台形補正用画像を読み込む */
+  function loadFromBlob(blob, filename = "image.jpg") {
+    if (!blob) return;
+    const type = blob.type?.startsWith("image/") ? blob.type : "image/jpeg";
+    const name = filename || "image.jpg";
+    const file = new File([blob], name, { type });
+    loadFile(file);
   }
 
   function rotateCanvas(canvas, angle) {
@@ -359,30 +651,13 @@ export function createTidyEditor(els) {
     return out;
   }
 
-  function rotatePoint(point, center, dir) {
-    const [x, y] = point;
-    const [cx, cy] = center;
-    const rx = x - cx;
-    const ry = y - cy;
-    let nx;
-    let ny;
-    if (dir === "CCW") {
-      nx = ry;
-      ny = -rx;
-    } else {
-      nx = -ry;
-      ny = rx;
-    }
-    return [nx + cx, ny + cy];
-  }
-
   function rotate(dir) {
     if (!state.imageCanvas || !state.squareCanvas) return;
     const angle = dir === "CCW" ? -Math.PI / 2 : Math.PI / 2;
     state.imageCanvas = rotateCanvas(state.imageCanvas, angle);
     invalidateSourceCache();
-    setCorners(getImageCorners());
-    state.editIndex = null;
+    setCorners(getImageCorners(), true);
+    state.editTarget = null;
     magnifier.hidden = true;
   }
 
@@ -390,7 +665,7 @@ export function createTidyEditor(els) {
     if (!hasImage) return;
     const pt = scalePoint(els.inputCanvas, [offsetX, offsetY]);
     state.cursor = pt;
-    if (state.editIndex !== null) {
+    if (state.editTarget !== null) {
       drawInput();
       updateMagnifier(clientX, clientY);
     }
@@ -401,18 +676,30 @@ export function createTidyEditor(els) {
     const pt = scalePoint(els.inputCanvas, [offsetX, offsetY]);
     state.cursor = pt;
 
-    if (state.editIndex === null) {
-      state.editIndex = nearestCornerIndex(pt);
+    if (state.editTarget === null) {
+      const target = nearestControlTarget(pt, els.inputCanvas);
+      if (!target) return;
+      state.editTarget =
+        target.type === "corner"
+          ? { type: "corner", index: target.index }
+          : { type: "edge", edge: target.edge, index: target.index };
       drawInput();
       updateMagnifier(clientX, clientY);
       return;
     }
 
-    const idx = state.editIndex;
-    const next = state.corners.map((c, i) => (i === idx ? pt : c));
-    state.editIndex = null;
+    const corners = state.corners.map((c) => [c[0], c[1]]);
+    const edges = cloneEdges();
+
+    if (state.editTarget.type === "corner") {
+      corners[state.editTarget.index] = [...pt];
+    } else {
+      edges[state.editTarget.edge][state.editTarget.index] = [...pt];
+    }
+
+    state.editTarget = null;
     magnifier.hidden = true;
-    setCorners(next);
+    applyMesh(corners, edges);
   }
 
   function getOutputBlob() {
@@ -425,6 +712,12 @@ export function createTidyEditor(els) {
     });
   }
 
+  function isTypingTarget(el) {
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el.isContentEditable;
+  }
+
   els.loadInput.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
     if (file) loadFile(file);
@@ -435,13 +728,34 @@ export function createTidyEditor(els) {
   });
 
   els.inputCanvas.addEventListener("mouseleave", () => {
-    if (state.editIndex !== null) {
+    if (state.editTarget !== null) {
       magnifier.hidden = true;
     }
   });
 
   els.inputCanvas.addEventListener("click", (e) => {
     handleClick(e.offsetX, e.offsetY, e.clientX, e.clientY);
+    els.inputCanvas.focus({ preventScroll: true });
+  });
+
+  els.inputCanvas.setAttribute("tabindex", "0");
+
+  els.inputCanvas.addEventListener("keydown", (e) => {
+    if (isTypingTarget(e.target) && e.target !== els.inputCanvas) return;
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      addEdgePointAtCursor();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (isTypingTarget(document.activeElement)) return;
+    if (e.key === "r" || e.key === "R") {
+      if (!hasImage) return;
+      if (document.activeElement === els.inputCanvas) return;
+      e.preventDefault();
+      addEdgePointAtCursor();
+    }
   });
 
   els.ccwBtn.addEventListener("click", () => rotate("CCW"));
@@ -487,5 +801,10 @@ export function createTidyEditor(els) {
 
   bindDropZone(els.dropZone);
 
-  return { getOutputBlob, loadFile };
+  for (const el of [els.outputLongEdgeSelect, els.outputLongCustomInput]) {
+    el?.addEventListener("input", drawOutput);
+    el?.addEventListener("change", drawOutput);
+  }
+
+  return { getOutputBlob, loadFile, loadFromBlob };
 }

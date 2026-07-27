@@ -2733,7 +2733,7 @@ function openShortcutDialog(storagePath, label) {
   const dialog = document.getElementById("cs-shortcut-dialog");
   const trimmedPath = storagePath?.trim() ?? "";
   if (!dialog || !trimmedPath) {
-    showToast("ショートカットを作成するフォルダを選択してください", true);
+    showToast("ショートカットを作成するフォルダを開いてください", true);
     return;
   }
 
@@ -2753,9 +2753,19 @@ function openShortcutDialogForItem(item) {
 }
 
 function openShortcutDialogFromSelection() {
+  if (trashView) {
+    showToast("ごみ箱ではショートカットを作成できません", true);
+    return;
+  }
+
   const items = getSelectedItems();
   if (items.length === 0) {
-    showToast("ショートカットを作成する項目を選択してください", true);
+    const path = currentPath?.trim() ?? "";
+    if (!path) {
+      showToast("ショートカットを作成するフォルダを開いてください", true);
+      return;
+    }
+    openShortcutDialog(path, getShortcutLabelForPath(path));
     return;
   }
 
