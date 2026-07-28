@@ -39,6 +39,11 @@ const ANGLE_SNAP = Math.PI / 4; // 45°
 /** 角度スナップの許容範囲（±度） */
 const ANGLE_SNAP_TOLERANCE_DEG = 3;
 const ANGLE_SNAP_TOLERANCE = (ANGLE_SNAP_TOLERANCE_DEG * Math.PI) / 180;
+/** 表示長さがこの値以下のとき 0°/90°… スナップの許容（±度） */
+const SHORT_LINE_ORTHO_SNAP_DISPLAY_LEN = 10;
+const ANGLE_SNAP_TOLERANCE_ORTHO_SHORT_DEG = 30;
+const ANGLE_SNAP_TOLERANCE_ORTHO_SHORT =
+  (ANGLE_SNAP_TOLERANCE_ORTHO_SHORT_DEG * Math.PI) / 180;
 const SQUARE_TOLERANCE = 0.2;
 const RATIO_12_MIN = 1.6;
 const RATIO_12_MAX = 2.4;
@@ -859,18 +864,32 @@ function normalizeLegacyElement(el) {
   return stripStrokeWidth(el);
 }
 
-/** 直線の終点を 0°/45°/90°… にスナップ（±3°以内のみ） */
+/** スナップ先が 0°/90°/180°/270° か（45° 刻みの偶数インデックス） */
+function isOrthogonalAngleSnap(snappedAngle) {
+  const index = Math.round(snappedAngle / ANGLE_SNAP);
+  return index % 2 === 0;
+}
+
+/** 直線の終点を 0°/45°/90°… にスナップ（±3°以内、短い線の 90° 系は ±30°） */
 function snapLineEnd(x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.hypot(dx, dy);
   if (len < 1) return { x: x2, y: y2 };
+  const displayLen = len * LENGTH_DISPLAY_SCALE;
   const angle = Math.atan2(dy, dx);
   const nearest = Math.round(angle / ANGLE_SNAP) * ANGLE_SNAP;
   let diff = angle - nearest;
   while (diff > Math.PI) diff -= 2 * Math.PI;
   while (diff < -Math.PI) diff += 2 * Math.PI;
-  if (Math.abs(diff) > ANGLE_SNAP_TOLERANCE) {
+  let tolerance = ANGLE_SNAP_TOLERANCE;
+  if (
+    displayLen <= SHORT_LINE_ORTHO_SNAP_DISPLAY_LEN &&
+    isOrthogonalAngleSnap(nearest)
+  ) {
+    tolerance = ANGLE_SNAP_TOLERANCE_ORTHO_SHORT;
+  }
+  if (Math.abs(diff) > tolerance) {
     return { x: x2, y: y2 };
   }
   return {
@@ -996,7 +1015,7 @@ function updateConstraintHint(shiftKey, mode = "") {
   }
   constraintHintEl.classList.remove("design-constraint-hint--free");
   const hints = {
-    line: "直線: 端点スナップ · 0°/45°/90°（±3°） · 寸法0.1刻み · Altで0.5刻み · Ctrlでグリッド交点",
+    line: "直線: 端点スナップ · 0°/45°/90°（±3°、長さ10以下の90°は±30°） · 寸法0.1刻み · Altで0.5刻み · Ctrlでグリッド交点",
     rect: "四角: 正方形 / 1:2 長方形を自動判定 · Ctrlでグリッド交点",
     text: "クリックで文字を配置 · 既存テキストをクリックで編集",
     select: "直線: 端点をドラッグして編集 · 移動時に端点同士を自動接続 · 連結確認 · 矢印キーで1.0移動 · Ctrlでグリッド移動",

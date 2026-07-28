@@ -3,6 +3,7 @@
  */
 
 import { bindSortableList } from "./sortable-list.js";
+import { bindLongEdgeCustomToggle, parseLongEdgeLimit } from "./long-edge.js";
 
 const MAX_PREVIEW_LONG_EDGE = 2048;
 
@@ -69,7 +70,7 @@ export function createCombineEditor(els) {
   const listTargets = [{ list: els.list, reorder: true }];
   if (els.extraLists) {
     for (const list of els.extraLists) {
-      listTargets.push({ list, reorder: true });
+      listTargets.push({ list, reorder: false });
     }
   }
 
@@ -292,9 +293,12 @@ export function createCombineEditor(els) {
     const long = Math.max(naturalW, naturalH);
 
     const resolution = els.resolutionSelect.value;
-    if (resolution === "long-1200") return Math.min(1, 1200 / long);
-    if (resolution === "long-2000") return Math.min(1, 2000 / long);
-    return 1;
+    const targetLong = parseLongEdgeLimit(
+      resolution,
+      els.resolutionCustomInput?.value
+    );
+    if (!targetLong) return 1;
+    return Math.min(1, targetLong / long);
   }
 
   function renderPreview() {
@@ -388,6 +392,16 @@ export function createCombineEditor(els) {
     return images.length;
   }
 
+  /** 台形補正などへ渡す用に結合リストの画像を取得 */
+  async function getImageBlobForEdit(id) {
+    const item = images.find((i) => i.id === id);
+    if (!item) return null;
+    const response = await fetch(item.url);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return { blob, name: item.name };
+  }
+
   function getOutputBlob() {
     return new Promise((resolve) => {
       if (!fullResultCanvas?.width) {
@@ -421,12 +435,15 @@ export function createCombineEditor(els) {
   for (const el of [
     els.patternSelect,
     els.resolutionSelect,
+    els.resolutionCustomInput,
     els.paddingInput,
     els.gapInput,
   ]) {
-    el.addEventListener("input", renderPreview);
-    el.addEventListener("change", renderPreview);
+    el?.addEventListener("input", renderPreview);
+    el?.addEventListener("change", renderPreview);
   }
+
+  bindLongEdgeCustomToggle(els.resolutionSelect, els.resolutionCustomWrap);
 
   for (const { list, reorder } of listTargets) {
     list.addEventListener("dragover", (e) => e.preventDefault());
@@ -446,5 +463,12 @@ export function createCombineEditor(els) {
   syncBgControlsFromRgba(els.bgInput.value);
   updateListEmptyState();
 
-  return { addFromBlob, loadFiles, renderPreview, getImageCount, getOutputBlob };
+  return {
+    addFromBlob,
+    loadFiles,
+    renderPreview,
+    getImageCount,
+    getImageBlobForEdit,
+    getOutputBlob,
+  };
 }

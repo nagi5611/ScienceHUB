@@ -6,6 +6,7 @@ import { createTidyEditor } from "./modules/tidy.js";
 import { createCombineEditor } from "./modules/combine.js";
 import { bindSaveMenu } from "./modules/save-menu.js";
 import { createCloudSaveModal } from "./modules/cloud-save-modal.js";
+import { bindLongEdgeCustomToggle } from "./modules/long-edge.js";
 
 const APP_SLUG = "uvcreator";
 
@@ -96,6 +97,8 @@ if (!allowed) {
     fileInput: document.getElementById("combine-file-input"),
     patternSelect: document.getElementById("combine-pattern"),
     resolutionSelect: document.getElementById("combine-resolution"),
+    resolutionCustomInput: document.getElementById("combine-resolution-custom"),
+    resolutionCustomWrap: document.getElementById("combine-resolution-custom-wrap"),
     paddingInput: document.getElementById("combine-padding"),
     gapInput: document.getElementById("combine-gap"),
     bgInput: document.getElementById("combine-bg"),
@@ -122,7 +125,15 @@ if (!allowed) {
     cwBtn: document.getElementById("tidy-cw"),
     saveBtn: document.getElementById("tidy-save"),
     sendCombineBtn: document.getElementById("tidy-add-combine"),
+    outputLongEdgeSelect: document.getElementById("tidy-output-long-edge"),
+    outputLongCustomInput: document.getElementById("tidy-output-long-custom"),
+    outputLongCustomWrap: document.getElementById("tidy-output-long-custom-wrap"),
   });
+
+  bindLongEdgeCustomToggle(
+    document.getElementById("tidy-output-long-edge"),
+    document.getElementById("tidy-output-long-custom-wrap")
+  );
 
   setupSaveMenu({
     menuId: "tidy-save-menu",
@@ -166,5 +177,25 @@ if (!allowed) {
 
   document.getElementById("tidy-goto-combine").addEventListener("click", () => {
     tabs.openCombine();
+  });
+
+  const queueList = document.getElementById("tidy-queue-list");
+  queueList?.addEventListener("click", async (e) => {
+    if (e.target.closest(".uv-img-item-remove")) return;
+    const itemEl = e.target.closest(".uv-img-item");
+    if (!itemEl) return;
+
+    const id = Number(itemEl.dataset.id);
+    if (!id) return;
+
+    const data = await combine.getImageBlobForEdit(id);
+    if (!data) return;
+
+    tidy.loadFromBlob(data.blob, data.name);
+    itemEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    document.getElementById("tidy-drop-zone")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   });
 }
