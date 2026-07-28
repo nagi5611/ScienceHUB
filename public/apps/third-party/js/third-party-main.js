@@ -237,6 +237,14 @@ function updatePhaseUI(phase, pendingForm, reviewSummary) {
   }
 
   renderPendingForm(currentPendingForm);
+
+  const chatInput = document.getElementById("chat-input");
+  if (currentPhase === "gate_deepen_or_build") {
+    chatInput.placeholder =
+      "「実装に進む」「実装して」または下のボタン…";
+  } else {
+    chatInput.placeholder = "作りたいアプリを説明…";
+  }
 }
 
 function renderPendingForm(form) {

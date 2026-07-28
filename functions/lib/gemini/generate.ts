@@ -96,7 +96,19 @@ export async function geminiGenerateText(
         `AI モデル "${options.model}" が使えません。GEMINI_TP_LITE_MODEL / GEMINI_TP_FLASH_MODEL を確認してください`
       );
     }
-    throw new Error("AI の呼び出しに失敗しました。しばらくしてから再度お試しください");
+    let detail = "";
+    try {
+      const parsed = JSON.parse(errText) as {
+        error?: { message?: string; status?: string };
+      };
+      const msg = parsed.error?.message?.trim();
+      if (msg) detail = `: ${msg.slice(0, 180)}`;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(
+      `AI の呼び出しに失敗しました。しばらくしてから再度お試しください${detail}`
+    );
   }
 
   const data = (await res.json()) as GeminiGenerateResponse;

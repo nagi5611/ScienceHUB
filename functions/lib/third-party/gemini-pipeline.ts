@@ -235,6 +235,35 @@ function formatFormResponses(
   return lines.join("\n");
 }
 
+/** ゲートで要件深掘りを選んだ意図 */
+function wantsDeepenRequirements(text: string): boolean {
+  const t = text.trim();
+  return (
+    text.includes("要件を深掘り") ||
+    text.includes("深掘り") ||
+    t === "deepen" ||
+    t === "deepen_requirements"
+  );
+}
+
+/** 要件・計画ドキュメント作成へ進む意図（ゲートの「実装に進む」相当） */
+function wantsGateBuildDocs(text: string, phase: string): boolean {
+  if (wantsDeepenRequirements(text)) return false;
+  const t = text.trim();
+  if (text.includes("実装に進む") || t === "write_docs") return true;
+  if (t === "implement_now" && phase === "gate_deepen_or_build") return true;
+  if (phase !== "gate_deepen_or_build") return false;
+  if (
+    t === "実装して" ||
+    t === "実装" ||
+    t === "作って" ||
+    /実装して|実装を進|実装に進|計画を作|計画作成|このまま|進めて/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function runLiteTurn(
   env: Env,
   project: TpProjectPipelineRow,
@@ -499,13 +528,15 @@ export async function runTpGeminiChat(
   const implementStartTrigger =
     userText === "実装開始" ||
     (current.awaiting_implement_confirm === 1 &&
-      (userText === "実装開始" || userText === "implement_now"));
+      (userText === "実装開始" ||
+        userText === "implement_now" ||
+        userText.includes("実装して") ||
+        userText.trim() === "実装"));
 
-  const gateBuildTrigger =
-    userText.includes("実装に進む") ||
-    userText === "write_docs" ||
-    (userText === "implement_now" &&
-      current.workflow_phase === "gate_deepen_or_build");
+  const gateBuildTrigger = wantsGateBuildDocs(
+    userText,
+    current.workflow_phase
+  );
 
   if (userText && !implementStartTrigger) {
     await assertDailyTurnLimit(db, userId);
@@ -524,11 +555,7 @@ export async function runTpGeminiChat(
   }
 
   // ゲート: 深掘り / 実装
-  if (
-    userText.includes("要件を深掘り") ||
-    userText === "deepen" ||
-    userText === "deepen_requirements"
-  ) {
+  if (wantsDeepenRequirements(userText)) {
     await patchProject(db, projectId, {
       workflow_phase: "deepen_requirements",
       pending_form_json: null,
@@ -592,7 +619,12 @@ export async function runTpGeminiChat(
     "deepen_requirements",
   ];
   current = (await loadPipelineProject(db, userId, projectId))!;
-  if (userText && litePhases.includes(current.workflow_phase)) {
+  if (
+    userText &&
+    litePhases.includes(current.workflow_phase) &&
+    !wantsGateBuildDocs(userText, current.workflow_phase) &&
+    !wantsDeepenRequirements(userText)
+  ) {
     const messages = await listMessages(db, projectId);
     const turn = await runLiteTurn(env, current, userText, messages);
     await insertMessage(db, projectId, "assistant", turn.assistant_message);
