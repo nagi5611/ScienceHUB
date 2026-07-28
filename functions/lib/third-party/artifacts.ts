@@ -89,3 +89,19 @@ export async function artifactExists(
   const head = await bucket.head(artifactKey(dirName, name));
   return head !== null;
 }
+
+/** プロジェクト配下の R2 ファイルを削除 */
+export async function deleteProjectArtifacts(
+  bucket: R2Bucket,
+  dirName: string
+): Promise<void> {
+  const names = [
+    ARTIFACT_REQUIREMENTS,
+    ARTIFACT_PLAN,
+    ARTIFACT_REVIEW,
+    ARTIFACT_INDEX,
+  ];
+  for (const name of names) {
+    await bucket.delete(artifactKey(dirName, name));
+  }
+}

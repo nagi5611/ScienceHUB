@@ -17,6 +17,7 @@ import { getUserGroupMemberships } from "./groups";
 import {
   allocateDirName,
   artifactExists,
+  deleteProjectArtifacts,
   getArtifact,
   reallocateDirNameIfDraft,
   ARTIFACT_PLAN,
@@ -372,6 +373,7 @@ export async function deleteTpProject(
       .run();
   }
 
+  await deleteProjectArtifacts(bucket, project.dir_name);
   await bucket.delete(indexR2Key(project.r2_prefix));
   await db.prepare("DELETE FROM tp_projects WHERE id = ?").bind(projectId).run();
   return true;

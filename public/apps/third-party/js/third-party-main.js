@@ -116,24 +116,42 @@ async function loadGallery() {
   } else {
     myEmpty.hidden = true;
     for (const p of projects) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "tp-card tp-card--mine";
+      const card = document.createElement("article");
+      card.className = "tp-card tp-card--mine";
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "tp-card-delete";
+      delBtn.textContent = "削除";
+      delBtn.setAttribute("aria-label", `${p.title} を削除`);
+      delBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteMyProject(p.id, p.title, p.status === "published").catch((err) =>
+          alert(err.message)
+        );
+      });
+
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "tp-card-open";
       const statusBadge =
         p.status === "published"
           ? `<span class="tp-card-badge tp-card-badge--published">公開済み</span>`
           : `<span class="tp-card-badge tp-card-badge--draft">下書き</span>`;
       const phase = phaseLabel(p.workflow_phase);
-      btn.innerHTML = `
+      openBtn.innerHTML = `
         ${statusBadge}
         <div class="tp-card-emoji">${p.icon_emoji || "🧩"}</div>
         <p class="tp-card-title">${escapeHtml(p.title)}</p>
         <p class="tp-card-meta">${escapeHtml(phase || "開発中")} · 更新 ${formatDate(p.updated_at)}</p>
       `;
-      btn.addEventListener("click", () => {
+      openBtn.addEventListener("click", () => {
         openStudio(p.id).catch((e) => alert(e.message));
       });
-      myGrid.appendChild(btn);
+
+      card.appendChild(delBtn);
+      card.appendChild(openBtn);
+      myGrid.appendChild(card);
     }
   }
 
@@ -168,6 +186,24 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+/** 自分のアプリを削除 */
+async function deleteMyProject(projectId, title, isPublished) {
+  const label = title?.trim() || "このアプリ";
+  let confirmMsg = `「${label}」を削除しますか？\nチャット履歴とプレビューは復元できません。`;
+  if (isPublished) {
+    confirmMsg +=
+      "\n公開済みの場合、みんなのアプリ一覧からも外れます。";
+  }
+  if (!confirm(confirmMsg)) return;
+
+  await tpApi(`projects/${projectId}`, { method: "DELETE" });
+
+  if (currentProjectId === projectId) {
+    showGallery();
+  }
+  await loadGallery();
+}
+
 function openCreateModal() {
   const input = document.getElementById("create-title");
   input.value = "";
@@ -199,6 +235,9 @@ function setChatBusy(busy) {
   document.getElementById("gate-build").disabled = busy;
   const implementStart = document.getElementById("gate-implement-start");
   if (implementStart) implementStart.disabled = busy;
+  document.querySelectorAll(".tp-msg-action").forEach((btn) => {
+    btn.disabled = busy;
+  });
 }
 
 function updatePhaseUI(phase, pendingForm, reviewSummary) {
@@ -376,10 +415,92 @@ function renderMessages(messages) {
   const el = document.getElementById("chat-messages");
   el.replaceChildren();
   for (const msg of messages) {
+    const row = document.createElement("div");
+    row.className = `tp-msg-row tp-msg-row--${msg.role}`;
+
+    if (
+      msg.role === "user" &&
+      editingMessageId === msg.id &&
+      !msg.content.startsWith("【フォーム回答】")
+    ) {
+      const editWrap = document.createElement("div");
+      editWrap.className = "tp-msg tp-msg--user tp-msg-edit";
+      const ta = document.createElement("textarea");
+      ta.value = msg.content;
+      ta.setAttribute("aria-label", "メッセージを編集");
+      const actions = document.createElement("div");
+      actions.className = "tp-msg-edit-actions";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "tp-btn";
+      cancelBtn.textContent = "キャンセル";
+      cancelBtn.addEventListener("click", () => {
+        editingMessageId = null;
+        renderMessages(messages);
+      });
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "tp-btn tp-btn--primary";
+      saveBtn.textContent = "編集して再送信";
+      saveBtn.addEventListener("click", () => {
+        const next = ta.value.trim();
+        if (!next) {
+          alert("メッセージを入力してください");
+          return;
+        }
+        sendChatWithRewind(msg.id, next).catch((err) => alert(err.message));
+      });
+      actions.appendChild(cancelBtn);
+      actions.appendChild(saveBtn);
+      editWrap.appendChild(ta);
+      editWrap.appendChild(actions);
+      row.appendChild(editWrap);
+      el.appendChild(row);
+      ta.focus();
+      continue;
+    }
+
     const div = document.createElement("div");
     div.className = `tp-msg tp-msg--${msg.role}`;
     div.textContent = msg.content;
-    el.appendChild(div);
+    row.appendChild(div);
+
+    if (
+      msg.role === "user" &&
+      !msg.content.startsWith("【フォーム回答】")
+    ) {
+      const actions = document.createElement("div");
+      actions.className = "tp-msg-actions";
+      const resendBtn = document.createElement("button");
+      resendBtn.type = "button";
+      resendBtn.className = "tp-msg-action";
+      resendBtn.textContent = "再送信";
+      resendBtn.addEventListener("click", () => {
+        if (
+          !confirm(
+            "この発言とそれ以降の会話を削除し、同じ内容で再送信します。"
+          )
+        ) {
+          return;
+        }
+        sendChatWithRewind(msg.id, msg.content).catch((err) =>
+          alert(err.message)
+        );
+      });
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "tp-msg-action";
+      editBtn.textContent = "編集";
+      editBtn.addEventListener("click", () => {
+        editingMessageId = msg.id;
+        renderMessages(messages);
+      });
+      actions.appendChild(resendBtn);
+      actions.appendChild(editBtn);
+      row.appendChild(actions);
+    }
+
+    el.appendChild(row);
   }
   el.scrollTop = el.scrollHeight;
 }

@@ -4,6 +4,7 @@
   --tp-orange: #f38020;
   --tp-orange-hover: #e5700f;
   --tp-orange-soft: #fff4eb;
+  --tp-cream: #fff9f3;
   --tp-bg: #ffffff;
   --tp-surface: #f6f6f7;
   --tp-border: #e2e5e9;
@@ -108,13 +109,22 @@
 }
 
 .tp-btn--primary {
-  background: var(--tp-orange);
+  background: var(--tp-cream);
   border-color: var(--tp-orange);
-  color: #fff;
+  color: var(--tp-orange);
+  font-weight: 500;
 }
 
 .tp-btn--primary:hover {
-  background: var(--tp-orange-hover);
+  background: var(--tp-orange-soft);
+  border-color: var(--tp-orange-hover);
+  color: var(--tp-orange-hover);
+}
+
+.tp-btn--primary:disabled {
+  background: var(--tp-cream);
+  border-color: color-mix(in srgb, var(--tp-orange) 45%, var(--tp-border));
+  color: color-mix(in srgb, var(--tp-orange) 55%, var(--tp-muted));
 }
 
 .tp-btn:disabled {
@@ -208,16 +218,65 @@
   border: 1px solid var(--tp-border);
   border-radius: 12px;
   padding: 1rem;
-  cursor: pointer;
   text-align: left;
   transition: box-shadow 0.15s, border-color 0.15s;
   font-family: inherit;
   width: 100%;
+  position: relative;
 }
 
-.tp-card:hover {
+.tp-card--mine {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.tp-card-open {
+  display: block;
+  width: 100%;
+  background: var(--tp-bg);
+  border: 1px solid var(--tp-border);
+  border-radius: 12px;
+  padding: 1rem;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.tp-card-open:hover {
   border-color: color-mix(in srgb, var(--tp-orange) 35%, var(--tp-border));
   box-shadow: 0 4px 16px color-mix(in srgb, var(--tp-orange) 18%, transparent);
+}
+
+.tp-card:not(.tp-card--mine):hover {
+  border-color: color-mix(in srgb, var(--tp-orange) 35%, var(--tp-border));
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--tp-orange) 18%, transparent);
+}
+
+.tp-card-delete {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--tp-border);
+  border-radius: 6px;
+  background: var(--tp-bg);
+  color: #94a3b8;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tp-card-delete:hover {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.tp-card:not(.tp-card--mine) {
+  cursor: pointer;
 }
 
 .tp-card-emoji {
@@ -443,7 +502,7 @@
 .tp-icon-btn {
   width: 32px;
   height: 32px;
-  border: none;
+  border: 1px solid var(--tp-border);
   border-radius: 6px;
   background: var(--tp-surface);
   cursor: pointer;
@@ -452,8 +511,10 @@
 }
 
 .tp-icon-btn.is-active {
-  background: var(--tp-orange);
-  color: #fff;
+  background: var(--tp-cream);
+  border-color: var(--tp-orange);
+  color: var(--tp-orange);
+  font-weight: 600;
 }
 
 .tp-preview-wrap {
