@@ -58,6 +58,7 @@ let currentPhase = null;
 let currentPendingForm = null;
 let titleSaveTimer = null;
 let chatBusy = false;
+let editingMessageId = null;
 
 function showGallery() {
   document.getElementById("gallery-view").hidden = false;
@@ -395,15 +396,41 @@ function applyChatResult(result) {
   updatePhaseUI(result.phase, result.pending_form, result.review_summary);
 }
 
-async function sendChat(text) {
+async function sendChatWithRewind(messageId, text) {
   if (!currentProjectId || !text.trim() || chatBusy) return;
   setChatBusy(true);
   const input = document.getElementById("chat-input");
   try {
     const result = await tpApi(`projects/${currentProjectId}/chat`, {
       method: "POST",
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({
+        message: text,
+        rewind_to_message_id: messageId,
+      }),
     });
+    editingMessageId = null;
+    applyChatResult(result);
+  } finally {
+    input.value = "";
+    setChatBusy(false);
+    input.focus();
+  }
+}
+
+async function sendChat(text, rewindToMessageId = null) {
+  if (!currentProjectId || !text.trim() || chatBusy) return;
+  setChatBusy(true);
+  const input = document.getElementById("chat-input");
+  try {
+    const body = { message: text };
+    if (rewindToMessageId) {
+      body.rewind_to_message_id = rewindToMessageId;
+    }
+    const result = await tpApi(`projects/${currentProjectId}/chat`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    editingMessageId = null;
     applyChatResult(result);
   } finally {
     input.value = "";

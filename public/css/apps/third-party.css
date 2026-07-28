@@ -310,6 +310,68 @@
   color: #334155;
 }
 
+.tp-msg-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 92%;
+}
+
+.tp-msg-row--user {
+  align-self: flex-end;
+}
+
+.tp-msg-row--assistant {
+  align-self: flex-start;
+}
+
+.tp-msg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.tp-msg-action {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--tp-border);
+  border-radius: 6px;
+  background: var(--tp-bg);
+  color: var(--tp-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tp-msg-action:hover {
+  color: var(--tp-orange);
+  border-color: color-mix(in srgb, var(--tp-orange) 40%, var(--tp-border));
+}
+
+.tp-msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.tp-msg-edit textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--tp-border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.tp-msg-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .tp-suggestions {
   display: flex;
   flex-wrap: wrap;

@@ -377,6 +377,56 @@ export async function deleteTpProject(
   return true;
 }
 
+/**
+ * 指定ユーザー発言以降のチャットを削除し、ワークフローを巻き戻す（再送信・編集用）
+ */
+export async function rewindChatFromUserMessage(
+  db: D1Database,
+  projectId: string,
+  messageId: string
+): Promise<{ previousContent: string }> {
+  const row = await db
+    .prepare(
+      `SELECT id, role, content, created_at FROM tp_chat_messages
+       WHERE id = ? AND project_id = ?`
+    )
+    .bind(messageId, projectId)
+    .first<{
+      id: string;
+      role: string;
+      content: string;
+      created_at: number;
+    }>();
+
+  if (!row) throw new Error("メッセージが見つかりません");
+  if (row.role !== "user") {
+    throw new Error("ユーザー発言のみ再送信・編集できます");
+  }
+  if (row.content.startsWith("【フォーム回答】")) {
+    throw new Error(
+      "フォーム回答は再送信できません。チャットで続きを入力してください"
+    );
+  }
+
+  await db
+    .prepare(
+      `DELETE FROM tp_chat_messages WHERE project_id = ? AND created_at >= ?`
+    )
+    .bind(projectId, row.created_at)
+    .run();
+
+  await db
+    .prepare(
+      `UPDATE tp_projects SET workflow_phase = 'discovery', pending_form_json = NULL,
+       context_summary = NULL, review_passed = NULL, awaiting_implement_confirm = 0,
+       updated_at = ? WHERE id = ?`
+    )
+    .bind(now(), projectId)
+    .run();
+
+  return { previousContent: row.content };
+}
+
 /** Gemini チャット（スタブフォールバック付き） */
 export async function postGeminiChat(
   env: Env,
@@ -387,17 +437,43 @@ export async function postGeminiChat(
   input: {
     message?: string;
     form_responses?: Record<string, string | string[]>;
+    rewind_to_message_id?: string;
   }
 ): Promise<GeminiChatResult | null> {
+  const project = await getOwnedProject(db, userId, projectId);
+  if (!project) return null;
+
+  let chatInput = { ...input };
+
+  if (chatInput.rewind_to_message_id?.trim()) {
+    const { previousContent } = await rewindChatFromUserMessage(
+      db,
+      projectId,
+      chatInput.rewind_to_message_id.trim()
+    );
+    if (!chatInput.message?.trim()) {
+      chatInput.message = previousContent;
+    }
+    if (chatInput.form_responses) {
+      throw new Error("再送信時はフォーム回答と併用できません");
+    }
+  }
+
   const hasKey = env.GEMINI_API_KEY?.trim();
   if (!hasKey) {
-    const msg = input.message?.trim() ?? "";
-    if (input.form_responses) {
+    const msg = chatInput.message?.trim() ?? "";
+    if (chatInput.form_responses) {
       throw new Error("GEMINI_API_KEY が未設定のためフォーム送信は使えません");
     }
+    if (!msg) throw new Error("メッセージを入力してください");
     return await runTpStubFallback(db, bucket, userId, projectId, msg);
   }
-  return await runTpGeminiChat(env, db, bucket, userId, projectId, input);
+
+  if (!chatInput.message?.trim() && !chatInput.form_responses) {
+    throw new Error("メッセージを入力してください");
+  }
+
+  return await runTpGeminiChat(env, db, bucket, userId, projectId, chatInput);
 }
 
 /** プロジェクト詳細（アーティファクト有無付き） */

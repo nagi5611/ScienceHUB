@@ -209,6 +209,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const body = (await context.request.json().catch(() => ({}))) as {
         message?: string;
         form_responses?: Record<string, string | string[]>;
+        rewind_to_message_id?: string;
       };
       const result = await postGeminiChat(
         context.env,
@@ -219,6 +220,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         {
           message: body.message,
           form_responses: body.form_responses,
+          rewind_to_message_id: body.rewind_to_message_id,
         }
       );
       if (!result) return jsonError("プロジェクトが見つかりません", 404);
