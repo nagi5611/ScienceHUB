@@ -14,6 +14,8 @@ export const TP_WORKFLOW_PHASES = [
   "flash_implement",
   "await_implement_confirm",
   "draft_ready",
+  "app_maintain",
+  "app_maintain_done",
 ] as const;
 
 export type TpWorkflowPhase = (typeof TP_WORKFLOW_PHASES)[number];
@@ -146,6 +148,46 @@ export const FLASH_IMPLEMENT_SCHEMA = {
   },
   required: ["index_html", "assistant_message"],
 } as const;
+
+export type MaintainAgentAction =
+  | "list"
+  | "read"
+  | "grep"
+  | "analyze"
+  | "patch_html"
+  | "reply";
+
+export interface MaintainAgentStep {
+  action: MaintainAgentAction;
+  assistant_message: string;
+  path?: string;
+  line_start?: number;
+  line_end?: number;
+  pattern?: string;
+  index_html?: string;
+}
+
+export const MAINTAIN_AGENT_STEP_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    action: { type: "STRING" },
+    assistant_message: { type: "STRING" },
+    path: { type: "STRING", nullable: true },
+    line_start: { type: "INTEGER", nullable: true },
+    line_end: { type: "INTEGER", nullable: true },
+    pattern: { type: "STRING", nullable: true },
+    index_html: { type: "STRING", nullable: true },
+  },
+  required: ["action", "assistant_message"],
+} as const;
+
+export function isPostBuildPhase(phase: string): boolean {
+  return (
+    phase === "draft_ready" ||
+    phase === "app_maintain" ||
+    phase === "app_maintain_done"
+  );
+}
 
 export function isTpWorkflowPhase(value: string): value is TpWorkflowPhase {
   return (TP_WORKFLOW_PHASES as readonly string[]).includes(value);

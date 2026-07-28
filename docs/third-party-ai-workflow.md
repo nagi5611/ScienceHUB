@@ -7,6 +7,9 @@ ScienceHUB のサードパーティスタジオで、ユーザーと AI がや�
 | 領域 | ファイル |
 |------|----------|
 | 状態機械・1ターン処理 | `functions/lib/third-party/gemini-pipeline.ts` |
+| 実装後メンテエージェント | `functions/lib/third-party/workspace-agent.ts` |
+| R2 ワークスペース | `functions/lib/third-party/workspace.ts` |
+| HTML 静的解析 | `functions/lib/third-party/static-analyze.ts` |
 | フェーズ名・JSON スキーマ | `functions/lib/third-party/schemas.ts` |
 | プロンプト | `functions/lib/third-party/prompts.ts` |
 | API 入口 | `functions/api/third-party/[[path]].ts` → `postGeminiChat` |
@@ -42,8 +45,44 @@ ScienceHUB のサードパーティスタジオで、ユーザーと AI がや�
 | `flash_implement` | HTML 実装中（内部遷移） |
 | `await_implement_confirm` | レビュー懸念あり・ユーザーの実装開始待ち |
 | `draft_ready` | 実装完了・プレビュー可能 |
+| `app_maintain` | 実装後サポート（ワークスペースエージェント稼働中） |
+| `app_maintain_done` | メンテ 1 ターン完了（UI 上は実装完了と同等表示可） |
 
 新規プロジェクト作成時は `discovery`。初回アシスタントメッセージのみ DB に入り、その後はユーザー送信で進みます。
+
+実装後（`draft_ready` / `app_maintain` / `app_maintain_done`）は Lite の構造化フォームを出さず、Flash ワークスペースエージェントが R2 上の `index.html` 等を読取・grep・静的解析して修正します（`workspace-agent.ts`）。
+
+---
+
+## 実装後メンテ（ワークスペースエージェント）
+
+**対象 phase:** `draft_ready`, `app_maintain`, `app_maintain_done`
+
+**入口:** ユーザーが不具合・要望（「直して」「動かない」「クリア」等）を送信 → phase **`app_maintain`**
+
+**処理:** `runMaintainAgentTurn`（`MAINTAIN_AGENT_STEP_SCHEMA`、最大 6 ラウンド/メッセージ）
+
+| action | 意味 |
+|--------|------|
+| `list` | ワークスペース内 allowlist ファイル一覧 |
+| `read` | 行範囲付きファイル読取 |
+| `grep` | allowlist 内全文検索 |
+| `analyze` | `index.html` の静的解析レポート |
+| `patch_html` | `index.html` 全文を R2 に保存 |
+| `reply` | 修正不要・説明のみ |
+
+**遷移:** `patch_html` 成功 → **`draft_ready`**。説明のみ → **`app_maintain` 維持**。
+
+**ワークスペース:** `functions/lib/third-party/workspace.ts`（許可パスは `artifacts.ts` と同様の allowlist）
+
+**静的解析:** `functions/lib/third-party/static-analyze.ts`（Workers 上でユーザー JS は実行しない）
+
+```mermaid
+flowchart LR
+  draft_ready --> app_maintain: 不具合・要望
+  app_maintain --> draft_ready: patch_html 成功
+  app_maintain --> app_maintain: reply のみ
+```
 
 ---
 
@@ -185,7 +224,8 @@ R2 `third-party/{dir_name}/` に保存:
 5. phase が `flash_review` なら `flashReviewPhase`（合格なら続けて実装）
 6. phase が `flash_revise_plan` なら `flash_review` に戻して再レビュー
 7. phase が `flash_implement` かつ未実装なら `flashImplementPhase`
-8. Lite 対象 phase かつゲート/深掘りトリガーでない場合 → `runLiteTurn`
+8. 実装後 phase で不具合・要望なら `runMaintainAgentTurn`（Lite より先）
+9. Lite 対象 phase かつゲート/深掘りトリガーでない場合 → `runLiteTurn`
 
 ---
 
@@ -196,8 +236,9 @@ R2 `third-party/{dir_name}/` に保存:
 | 1 ユーザー 1 日あたりのチャットターン | 30 | `assertDailyTurnLimit`（実装開始トリガー時はユーザーメッセージ未挿入のためカウントされない場合あり） |
 | レビューループ | 最大 2 回 | `review_loop_count`, `MAX_REVIEW_LOOPS` |
 | 実装試行 | 最大 3 回 | `implement_attempts`, `MAX_IMPLEMENT_ATTEMPTS` |
+| メンテ修正（patch_html） | 最大 10 回 | `maintain_attempts`, `MAX_MAINTAIN_ATTEMPTS`（migration `0067_tp_maintain_attempts.sql`） |
 
-**再送信・編集:** `rewind_to_message_id` 付き POST で、指定ユーザー発言以降のメッセージを削除し、`workflow_phase` を `discovery` に戻してから再送する（`third-party.ts` の `rewindChatFromUserMessage`）。フォーム回答行（`【フォーム回答】` 始まり）は再送信不可。
+**再送信・編集:** `rewind_to_message_id` 付き POST で、指定ユーザー発言以降のメッセージを削除する。`draft_ready` / `app_maintain` 系では **`workflow_phase` を `discovery` に戻さない**（`context_summary` 維持）。初回ビルド前は従来どおり `discovery` へ巻き戻し。フォーム回答行（`【フォーム回答】` 始まり）は再送信不可。
 
 **公開:** `draft_ready` かつプレースホルダー以外の HTML が必要（`publishTpProject`）。
 
@@ -223,9 +264,10 @@ POST /api/third-party/projects/:id/chat
 
 | UI | phase / 条件 |
 |----|----------------|
-| サジェスト（ランディングページ等） | `discovery` / `clarify` |
-| 動的フォーム | `pending_form` あり（多くは `structured_form`） |
-| 「要件を深掘り」「実装に進む」 | `gate_deepen_or_build` |
+| サジェスト（ランディングページ等） | `discovery` / `clarify`（実装後 phase では非表示） |
+| 動的フォーム | `pending_form` あり（実装後はメンテで抑止） |
+| 「要件を深掘り」「実装に進む」 | `gate_deepen_or_build`（実装後では非表示） |
+| 不具合・要望の入力 | `draft_ready` 以降（プレースホルダーで誘導） |
 | 「実装開始」 | `await_implement_confirm` |
 | フェーズバッジ | `PHASE_LABELS` in `third-party-main.js` |
 
@@ -233,4 +275,5 @@ POST /api/third-party/projects/:id/chat
 
 ## 更新履歴
 
+- 2026-07-28: 実装後メンテ（ワークスペースエージェント）追記
 - 2026-07-28: 初版（`gemini-pipeline.ts` 現行実装に基づく）

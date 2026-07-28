@@ -28,7 +28,11 @@ import {
   runTpStubFallback,
   type GeminiChatResult,
 } from "./third-party/gemini-pipeline";
-import type { StructuredForm, TpWorkflowPhase } from "./third-party/schemas";
+import {
+  isPostBuildPhase,
+  type StructuredForm,
+  type TpWorkflowPhase,
+} from "./third-party/schemas";
 import { EMPTY_PLACEHOLDER_HTML } from "./third-party/stub-chat";
 
 export const THIRD_PARTY_APP_SLUG = "third-party";
@@ -417,14 +421,31 @@ export async function rewindChatFromUserMessage(
     .bind(projectId, row.created_at)
     .run();
 
-  await db
-    .prepare(
-      `UPDATE tp_projects SET workflow_phase = 'discovery', pending_form_json = NULL,
-       context_summary = NULL, review_passed = NULL, awaiting_implement_confirm = 0,
-       updated_at = ? WHERE id = ?`
-    )
-    .bind(now(), projectId)
-    .run();
+  const projectRow = await db
+    .prepare("SELECT workflow_phase FROM tp_projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ workflow_phase: string }>();
+
+  const postBuild = isPostBuildPhase(projectRow?.workflow_phase ?? "");
+
+  if (postBuild) {
+    await db
+      .prepare(
+        `UPDATE tp_projects SET pending_form_json = NULL, awaiting_implement_confirm = 0,
+         updated_at = ? WHERE id = ?`
+      )
+      .bind(now(), projectId)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `UPDATE tp_projects SET workflow_phase = 'discovery', pending_form_json = NULL,
+         context_summary = NULL, review_passed = NULL, awaiting_implement_confirm = 0,
+         updated_at = ? WHERE id = ?`
+      )
+      .bind(now(), projectId)
+      .run();
+  }
 
   return { previousContent: row.content };
 }

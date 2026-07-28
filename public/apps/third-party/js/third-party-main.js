@@ -17,6 +17,8 @@ const PHASE_LABELS = {
   flash_implement: "実装中",
   await_implement_confirm: "実装確認",
   draft_ready: "実装完了",
+  app_maintain: "不具合対応中",
+  app_maintain_done: "実装完了",
 };
 
 /** API 呼び出し */
@@ -254,12 +256,17 @@ function updatePhaseUI(phase, pendingForm, reviewSummary) {
   }
 
   const suggestions = document.getElementById("chat-suggestions");
+  const postBuild =
+    currentPhase === "draft_ready" ||
+    currentPhase === "app_maintain" ||
+    currentPhase === "app_maintain_done";
   const showSuggest =
-    currentPhase === "discovery" || currentPhase === "clarify";
+    !postBuild &&
+    (currentPhase === "discovery" || currentPhase === "clarify");
   suggestions.hidden = !showSuggest;
 
   const gate = document.getElementById("chat-gate");
-  gate.hidden = currentPhase !== "gate_deepen_or_build";
+  gate.hidden = postBuild || currentPhase !== "gate_deepen_or_build";
 
   const implementConfirm = document.getElementById("chat-implement-confirm");
   implementConfirm.hidden = currentPhase !== "await_implement_confirm";
@@ -279,7 +286,10 @@ function updatePhaseUI(phase, pendingForm, reviewSummary) {
   renderPendingForm(currentPendingForm);
 
   const chatInput = document.getElementById("chat-input");
-  if (currentPhase === "gate_deepen_or_build") {
+  if (postBuild) {
+    chatInput.placeholder =
+      "不具合や追加したいことを説明（例: クリアボタンが動かない）…";
+  } else if (currentPhase === "gate_deepen_or_build") {
     chatInput.placeholder =
       "「実装に進む」「実装して」または下のボタン…";
   } else {

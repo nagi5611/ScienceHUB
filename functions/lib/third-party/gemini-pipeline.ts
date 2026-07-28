@@ -23,6 +23,7 @@ import {
   type PlanReviewResult,
   type StructuredForm,
   type TpWorkflowPhase,
+  isPostBuildPhase,
   isTpWorkflowPhase,
 } from "./schemas";
 import {
@@ -33,6 +34,11 @@ import {
   REVIEW_CHECKLIST_HINT,
 } from "./prompts";
 import { EMPTY_PLACEHOLDER_HTML } from "./stub-chat";
+import {
+  runMaintainAgentTurn,
+  wantsMaintainUserReport,
+  type MaintainProjectContext,
+} from "./workspace-agent";
 
 const MAX_DAILY_TURNS = 30;
 const MAX_REVIEW_LOOPS = 2;
@@ -56,6 +62,7 @@ export interface TpProjectPipelineRow {
   implement_attempts: number;
   review_loop_count: number;
   awaiting_implement_confirm: number;
+  maintain_attempts: number;
 }
 
 export interface GeminiChatResult {
@@ -143,7 +150,8 @@ async function loadPipelineProject(
     .prepare(
       `SELECT id, owner_user_id, title, slug, status, r2_prefix, dir_name,
               workflow_phase, context_summary, pending_form_json, review_passed,
-              implement_attempts, review_loop_count, awaiting_implement_confirm
+              implement_attempts, review_loop_count, awaiting_implement_confirm,
+              COALESCE(maintain_attempts, 0) AS maintain_attempts
        FROM tp_projects WHERE id = ? AND owner_user_id = ?`
     )
     .bind(projectId, userId)
@@ -162,6 +170,7 @@ async function patchProject(
     implement_attempts: number;
     review_loop_count: number;
     awaiting_implement_confirm: number;
+    maintain_attempts: number;
   }>
 ): Promise<void> {
   const updates: string[] = ["updated_at = ?"];
@@ -194,6 +203,10 @@ async function patchProject(
   if (fields.awaiting_implement_confirm !== undefined) {
     updates.push("awaiting_implement_confirm = ?");
     values.push(fields.awaiting_implement_confirm);
+  }
+  if (fields.maintain_attempts !== undefined) {
+    updates.push("maintain_attempts = ?");
+    values.push(fields.maintain_attempts);
   }
 
   values.push(projectId);
@@ -248,6 +261,7 @@ function wantsDeepenRequirements(text: string): boolean {
 
 /** 要件・計画ドキュメント作成へ進む意図（ゲートの「実装に進む」相当） */
 function wantsGateBuildDocs(text: string, phase: string): boolean {
+  if (isPostBuildPhase(phase)) return false;
   if (wantsDeepenRequirements(text)) return false;
   const t = text.trim();
   if (text.includes("実装に進む") || t === "write_docs") return true;
@@ -526,12 +540,13 @@ export async function runTpGeminiChat(
   if (!current) return null;
 
   const implementStartTrigger =
-    userText === "実装開始" ||
-    (current.awaiting_implement_confirm === 1 &&
-      (userText === "実装開始" ||
-        userText === "implement_now" ||
-        userText.includes("実装して") ||
-        userText.trim() === "実装"));
+    !isPostBuildPhase(current.workflow_phase) &&
+    (userText === "実装開始" ||
+      (current.awaiting_implement_confirm === 1 &&
+        (userText === "実装開始" ||
+          userText === "implement_now" ||
+          userText.includes("実装して") ||
+          userText.trim() === "実装")));
 
   const gateBuildTrigger = wantsGateBuildDocs(
     userText,
@@ -555,7 +570,7 @@ export async function runTpGeminiChat(
   }
 
   // ゲート: 深掘り / 実装
-  if (wantsDeepenRequirements(userText)) {
+  if (!isPostBuildPhase(current.workflow_phase) && wantsDeepenRequirements(userText)) {
     await patchProject(db, projectId, {
       workflow_phase: "deepen_requirements",
       pending_form_json: null,
@@ -610,6 +625,51 @@ export async function runTpGeminiChat(
     htmlUpdated = impl.htmlUpdated;
   }
 
+  // 実装後メンテ（ワークスペースエージェント）
+  current = (await loadPipelineProject(db, userId, projectId))!;
+  const maintainPhases = ["draft_ready", "app_maintain", "app_maintain_done"];
+  if (
+    userText &&
+    maintainPhases.includes(current.workflow_phase) &&
+    wantsMaintainUserReport(userText, current.workflow_phase)
+  ) {
+    await patchProject(db, projectId, {
+      workflow_phase: "app_maintain",
+      pending_form_json: null,
+    });
+    current = (await loadPipelineProject(db, userId, projectId))!;
+    const messages = await listMessages(db, projectId);
+    const maintainCtx: MaintainProjectContext = {
+      id: current.id,
+      title: current.title,
+      r2_prefix: current.r2_prefix,
+      dir_name: current.dir_name,
+      context_summary: current.context_summary,
+      maintain_attempts: current.maintain_attempts ?? 0,
+    };
+    const maintainResult = await runMaintainAgentTurn(
+      env,
+      db,
+      bucket,
+      maintainCtx,
+      userText,
+      recentChatBlock(messages)
+    );
+    await insertMessage(
+      db,
+      projectId,
+      "assistant",
+      maintainResult.assistantMessage
+    );
+    await patchProject(db, projectId, {
+      workflow_phase: maintainResult.workflowPhase,
+      pending_form_json: null,
+    });
+    if (maintainResult.htmlUpdated) {
+      htmlUpdated = true;
+    }
+  }
+
   // Lite 対話フェーズ
   const litePhases = [
     "discovery",
@@ -622,6 +682,7 @@ export async function runTpGeminiChat(
   if (
     userText &&
     litePhases.includes(current.workflow_phase) &&
+    !isPostBuildPhase(current.workflow_phase) &&
     !wantsGateBuildDocs(userText, current.workflow_phase) &&
     !wantsDeepenRequirements(userText)
   ) {
