@@ -2,7 +2,8 @@
 import type { Env } from "../types";
 import { terminateEc2Instance, isAwsEc2Configured } from "../aws/ec2";
 import { getFdsJobById, updateFdsJobStatus, type FdsJobStatus } from "./fds-jobs";
-import { syncFdsJobArtifacts } from "./fds-job-artifacts";
+import { readFdsJobLogSnippet, syncFdsJobArtifacts } from "./fds-job-artifacts";
+import { classifyFdsJobFailure } from "./fds-failure-category";
 
 const CALLBACK_STATUSES = new Set<FdsJobStatus>(["running", "succeeded", "failed", "timed_out"]);
 
@@ -48,9 +49,16 @@ export async function handleFdsJobCallback(
   }
 
   const finishedAt = new Date().toISOString();
+  let failureCategory = null;
+  if (status === "failed" || status === "timed_out") {
+    const logSnippet = await readFdsJobLogSnippet(env.FILES, job.log_r2_key);
+    failureCategory = classifyFdsJobFailure(status, message, logSnippet);
+  }
+
   await updateFdsJobStatus(env.DB, jobId, status, {
     statusMessage: message,
     finishedAt,
+    failureCategory,
   });
 
   await syncFdsJobArtifacts(env, (await getFdsJobById(env.DB, jobId)) ?? job);

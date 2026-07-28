@@ -56,8 +56,15 @@ function requestHasDetailPanel(row) {
     row.status === 'primary_failed' ||
     row.status === 'primary_error' ||
     row.status === 'pending_approval' ||
-    row.status === 'rejected'
+    row.status === 'rejected' ||
+    row.status === 'approved'
   );
+}
+
+/** Shortens a SHA-256 hex string for display. */
+function formatSha256Short(hex) {
+  if (!hex || hex.length < 16) return hex || '—';
+  return `${hex.slice(0, 12)}…${hex.slice(-8)}`;
 }
 
 /** Builds HTML for the expandable detail panel under a request row. */
@@ -92,6 +99,59 @@ function renderRequestDetailPanel(row) {
     parts.push(
       '<p class="hint">担当者の承認後にシミュレーションが実行されます。</p>'
     );
+  }
+
+  if (row.execution_failure_message) {
+    parts.push(
+      `<p class="fds-request-detail-label">実行結果の説明</p><p class="alert alert-error fds-request-detail-error">${escapeHtml(row.execution_failure_message)}</p>`
+    );
+  }
+
+  if (row.status === 'approved') {
+    const repro = [];
+    if (row.input_sha256) {
+      repro.push(`入力 SHA-256: <code>${escapeHtml(formatSha256Short(row.input_sha256))}</code>`);
+    }
+    if (row.output_sha256) {
+      repro.push(`出力 SHA-256: <code>${escapeHtml(formatSha256Short(row.output_sha256))}</code>`);
+    }
+    if (row.fds_solver_version) {
+      repro.push(`FDS: ${escapeHtml(row.fds_solver_version)}`);
+    }
+    if (row.fds_ami_id) {
+      repro.push(`AMI: <code>${escapeHtml(row.fds_ami_id)}</code>`);
+    }
+    if (row.ec2_instance_type) {
+      repro.push(`インスタンス: ${escapeHtml(row.ec2_instance_type)} · MPI ${row.mpi_processes}`);
+    }
+    if (row.job_launched_at || row.job_finished_at) {
+      repro.push(
+        `実行: ${escapeHtml(row.job_launched_at ?? '—')} 〜 ${escapeHtml(row.job_finished_at ?? '—')}`
+      );
+    }
+    if (repro.length) {
+      parts.push(
+        `<p class="fds-request-detail-label">再現性情報</p><ul class="fds-primary-review-issues">${repro
+          .map((line) => `<li>${line}</li>`)
+          .join('')}</ul>`
+      );
+    }
+
+    if (row.has_output_download) {
+      parts.push(
+        `<p class="fds-request-detail-actions"><a class="btn btn-primary btn-sm" href="/api/simulation/fds-requests/${escapeHtml(row.id)}/output/download" download>結果 ZIP をダウンロード</a></p>`
+      );
+    }
+
+    if (row.can_rerun) {
+      parts.push(
+        `<p class="fds-request-detail-actions"><button type="button" class="btn btn-secondary btn-sm fds-rerun-btn" data-request-id="${escapeHtml(row.id)}">同条件で再依頼</button></p>`
+      );
+    }
+  }
+
+  if (row.primary_review_model) {
+    parts.push(`<p class="hint">一次審査モデル: ${escapeHtml(row.primary_review_model)}</p>`);
   }
 
   appendPrimaryReviewActions(parts, row);
@@ -258,20 +318,41 @@ function formatBytes(bytes) {
 /** Updates EC2 instance preview from MPI process count. */
 async function refreshInstancePreview() {
   const mpiInput = document.getElementById('fds-mpi-processes');
+  const runtimeInput = document.getElementById('fds-max-runtime-hours');
+  const fileInput = document.getElementById('fds-input-file');
   const previewEl = document.getElementById('fds-instance-preview');
+  const costEl = document.getElementById('fds-cost-estimate-hint');
   if (!mpiInput || !previewEl) return;
 
   const mpi = parseInt(mpiInput.value, 10);
   if (!Number.isFinite(mpi) || mpi < 1) {
     previewEl.textContent = '—';
+    if (costEl) costEl.textContent = '';
     return;
   }
 
+  const maxRuntime = runtimeInput ? parseInt(runtimeInput.value, 10) : 10;
+  const file = fileInput?.files?.[0];
+  const inputSize = file?.size ?? 0;
+
   try {
-    const data = await apiRequest(`fds-requests/instance-preview?mpi_processes=${mpi}`);
+    const params = new URLSearchParams({
+      mpi_processes: String(mpi),
+      max_runtime_hours: String(Number.isFinite(maxRuntime) ? maxRuntime : 10),
+      input_size_bytes: String(inputSize),
+    });
+    const data = await apiRequest(`fds-requests/instance-preview?${params}`);
     previewEl.textContent = `${data.instance_type}（${data.vcpus} vCPU）`;
+    if (costEl && data.estimated_cost_jpy_max != null) {
+      const storage = data.estimated_storage;
+      const storageHint = storage
+        ? ` · ストレージ目安 入力 ${formatBytes(storage.input_bytes)} / 出力 ${formatBytes(storage.output_bytes_hint_min)} 以上`
+        : '';
+      costEl.textContent = `概算料金（最大 ${data.max_runtime_hours} 時間フル稼働）: 約 ${data.estimated_cost_jpy_max.toLocaleString('ja-JP')} 円（$${data.estimated_cost_usd_max}）${storageHint}。${data.cost_note ?? ''}`;
+    }
   } catch {
     previewEl.textContent = '取得できませんでした';
+    if (costEl) costEl.textContent = '';
   }
 }
 
@@ -320,6 +401,7 @@ function setupFdsFileDropZone() {
     alertEl?.classList.add('hidden');
     assignFileToInput(fileInput, file);
     updateFdsFileStatus(file);
+    scheduleInstancePreview();
   };
 
   uploadZone.addEventListener('click', () => fileInput.click());
@@ -468,6 +550,14 @@ async function renderMyRequests() {
       });
     });
 
+    mount.querySelectorAll('.fds-rerun-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-request-id');
+        if (id) rerunFdsRequest(id);
+      });
+    });
+
     mount.querySelectorAll('.fds-retry-primary-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -606,7 +696,32 @@ async function submitFdsRequest(form, { forceSecondary = false } = {}) {
   }
 }
 
-/** Handles FDS request form submit. */
+/** Re-submits a finished request with the same input and parameters. */
+async function rerunFdsRequest(requestId) {
+  const ok = window.confirm(
+    '同じ入力・MPI・最大実行時間で新しい依頼を作成します（一次審査から）。よろしいですか？'
+  );
+  if (!ok) return;
+  try {
+    await ensureSimPhoneVerified();
+    const data = await apiRequest(`fds-requests/${requestId}/rerun`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    if (data.request?.id) {
+      lastSubmittedRequestId = data.request.id;
+      expandedRequestIds.add(data.request.id);
+    }
+    await renderMyRequests();
+  } catch (err) {
+    const alertEl = document.getElementById('fds-form-alert');
+    if (alertEl) {
+      alertEl.textContent = err instanceof Error ? err.message : '再依頼に失敗しました';
+      alertEl.classList.remove('hidden');
+    }
+  }
+}
+
 async function handleFdsSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -639,6 +754,7 @@ async function init() {
   document.getElementById('fds-request-panel')?.classList.remove('hidden');
 
   document.getElementById('fds-mpi-processes')?.addEventListener('input', scheduleInstancePreview);
+  document.getElementById('fds-max-runtime-hours')?.addEventListener('input', scheduleInstancePreview);
   setupFdsFileDropZone();
   document.getElementById('fds-request-form')?.addEventListener('submit', handleFdsSubmit);
   document.getElementById('fds-force-secondary-btn')?.addEventListener('click', () => {

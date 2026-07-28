@@ -3451,6 +3451,10 @@ tr:hover td {
   color: #1d4ed8;
 }
 
+.fds-request-status--execution_queued {
+  color: #6b7280;
+}
+
 .fds-request-status--execution_running,
 .fds-request-status--approved {
   color: #b45309;

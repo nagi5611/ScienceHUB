@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <title>サードパーティ — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/third-party.css">
+</head>
+<body>
+  <div class="tp-loading" id="app-loading">読み込み中…</div>
+
+  <div class="tp-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。</p>
+    <a href="/" class="tp-btn tp-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <div class="tp-app" id="app-root" hidden>
+    <section class="tp-gallery" id="gallery-view">
+      <header class="tp-header">
+        <a href="/" class="tp-back">← ダッシュボード</a>
+        <h1 class="tp-title">サードパーティ</h1>
+        <span class="tp-header-spacer"></span>
+        <button type="button" class="tp-btn tp-btn--primary" id="new-app-btn">新規アプリを開発</button>
+      </header>
+      <div class="tp-gallery-body">
+        <section class="tp-gallery-section" id="my-projects-section">
+          <h2 class="tp-section-title">自分のアプリ</h2>
+          <div class="tp-empty tp-empty--inline" id="my-projects-empty" hidden>
+            <p>まだアプリがありません。「新規アプリを開発」から作成できます。</p>
+          </div>
+          <div class="tp-grid" id="my-projects-grid"></div>
+        </section>
+        <section class="tp-gallery-section" id="community-section">
+          <h2 class="tp-section-title">みんなのアプリ（公開）</h2>
+          <div class="tp-empty tp-empty--inline" id="gallery-empty" hidden>
+            <p>まだ公開されたアプリがありません。</p>
+          </div>
+          <div class="tp-grid" id="gallery-grid"></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="tp-studio" id="studio-view" hidden>
+      <header class="tp-header">
+        <button type="button" class="tp-back" id="studio-back">← 一覧</button>
+        <input type="text" class="tp-title-input" id="studio-title" maxlength="120" aria-label="アプリ名">
+        <span class="tp-phase-badge" id="studio-phase" hidden></span>
+        <span class="tp-status" id="studio-status" aria-live="polite"></span>
+        <span class="tp-header-spacer"></span>
+        <button type="button" class="tp-btn" id="refresh-preview-btn">プレビュー更新</button>
+        <button type="button" class="tp-btn tp-btn--primary" id="publish-btn">公開</button>
+      </header>
+      <div class="tp-studio-main">
+        <div class="tp-chat-panel">
+          <div class="tp-chat-messages" id="chat-messages"></div>
+          <div class="tp-review-banner" id="chat-review-banner" hidden></div>
+          <div class="tp-chat-dynamic" id="chat-dynamic-form" hidden></div>
+          <div class="tp-gate-actions" id="chat-gate" hidden>
+            <button type="button" class="tp-btn" id="gate-deepen">要件を深掘り</button>
+            <button type="button" class="tp-btn tp-btn--primary" id="gate-build">実装に進む</button>
+          </div>
+          <div class="tp-gate-actions" id="chat-implement-confirm" hidden>
+            <button type="button" class="tp-btn tp-btn--primary" id="gate-implement-start">実装開始</button>
+          </div>
+          <div class="tp-suggestions" id="chat-suggestions" hidden>
+            <button type="button" class="tp-suggest" data-prompt="ランディングページを作って">ランディングページ</button>
+            <button type="button" class="tp-suggest" data-prompt="TODOリストを作って">TODO リスト</button>
+            <button type="button" class="tp-suggest" data-prompt="アンケートフォームを作って">アンケートフォーム</button>
+          </div>
+          <form class="tp-chat-form" id="chat-form">
+            <input type="text" class="tp-chat-input" id="chat-input" placeholder="作りたいアプリを説明…" autocomplete="off">
+            <button type="submit" class="tp-btn tp-btn--primary" id="chat-send">送信</button>
+          </form>
+        </div>
+        <div class="tp-canvas-panel">
+          <div class="tp-preview-header">
+            <span class="tp-preview-label">Preview</span>
+            <div class="tp-preview-actions">
+              <button type="button" class="tp-icon-btn is-active" id="width-full" title="PC幅">PC</button>
+              <button type="button" class="tp-icon-btn" id="width-mobile" title="モバイル幅">SP</button>
+            </div>
+          </div>
+          <div class="tp-preview-wrap">
+            <div class="tp-preview-frame-box" id="preview-box">
+              <iframe class="tp-preview-iframe" id="preview-iframe" title="プレビュー" sandbox="allow-scripts"></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="tp-modal" id="create-modal" hidden>
+    <div class="tp-modal-card">
+      <h2>新規アプリを作成</h2>
+      <p class="tp-card-meta">アプリ名を入力して開発を始めます。あとから変更できます。</p>
+      <label for="create-title">アプリ名</label>
+      <input type="text" class="tp-modal-input" id="create-title" maxlength="120" placeholder="例: 部活予定アプリ" autocomplete="off">
+      <div class="tp-modal-actions">
+        <button type="button" class="tp-btn" id="create-cancel">キャンセル</button>
+        <button type="button" class="tp-btn tp-btn--primary" id="create-confirm">作成して開発</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tp-modal" id="publish-modal" hidden>
+    <div class="tp-modal-card">
+      <h2>アプリを公開</h2>
+      <p class="tp-card-meta">サードパーティの一覧に表示されます。閲覧できる人は選択したグループのメンバーです。</p>
+      <label for="publish-group">公開先グループ</label>
+      <select id="publish-group"></select>
+      <div class="tp-modal-actions">
+        <button type="button" class="tp-btn" id="publish-cancel">キャンセル</button>
+        <button type="button" class="tp-btn tp-btn--primary" id="publish-confirm">公開する</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/apps/third-party/js/third-party-main.js" type="module"></script>
+</body>
+</html>

@@ -1,5 +1,10 @@
 // functions/lib/simulation/fds-jobs.ts
 
+import {
+  fdsFailureCategoryUserMessage,
+  type FdsFailureCategory,
+} from "./fds-failure-category";
+
 export type FdsJobStatus =
   | "pending"
   | "launching"
@@ -50,6 +55,11 @@ export interface FdsJob {
   finished_at: string | null;
   created_by_user_id: string;
   created_at: string;
+  input_sha256: string | null;
+  output_sha256: string | null;
+  fds_ami_id: string | null;
+  fds_solver_version: string | null;
+  failure_category: string | null;
 }
 
 export interface FdsJobApiModel {
@@ -72,6 +82,12 @@ export interface FdsJobApiModel {
   has_log: boolean;
   ec2_instance_state: string | null;
   ec2_launch_time: string | null;
+  input_sha256: string | null;
+  output_sha256: string | null;
+  fds_ami_id: string | null;
+  fds_solver_version: string | null;
+  failure_category: FdsFailureCategory | null;
+  failure_message: string | null;
 }
 
 export const FDS_JOB_MAX_RUNTIME_HOURS = 10;
@@ -152,6 +168,14 @@ export function formatFdsJobForApi(
     has_log: hasLog,
     ec2_instance_state: liveEc2?.ec2_instance_state ?? null,
     ec2_launch_time: liveEc2?.ec2_launch_time ?? null,
+    input_sha256: job.input_sha256 ?? null,
+    output_sha256: job.output_sha256 ?? null,
+    fds_ami_id: job.fds_ami_id ?? null,
+    fds_solver_version: job.fds_solver_version ?? null,
+    failure_category: (job.failure_category as FdsFailureCategory | null) ?? null,
+    failure_message: job.failure_category
+      ? fdsFailureCategoryUserMessage(job.failure_category as FdsFailureCategory)
+      : null,
   };
 }
 
@@ -181,6 +205,7 @@ export async function createFdsJob(
     instanceType: string;
     maxRuntimeHours?: number;
     mpiProcesses?: number;
+    inputSha256?: string | null;
     createdByUserId: string;
     createdAt: string;
   }
@@ -193,8 +218,8 @@ export async function createFdsJob(
       `INSERT INTO sim_fds_jobs (
         id, title, input_r2_key, input_filename, input_size_bytes,
         status, ec2_instance_type, max_runtime_hours, mpi_processes,
-        created_by_user_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`
+        created_by_user_id, created_at, input_sha256
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -206,7 +231,8 @@ export async function createFdsJob(
       maxRuntimeHours,
       mpiProcesses,
       data.createdByUserId,
-      data.createdAt
+      data.createdAt,
+      data.inputSha256 ?? null
     )
     .run();
 
@@ -244,6 +270,10 @@ export async function updateFdsJobStatus(
     outputFilename?: string | null;
     outputSizeBytes?: number | null;
     logR2Key?: string | null;
+    failureCategory?: FdsFailureCategory | null;
+    outputSha256?: string | null;
+    fdsAmiId?: string | null;
+    fdsSolverVersion?: string | null;
   } = {}
 ): Promise<void> {
   const fields: string[] = ["status = ?"];
@@ -272,6 +302,22 @@ export async function updateFdsJobStatus(
   if (options.logR2Key !== undefined) {
     fields.push("log_r2_key = ?");
     values.push(options.logR2Key);
+  }
+  if (options.failureCategory !== undefined) {
+    fields.push("failure_category = ?");
+    values.push(options.failureCategory);
+  }
+  if (options.outputSha256 !== undefined) {
+    fields.push("output_sha256 = ?");
+    values.push(options.outputSha256);
+  }
+  if (options.fdsAmiId !== undefined) {
+    fields.push("fds_ami_id = ?");
+    values.push(options.fdsAmiId);
+  }
+  if (options.fdsSolverVersion !== undefined) {
+    fields.push("fds_solver_version = ?");
+    values.push(options.fdsSolverVersion);
   }
 
   values.push(jobId);

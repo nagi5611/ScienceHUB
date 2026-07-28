@@ -204,6 +204,9 @@ import {
 import {
   extractFdsTextForReview,
 } from "../../lib/simulation/fds-primary-review";
+import { sha256HexFromBuffer } from "../../lib/simulation/fds-content-hash";
+import { estimateFdsRunCost, estimateFdsStorage } from "../../lib/simulation/fds-cost-estimate";
+import { createFdsRerunFromRequest } from "../../lib/simulation/fds-rerun";
 import { verifyFirebaseIdToken } from "../../lib/simulation/firebase-id-token";
 import {
   assertSimPhoneE164Available,
@@ -1392,10 +1395,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     ) {
       const mpiRaw = parseInt(url.searchParams.get("mpi_processes") ?? "", 10);
       const sizing = pickC7aInstanceType(Number.isFinite(mpiRaw) ? mpiRaw : 1);
+      const maxRuntimeRaw = parseInt(url.searchParams.get("max_runtime_hours") ?? "", 10);
+      const maxRuntimeHours = Number.isFinite(maxRuntimeRaw)
+        ? maxRuntimeRaw
+        : FDS_JOB_MAX_RUNTIME_HOURS;
+      const inputSizeRaw = parseInt(url.searchParams.get("input_size_bytes") ?? "", 10);
+      const inputBytes = Number.isFinite(inputSizeRaw) ? inputSizeRaw : 0;
+      const cost = estimateFdsRunCost(sizing.instanceType, maxRuntimeHours);
+      const storage = estimateFdsStorage(inputBytes);
       return json({
         mpi_processes: sizing.requestedCores,
         instance_type: sizing.instanceType,
         vcpus: sizing.vcpus,
+        max_runtime_hours: cost.max_runtime_hours,
+        estimated_cost_usd_max: cost.estimated_cost_usd_max,
+        estimated_cost_jpy_max: cost.estimated_cost_jpy_max,
+        cost_note: cost.cost_note,
+        estimated_storage: storage,
       });
     }
 
@@ -1413,6 +1429,93 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("依頼が見つかりません", 404);
       }
       return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+    }
+
+    // GET /api/simulation/fds-requests/:id/output/download
+    if (
+      method === "GET" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 4 &&
+      segments[2] === "output" &&
+      segments[3] === "download"
+    ) {
+      const row = await getFdsRequestById(db, segments[1]);
+      if (!row || row.user_id !== userId) {
+        return error("依頼が見つかりません", 404);
+      }
+      if (!row.fds_job_id) return error("実行結果がありません", 404);
+      let job = await getFdsJobById(db, row.fds_job_id);
+      if (!job?.output_r2_key) return error("結果ファイルがありません", 404);
+      const synced = await syncFdsJobArtifacts(env, job);
+      job = synced.job;
+      if (!synced.artifacts.hasOutput) return error("結果ファイルがありません", 404);
+      const obj = await env.FILES.get(job.output_r2_key!);
+      if (!obj) return error("結果ファイルがありません", 404);
+      const base = job.input_filename.replace(/\.fds$/i, "");
+      const filename = job.output_filename ?? `${base}-results.zip`;
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachmentFilename(filename),
+        },
+      });
+    }
+
+    // POST /api/simulation/fds-requests/:id/rerun
+    if (
+      method === "POST" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 3 &&
+      segments[2] === "rerun"
+    ) {
+      try {
+        await requireSimPhoneVerified(db, userId);
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as Error & { code?: string }).code
+            : undefined;
+        if (code === SIM_PHONE_NOT_VERIFIED_CODE) {
+          return json(
+            { error: err instanceof Error ? err.message : "電話認証が必要です", code },
+            403
+          );
+        }
+        throw err;
+      }
+
+      const sourceId = segments[1];
+      let body: { title?: string; desired_date?: string | null } = {};
+      try {
+        body = await request.json();
+      } catch {
+        body = {};
+      }
+
+      try {
+        const row = await createFdsRerunFromRequest(env, db, sourceId, userId, {
+          title: body.title,
+          desiredDate: body.desired_date,
+        });
+        const object = await env.FILES.get(row.input_r2_key);
+        const fdsText = object
+          ? extractFdsTextForReview(await object.arrayBuffer())
+          : "";
+        waitUntil(
+          runFdsPrimaryReviewJob(env, db, {
+            requestId: row.id,
+            fdsText,
+            filename: row.input_filename,
+            mpiProcesses: row.mpi_processes,
+            maxRuntimeHours: row.max_runtime_hours,
+            forceSecondary: false,
+          })
+        );
+        return json({ request: await formatFdsRequestForApiEnriched(db, row) }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "再依頼に失敗しました";
+        return error(message, 400);
+      }
     }
 
     // POST /api/simulation/fds-requests/:id/retry-primary
@@ -1468,6 +1571,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const fileBuffer = await fileEntry.arrayBuffer();
+      const inputSha256 = await sha256HexFromBuffer(fileBuffer);
       const fdsText = extractFdsTextForReview(fileBuffer);
       const r2Key = generateFdsInputR2Key(requestId, filename);
 
@@ -1480,6 +1584,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           inputR2Key: r2Key,
           inputFilename: filename,
           inputSizeBytes: sizeBytes,
+          inputSha256,
         });
 
         waitUntil(
@@ -1579,6 +1684,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const createdAt = new Date().toISOString();
 
       const fileBuffer = await fileEntry.arrayBuffer();
+      const inputSha256 = await sha256HexFromBuffer(fileBuffer);
       const fdsText = extractFdsTextForReview(fileBuffer);
 
       await env.FILES.put(r2Key, fileBuffer, {
@@ -1595,6 +1701,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         inputR2Key: r2Key,
         inputFilename: filename,
         inputSizeBytes: sizeBytes,
+        inputSha256,
         notes: notesInput || null,
         createdAt,
         status: "primary_reviewing",
@@ -2533,6 +2640,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         inputR2Key: row.input_r2_key,
         inputFilename: row.input_filename,
         inputSizeBytes: row.input_size_bytes,
+        inputSha256: row.input_sha256,
         instanceType: row.ec2_instance_type,
         maxRuntimeHours: row.max_runtime_hours,
         mpiProcesses: row.mpi_processes,

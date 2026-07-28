@@ -301,11 +301,15 @@ export async function launchFdsJobOnEc2(
   pushStep(`EC2 インスタンスを起動しました: ${instanceId}`);
 
   const launchedAt = new Date().toISOString();
+  const solverVersion =
+    env.FDS_SOLVER_VERSION?.trim() || "AMI 同梱（/opt/fds）";
   await markFdsJobLaunching(env.DB, job.id, instanceId, launchedAt);
   await updateFdsJobStatus(env.DB, job.id, "running", {
     outputR2Key,
     outputFilename: "results.zip",
     logR2Key,
+    fdsAmiId: imageId,
+    fdsSolverVersion: solverVersion,
   });
   pushStep("ジョブ状態を running に更新しました");
 

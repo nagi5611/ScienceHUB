@@ -2,13 +2,17 @@
 
 import type { Env } from "../types";
 import { pickC7aInstanceType } from "./fds-instance-sizing";
-import { FDS_JOB_MAX_RUNTIME_HOURS, getFdsJobById, type FdsJobStatus } from "./fds-jobs";
+import { FDS_JOB_MAX_RUNTIME_HOURS, getFdsJobById, type FdsJob, type FdsJobStatus } from "./fds-jobs";
 import { reviewFdsInputWithGemini } from "./fds-primary-review";
 import { buildSimulationAdminUrl, notifyFdsSecondaryReviewPending } from "./discord";
 import {
   listFdsDiscordMentionUserIds,
   resolveSimDiscordWebhookUrl,
 } from "./sim-app-settings";
+import {
+  fdsFailureCategoryUserMessage,
+  type FdsFailureCategory,
+} from "./fds-failure-category";
 
 /** 1 依頼あたりの一次審査の最大実施回数（初回 + 再審最大3回 = 合計4回）。 */
 export const FDS_PRIMARY_REVIEW_MAX_ATTEMPTS = 4;
@@ -45,6 +49,19 @@ export interface FdsRequest {
   primary_review_issues: string | null;
   primary_review_error: string | null;
   primary_review_attempt_count: number;
+  input_sha256: string | null;
+  primary_review_model: string | null;
+  primary_review_history: string | null;
+}
+
+export interface FdsPrimaryReviewHistoryEntry {
+  at: string;
+  model: string;
+  passed: boolean;
+  forced: boolean;
+  status: string;
+  issues: string[];
+  error: string | null;
 }
 
 export interface FdsRequestApiModel {
@@ -70,9 +87,26 @@ export interface FdsRequestApiModel {
   primary_review_max_attempts: number;
   primary_review_can_retry: boolean;
   /** UI badge key (may differ from `status` when linked FDS job is running/done). */
-  status_badge: FdsRequestStatus | "execution_running" | "execution_succeeded" | "execution_failed";
+  status_badge:
+    | FdsRequestStatus
+    | "execution_queued"
+    | "execution_running"
+    | "execution_succeeded"
+    | "execution_failed";
   status_display: string;
   fds_job_status: FdsJobStatus | null;
+  input_sha256: string | null;
+  primary_review_model: string | null;
+  primary_review_history: FdsPrimaryReviewHistoryEntry[];
+  execution_failure_category: FdsFailureCategory | null;
+  execution_failure_message: string | null;
+  has_output_download: boolean;
+  can_rerun: boolean;
+  fds_ami_id: string | null;
+  fds_solver_version: string | null;
+  output_sha256: string | null;
+  job_launched_at: string | null;
+  job_finished_at: string | null;
 }
 
 const REQUEST_STATUS_LABELS: Record<FdsRequestStatus, string> = {
@@ -84,6 +118,44 @@ const REQUEST_STATUS_LABELS: Record<FdsRequestStatus, string> = {
   rejected: "却下",
   cancelled: "キャンセル",
 };
+
+/** Parses stored primary review history JSON. */
+function parsePrimaryReviewHistory(raw: string | null): FdsPrimaryReviewHistoryEntry[] {
+  if (!raw?.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        return {
+          at: String(row.at ?? ""),
+          model: String(row.model ?? ""),
+          passed: Boolean(row.passed),
+          forced: Boolean(row.forced),
+          status: String(row.status ?? ""),
+          issues: Array.isArray(row.issues)
+            ? row.issues.map((s) => String(s).trim()).filter(Boolean)
+            : [],
+          error: row.error != null ? String(row.error) : null,
+        } satisfies FdsPrimaryReviewHistoryEntry;
+      })
+      .filter((e): e is FdsPrimaryReviewHistoryEntry => Boolean(e?.at));
+  } catch {
+    return [];
+  }
+}
+
+/** Appends a primary review attempt to stored history (keeps last 20). */
+function appendPrimaryReviewHistory(
+  existingJson: string | null,
+  entry: FdsPrimaryReviewHistoryEntry
+): string {
+  const list = parsePrimaryReviewHistory(existingJson);
+  list.push(entry);
+  return JSON.stringify(list.slice(-20));
+}
 
 /** Parses stored primary review issues JSON. */
 function parsePrimaryReviewIssues(raw: string | null): string[] {
@@ -104,10 +176,23 @@ export function canRetryPrimaryReview(row: FdsRequest): boolean {
   return row.status === "primary_failed" || row.status === "primary_error";
 }
 
+const TERMINAL_FDS_JOB_STATUSES = new Set(["succeeded", "failed", "timed_out", "cancelled"]);
+
+/** Whether the user may submit a new request with the same parameters as a finished run. */
+export function canRerunFdsRequest(row: FdsRequest, job: FdsJob | null): boolean {
+  if (row.status !== "approved" || !job) return false;
+  return TERMINAL_FDS_JOB_STATUSES.has(job.status);
+}
+
 /** Formats a request for API responses. */
-export function formatFdsRequestForApi(row: FdsRequest): FdsRequestApiModel {
+export function formatFdsRequestForApi(row: FdsRequest, job: FdsJob | null = null): FdsRequestApiModel {
   const attemptCount = row.primary_review_attempt_count ?? 0;
-  const presentation = resolveFdsRequestStatusPresentation(row, null);
+  const presentation = resolveFdsRequestStatusPresentation(row, job?.status ?? null);
+  const failureCategory = (job?.failure_category as FdsFailureCategory | null) ?? null;
+  const hasOutput =
+    Boolean(job?.output_r2_key) &&
+    (job?.status === "succeeded" || job?.status === "failed" || job?.status === "timed_out");
+
   return {
     id: row.id,
     title: row.title,
@@ -133,6 +218,20 @@ export function formatFdsRequestForApi(row: FdsRequest): FdsRequestApiModel {
     status_badge: presentation.status_badge,
     status_display: presentation.status_display,
     fds_job_status: presentation.fds_job_status,
+    input_sha256: row.input_sha256 ?? null,
+    primary_review_model: row.primary_review_model?.trim() || null,
+    primary_review_history: parsePrimaryReviewHistory(row.primary_review_history),
+    execution_failure_category: failureCategory,
+    execution_failure_message: failureCategory
+      ? fdsFailureCategoryUserMessage(failureCategory)
+      : null,
+    has_output_download: hasOutput,
+    can_rerun: canRerunFdsRequest(row, job),
+    fds_ami_id: job?.fds_ami_id ?? null,
+    fds_solver_version: job?.fds_solver_version ?? null,
+    output_sha256: job?.output_sha256 ?? null,
+    job_launched_at: job?.launched_at ?? null,
+    job_finished_at: job?.finished_at ?? null,
   };
 }
 
@@ -151,11 +250,18 @@ function resolveFdsRequestStatusPresentation(
     if (jobStatus === "failed" || jobStatus === "timed_out") {
       return { status_display: "完了_失敗", status_badge: "execution_failed", fds_job_status: jobStatus };
     }
-    if (jobStatus === "running" || jobStatus === "launching") {
+    if (jobStatus === "running") {
       return { status_display: "実行中", status_badge: "execution_running", fds_job_status: jobStatus };
     }
+    if (jobStatus === "launching") {
+      return {
+        status_display: "プロビジョニング中",
+        status_badge: "execution_running",
+        fds_job_status: jobStatus,
+      };
+    }
     if (jobStatus === "pending") {
-      return { status_display: "起動待ち", status_badge: "approved", fds_job_status: jobStatus };
+      return { status_display: "キュー待ち", status_badge: "execution_queued", fds_job_status: jobStatus };
     }
     if (jobStatus === "cancelled") {
       return { status_display: "キャンセル", status_badge: "cancelled", fds_job_status: jobStatus };
@@ -174,17 +280,8 @@ export async function formatFdsRequestForApiEnriched(
   db: D1Database,
   row: FdsRequest
 ): Promise<FdsRequestApiModel> {
-  const base = formatFdsRequestForApi(row);
-  if (!row.fds_job_id) return base;
-
-  const job = await getFdsJobById(db, row.fds_job_id);
-  const presentation = resolveFdsRequestStatusPresentation(row, job?.status ?? null);
-  return {
-    ...base,
-    status_badge: presentation.status_badge,
-    status_display: presentation.status_display,
-    fds_job_status: presentation.fds_job_status,
-  };
+  const job = row.fds_job_id ? await getFdsJobById(db, row.fds_job_id) : null;
+  return formatFdsRequestForApi(row, job);
 }
 
 /** Returns a human-readable status label. */
@@ -259,6 +356,7 @@ export async function createFdsRequest(
     inputR2Key: string;
     inputFilename: string;
     inputSizeBytes: number;
+    inputSha256?: string | null;
     notes: string | null;
     createdAt: string;
     status?: FdsRequestStatus;
@@ -283,8 +381,8 @@ export async function createFdsRequest(
         ec2_instance_type, input_r2_key, input_filename, input_size_bytes,
         notes, status, created_at,
         primary_review_passed, primary_review_forced, primary_review_issues,
-        primary_review_error, primary_review_attempt_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+        primary_review_error, primary_review_attempt_count, input_sha256
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
     )
     .bind(
       data.id,
@@ -303,7 +401,8 @@ export async function createFdsRequest(
       primaryReviewPassed ? 1 : 0,
       primaryReviewForced ? 1 : 0,
       issuesJson,
-      primaryReviewError
+      primaryReviewError,
+      data.inputSha256 ?? null
     )
     .run();
 
@@ -322,10 +421,25 @@ export async function applyFdsPrimaryReviewResult(
     primaryReviewForced: boolean;
     primaryReviewIssues: string[];
     primaryReviewError: string | null;
+    reviewModel: string | null;
   }
 ): Promise<void> {
+  const row = await getFdsRequestById(db, requestId);
+  if (!row) return;
+
   const issuesJson =
     data.primaryReviewIssues.length > 0 ? JSON.stringify(data.primaryReviewIssues) : null;
+
+  const historyEntry: FdsPrimaryReviewHistoryEntry = {
+    at: new Date().toISOString(),
+    model: data.reviewModel?.trim() || "unknown",
+    passed: data.primaryReviewPassed,
+    forced: data.primaryReviewForced,
+    status: data.status,
+    issues: data.primaryReviewIssues,
+    error: data.primaryReviewError,
+  };
+  const historyJson = appendPrimaryReviewHistory(row.primary_review_history, historyEntry);
 
   await db
     .prepare(
@@ -335,7 +449,9 @@ export async function applyFdsPrimaryReviewResult(
            primary_review_forced = ?,
            primary_review_issues = ?,
            primary_review_error = ?,
-           primary_review_attempt_count = primary_review_attempt_count + 1
+           primary_review_attempt_count = primary_review_attempt_count + 1,
+           primary_review_model = ?,
+           primary_review_history = ?
        WHERE id = ? AND status = 'primary_reviewing'`
     )
     .bind(
@@ -344,6 +460,8 @@ export async function applyFdsPrimaryReviewResult(
       data.primaryReviewForced ? 1 : 0,
       issuesJson,
       data.primaryReviewError,
+      data.reviewModel,
+      historyJson,
       requestId
     )
     .run();
@@ -409,6 +527,7 @@ export async function runFdsPrimaryReviewJob(
         primaryReviewForced: false,
         primaryReviewIssues: review.issues,
         primaryReviewError: null,
+        reviewModel: review.model,
       });
       return;
     }
@@ -420,6 +539,7 @@ export async function runFdsPrimaryReviewJob(
       primaryReviewForced: forced,
       primaryReviewIssues: forced ? review.issues : [],
       primaryReviewError: null,
+      reviewModel: review.model,
     });
     await sendFdsPendingApprovalDiscordNotification(env, db, requestId);
   } catch (err) {
@@ -432,6 +552,7 @@ export async function runFdsPrimaryReviewJob(
       primaryReviewForced: false,
       primaryReviewIssues: [],
       primaryReviewError: message,
+      reviewModel: null,
     });
   }
 }
@@ -473,6 +594,7 @@ export async function retryFdsPrimaryReview(
     inputR2Key: string;
     inputFilename: string;
     inputSizeBytes: number;
+    inputSha256?: string | null;
   }
 ): Promise<FdsRequest> {
   const row = await getFdsRequestById(db, requestId);
@@ -492,6 +614,7 @@ export async function retryFdsPrimaryReview(
            input_r2_key = ?,
            input_filename = ?,
            input_size_bytes = ?,
+           input_sha256 = ?,
            primary_review_passed = 0,
            primary_review_forced = 0,
            primary_review_issues = NULL,
@@ -504,6 +627,7 @@ export async function retryFdsPrimaryReview(
       data.inputR2Key,
       data.inputFilename,
       data.inputSizeBytes,
+      data.inputSha256 ?? null,
       requestId,
       userId,
       FDS_PRIMARY_REVIEW_MAX_ATTEMPTS

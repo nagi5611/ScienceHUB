@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f38020">
+  <title>ユーザーアプリ — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/apps/third-party.css">
+</head>
+<body class="tp-viewer-app">
+  <div class="tp-loading" id="viewer-loading">読み込み中…</div>
+  <div class="tp-denied" id="viewer-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを表示する権限がありません。</p>
+    <a href="/apps/third-party/" class="tp-btn tp-btn--primary">サードパーティへ</a>
+  </div>
+  <header class="tp-viewer-header" id="viewer-header" hidden>
+    <a href="/apps/third-party/" class="tp-back">← サードパーティ</a>
+    <h1 class="tp-title" id="viewer-title"></h1>
+    <span class="tp-badge">ユーザー作成</span>
+    <span class="tp-card-meta" id="viewer-owner"></span>
+  </header>
+  <div class="tp-viewer-frame-wrap" id="viewer-wrap" hidden>
+    <iframe class="tp-viewer-iframe" id="viewer-iframe" title="アプリ" sandbox="allow-scripts"></iframe>
+  </div>
+  <script src="/apps/third-party/js/third-party-view.js" type="module"></script>
+</body>
+</html>
