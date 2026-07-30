@@ -18,6 +18,11 @@ import {
 import { buildSimulatorStatusBadge } from '../../simulation-request/js/simulator-status.js';
 import { initFdsTestPanel, renderFdsTestPanel, stopFdsLivePolling } from './fds-test.js';
 import {
+  initOpenfoamTestPanel,
+  renderOpenfoamTestPanel,
+  stopOpenfoamLivePolling,
+} from './openfoam-test.js';
+import {
   initPhoneVerificationAdminPanel,
   renderPhoneVerificationAdminPanel,
 } from './phone-verification-admin.js';
@@ -43,6 +48,7 @@ const ADMIN_PANEL_TITLES = {
   simulators: 'シミュレーター',
   shifts: 'シフト',
   'fds-test': 'FDSテスト',
+  'openfoam-test': 'OpenFOAMテスト',
   'phone-verification': '電話認証',
 };
 
@@ -170,6 +176,7 @@ async function init() {
   setupAdminFormModal();
   setupSimNotificationSettings();
   initFdsTestPanel();
+  initOpenfoamTestPanel();
   initPhoneVerificationAdminPanel();
   try {
     initShiftPanel();
@@ -198,6 +205,9 @@ function switchPanel(panel) {
   if (activePanel === 'fds-test' && panel !== 'fds-test') {
     stopFdsLivePolling();
   }
+  if (activePanel === 'openfoam-test' && panel !== 'openfoam-test') {
+    stopOpenfoamLivePolling();
+  }
   activePanel = panel;
   document.querySelectorAll('.admin-menu-item[data-panel], .admin-mobile-nav-item[data-panel]').forEach((b) => {
     b.classList.toggle('active', b.dataset.panel === panel);
@@ -217,6 +227,7 @@ function switchPanel(panel) {
   }
   if (panel === 'shifts') renderShiftPanel();
   if (panel === 'fds-test') renderFdsTestPanel();
+  if (panel === 'openfoam-test') renderOpenfoamTestPanel();
   if (panel === 'phone-verification') renderPhoneVerificationAdminPanel();
   updateAdminStickyOffsets();
 }

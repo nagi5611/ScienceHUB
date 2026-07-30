@@ -34,7 +34,7 @@
     <div id="page-toast" class="page-toast hidden"></div>
 
     <h1 class="page-heading">シミュレーション依頼</h1>
-    <p class="page-subheading">FDS 依頼は一次審査（AI）のあと担当者による二次審査を経て実行されます。OpenFOAM は現在準備中です。担当者が承認するとシミュレーションが開始されます。</p>
+    <p class="page-subheading">FDS / OpenFOAM 依頼は一次審査（AI）のあと担当者による二次審査を経て実行されます。担当者が承認するとシミュレーションが開始されます。</p>
     <p class="contact-notice">不明点は <a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
 
     <div class="sr-hub-layout">
@@ -51,10 +51,53 @@
 
         <section class="card hidden" id="openfoam-request-panel">
           <h2 class="section-heading">OpenFOAM の設定</h2>
-          <div class="sim-coming-soon-notice" role="status">
-            <p><strong>OpenFOAM 依頼は現在準備中です。</strong></p>
-            <p class="hint">計算流体力学（OpenFOAM）のケースファイル依頼機能は開発中です。公開までしばらくお待ちください。FDS の依頼は引き続きご利用いただけます。</p>
+          <p class="hint" id="openfoam-desired-date-label"></p>
+          <div id="openfoam-phone-verification-banner" class="phone-verification-banner" role="status">
+            <p>OpenFOAM 依頼の前に携帯電話番号の SMS 認証が必要です（日本国内番号のみ）。</p>
+            <button type="button" class="btn btn-primary btn-sm" id="openfoam-phone-verification-open-btn">電話番号を認証する</button>
           </div>
+          <div id="openfoam-form-alert" class="alert alert-error hidden" role="alert"></div>
+          <div id="openfoam-primary-review-block" class="fds-primary-review-block hidden" role="alert">
+            <h3 class="fds-primary-review-block-title">一次審査で指摘がありました</h3>
+            <p class="hint">内容を修正して再送信するか、問題ないと判断できる場合は二次審査（担当者確認）へ進めます。</p>
+            <p class="hint hidden" id="openfoam-primary-review-attempts-hint"></p>
+            <ul class="fds-primary-review-issues" id="openfoam-primary-review-issues"></ul>
+            <button type="button" class="btn btn-primary btn-sm hidden" id="openfoam-retry-primary-form-btn">修正ファイルで再審</button>
+            <button type="button" class="btn btn-secondary" id="openfoam-force-secondary-btn">二次審査へ強制申請する</button>
+          </div>
+          <form id="openfoam-request-form" class="fds-request-form">
+            <div class="form-group">
+              <label for="openfoam-title">タイトル（任意）</label>
+              <input type="text" id="openfoam-title" name="title" placeholder="例: 翼まわり流れ" maxlength="120" />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="openfoam-max-runtime-hours">最大実行時間（時間）</label>
+                <input type="number" id="openfoam-max-runtime-hours" name="max_runtime_hours" min="1" max="10" value="10" required />
+              </div>
+              <div class="form-group">
+                <label for="openfoam-mpi-processes">MPI プロセス数</label>
+                <input type="number" id="openfoam-mpi-processes" name="mpi_processes" min="1" max="96" value="4" required />
+              </div>
+            </div>
+            <p class="hint">自動選択インスタンス: <strong id="openfoam-instance-preview">—</strong></p>
+            <p class="hint" id="openfoam-cost-estimate-hint"></p>
+            <div class="form-group">
+              <label for="openfoam-notes">メモ（任意）</label>
+              <textarea id="openfoam-notes" name="notes" rows="2" maxlength="500"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="openfoam-input-file">ケースファイル (.zip)</label>
+              <div class="upload-zone" id="openfoam-upload-zone">
+                <input type="file" id="openfoam-input-file" name="file" accept=".zip" required />
+                <div class="upload-icon" aria-hidden="true">📦</div>
+                <p>クリックまたはドラッグ＆ドロップでケース ZIP を選択</p>
+                <p class="upload-info" id="openfoam-file-status">未選択</p>
+              </div>
+              <p class="hint">system/controlDict を含む OpenFOAM ケースを ZIP にまとめてください。</p>
+            </div>
+            <button type="submit" class="btn btn-primary">依頼する</button>
+          </form>
         </section>
 
         <section class="card hidden fds-panel--locked" id="fds-request-panel">
@@ -107,9 +150,14 @@
           </form>
         </section>
 
-        <section class="card">
-          <h2 class="section-heading">自分の依頼</h2>
+        <section class="card hidden" id="my-fds-requests-section">
+          <h2 class="section-heading">自分の FDS 依頼</h2>
           <div id="my-fds-requests"><p class="hint">読み込み中…</p></div>
+        </section>
+
+        <section class="card hidden" id="my-openfoam-requests-section">
+          <h2 class="section-heading">自分の OpenFOAM 依頼</h2>
+          <div id="my-openfoam-requests"><p class="hint">読み込み中…</p></div>
         </section>
       </div>
     </div>
