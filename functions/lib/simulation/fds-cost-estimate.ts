@@ -1,10 +1,10 @@
 // functions/lib/simulation/fds-cost-estimate.ts
 
 /**
- * On-demand 概算（USD/時間・東京リージョン c7a 系の目安）。
+ * On-demand 概算（USD/時間・東京リージョンの目安）。
  * 正確な請求額ではなく、実行前の目安表示用。
  */
-const C7A_USD_PER_HOUR: Record<string, number> = {
+const EC2_USD_PER_HOUR: Record<string, number> = {
   "c7a.medium": 0.0504,
   "c7a.large": 0.1008,
   "c7a.xlarge": 0.2016,
@@ -12,9 +12,7 @@ const C7A_USD_PER_HOUR: Record<string, number> = {
   "c7a.4xlarge": 0.8064,
   "c7a.8xlarge": 1.6128,
   "c7a.12xlarge": 2.4192,
-  "c7a.16xlarge": 3.2256,
-  "c7a.24xlarge": 4.8384,
-  "c7a.48xlarge": 9.6768,
+  "hpc6a.48xlarge": 3.1,
 };
 
 const DEFAULT_USD_PER_HOUR = 0.2;
@@ -40,7 +38,7 @@ export function estimateFdsRunCost(
   maxRuntimeHours: number
 ): FdsRunCostEstimate {
   const hours = Math.max(1, Math.min(10, Math.floor(maxRuntimeHours)));
-  const rate = C7A_USD_PER_HOUR[instanceType] ?? DEFAULT_USD_PER_HOUR;
+  const rate = EC2_USD_PER_HOUR[instanceType] ?? DEFAULT_USD_PER_HOUR;
   const usd = Math.round(rate * hours * 100) / 100;
   const jpy = Math.round(usd * USD_TO_JPY_HINT);
   return {

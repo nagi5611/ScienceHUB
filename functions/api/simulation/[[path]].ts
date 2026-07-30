@@ -179,7 +179,7 @@ import {
   clampMpiProcesses,
   FDS_MAX_MPI_PROCESSES,
   FDS_MIN_MPI_PROCESSES,
-  pickC7aInstanceType,
+  pickEc2InstanceType,
 } from "../../lib/simulation/fds-instance-sizing";
 import {
   buildEc2InstanceCatalog,
@@ -1382,7 +1382,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         max_runtime_hours: FDS_JOB_MAX_RUNTIME_HOURS,
         min_mpi_processes: FDS_MIN_MPI_PROCESSES,
         max_mpi_processes: FDS_MAX_MPI_PROCESSES,
-        instance_family: "c7a",
+        instance_family: "c7a,hpc6a",
         primary_review_max_attempts: FDS_PRIMARY_REVIEW_MAX_ATTEMPTS,
       });
     }
@@ -1394,7 +1394,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[1] === "instance-preview"
     ) {
       const mpiRaw = parseInt(url.searchParams.get("mpi_processes") ?? "", 10);
-      const sizing = pickC7aInstanceType(Number.isFinite(mpiRaw) ? mpiRaw : 1);
+      const sizing = pickEc2InstanceType(Number.isFinite(mpiRaw) ? mpiRaw : 1);
       const maxRuntimeRaw = parseInt(url.searchParams.get("max_runtime_hours") ?? "", 10);
       const maxRuntimeHours = Number.isFinite(maxRuntimeRaw)
         ? maxRuntimeRaw
@@ -2418,7 +2418,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // GET /api/simulation/admin/ec2-instances
     if (method === "GET" && segments[1] === "ec2-instances" && segments.length === 2) {
       const instances = await buildEc2InstanceCatalog(db);
-      return json({ instance_family: "c7a", instances });
+      return json({ instance_family: "c7a,hpc6a", instances });
     }
 
     // POST /api/simulation/admin/ec2-instances
