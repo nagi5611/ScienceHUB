@@ -195,12 +195,22 @@ import {
   listPendingFdsRequests,
   markFdsRequestApproved,
   markFdsRequestRejected,
+  replaceFdsRequestInputByStaff,
   retryFdsPrimaryReview,
   runFdsPrimaryReviewJob,
   sendFdsPendingApprovalDiscordNotification,
   FDS_PRIMARY_REVIEW_MAX_ATTEMPTS,
   validateFdsRequestMaxRuntimeHours,
+  canStaffReplaceFdsRequestInput,
 } from "../../lib/simulation/fds-requests";
+import {
+  assertFdsRequestChatAccess,
+  createFdsRequestMessage,
+  FdsRequestChatAccessError,
+  getFdsRequestAttachmentForDownload,
+  listFdsRequestMessagesForApi,
+  postFdsRequestSystemChatMessage,
+} from "../../lib/simulation/fds-request-chat";
 import {
   extractFdsTextForReview,
 } from "../../lib/simulation/fds-primary-review";
@@ -237,6 +247,138 @@ const MANAGEMENT_APP = "simulation-management";
 function attachmentFilename(filename: string): string {
   const safe = filename.replace(/[^\w.\-()]/g, "_").slice(0, 180) || "download";
   return `attachment; filename="${safe}"`;
+}
+
+/** Parses chat message body and optional file from a request. */
+async function parseFdsChatMessageRequest(request: Request): Promise<{
+  body: string;
+  file: File | null;
+}> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const body = String(formData.get("body") ?? "").trim();
+    const fileEntry = formData.get("file");
+    const file = fileEntry instanceof File && fileEntry.size > 0 ? fileEntry : null;
+    return { body, file };
+  }
+
+  const data = await request.json<{ body?: string }>().catch(() => ({ body: "" }));
+  return { body: String(data.body ?? "").trim(), file: null };
+}
+
+/** Handles FDS request chat message listing. */
+async function handleFdsRequestChatList(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  params: {
+    requestId: string;
+    userId: string;
+    apiPrefix: string;
+  }
+): Promise<Response> {
+  try {
+    const access = await assertFdsRequestChatAccess(db, params.userId, params.requestId);
+    const url = new URL(request.url);
+    const after = url.searchParams.get("after");
+    const limitRaw = parseInt(url.searchParams.get("limit") ?? "", 10);
+    const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
+
+    const messages = await listFdsRequestMessagesForApi(env, db, {
+      requestId: params.requestId,
+      viewerUserId: params.userId,
+      requestOwnerUserId: access.request.user_id,
+      apiPrefix: params.apiPrefix,
+      after,
+      limit,
+    });
+    return json({ messages });
+  } catch (err) {
+    if (err instanceof FdsRequestChatAccessError) {
+      return error(err.message, 404);
+    }
+    const message = err instanceof Error ? err.message : "メッセージの取得に失敗しました";
+    return error(message, 400);
+  }
+}
+
+/** Handles posting a FDS request chat message. */
+async function handleFdsRequestChatPost(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  params: {
+    requestId: string;
+    userId: string;
+    apiPrefix: string;
+  }
+): Promise<Response> {
+  try {
+    const access = await assertFdsRequestChatAccess(db, params.userId, params.requestId);
+    const { body, file } = await parseFdsChatMessageRequest(request);
+
+    const row = await createFdsRequestMessage(env, db, {
+      requestId: params.requestId,
+      senderUserId: params.userId,
+      body,
+      attachment: file
+        ? {
+            buffer: await file.arrayBuffer(),
+            filename: file.name.trim(),
+            contentType: file.type || "application/octet-stream",
+            sizeBytes: file.size,
+          }
+        : null,
+    });
+
+    const messages = await listFdsRequestMessagesForApi(env, db, {
+      requestId: params.requestId,
+      viewerUserId: params.userId,
+      requestOwnerUserId: access.request.user_id,
+      apiPrefix: params.apiPrefix,
+      limit: 200,
+    });
+    const created = messages.find((m) => m.id === row.id);
+
+    return json({ message: created ?? messages[messages.length - 1] }, 201);
+  } catch (err) {
+    if (err instanceof FdsRequestChatAccessError) {
+      return error(err.message, 404);
+    }
+    const message = err instanceof Error ? err.message : "メッセージの送信に失敗しました";
+    return error(message, 400);
+  }
+}
+
+/** Handles chat attachment download. */
+async function handleFdsRequestChatAttachmentDownload(
+  env: Env,
+  db: D1Database,
+  params: {
+    requestId: string;
+    messageId: string;
+    userId: string;
+  }
+): Promise<Response> {
+  try {
+    const resolved = await getFdsRequestAttachmentForDownload(env, db, params);
+    const obj = await env.FILES.get(resolved.r2Key);
+    if (!obj) return error("添付ファイルが見つかりません", 410);
+    return new Response(obj.body, {
+      headers: {
+        "Content-Type": resolved.contentType,
+        "Content-Disposition": attachmentFilename(resolved.filename),
+      },
+    });
+  } catch (err) {
+    if (err instanceof FdsRequestChatAccessError) {
+      return error(err.message, 404);
+    }
+    const message = err instanceof Error ? err.message : "添付ファイルの取得に失敗しました";
+    const status = message.includes("期限") ? 410 : 400;
+    return error(message, status);
+  }
 }
 
 /** Syncs EC2/R2 state and formats an FDS job for the admin API. */
@@ -1429,6 +1571,50 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("依頼が見つかりません", 404);
       }
       return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+    }
+
+    // GET /api/simulation/fds-requests/:id/messages
+    if (
+      method === "GET" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 3 &&
+      segments[2] === "messages"
+    ) {
+      return handleFdsRequestChatList(env, db, request, {
+        requestId: segments[1],
+        userId,
+        apiPrefix: "fds-requests",
+      });
+    }
+
+    // POST /api/simulation/fds-requests/:id/messages
+    if (
+      method === "POST" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 3 &&
+      segments[2] === "messages"
+    ) {
+      return handleFdsRequestChatPost(env, db, request, {
+        requestId: segments[1],
+        userId,
+        apiPrefix: "fds-requests",
+      });
+    }
+
+    // GET /api/simulation/fds-requests/:id/messages/:msgId/attachment/download
+    if (
+      method === "GET" &&
+      segments[0] === "fds-requests" &&
+      segments.length === 6 &&
+      segments[2] === "messages" &&
+      segments[4] === "attachment" &&
+      segments[5] === "download"
+    ) {
+      return handleFdsRequestChatAttachmentDownload(env, db, {
+        requestId: segments[1],
+        messageId: segments[3],
+        userId,
+      });
     }
 
     // GET /api/simulation/fds-requests/:id/output/download
@@ -2671,6 +2857,128 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           .bind(row.id)
           .run();
         return error(message, 502);
+      }
+    }
+
+    // GET /api/simulation/admin/fds-requests/:id/messages
+    if (
+      method === "GET" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 4 &&
+      segments[3] === "messages"
+    ) {
+      return handleFdsRequestChatList(env, db, request, {
+        requestId: segments[2],
+        userId,
+        apiPrefix: "admin/fds-requests",
+      });
+    }
+
+    // POST /api/simulation/admin/fds-requests/:id/messages
+    if (
+      method === "POST" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 4 &&
+      segments[3] === "messages"
+    ) {
+      return handleFdsRequestChatPost(env, db, request, {
+        requestId: segments[2],
+        userId,
+        apiPrefix: "admin/fds-requests",
+      });
+    }
+
+    // GET /api/simulation/admin/fds-requests/:id/messages/:msgId/attachment/download
+    if (
+      method === "GET" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 7 &&
+      segments[3] === "messages" &&
+      segments[5] === "attachment" &&
+      segments[6] === "download"
+    ) {
+      return handleFdsRequestChatAttachmentDownload(env, db, {
+        requestId: segments[2],
+        messageId: segments[4],
+        userId,
+      });
+    }
+
+    // POST /api/simulation/admin/fds-requests/:id/replace-input
+    if (
+      method === "POST" &&
+      segments[1] === "fds-requests" &&
+      segments.length === 4 &&
+      segments[3] === "replace-input"
+    ) {
+      const requestId = segments[2];
+      const row = await getFdsRequestById(db, requestId);
+      if (!row) return error("依頼が見つかりません", 404);
+      if (!canStaffReplaceFdsRequestInput(row.status)) {
+        return error("この依頼の入力ファイルは置き換えできません", 400);
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .fds ファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateFdsFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > FDS_MAX_INPUT_BYTES) {
+        return error(
+          `ファイルサイズは 1 バイト以上 ${FDS_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`,
+          400
+        );
+      }
+
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const inputSha256 = await sha256HexFromBuffer(fileBuffer);
+      const fdsText = extractFdsTextForReview(fileBuffer);
+      const r2Key = generateFdsInputR2Key(requestId, filename);
+
+      await env.FILES.put(r2Key, fileBuffer, {
+        httpMetadata: { contentType: "text/plain; charset=utf-8" },
+      });
+
+      try {
+        const updated = await replaceFdsRequestInputByStaff(db, requestId, {
+          inputR2Key: r2Key,
+          inputFilename: filename,
+          inputSizeBytes: sizeBytes,
+          inputSha256,
+        });
+
+        await postFdsRequestSystemChatMessage(db, {
+          requestId,
+          senderUserId: userId,
+          body: `[システム] 担当者が入力 .fds を更新しました（${filename}）。一次審査を再実行します。`,
+        });
+
+        waitUntil(
+          runFdsPrimaryReviewJob(env, db, {
+            requestId,
+            fdsText,
+            filename,
+            mpiProcesses: updated.mpi_processes,
+            maxRuntimeHours: updated.max_runtime_hours,
+            forceSecondary: false,
+          })
+        );
+
+        return json({ request: await formatFdsRequestForApiEnriched(db, updated) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "入力ファイルの置き換えに失敗しました";
+        return error(message, 400);
       }
     }
 
