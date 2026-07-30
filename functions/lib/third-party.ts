@@ -42,6 +42,14 @@ import {
   type TpWorkflowPhase,
 } from "./third-party/schemas";
 import { EMPTY_PLACEHOLDER_HTML } from "./third-party/stub-chat";
+import { copyProjectArtifacts } from "./third-party/r2-copy";
+import {
+  listRevisions,
+  getRevisionDetail,
+  restoreRevision,
+  snapshotCurrentHtml,
+} from "./third-party/revisions";
+import { ARTIFACT_INDEX } from "./third-party/artifacts";
 
 export const THIRD_PARTY_APP_SLUG = "third-party";
 
@@ -680,6 +688,142 @@ export async function publishTpProject(
 
   const row = await getOwnedProject(db, userId, projectId);
   return row ? toSummary(row) : null;
+}
+
+/** 自分のプロジェクトをフォーク */
+export async function forkTpProject(
+  db: D1Database,
+  bucket: R2Bucket,
+  user: SessionUser,
+  sourceProjectId: string
+): Promise<TpProjectSummary> {
+  const source = await getOwnedProject(db, user.id, sourceProjectId);
+  if (!source) throw new Error("プロジェクトが見つかりません");
+
+  const forkTitle = `${source.title.trim() || "無題のアプリ"} のコピー`;
+  const id = createId("tp");
+  const slug = await allocateProjectSlug(db, forkTitle);
+  const dirName = await allocateDirName(db, forkTitle);
+  const r2Prefix = `third-party/${dirName}/`;
+  const timestamp = now();
+
+  const sourceHtml = await getArtifact(bucket, source.dir_name, ARTIFACT_INDEX);
+  const hasRealHtml =
+    sourceHtml?.trim() &&
+    sourceHtml !== EMPTY_PLACEHOLDER_HTML &&
+    source.workflow_phase === "draft_ready";
+
+  const workflowPhase = hasRealHtml ? "draft_ready" : "discovery";
+
+  await db
+    .prepare(
+      `INSERT INTO tp_projects (
+        id, owner_user_id, title, slug, description, icon_emoji, color, status,
+        visibility_group_id, hub_app_id, r2_prefix, dir_name, workflow_phase,
+        context_summary, pending_form_json, review_passed, implement_attempts,
+        review_loop_count, awaiting_implement_confirm, published_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', NULL, NULL, ?, ?, ?,
+        NULL, NULL, NULL, 0, 0, 0, NULL, ?, ?)`
+    )
+    .bind(
+      id,
+      user.id,
+      forkTitle.slice(0, 120),
+      slug,
+      source.description,
+      source.icon_emoji ?? "🧩",
+      source.color ?? "#F38020",
+      r2Prefix,
+      dirName,
+      workflowPhase,
+      timestamp,
+      timestamp
+    )
+    .run();
+
+  await copyProjectArtifacts(bucket, source.dir_name, dirName);
+
+  const welcome = `「${source.title}」をベースにコピーしました。チャットで編集を続けられます。`;
+  await db
+    .prepare(
+      `INSERT INTO tp_chat_messages (id, project_id, role, content, created_at)
+       VALUES (?, ?, 'assistant', ?, ?)`
+    )
+    .bind(createId("tpmsg"), id, welcome, timestamp)
+    .run();
+
+  if (hasRealHtml && sourceHtml) {
+    await snapshotCurrentHtml(
+      db,
+      bucket,
+      { id, dir_name: dirName, r2_prefix: r2Prefix },
+      "フォーク時の初期スナップショット"
+    );
+  }
+
+  const row = await getOwnedProject(db, user.id, id);
+  if (!row) throw new Error("フォークに失敗しました");
+  return toSummary(row);
+}
+
+/** 公開アプリをフォーク */
+export async function forkPublishedTpProject(
+  db: D1Database,
+  bucket: R2Bucket,
+  user: SessionUser,
+  publishedSlug: string
+): Promise<TpProjectSummary> {
+  const source = await canViewPublished(db, user.id, publishedSlug);
+  if (!source) throw new Error("アプリが見つかりません、または閲覧権限がありません");
+
+  return await forkTpProject(db, bucket, user, source.id);
+}
+
+/** リビジョン一覧（所有者） */
+export async function listOwnedRevisions(
+  db: D1Database,
+  userId: string,
+  projectId: string
+) {
+  const row = await getOwnedProject(db, userId, projectId);
+  if (!row) return null;
+  return await listRevisions(db, projectId);
+}
+
+/** リビジョン詳細 */
+export async function getOwnedRevisionDetail(
+  db: D1Database,
+  bucket: R2Bucket,
+  userId: string,
+  projectId: string,
+  revisionNumber: number
+) {
+  const row = await getOwnedProject(db, userId, projectId);
+  if (!row) return null;
+  return await getRevisionDetail(
+    db,
+    bucket,
+    { id: row.id, dir_name: row.dir_name, r2_prefix: row.r2_prefix },
+    revisionNumber
+  );
+}
+
+/** リビジョン復元 */
+export async function restoreOwnedRevision(
+  db: D1Database,
+  bucket: R2Bucket,
+  userId: string,
+  projectId: string,
+  revisionNumber: number
+) {
+  const row = await getOwnedProject(db, userId, projectId);
+  if (!row) return null;
+  return await restoreRevision(
+    db,
+    bucket,
+    { id: row.id, dir_name: row.dir_name, r2_prefix: row.r2_prefix },
+    revisionNumber
+  );
 }
 
 /** ギャラリー（ACL 済み） */

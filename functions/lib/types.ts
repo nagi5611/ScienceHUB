@@ -71,6 +71,10 @@ export interface Env {
   GEMINI_TP_LITE_MODEL?: string;
   /** サードパーティレビュー・実装（既定 gemini-3.5-flash 等） */
   GEMINI_TP_FLASH_MODEL?: string;
+  /** サードパーティ実装/検証 Worker のベース URL */
+  TP_PIPELINE_WORKER_URL?: string;
+  /** サードパーティ実装/検証 Worker 内部認証 */
+  TP_PIPELINE_WORKER_SECRET?: string;
   /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */
   FDS_REVIEW_SYNTAX_REFERENCE?: string;
   /** OpenFOAM 入り AMI（/opt/openfoam 等） */

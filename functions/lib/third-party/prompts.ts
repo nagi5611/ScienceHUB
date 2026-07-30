@@ -85,6 +85,18 @@ assistant_message の制約（厳守）:
 
 1 ステップで 1 action。調査が足りなければ read/grep を続ける。`;
 
+export const LITE_INTENT_SYSTEM = `ScienceHUB サードパーティのユーザー意図分類器（実装完了後フェーズ）。
+ユーザーの1メッセージを次のいずれかに分類する:
+
+- maintain: バグ修正・機能追加・UI変更・「直して」「動かない」等
+- ask: コードや仕様についての質問のみ（編集不要）
+- gate_build: 「実装に進む」「計画を作る」等（再ビルド前の計画フェーズへ）
+- gate_deepen: 「要件を深掘り」
+- implement_start: 「実装開始」等の明示的な再実装
+- general_chat: 上記以外の雑談・感謝・短い返答
+
+JSON で intent, confidence (0-1), reason を返す。`;
+
 export const FLASH_MAINTAIN_EDIT_SYSTEM = `番号付き index.html に対する行編集プランナー。L001: 形式の行番号と一致する edits を JSON で返す。
 
 op: replace_lines | insert_after | insert_before | delete_lines

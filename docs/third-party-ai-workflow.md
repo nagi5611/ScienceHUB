@@ -273,7 +273,45 @@ POST /api/third-party/projects/:id/chat
 
 ---
 
+## P0 / P2 拡張（2026-07-30）
+
+### ブラウザ検証
+
+- 実装完了・メンテ修正後に `verify/latest.json` を R2 へ保存
+- `TP_PIPELINE_WORKER_URL` 設定時は `workers/tp-pipeline` の Browser Run で実行
+- 未設定時は `static-analyze.ts` による静的フォールバック
+
+### LLM 意図分類
+
+- 実装後フェーズで Lite モデルが `maintain` / `ask` / `gate_build` 等を分類（`intent-classify.ts`）
+- ルールベースフォールバックあり
+
+### リビジョン
+
+- `tp_revisions.r2_snapshot_key` に HTML スナップショット
+- API: `GET projects/:id/revisions`, `POST projects/:id/revisions/:n/restore`
+- UI: Files パネル「履歴」
+
+### バックグラウンド実装ジョブ
+
+- `tp_jobs` テーブル + `workers/tp-pipeline` の `POST /implement`
+- Pages はジョブ enqueue 後 SSE で `job` イベントをポーリング
+- `TP_PIPELINE_WORKER_URL` 未設定時は in-process `runImplementJob`
+
+### 並列タスク
+
+- `depends_on` を評価し、`markup` + `styles` を同一バッチで計画（`implement-parallel.ts`）
+- 編集プランは並列取得、適用は直列
+
+### ギャラリーフォーク
+
+- `POST projects/:id/fork`, `POST published/:slug/fork`
+- R2 コピー後 `draft_ready`（有効 HTML がある場合）
+
+---
+
 ## 更新履歴
 
+- 2026-07-30: P0（検証・意図分類・リビジョン）/ P2（ジョブ・並列・フォーク）追記
 - 2026-07-28: 実装後メンテ（ワークスペースエージェント）追記
 - 2026-07-28: 初版（`gemini-pipeline.ts` 現行実装に基づく）

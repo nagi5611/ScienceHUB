@@ -348,6 +348,17 @@ async function postProjectChat(body) {
           }
         })
         .catch(() => {});
+      if (currentProjectId) {
+        loadRevisions(currentProjectId).catch(() => {});
+      }
+    } else if (eventName === "job" && payload.jobId) {
+      const label = payload.progress?.label;
+      if (label && chatPending) {
+        chatPending.activityLabel = label;
+        renderMessagesFromState();
+      }
+    } else if (eventName === "verify") {
+      showVerifyBanner(payload);
     } else if (eventName === "done") {
       finalResult = payload;
     } else if (eventName === "error") {
@@ -609,8 +620,18 @@ async function loadGallery() {
         openStudio(p.id).catch((e) => alert(e.message));
       });
 
+      const forkBtn = document.createElement("button");
+      forkBtn.type = "button";
+      forkBtn.className = "tp-card-fork";
+      forkBtn.textContent = "コピー";
+      forkBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        forkMyProject(p.id).catch((err) => alert(err.message));
+      });
+
       card.appendChild(delBtn);
       card.appendChild(openBtn);
+      card.appendChild(forkBtn);
       myGrid.appendChild(card);
     }
   }
@@ -624,18 +645,36 @@ async function loadGallery() {
   } else {
     empty.hidden = true;
     for (const app of apps) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "tp-card";
-      btn.innerHTML = `
+      const card = document.createElement("article");
+      card.className = "tp-card";
+
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "tp-card-open";
+      openBtn.innerHTML = `
         <div class="tp-card-emoji">${app.icon_emoji || "🧩"}</div>
         <p class="tp-card-title">${escapeHtml(app.title)}</p>
         <p class="tp-card-meta">${escapeHtml(app.owner_display_name)} · ${formatDate(app.published_at)}</p>
       `;
-      btn.addEventListener("click", () => {
+      openBtn.addEventListener("click", () => {
         window.location.href = app.view_href;
       });
-      grid.appendChild(btn);
+
+      const actions = document.createElement("div");
+      actions.className = "tp-card-actions";
+      const forkBtn = document.createElement("button");
+      forkBtn.type = "button";
+      forkBtn.className = "tp-card-fork";
+      forkBtn.textContent = "ベースに作る";
+      forkBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        forkPublishedApp(app.slug).catch((err) => alert(err.message));
+      });
+      actions.appendChild(forkBtn);
+
+      card.appendChild(openBtn);
+      card.appendChild(actions);
+      grid.appendChild(card);
     }
   }
 }
@@ -644,6 +683,95 @@ function escapeHtml(s) {
   const d = document.createElement("div");
   d.textContent = s;
   return d.innerHTML;
+}
+
+/** ブラウザ検証バナー */
+function showVerifyBanner(payload) {
+  const el = document.getElementById("verify-banner");
+  if (!el || !payload) return;
+  const passed = Boolean(payload.passed);
+  const errors = Array.isArray(payload.errors) ? payload.errors : [];
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  if (passed && warnings.length === 0) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.className = "tp-verify-banner";
+  if (!passed) {
+    el.classList.add("tp-verify-banner--fail");
+    el.textContent = `検証: 問題あり — ${errors.slice(0, 2).join("; ") || "エラー"}`;
+  } else if (warnings.length) {
+    el.classList.add("tp-verify-banner--warn");
+    el.textContent = `検証: 警告 — ${warnings.slice(0, 2).join("; ")}`;
+  } else {
+    el.classList.add("tp-verify-banner--ok");
+    el.textContent = "検証: OK";
+  }
+}
+
+/** HTML 履歴一覧 */
+async function loadRevisions(projectId) {
+  const listEl = document.getElementById("revisions-list");
+  const emptyEl = document.getElementById("revisions-empty");
+  if (!listEl) return;
+  const { revisions } = await tpApi(`projects/${projectId}/revisions`);
+  listEl.replaceChildren();
+  if (!revisions?.length) {
+    emptyEl.hidden = false;
+    return;
+  }
+  emptyEl.hidden = true;
+  for (const rev of revisions) {
+    const li = document.createElement("li");
+    li.className = "tp-revisions-item";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.innerHTML = `
+      <div>#${rev.revision_number} ${escapeHtml(rev.summary)}</div>
+      <div class="tp-revisions-meta">${formatDate(rev.created_at)}</div>
+    `;
+    if (!rev.has_snapshot) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener("click", () => {
+        restoreRevision(projectId, rev.revision_number).catch((err) =>
+          alert(err.message)
+        );
+      });
+    }
+    li.appendChild(btn);
+    listEl.appendChild(li);
+  }
+}
+
+async function restoreRevision(projectId, revisionNumber) {
+  if (!confirm(`リビジョン #${revisionNumber} に戻しますか？`)) return;
+  await tpApi(`projects/${projectId}/revisions/${revisionNumber}/restore`, {
+    method: "POST",
+    body: "{}",
+  });
+  refreshPreview();
+  await loadRevisions(projectId);
+  await refreshWorkspaceTree().catch(() => {});
+}
+
+/** 公開アプリをフォーク */
+async function forkPublishedApp(slug) {
+  const { project } = await tpApi(`published/${encodeURIComponent(slug)}/fork`, {
+    method: "POST",
+    body: "{}",
+  });
+  await openStudio(project.id);
+}
+
+/** 自分のプロジェクトをフォーク */
+async function forkMyProject(projectId) {
+  const { project } = await tpApi(`projects/${projectId}/fork`, {
+    method: "POST",
+    body: "{}",
+  });
+  await openStudio(project.id);
 }
 
 /** 自分のアプリを削除 */
@@ -986,6 +1114,7 @@ async function openStudio(projectId) {
   refreshPreview();
   await refreshWorkspaceTree().catch(() => {});
   await loadImplementTasksFromWorkspace().catch(() => {});
+  await loadRevisions(projectId).catch(() => {});
   setFileViewerState({ name: null, path: null, content: "" });
 }
 

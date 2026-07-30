@@ -22,6 +22,8 @@
     "worker:deploy": "wrangler deploy --config workers/sciencehub-worker/wrangler.jsonc",
     "collab:deploy": "wrangler deploy --config workers/excalidraw-collab/wrangler.jsonc",
     "design-collab:deploy": "wrangler deploy --config workers/design-collab/wrangler.jsonc",
+    "tp-pipeline:deploy": "wrangler deploy --config workers/tp-pipeline/wrangler.jsonc",
+    "test:tp-pipeline": "npx tsx --test functions/lib/third-party/implement-parallel.test.ts functions/lib/third-party/intent-classify.test.ts functions/lib/third-party/workspace-edits.test.ts",
     "pwa:icons": "node scripts/generate-pwa-icons.mjs"
   },
   "devDependencies": {
@@ -31,6 +33,7 @@
     "wrangler": "^4.24.4"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.0.4",
     "aws4fetch": "^1.0.20",
     "firebase": "^12.16.0",
     "jose": "^6.2.4"

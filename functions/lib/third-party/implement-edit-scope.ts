@@ -7,6 +7,25 @@ import type { WorkspaceEditOp } from "./workspace-edits";
 
 export const IMPLEMENT_EDIT_TARGET_PATH = "index.html";
 
+const PARALLEL_SAFE_TARGETS = new Set(["markup", "styles"]);
+const MAX_PARALLEL_BATCH = 3;
+
+/** 2 タスクを同一バッチで並列実行可能か */
+export function canParallelizeTargets(
+  a: ImplementationTask["target"],
+  b: ImplementationTask["target"]
+): boolean {
+  if (a === b) return false;
+  if (a === "skeleton" || b === "skeleton") return false;
+  if (a === "polish" || b === "polish") return false;
+  if (a === "script" || b === "script") return false;
+  return PARALLEL_SAFE_TARGETS.has(a) && PARALLEL_SAFE_TARGETS.has(b);
+}
+
+export function maxParallelBatchSize(): number {
+  return MAX_PARALLEL_BATCH;
+}
+
 type LineBlock = { open: number; close: number };
 
 function findStyleBlock(lines: string[]): LineBlock | null {

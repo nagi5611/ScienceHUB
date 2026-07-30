@@ -43,6 +43,31 @@ async function init() {
     document.getElementById("viewer-title").textContent = meta.title;
     document.getElementById("viewer-owner").textContent = meta.owner_display_name;
 
+    const forkBtn = document.getElementById("viewer-fork-btn");
+    if (forkBtn) {
+      forkBtn.hidden = false;
+      forkBtn.addEventListener("click", async () => {
+        forkBtn.disabled = true;
+        try {
+          const res = await fetch(
+            `/api/third-party/published/${encodeURIComponent(slug)}/fork`,
+            {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: "{}",
+            }
+          );
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "フォークに失敗しました");
+          window.location.href = `/apps/third-party/?project=${encodeURIComponent(data.project.id)}`;
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "フォークに失敗しました");
+          forkBtn.disabled = false;
+        }
+      });
+    }
+
     document.getElementById("viewer-header").hidden = false;
     document.getElementById("viewer-wrap").hidden = false;
     document.getElementById("viewer-iframe").src =

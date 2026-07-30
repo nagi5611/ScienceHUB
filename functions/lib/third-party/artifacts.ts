@@ -13,6 +13,13 @@ export const ARTIFACT_TASKS = "docs/implementation-tasks.json";
 export const ARTIFACT_REVIEW = "review-last.json";
 export const ARTIFACT_INDEX = "index.html";
 export const DOCS_GITKEEP = "docs/.gitkeep";
+export const ARTIFACT_VERIFY_JSON = "verify/latest.json";
+export const ARTIFACT_VERIFY_PNG = "verify/latest.png";
+
+/** リビジョンスナップショットの R2 キー（dir_name 相対） */
+export function revisionSnapshotPath(revisionNumber: number): string {
+  return `revisions/${revisionNumber}/index.html`;
+}
 
 const DOC_LEGACY_FALLBACK: Record<string, string> = {
   [ARTIFACT_REQUIREMENTS]: LEGACY_REQUIREMENTS,

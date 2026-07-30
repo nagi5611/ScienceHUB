@@ -61,6 +61,7 @@
         <div class="tp-chat-panel">
           <div class="tp-chat-messages" id="chat-messages"></div>
           <div class="tp-review-banner" id="chat-review-banner" hidden></div>
+          <div class="tp-verify-banner" id="verify-banner" hidden aria-live="polite"></div>
           <div class="tp-chat-dynamic" id="chat-dynamic-form" hidden aria-hidden="true"></div>
           <div class="tp-suggestions" id="chat-suggestions" hidden>
             <button type="button" class="tp-suggest" data-prompt="ランディングページを作って">ランディングページ</button>
@@ -145,6 +146,11 @@
                     <pre class="tp-files-content" id="workspace-file-content" aria-label="ファイル内容"></pre>
                   </div>
                 </div>
+                <aside class="tp-revisions-panel" aria-label="HTML 履歴">
+                  <h3 class="tp-revisions-title">履歴</h3>
+                  <ul class="tp-revisions-list" id="revisions-list"></ul>
+                  <p class="tp-revisions-empty" id="revisions-empty" hidden>まだ履歴がありません</p>
+                </aside>
               </div>
             </div>
           </div>
