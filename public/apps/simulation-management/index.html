@@ -88,6 +88,14 @@
         </span>
         <span>FDS</span>
       </button>
+      <button class="admin-mobile-nav-item" data-panel="openfoam-test" type="button">
+        <span class="admin-mobile-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+          </svg>
+        </span>
+        <span>OpenFOAM</span>
+      </button>
     </nav>
 
     <div class="admin-layout">
@@ -104,6 +112,7 @@
           <button class="admin-menu-item" data-panel="shifts" type="button">シフト管理表</button>
           <button class="admin-menu-item" data-panel="phone-verification" type="button">電話認証</button>
           <button class="admin-menu-item" data-panel="fds-test" type="button">FDSテスト</button>
+          <button class="admin-menu-item" data-panel="openfoam-test" type="button">OpenFOAMテスト</button>
         </nav>
         <button class="btn btn-secondary btn-sm admin-logout" id="logout-btn" type="button">ダッシュボード</button>
       </aside>
@@ -377,6 +386,57 @@
               <div id="fds-jobs-list-mount"><p class="hint">読み込み中...</p></div>
               <aside id="fds-job-detail-mount" class="fds-job-detail-panel" aria-live="polite">
                 <p class="hint fds-job-detail-placeholder">ジョブを選択してください。</p>
+              </aside>
+            </div>
+          </section>
+        <div class="admin-panel hidden" id="panel-openfoam-test">
+          <h1 class="page-heading">OpenFOAM</h1>
+          <p class="page-subheading">依頼者からの OpenFOAM シミュレーション依頼の承認と、管理者向けテスト実行です。</p>
+
+          <section class="card" id="openfoam-requests-section">
+            <div class="section-heading-row">
+              <h2 class="section-heading">対応中の OpenFOAM 依頼</h2>
+              <button type="button" class="btn btn-secondary btn-sm" id="openfoam-requests-refresh-btn">更新</button>
+            </div>
+            <div id="openfoam-requests-queue-mount"><p class="hint">読み込み中...</p></div>
+          </section>
+
+          <section class="card" id="openfoam-config-section" style="margin-top:1.5rem">
+            <h2 class="section-heading">接続状態</h2>
+            <div id="openfoam-config-mount"><p class="hint">読み込み中...</p></div>
+          </section>
+
+          <section class="card" style="margin-top:1.5rem">
+            <h2 class="section-heading">新規テスト実行</h2>
+            <div id="openfoam-run-alert"></div>
+            <form id="openfoam-run-form" action="#" method="post" novalidate>
+              <div class="form-group">
+                <label for="openfoam-title">タイトル（任意）</label>
+                <input type="text" id="openfoam-title" name="title" placeholder="例: 禁煙室ミニケース" maxlength="80" />
+              </div>
+              <div class="form-group">
+                <label for="openfoam-file">OpenFOAM ファイル（.zip）</label>
+                <input type="file" id="openfoam-file" name="file" accept=".zip" required />
+                <p class="hint">超軽量の検証用ケースから試してください。最大 50MB。</p>
+              </div>
+              <button type="button" class="btn btn-primary" id="openfoam-run-btn">テスト実行を開始</button>
+            </form>
+            <div class="openfoam-run-log-wrap" id="openfoam-run-log-wrap" hidden>
+              <h3 class="openfoam-run-log-heading">実行ログ</h3>
+              <pre class="openfoam-run-log" id="openfoam-run-log" aria-live="polite"></pre>
+            </div>
+          </section>
+
+          <section class="card admin-list-section" style="margin-top:1.5rem">
+            <div class="section-heading-row">
+              <h2 class="section-heading">ジョブ履歴</h2>
+              <button type="button" class="btn btn-secondary btn-sm" id="openfoam-refresh-btn">更新</button>
+            </div>
+            <p class="hint" style="margin-top:0">行をクリックすると右側にリアルタイム状態（EC2 含む）を表示します。実行中は自動更新します。</p>
+            <div class="openfoam-jobs-split">
+              <div id="openfoam-jobs-list-mount"><p class="hint">読み込み中...</p></div>
+              <aside id="openfoam-job-detail-mount" class="openfoam-job-detail-panel" aria-live="polite">
+                <p class="hint openfoam-job-detail-placeholder">ジョブを選択してください。</p>
               </aside>
             </div>
           </section>

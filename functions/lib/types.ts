@@ -73,8 +73,16 @@ export interface Env {
   GEMINI_TP_FLASH_MODEL?: string;
   /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */
   FDS_REVIEW_SYNTAX_REFERENCE?: string;
-  /** ジョブ記録用 FDS バージョン表示（未設定時は AMI 同梱） */
-  FDS_SOLVER_VERSION?: string;
+  /** OpenFOAM 入り AMI（/opt/openfoam 等） */
+  AWS_EC2_OPENFOAM_AMI_ID?: string;
+  /** EC2 user-data → ScienceHUB 完了通知用（OpenFOAM） */
+  OPENFOAM_JOB_CALLBACK_SECRET?: string;
+  /** ジョブ記録用 OpenFOAM バージョン表示 */
+  OPENFOAM_SOLVER_VERSION?: string;
+  /** Google Gemini API（OpenFOAM 一次審査） */
+  GEMINI_OPENFOAM_REVIEW_MODEL?: string;
+  /** 一次審査プロンプト用 OpenFOAM 構文リファレンス全文の上書き */
+  OPENFOAM_REVIEW_SYNTAX_REFERENCE?: string;
 }
 
 export interface RoleRow {

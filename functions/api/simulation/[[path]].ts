@@ -217,6 +217,63 @@ import {
 import { sha256HexFromBuffer } from "../../lib/simulation/fds-content-hash";
 import { estimateFdsRunCost, estimateFdsStorage } from "../../lib/simulation/fds-cost-estimate";
 import { createFdsRerunFromRequest } from "../../lib/simulation/fds-rerun";
+import { handleOpenfoamJobCallback } from "../../lib/simulation/openfoam-callback";
+import { syncOpenfoamJobArtifacts } from "../../lib/simulation/openfoam-job-artifacts";
+import {
+  cancelOpenfoamJob,
+  fetchOpenfoamAmiStatus,
+  fetchLiveEc2StateForOpenfoamJob,
+  getOpenfoamAwsConfig,
+  launchOpenfoamJobOnEc2,
+  syncOpenfoamJobFromEc2,
+} from "../../lib/simulation/openfoam-ec2-runner";
+import {
+  createOpenfoamJob,
+  OPENFOAM_DEFAULT_INSTANCE_TYPE,
+  OPENFOAM_JOB_MAX_RUNTIME_HOURS,
+  OPENFOAM_MAX_INPUT_BYTES,
+  formatOpenfoamJobForApi,
+  generateOpenfoamInputR2Key,
+  getOpenfoamJobById,
+  listOpenfoamJobs,
+  updateOpenfoamJobStatus,
+  validateOpenfoamFilename,
+} from "../../lib/simulation/openfoam-jobs";
+import {
+  clampMpiProcesses as clampOpenfoamMpiProcesses,
+  FDS_MAX_MPI_PROCESSES as OPENFOAM_MAX_MPI_PROCESSES,
+  FDS_MIN_MPI_PROCESSES as OPENFOAM_MIN_MPI_PROCESSES,
+  pickEc2InstanceType as pickOpenfoamEc2InstanceType,
+} from "../../lib/simulation/openfoam-instance-sizing";
+import {
+  createOpenfoamRequest,
+  formatOpenfoamRequestForApiEnriched,
+  forceSecondaryOpenfoamRequest,
+  getOpenfoamRequestById,
+  listOpenfoamRequestsAdmin,
+  listOpenfoamRequestsForUser,
+  listPendingOpenfoamRequests,
+  markOpenfoamRequestApproved,
+  markOpenfoamRequestRejected,
+  replaceOpenfoamRequestInputByStaff,
+  retryOpenfoamPrimaryReview,
+  runOpenfoamPrimaryReviewJob,
+  sendOpenfoamPendingApprovalDiscordNotification,
+  OPENFOAM_PRIMARY_REVIEW_MAX_ATTEMPTS,
+  validateOpenfoamRequestMaxRuntimeHours,
+  canStaffReplaceOpenfoamRequestInput,
+} from "../../lib/simulation/openfoam-requests";
+import {
+  assertOpenfoamRequestChatAccess,
+  createOpenfoamRequestMessage,
+  OpenfoamRequestChatAccessError,
+  getOpenfoamRequestAttachmentForDownload,
+  listOpenfoamRequestMessagesForApi,
+} from "../../lib/simulation/openfoam-request-chat";
+import { extractOpenfoamTextForReview } from "../../lib/simulation/openfoam-primary-review";
+import { estimateOpenfoamRunCost, estimateOpenfoamStorage } from "../../lib/simulation/openfoam-cost-estimate";
+import { createOpenfoamRerunFromRequest } from "../../lib/simulation/openfoam-rerun";
+
 import { verifyFirebaseIdToken } from "../../lib/simulation/firebase-id-token";
 import {
   assertSimPhoneE164Available,
@@ -382,6 +439,93 @@ async function handleFdsRequestChatAttachmentDownload(
 }
 
 /** Syncs EC2/R2 state and formats an FDS job for the admin API. */
+
+/** Handles OpenFOAM request chat message listing. */
+async function handleOpenfoamRequestChatList(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  params: { requestId: string; userId: string; apiPrefix: string }
+): Promise<Response> {
+  try {
+    const access = await assertOpenfoamRequestChatAccess(db, params.userId, params.requestId);
+    const url = new URL(request.url);
+    const after = url.searchParams.get("after");
+    const limitRaw = parseInt(url.searchParams.get("limit") ?? "", 10);
+    const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
+    const messages = await listOpenfoamRequestMessagesForApi(env, db, {
+      requestId: params.requestId,
+      viewerUserId: params.userId,
+      requestOwnerUserId: access.request.user_id,
+      apiPrefix: params.apiPrefix,
+      after,
+      limit,
+    });
+    return json({ messages });
+  } catch (err) {
+    if (err instanceof OpenfoamRequestChatAccessError) return error(err.message, 404);
+    return error(err instanceof Error ? err.message : "メッセージの取得に失敗しました", 400);
+  }
+}
+
+async function handleOpenfoamRequestChatPost(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  params: { requestId: string; userId: string; apiPrefix: string }
+): Promise<Response> {
+  try {
+    const access = await assertOpenfoamRequestChatAccess(db, params.userId, params.requestId);
+    const { body, file } = await parseFdsChatMessageRequest(request);
+    const row = await createOpenfoamRequestMessage(env, db, {
+      requestId: params.requestId,
+      senderUserId: params.userId,
+      body,
+      attachment: file
+        ? {
+            buffer: await file.arrayBuffer(),
+            filename: file.name.trim(),
+            contentType: file.type || "application/octet-stream",
+            sizeBytes: file.size,
+          }
+        : null,
+    });
+    const messages = await listOpenfoamRequestMessagesForApi(env, db, {
+      requestId: params.requestId,
+      viewerUserId: params.userId,
+      requestOwnerUserId: access.request.user_id,
+      apiPrefix: params.apiPrefix,
+      limit: 200,
+    });
+    const created = messages.find((m) => m.id === row.id);
+    return json({ message: created ?? messages[messages.length - 1] }, 201);
+  } catch (err) {
+    if (err instanceof OpenfoamRequestChatAccessError) return error(err.message, 404);
+    return error(err instanceof Error ? err.message : "メッセージの送信に失敗しました", 400);
+  }
+}
+
+async function handleOpenfoamRequestChatAttachmentDownload(
+  env: Env,
+  db: D1Database,
+  params: { requestId: string; messageId: string; userId: string }
+): Promise<Response> {
+  try {
+    await assertOpenfoamRequestChatAccess(db, params.userId, params.requestId);
+    const result = await getOpenfoamRequestAttachmentForDownload(env, params.messageId, params.userId);
+    if (!result) return error("添付ファイルが見つかりません", 404);
+    return new Response(result.body, {
+      headers: {
+        "Content-Type": result.contentType,
+        "Content-Disposition": attachmentFilename(result.filename),
+      },
+    });
+  } catch (err) {
+    if (err instanceof OpenfoamRequestChatAccessError) return error(err.message, 404);
+    return error(err instanceof Error ? err.message : "ダウンロードに失敗しました", 400);
+  }
+}
+
 async function formatFdsJobForAdminApi(
   env: Env,
   job: FdsJob,
@@ -410,6 +554,36 @@ async function formatFdsJobForAdminApi(
     };
   }
   return formatFdsJobForApi(refreshed, artifacts, liveEc2);
+}
+
+async function formatOpenfoamJobForAdminApi(
+  env: Env,
+  job: import("../../lib/simulation/openfoam-jobs").OpenfoamJob,
+  options: { liveEc2?: boolean } = {}
+) {
+  const afterEc2 = await syncOpenfoamJobFromEc2(env, job);
+  let { job: refreshed, artifacts } = await syncOpenfoamJobArtifacts(env, afterEc2);
+  if (
+    artifacts.hasOutput &&
+    refreshed.status === "failed" &&
+    (refreshed.status_message?.includes("完了通知") ||
+      refreshed.status_message?.includes("結果 ZIP を R2"))
+  ) {
+    await updateOpenfoamJobStatus(env.DB, refreshed.id, "succeeded", {
+      statusMessage: "OpenFOAM の実行が完了しました",
+      finishedAt: refreshed.finished_at ?? new Date().toISOString(),
+    });
+    refreshed = (await getOpenfoamJobById(env.DB, refreshed.id)) ?? refreshed;
+  }
+  let liveEc2: { ec2_instance_state: string | null; ec2_launch_time: string | null } | undefined;
+  if (options.liveEc2) {
+    const snapshot = await fetchLiveEc2StateForOpenfoamJob(env, refreshed);
+    liveEc2 = {
+      ec2_instance_state: snapshot?.state ?? null,
+      ec2_launch_time: snapshot?.launchTime ?? null,
+    };
+  }
+  return formatOpenfoamJobForApi(refreshed, artifacts, liveEc2);
 }
 
 /** Returns hashed client metadata for phone verification audit logs. */
@@ -787,6 +961,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return handleFdsJobCallback(env, request);
     }
 
+    if (method === "POST" && segments[0] === "openfoam-jobs" && segments[1] === "callback") {
+      return handleOpenfoamJobCallback(env, request);
+    }
+
     const isAdminRoute = segments[0] === "admin";
     const isUploadRoute = segments[0] === "upload";
 
@@ -806,6 +984,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     } else if (
       segments[0] === "calendar" ||
       segments[0] === "fds-requests" ||
+      segments[0] === "openfoam-requests" ||
       segments[0] === "reservations" ||
       segments[0] === "simulators" ||
       segments[0] === "result-videos" ||
@@ -1905,6 +2084,396 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
 
       return json({ request: await formatFdsRequestForApiEnriched(db, row) }, 201);
+    }
+
+
+    // GET /api/simulation/openfoam-requests/config
+    if (method === "GET" && segments[0] === "openfoam-requests" && segments[1] === "config") {
+      return json({
+        max_runtime_hours: OPENFOAM_JOB_MAX_RUNTIME_HOURS,
+        min_mpi_processes: OPENFOAM_MIN_MPI_PROCESSES,
+        max_mpi_processes: OPENFOAM_MAX_MPI_PROCESSES,
+        instance_family: "c7a,hpc6a",
+        primary_review_max_attempts: OPENFOAM_PRIMARY_REVIEW_MAX_ATTEMPTS,
+      });
+    }
+
+    // GET /api/simulation/openfoam-requests/instance-preview?mpi_processes=8
+    if (
+      method === "GET" &&
+      segments[0] === "openfoam-requests" &&
+      segments[1] === "instance-preview"
+    ) {
+      const mpiRaw = parseInt(url.searchParams.get("mpi_processes") ?? "", 10);
+      const sizing = pickOpenfoamEc2InstanceType(Number.isFinite(mpiRaw) ? mpiRaw : 1);
+      const maxRuntimeRaw = parseInt(url.searchParams.get("max_runtime_hours") ?? "", 10);
+      const maxRuntimeHours = Number.isFinite(maxRuntimeRaw)
+        ? maxRuntimeRaw
+        : OPENFOAM_JOB_MAX_RUNTIME_HOURS;
+      const inputSizeRaw = parseInt(url.searchParams.get("input_size_bytes") ?? "", 10);
+      const inputBytes = Number.isFinite(inputSizeRaw) ? inputSizeRaw : 0;
+      const cost = estimateOpenfoamRunCost(sizing.instanceType, maxRuntimeHours);
+      const storage = estimateOpenfoamStorage(inputBytes);
+      return json({
+        mpi_processes: sizing.requestedCores,
+        instance_type: sizing.instanceType,
+        vcpus: sizing.vcpus,
+        max_runtime_hours: cost.max_runtime_hours,
+        estimated_cost_usd_max: cost.estimated_cost_usd_max,
+        estimated_cost_jpy_max: cost.estimated_cost_jpy_max,
+        cost_note: cost.cost_note,
+        estimated_storage: storage,
+      });
+    }
+
+    // GET /api/simulation/openfoam-requests
+    if (method === "GET" && segments[0] === "openfoam-requests" && segments.length === 1) {
+      const rows = await listOpenfoamRequestsForUser(db, userId);
+      const requests = await Promise.all(rows.map((row) => formatOpenfoamRequestForApiEnriched(db, row)));
+      return json({ requests });
+    }
+
+    // GET /api/simulation/openfoam-requests/:id
+    if (method === "GET" && segments[0] === "openfoam-requests" && segments.length === 2) {
+      const row = await getOpenfoamRequestById(db, segments[1]);
+      if (!row || row.user_id !== userId) {
+        return error("依頼が見つかりません", 404);
+      }
+      return json({ request: await formatOpenfoamRequestForApiEnriched(db, row) });
+    }
+
+    // GET /api/simulation/openfoam-requests/:id/messages
+    if (
+      method === "GET" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 3 &&
+      segments[2] === "messages"
+    ) {
+      return handleOpenfoamRequestChatList(env, db, request, {
+        requestId: segments[1],
+        userId,
+        apiPrefix: "openfoam-requests",
+      });
+    }
+
+    // POST /api/simulation/openfoam-requests/:id/messages
+    if (
+      method === "POST" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 3 &&
+      segments[2] === "messages"
+    ) {
+      return handleOpenfoamRequestChatPost(env, db, request, {
+        requestId: segments[1],
+        userId,
+        apiPrefix: "openfoam-requests",
+      });
+    }
+
+    // GET /api/simulation/openfoam-requests/:id/messages/:msgId/attachment/download
+    if (
+      method === "GET" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 6 &&
+      segments[2] === "messages" &&
+      segments[4] === "attachment" &&
+      segments[5] === "download"
+    ) {
+      return handleOpenfoamRequestChatAttachmentDownload(env, db, {
+        requestId: segments[1],
+        messageId: segments[3],
+        userId,
+      });
+    }
+
+    // GET /api/simulation/openfoam-requests/:id/output/download
+    if (
+      method === "GET" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 4 &&
+      segments[2] === "output" &&
+      segments[3] === "download"
+    ) {
+      const row = await getOpenfoamRequestById(db, segments[1]);
+      if (!row || row.user_id !== userId) {
+        return error("依頼が見つかりません", 404);
+      }
+      if (!row.openfoam_job_id) return error("実行結果がありません", 404);
+      let job = await getOpenfoamJobById(db, row.openfoam_job_id);
+      if (!job?.output_r2_key) return error("結果ファイルがありません", 404);
+      const synced = await syncOpenfoamJobArtifacts(env, job);
+      job = synced.job;
+      if (!synced.artifacts.hasOutput) return error("結果ファイルがありません", 404);
+      const obj = await env.FILES.get(job.output_r2_key!);
+      if (!obj) return error("結果ファイルがありません", 404);
+      const base = job.input_filename.replace(/\.zip/i, "");
+      const filename = job.output_filename ?? `${base}-results.zip`;
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachmentFilename(filename),
+        },
+      });
+    }
+
+    // POST /api/simulation/openfoam-requests/:id/rerun
+    if (
+      method === "POST" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 3 &&
+      segments[2] === "rerun"
+    ) {
+      try {
+        await requireSimPhoneVerified(db, userId);
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as Error & { code?: string }).code
+            : undefined;
+        if (code === SIM_PHONE_NOT_VERIFIED_CODE) {
+          return json(
+            { error: err instanceof Error ? err.message : "電話認証が必要です", code },
+            403
+          );
+        }
+        throw err;
+      }
+
+      const sourceId = segments[1];
+      let body: { title?: string; desired_date?: string | null } = {};
+      try {
+        body = await request.json();
+      } catch {
+        body = {};
+      }
+
+      try {
+        const row = await createOpenfoamRerunFromRequest(env, db, sourceId, userId, {
+          title: body.title,
+          desiredDate: body.desired_date,
+        });
+        const object = await env.FILES.get(row.input_r2_key);
+        const caseText = object
+          ? await extractOpenfoamTextForReview(await object.arrayBuffer())
+          : "";
+        waitUntil(
+          runOpenfoamPrimaryReviewJob(env, db, {
+            requestId: row.id,
+            caseText,
+            filename: row.input_filename,
+            mpiProcesses: row.mpi_processes,
+            maxRuntimeHours: row.max_runtime_hours,
+            forceSecondary: false,
+          })
+        );
+        return json({ request: await formatOpenfoamRequestForApiEnriched(db, row) }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "再依頼に失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // POST /api/simulation/openfoam-requests/:id/retry-primary
+    if (
+      method === "POST" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 3 &&
+      segments[2] === "retry-primary"
+    ) {
+      try {
+        await requireSimPhoneVerified(db, userId);
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as Error & { code?: string }).code
+            : undefined;
+        if (code === SIM_PHONE_NOT_VERIFIED_CODE) {
+          return json(
+            { error: err instanceof Error ? err.message : "電話認証が必要です", code },
+            403
+          );
+        }
+        throw err;
+      }
+
+      const requestId = segments[1];
+      const existing = await getOpenfoamRequestById(db, requestId);
+      if (!existing || existing.user_id !== userId) {
+        return error("依頼が見つかりません", 404);
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .zip ケースファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateOpenfoamFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > OPENFOAM_MAX_INPUT_BYTES) {
+        return error(
+          `ファイルサイズは 1 バイト以上 ${OPENFOAM_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`,
+          400
+        );
+      }
+
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const inputSha256 = await sha256HexFromBuffer(fileBuffer);
+      const caseText = await extractOpenfoamTextForReview(fileBuffer);
+      const r2Key = generateOpenfoamInputR2Key(requestId, filename);
+
+      await env.FILES.put(r2Key, fileBuffer, {
+        httpMetadata: { contentType: "application/zip" },
+      });
+
+      try {
+        const row = await retryOpenfoamPrimaryReview(db, requestId, userId, {
+          inputR2Key: r2Key,
+          inputFilename: filename,
+          inputSizeBytes: sizeBytes,
+          inputSha256,
+        });
+
+        waitUntil(
+          runOpenfoamPrimaryReviewJob(env, db, {
+            requestId,
+            caseText,
+            filename,
+            mpiProcesses: row.mpi_processes,
+            maxRuntimeHours: row.max_runtime_hours,
+            forceSecondary: false,
+          })
+        );
+
+        return json({ request: await formatOpenfoamRequestForApiEnriched(db, row) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "再審の開始に失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // POST /api/simulation/openfoam-requests/:id/force-secondary
+    if (
+      method === "POST" &&
+      segments[0] === "openfoam-requests" &&
+      segments.length === 3 &&
+      segments[2] === "force-secondary"
+    ) {
+      try {
+        const row = await forceSecondaryOpenfoamRequest(db, segments[1], userId);
+        waitUntil(sendOpenfoamPendingApprovalDiscordNotification(env, db, row.id));
+        return json({ request: await formatOpenfoamRequestForApiEnriched(db, row) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "二次審査への申請に失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // POST /api/simulation/openfoam-requests — OpenFOAM 依頼（一次審査は非同期）
+    if (method === "POST" && segments[0] === "openfoam-requests" && segments.length === 1) {
+      try {
+        await requireSimPhoneVerified(db, userId);
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as Error & { code?: string }).code
+            : undefined;
+        if (code === SIM_PHONE_NOT_VERIFIED_CODE) {
+          return json(
+            { error: err instanceof Error ? err.message : "電話認証が必要です", code },
+            403
+          );
+        }
+        throw err;
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      const titleInput = String(formData.get("title") ?? "").trim();
+      const notesInput = String(formData.get("notes") ?? "").trim();
+      const desiredDate = String(formData.get("desired_date") ?? "").trim() || null;
+      const maxRuntimeRaw = parseInt(String(formData.get("max_runtime_hours") ?? ""), 10);
+      const mpiRaw = parseInt(String(formData.get("mpi_processes") ?? ""), 10);
+
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .zip ケースファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateOpenfoamFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const runtimeError = validateOpenfoamRequestMaxRuntimeHours(maxRuntimeRaw);
+      if (runtimeError) return error(runtimeError, 400);
+
+      const mpiProcesses = clampOpenfoamMpiProcesses(Number.isFinite(mpiRaw) ? mpiRaw : 1);
+
+      const forceSecondary =
+        String(formData.get("force_secondary") ?? "").trim() === "1" ||
+        String(formData.get("force_secondary") ?? "").trim().toLowerCase() === "true";
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > OPENFOAM_MAX_INPUT_BYTES) {
+        return error(
+          `ファイルサイズは 1 バイト以上 ${OPENFOAM_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`,
+          400
+        );
+      }
+
+      const requestId = createId("ofreq");
+      const r2Key = generateOpenfoamInputR2Key(requestId, filename);
+      const title = titleInput || filename.replace(/\.zip/i, "");
+      const createdAt = new Date().toISOString();
+
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const inputSha256 = await sha256HexFromBuffer(fileBuffer);
+      const caseText = await extractOpenfoamTextForReview(fileBuffer);
+
+      await env.FILES.put(r2Key, fileBuffer, {
+        httpMetadata: { contentType: "application/zip" },
+      });
+
+      const row = await createOpenfoamRequest(db, {
+        id: requestId,
+        userId,
+        title,
+        desiredDate,
+        maxRuntimeHours: maxRuntimeRaw,
+        mpiProcesses,
+        inputR2Key: r2Key,
+        inputFilename: filename,
+        inputSizeBytes: sizeBytes,
+        inputSha256,
+        notes: notesInput || null,
+        createdAt,
+        status: "primary_reviewing",
+      });
+
+      waitUntil(
+        runOpenfoamPrimaryReviewJob(env, db, {
+          requestId,
+          caseText,
+          filename,
+          mpiProcesses,
+          maxRuntimeHours: maxRuntimeRaw,
+          forceSecondary,
+        })
+      );
+
+      return json({ request: await formatOpenfoamRequestForApiEnriched(db, row) }, 201);
     }
 
     // --- Admin routes (management app access already verified) ---
@@ -3211,6 +3780,569 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return new Response(obj.body, {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": attachmentFilename(`${job.id}-runner.log`),
+        },
+      });
+    }
+
+    // GET /api/simulation/admin/stl/:id
+    if (method === "GET" && segments[1] === "stl" && segments.length === 3) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+      return streamSimFile(env.FILES, reservation.stl_r2_key, reservation.stl_filename);
+    }
+
+    // POST /api/simulation/admin/reservations/:id/result-video
+    if (
+      method === "POST" &&
+      segments[1] === "reservations" &&
+      segments.length === 4 &&
+      segments[3] === "result-video"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const file = formData.get("file");
+      if (!(file instanceof File)) {
+        return error("file フィールドが必要です", 400);
+      }
+
+      const filenameError = validatePrintVideoFilename(file.name);
+      if (filenameError) return error(filenameError);
+
+      const body = await file.arrayBuffer();
+      const uploaded = await uploadPrintVideoToStorage(
+        env,
+        db,
+        authUser,
+        reservation,
+        file.name,
+        body
+      );
+
+      if (reservation.result_video_storage_path) {
+        context.waitUntil(
+          deletePrintVideoFile(env, db, reservation.result_video_storage_path)
+        );
+      }
+
+      await updateReservationPrintVideo(db, reservation.id, {
+        result_video_storage_path: uploaded.path,
+        result_video_filename: uploaded.filename,
+        result_video_size_bytes: uploaded.size,
+      });
+
+      const memberMap = await buildMemberMap(db);
+      const simulatorMap = await buildSimulatorMap(db);
+      const updated = await getReservationById(db, reservation.id);
+      return json({
+        reservation: updated
+          ? enrichReservationForAdmin(updated, memberMap, simulatorMap)
+          : null,
+      });
+    }
+
+    // DELETE /api/simulation/admin/reservations/:id/result-video
+    if (
+      method === "DELETE" &&
+      segments[1] === "reservations" &&
+      segments.length === 4 &&
+      segments[3] === "result-video"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+
+      if (reservation.result_video_storage_path) {
+        await deletePrintVideoFile(env, db, reservation.result_video_storage_path);
+      }
+      await clearReservationPrintVideo(db, reservation.id);
+
+      const memberMap = await buildMemberMap(db);
+      const simulatorMap = await buildSimulatorMap(db);
+      const updated = await getReservationById(db, reservation.id);
+      return json({
+        reservation: updated
+          ? enrichReservationForAdmin(updated, memberMap, simulatorMap)
+          : null,
+      });
+    }
+
+    // GET /api/simulation/admin/reservations/:id/result-video/download
+    if (
+      method === "GET" &&
+      segments[1] === "reservations" &&
+      segments.length === 5 &&
+      segments[3] === "result-video" &&
+      segments[4] === "download"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+      if (!reservation.result_video_storage_path) {
+        return error("結果動画はまだアップロードされていません", 404);
+      }
+
+      const parsed = parseLogicalPath(reservation.result_video_storage_path);
+      if (!parsed?.relativePath) {
+        return error("動画ファイルのパスが不正です", 500);
+      }
+
+      try {
+        return await streamStorageFile(env, parsed);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "ダウンロードに失敗しました";
+        return error(message, 404);
+      }
+    }
+
+    // GET /api/simulation/admin/openfoam-requests
+    if (method === "GET" && segments[1] === "openfoam-requests" && segments.length === 2) {
+      const pendingOnly = url.searchParams.get("pending") === "1";
+      const rows = pendingOnly
+        ? await listPendingOpenfoamRequests(db)
+        : await listOpenfoamRequestsAdmin(db);
+      const requests = await Promise.all(rows.map((row) => formatOpenfoamRequestForApiEnriched(db, row)));
+      return json({ requests });
+    }
+
+    // GET /api/simulation/admin/openfoam-requests/:id
+    if (method === "GET" && segments[1] === "openfoam-requests" && segments.length === 3) {
+      const row = await getOpenfoamRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      return json({ request: await formatOpenfoamRequestForApiEnriched(db, row) });
+    }
+
+    // GET /api/simulation/admin/openfoam-requests/:id/input/download
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 5 &&
+      segments[3] === "input" &&
+      segments[4] === "download"
+    ) {
+      const row = await getOpenfoamRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      const obj = await env.FILES.get(row.input_r2_key);
+      if (!obj) return error("入力ファイルが見つかりません", 404);
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachmentFilename(row.input_filename),
+        },
+      });
+    }
+
+    // POST /api/simulation/admin/openfoam-requests/:id/approve
+    if (
+      method === "POST" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 4 &&
+      segments[3] === "approve"
+    ) {
+      const row = await getOpenfoamRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      if (row.status !== "pending_approval") {
+        return error("この依頼は承認できません", 400);
+      }
+
+      const jobId = createId("of");
+      const createdAt = new Date().toISOString();
+      const job = await createOpenfoamJob(db, {
+        id: jobId,
+        title: row.title,
+        inputR2Key: row.input_r2_key,
+        inputFilename: row.input_filename,
+        inputSizeBytes: row.input_size_bytes,
+        inputSha256: row.input_sha256,
+        instanceType: row.ec2_instance_type,
+        maxRuntimeHours: row.max_runtime_hours,
+        mpiProcesses: row.mpi_processes,
+        createdByUserId: row.user_id,
+        createdAt,
+      });
+
+      const reviewedAt = new Date().toISOString();
+      await markOpenfoamRequestApproved(db, row.id, jobId, userId, reviewedAt);
+
+      try {
+        const launched = await launchOpenfoamJobOnEc2(env, job, getOAuthRedirectBase(request, env));
+        const approvedRow = await getOpenfoamRequestById(db, row.id);
+        return json({
+          request: approvedRow ? await formatOpenfoamRequestForApiEnriched(db, approvedRow) : null,
+          job: await formatOpenfoamJobForAdminApi(env, launched.job, { liveEc2: true }),
+          launch_steps: launched.steps,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "EC2 起動に失敗しました";
+        await deleteFdsJob(db, jobId);
+        await db
+          .prepare(
+            `UPDATE sim_fds_requests
+             SET status = 'pending_approval', fds_job_id = NULL, reviewed_by_user_id = NULL, reviewed_at = NULL
+             WHERE id = ?`
+          )
+          .bind(row.id)
+          .run();
+        return error(message, 502);
+      }
+    }
+
+    // GET /api/simulation/admin/openfoam-requests/:id/messages
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 4 &&
+      segments[3] === "messages"
+    ) {
+      return handleOpenfoamRequestChatList(env, db, request, {
+        requestId: segments[2],
+        userId,
+        apiPrefix: "admin/openfoam-requests",
+      });
+    }
+
+    // POST /api/simulation/admin/openfoam-requests/:id/messages
+    if (
+      method === "POST" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 4 &&
+      segments[3] === "messages"
+    ) {
+      return handleOpenfoamRequestChatPost(env, db, request, {
+        requestId: segments[2],
+        userId,
+        apiPrefix: "admin/openfoam-requests",
+      });
+    }
+
+    // GET /api/simulation/admin/openfoam-requests/:id/messages/:msgId/attachment/download
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 7 &&
+      segments[3] === "messages" &&
+      segments[5] === "attachment" &&
+      segments[6] === "download"
+    ) {
+      return handleOpenfoamRequestChatAttachmentDownload(env, db, {
+        requestId: segments[2],
+        messageId: segments[4],
+        userId,
+      });
+    }
+
+    // POST /api/simulation/admin/openfoam-requests/:id/replace-input
+    if (
+      method === "POST" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 4 &&
+      segments[3] === "replace-input"
+    ) {
+      const requestId = segments[2];
+      const row = await getOpenfoamRequestById(db, requestId);
+      if (!row) return error("依頼が見つかりません", 404);
+      if (!canStaffReplaceOpenfoamRequestInput(row.status)) {
+        return error("この依頼の入力ファイルは置き換えできません", 400);
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .zip ケースファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateOpenfoamFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > OPENFOAM_MAX_INPUT_BYTES) {
+        return error(
+          `ファイルサイズは 1 バイト以上 ${OPENFOAM_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`,
+          400
+        );
+      }
+
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const inputSha256 = await sha256HexFromBuffer(fileBuffer);
+      const caseText = await extractOpenfoamTextForReview(fileBuffer);
+      const r2Key = generateOpenfoamInputR2Key(requestId, filename);
+
+      await env.FILES.put(r2Key, fileBuffer, {
+        httpMetadata: { contentType: "application/zip" },
+      });
+
+      try {
+        const updated = await replaceOpenfoamRequestInputByStaff(db, requestId, {
+          inputR2Key: r2Key,
+          inputFilename: filename,
+          inputSizeBytes: sizeBytes,
+          inputSha256,
+        });
+
+        await postFdsRequestSystemChatMessage(db, {
+          requestId,
+          senderUserId: userId,
+          body: `[システム] 担当者が入力 .fds を更新しました（${filename}）。一次審査を再実行します。`,
+        });
+
+        waitUntil(
+          runOpenfoamPrimaryReviewJob(env, db, {
+            requestId,
+            caseText,
+            filename,
+            mpiProcesses: updated.mpi_processes,
+            maxRuntimeHours: updated.max_runtime_hours,
+            forceSecondary: false,
+          })
+        );
+
+        return json({ request: await formatOpenfoamRequestForApiEnriched(db, updated) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "入力ファイルの置き換えに失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // POST /api/simulation/admin/openfoam-requests/:id/reject
+    if (
+      method === "POST" &&
+      segments[1] === "openfoam-requests" &&
+      segments.length === 4 &&
+      segments[3] === "reject"
+    ) {
+      const row = await getOpenfoamRequestById(db, segments[2]);
+      if (!row) return error("依頼が見つかりません", 404);
+      if (row.status !== "pending_approval") {
+        return error("この依頼は却下できません", 400);
+      }
+
+      let reviewMessage: string | null = null;
+      try {
+        const body = await request.json<{ message?: string }>();
+        reviewMessage = String(body.message ?? "").trim() || null;
+      } catch {
+        reviewMessage = null;
+      }
+
+      const reviewedAt = new Date().toISOString();
+      await markOpenfoamRequestRejected(db, row.id, userId, reviewedAt, reviewMessage);
+      const updated = await getOpenfoamRequestById(db, row.id);
+      return json({ request: updated ? await formatOpenfoamRequestForApiEnriched(db, updated) : null });
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs/config
+    if (method === "GET" && segments[1] === "openfoam-jobs" && segments[2] === "config") {
+      const config = getOpenfoamAwsConfig(env);
+      const ami = await fetchOpenfoamAmiStatus(env);
+      return json({
+        aws: config,
+        ami,
+        r2_presign: Boolean(
+          env.R2_ACCESS_KEY_ID?.trim() &&
+            env.R2_SECRET_ACCESS_KEY?.trim() &&
+            env.R2_ACCOUNT_ID?.trim()
+        ),
+        callback_secret: Boolean(env.OPENFOAM_JOB_CALLBACK_SECRET?.trim()),
+        max_runtime_hours: 10,
+        default_instance_type: env.AWS_EC2_INSTANCE_TYPE?.trim() || OPENFOAM_DEFAULT_INSTANCE_TYPE,
+      });
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs
+    if (method === "GET" && segments[1] === "openfoam-jobs" && segments.length === 2) {
+      const jobs = await listOpenfoamJobs(db);
+      const formatted = await Promise.all(
+        jobs.map((job) => formatOpenfoamJobForAdminApi(env, job, { liveEc2: false }))
+      );
+      return json({ jobs: formatted });
+    }
+
+    // POST /api/simulation/admin/openfoam-jobs/run — .fds をアップロードしてジョブ作成（EC2 起動は POST :id/run）
+    if (method === "POST" && segments[1] === "openfoam-jobs" && segments[2] === "run") {
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("multipart/form-data")) {
+        return error("multipart/form-data で送信してください", 400);
+      }
+
+      const formData = await request.formData();
+      const fileEntry = formData.get("file");
+      const titleInput = String(formData.get("title") ?? "").trim();
+
+      if (!(fileEntry instanceof File)) {
+        return error("file フィールドに .zip ケースファイルを指定してください", 400);
+      }
+
+      const filename = fileEntry.name.trim();
+      const validationError = validateOpenfoamFilename(filename);
+      if (validationError) return error(validationError, 400);
+
+      const sizeBytes = fileEntry.size;
+      if (sizeBytes <= 0 || sizeBytes > OPENFOAM_MAX_INPUT_BYTES) {
+        return error(`ファイルサイズは 1 バイト以上 ${OPENFOAM_MAX_INPUT_BYTES / (1024 * 1024)}MB 以下である必要があります`, 400);
+      }
+
+      const jobId = createId("of");
+      const r2Key = generateOpenfoamInputR2Key(jobId, filename);
+      const title = titleInput || filename.replace(/\.zip/i, "");
+      const instanceType = env.AWS_EC2_INSTANCE_TYPE?.trim() || OPENFOAM_DEFAULT_INSTANCE_TYPE;
+      const createdAt = new Date().toISOString();
+
+      await env.FILES.put(r2Key, await fileEntry.arrayBuffer(), {
+        httpMetadata: { contentType: "application/zip" },
+      });
+
+      const job = await createOpenfoamJob(db, {
+        id: jobId,
+        title,
+        inputR2Key: r2Key,
+        inputFilename: filename,
+        inputSizeBytes: sizeBytes,
+        instanceType,
+        createdByUserId: userId,
+        createdAt,
+      });
+
+      return json(
+        {
+          job: await formatOpenfoamJobForAdminApi(env, job, { liveEc2: false }),
+          launch_required: true,
+          upload_steps: [
+            { at: createdAt, message: `R2 に入力ファイルを保存しました (${r2Key})` },
+            { at: new Date().toISOString(), message: `ジョブを作成しました (ID: ${jobId})` },
+          ],
+        },
+        201
+      );
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs/:id
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 3 &&
+      segments[2] !== "config"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      return json({ job: await formatOpenfoamJobForAdminApi(env, job, { liveEc2: true }) });
+    }
+
+    // POST /api/simulation/admin/openfoam-jobs/:id/run
+    if (
+      method === "POST" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 4 &&
+      segments[3] === "run"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      if (job.status !== "pending" && job.status !== "failed" && job.status !== "cancelled") {
+        return error("このジョブは再実行できません", 400);
+      }
+
+      try {
+        const launched = await launchOpenfoamJobOnEc2(env, job, getOAuthRedirectBase(request, env));
+        return json({
+          job: await formatOpenfoamJobForAdminApi(env, launched.job, { liveEc2: true }),
+          launch_steps: launched.steps,
+        });
+      } catch (launchErr) {
+        if (launchErr instanceof Ec2AmiNotReadyError) {
+          return error(launchErr.message, 503, {
+            code: launchErr.code,
+            ami_state: launchErr.amiState,
+          });
+        }
+        const message =
+          launchErr instanceof Error ? launchErr.message : "EC2 の起動に失敗しました";
+        return error(message, 500);
+      }
+    }
+
+    // POST /api/simulation/admin/openfoam-jobs/:id/cancel
+    if (
+      method === "POST" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 4 &&
+      segments[3] === "cancel"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      if (!["pending", "launching", "running"].includes(job.status)) {
+        return error("このジョブはキャンセルできません", 400);
+      }
+      const cancelled = await cancelOpenfoamJob(env, job);
+      return json({ job: await formatOpenfoamJobForAdminApi(env, cancelled, { liveEc2: true }) });
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs/:id/input/download
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "input" &&
+      segments[4] === "download"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      const obj = await env.FILES.get(job.input_r2_key);
+      if (!obj) return error("入力ファイルが見つかりません", 404);
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachmentFilename(job.input_filename),
+        },
+      });
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs/:id/output/download
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "output" &&
+      segments[4] === "download"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job?.output_r2_key) return error("結果ファイルがありません", 404);
+      const obj = await env.FILES.get(job.output_r2_key);
+      if (!obj) return error("結果ファイルが見つかりません", 404);
+      const base = job.input_filename.replace(/\.zip/i, "") || job.title || job.id;
+      const filename = job.output_filename ?? `${base}-results.zip`;
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachmentFilename(filename),
+        },
+      });
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs/:id/log/download
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "log" &&
+      segments[4] === "download"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job?.log_r2_key) return error("ログファイルがありません", 404);
+      const obj = await env.FILES.get(job.log_r2_key);
+      if (!obj) return error("ログファイルが見つかりません", 404);
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "application/zip",
           "Content-Disposition": attachmentFilename(`${job.id}-runner.log`),
         },
       });

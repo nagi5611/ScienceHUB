@@ -1,39 +1,17 @@
-// public/apps/simulation-request/js/sim-request-main.js
+// public/apps/simulation-request/js/openfoam-request.js
 import { apiFormRequest, apiRequest } from './api.js';
-import { createShiftMiniCalendar } from './shift-mini-calendar.js';
+// import { createShiftMiniCalendar } from './shift-mini-calendar.js';
 import { setupHomeroomCombobox } from './homeroom.js';
 import {
   initPhoneVerification,
   ensureSimPhoneVerified,
   applyPhoneVerificationUi,
 } from './phone-verification.js';
-import {
-  initAuth,
-  checkAppAccess,
-  ensureCanBook,
-  setupProfileGateForm,
-} from './sciencehub-auth.js';
+import { ensureCanBook } from './sciencehub-auth.js';
 import {
   mountFdsRequestChat,
   isFdsRequestChatAvailable,
-} from './fds-request-chat.js';
-
-import { initOpenfoamRequestPanel } from './openfoam-request.js';
-
-const SIM_TYPES = [
-  {
-    id: 'fds',
-    name: 'FDS',
-    description: '火災動的シミュレーション（.fds）',
-    available: true,
-  },
-  {
-    id: 'openfoam',
-    name: 'OpenFOAM',
-    description: '計算流体力学（ケース ZIP）',
-    available: true,
-  },
-];
+} from './openfoam-request-chat.js';
 
 const REQUEST_STATUS_LABELS = {
   primary_reviewing: '一次審査中…',
@@ -51,12 +29,12 @@ let expandedRequestIds = new Set();
 let requestsPollTimer = null;
 let lastSubmittedRequestId = null;
 
-let fdsConfig = null;
+let openfoamConfig = null;
 let selectedSimType = null;
-const fdsChatDestroyers = new Map();
+const openfoamChatDestroyers = new Map();
 
 /** Returns display label and CSS badge key for a request row. */
-function fdsRequestStatusUi(row) {
+function openfoamRequestStatusUi(row) {
   const badge = row.status_badge ?? row.status;
   const label = row.status_display ?? REQUEST_STATUS_LABELS[row.status] ?? row.status;
   return { badge, label };
@@ -85,12 +63,12 @@ function renderRequestDetailPanel(row) {
   const parts = [];
 
   if (row.status === 'primary_reviewing') {
-    parts.push('<p class="hint">AI が .fds 入力を確認しています。しばらくお待ちください。</p>');
+    parts.push('<p class="hint">AI が .zip 入力を確認しています。しばらくお待ちください。</p>');
   }
 
   if (row.primary_review_issues?.length) {
     parts.push(
-      `<p class="fds-request-detail-label">一次審査の指摘</p><ul class="fds-primary-review-issues">${row.primary_review_issues
+      `<p class="openfoam-request-detail-label">一次審査の指摘</p><ul class="openfoam-primary-review-issues">${row.primary_review_issues
         .map((issue) => `<li>${escapeHtml(issue)}</li>`)
         .join('')}</ul>`
     );
@@ -98,13 +76,13 @@ function renderRequestDetailPanel(row) {
 
   if (row.primary_review_error) {
     parts.push(
-      `<p class="fds-request-detail-label">一次審査エラー</p><p class="alert alert-error fds-request-detail-error">${escapeHtml(row.primary_review_error)}</p>`
+      `<p class="openfoam-request-detail-label">一次審査エラー</p><p class="alert alert-error openfoam-request-detail-error">${escapeHtml(row.primary_review_error)}</p>`
     );
   }
 
   if (row.status === 'rejected' && row.review_message) {
     parts.push(
-      `<p class="fds-request-detail-label">二次審査（却下理由）</p><p class="hint">${escapeHtml(row.review_message)}</p>`
+      `<p class="openfoam-request-detail-label">二次審査（却下理由）</p><p class="hint">${escapeHtml(row.review_message)}</p>`
     );
   }
 
@@ -116,7 +94,7 @@ function renderRequestDetailPanel(row) {
 
   if (row.execution_failure_message) {
     parts.push(
-      `<p class="fds-request-detail-label">実行結果の説明</p><p class="alert alert-error fds-request-detail-error">${escapeHtml(row.execution_failure_message)}</p>`
+      `<p class="openfoam-request-detail-label">実行結果の説明</p><p class="alert alert-error openfoam-request-detail-error">${escapeHtml(row.execution_failure_message)}</p>`
     );
   }
 
@@ -128,11 +106,11 @@ function renderRequestDetailPanel(row) {
     if (row.output_sha256) {
       repro.push(`出力 SHA-256: <code>${escapeHtml(formatSha256Short(row.output_sha256))}</code>`);
     }
-    if (row.fds_solver_version) {
-      repro.push(`FDS: ${escapeHtml(row.fds_solver_version)}`);
+    if (row.zip_solver_version) {
+      repro.push(`OpenFOAM: ${escapeHtml(row.zip_solver_version)}`);
     }
-    if (row.fds_ami_id) {
-      repro.push(`AMI: <code>${escapeHtml(row.fds_ami_id)}</code>`);
+    if (row.zip_ami_id) {
+      repro.push(`AMI: <code>${escapeHtml(row.zip_ami_id)}</code>`);
     }
     if (row.ec2_instance_type) {
       repro.push(`インスタンス: ${escapeHtml(row.ec2_instance_type)} · MPI ${row.mpi_processes}`);
@@ -144,7 +122,7 @@ function renderRequestDetailPanel(row) {
     }
     if (repro.length) {
       parts.push(
-        `<p class="fds-request-detail-label">再現性情報</p><ul class="fds-primary-review-issues">${repro
+        `<p class="openfoam-request-detail-label">再現性情報</p><ul class="openfoam-primary-review-issues">${repro
           .map((line) => `<li>${line}</li>`)
           .join('')}</ul>`
       );
@@ -152,13 +130,13 @@ function renderRequestDetailPanel(row) {
 
     if (row.has_output_download) {
       parts.push(
-        `<p class="fds-request-detail-actions"><a class="btn btn-primary btn-sm" href="/api/simulation/fds-requests/${escapeHtml(row.id)}/output/download" download>結果 ZIP をダウンロード</a></p>`
+        `<p class="openfoam-request-detail-actions"><a class="btn btn-primary btn-sm" href="/api/simulation/openfoam-requests/${escapeHtml(row.id)}/output/download" download>結果 ZIP をダウンロード</a></p>`
       );
     }
 
     if (row.can_rerun) {
       parts.push(
-        `<p class="fds-request-detail-actions"><button type="button" class="btn btn-secondary btn-sm fds-rerun-btn" data-request-id="${escapeHtml(row.id)}">同条件で再依頼</button></p>`
+        `<p class="openfoam-request-detail-actions"><button type="button" class="btn btn-secondary btn-sm openfoam-rerun-btn" data-request-id="${escapeHtml(row.id)}">同条件で再依頼</button></p>`
       );
     }
   }
@@ -171,7 +149,7 @@ function renderRequestDetailPanel(row) {
 
   if (isFdsRequestChatAvailable(row.status)) {
     parts.push(
-      `<div class="fds-request-chat-mount" data-request-id="${escapeHtml(row.id)}" data-request-status="${escapeHtml(row.status)}"></div>`
+      `<div class="openfoam-request-chat-mount" data-request-id="${escapeHtml(row.id)}" data-request-status="${escapeHtml(row.status)}"></div>`
     );
   }
 
@@ -179,12 +157,12 @@ function renderRequestDetailPanel(row) {
     parts.push('<p class="hint">詳細情報はありません。</p>');
   }
 
-  return `<div class="fds-request-detail-panel">${parts.join('')}</div>`;
+  return `<div class="openfoam-request-detail-panel">${parts.join('')}</div>`;
 }
 
 /** Returns how many primary review attempts remain for this request. */
 function primaryReviewAttemptsRemaining(row) {
-  const max = row.primary_review_max_attempts ?? fdsConfig?.primary_review_max_attempts ?? 3;
+  const max = row.primary_review_max_attempts ?? openfoamConfig?.primary_review_max_attempts ?? 3;
   const used = row.primary_review_attempt_count ?? 0;
   return Math.max(0, max - used);
 }
@@ -193,17 +171,17 @@ function primaryReviewAttemptsRemaining(row) {
 function appendPrimaryReviewActions(parts, row) {
   if (row.status !== 'primary_failed' && row.status !== 'primary_error') return;
 
-  const max = row.primary_review_max_attempts ?? fdsConfig?.primary_review_max_attempts ?? 3;
+  const max = row.primary_review_max_attempts ?? openfoamConfig?.primary_review_max_attempts ?? 3;
   const used = row.primary_review_attempt_count ?? 0;
   parts.push(
-    `<p class="hint fds-primary-attempts-hint">一次審査: ${used} / ${max} 回実施済み</p>`
+    `<p class="hint openfoam-primary-attempts-hint">一次審査: ${used} / ${max} 回実施済み</p>`
   );
 
   if (row.primary_review_can_retry) {
     const remaining = primaryReviewAttemptsRemaining(row);
     parts.push(
       `<p class="hint">あと ${remaining} 回まで修正ファイルで再審できます。</p>`,
-      `<button type="button" class="btn btn-primary btn-sm fds-retry-primary-btn" data-request-id="${escapeHtml(row.id)}">修正ファイルで再審</button>`
+      `<button type="button" class="btn btn-primary btn-sm openfoam-retry-primary-btn" data-request-id="${escapeHtml(row.id)}">修正ファイルで再審</button>`
     );
   } else {
     parts.push(
@@ -212,7 +190,7 @@ function appendPrimaryReviewActions(parts, row) {
   }
 
   parts.push(
-    `<button type="button" class="btn btn-secondary btn-sm fds-force-secondary-list-btn" data-request-id="${escapeHtml(row.id)}">二次審査へ強制申請する</button>`
+    `<button type="button" class="btn btn-secondary btn-sm openfoam-force-secondary-list-btn" data-request-id="${escapeHtml(row.id)}">二次審査へ強制申請する</button>`
   );
 }
 
@@ -224,13 +202,13 @@ function stopRequestsPoll() {
   }
 }
 
-/** Polls the request list while primary review or FDS execution is in progress. */
+/** Polls the request list while primary review or OpenFOAM execution is in progress. */
 function startRequestsPollIfNeeded(rows) {
   const needsPoll = (rows ?? []).some((r) => {
     if (r.status === 'primary_reviewing') return true;
     if (r.status !== 'approved') return false;
-    if (!r.fds_job_id) return true;
-    const jobStatus = r.fds_job_status;
+    if (!r.zip_job_id) return true;
+    const jobStatus = r.zip_job_status;
     if (!jobStatus) return true;
     return jobStatus === 'pending' || jobStatus === 'launching' || jobStatus === 'running';
   });
@@ -240,35 +218,35 @@ function startRequestsPollIfNeeded(rows) {
   }
   if (requestsPollTimer) return;
   requestsPollTimer = window.setInterval(() => {
-    renderMyRequests().catch(() => {});
+    renderMyOpenfoamRequests().catch(() => {});
   }, 2500);
 }
 
-/** Destroys all mounted FDS chat panels. */
-function destroyAllFdsChats() {
-  for (const destroy of fdsChatDestroyers.values()) {
+/** Destroys all mounted OpenFOAM chat panels. */
+function destroyAllOpenfoamChats() {
+  for (const destroy of openfoamChatDestroyers.values()) {
     destroy?.();
   }
-  fdsChatDestroyers.clear();
+  openfoamChatDestroyers.clear();
 }
 
 /** Mounts chat panels for currently expanded request rows. */
-function mountExpandedFdsChats(rows) {
-  destroyAllFdsChats();
+function mountExpandedOpenfoamChats(rows) {
+  destroyAllOpenfoamChats();
   for (const row of rows) {
     if (!expandedRequestIds.has(row.id) || !isFdsRequestChatAvailable(row.status)) continue;
     const mount = document.querySelector(
-      `.fds-request-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
+      `.openfoam-request-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
     );
     if (!mount) continue;
     const destroy = mountFdsRequestChat(mount, {
       requestId: row.id,
-      apiPrefix: 'fds-requests',
+      apiPrefix: 'openfoam-requests',
       isStaff: false,
       canReplaceInput: false,
       requestStatus: row.status,
     });
-    fdsChatDestroyers.set(row.id, destroy);
+    openfoamChatDestroyers.set(row.id, destroy);
   }
 }
 
@@ -276,30 +254,30 @@ function mountExpandedFdsChats(rows) {
 function toggleRequestExpanded(requestId) {
   if (expandedRequestIds.has(requestId)) {
     expandedRequestIds.delete(requestId);
-    fdsChatDestroyers.get(requestId)?.();
-    fdsChatDestroyers.delete(requestId);
+    openfoamChatDestroyers.get(requestId)?.();
+    openfoamChatDestroyers.delete(requestId);
   } else {
     expandedRequestIds.add(requestId);
   }
-  renderMyRequests().catch(() => {});
+  renderMyOpenfoamRequests().catch(() => {});
 }
 
-/** Prompts for a .fds file and retries primary review for a request. */
-function promptRetryPrimaryFile(requestId) {
+/** Prompts for a .zip file and retries primary review for a request. */
+function promptOpenfoamRetryPrimaryFile(requestId) {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.fds';
+  input.accept = '.zip';
   input.addEventListener('change', () => {
     const file = input.files?.[0];
-    if (file) retryPrimaryWithFile(requestId, file);
+    if (file) retryOpenfoamPrimaryWithFile(requestId, file);
   });
   input.click();
 }
 
-/** POSTs a revised .fds for primary re-review. */
-async function retryPrimaryWithFile(requestId, file) {
-  if (!/\.fds$/i.test(file.name)) {
-    showToast('.fds ファイルのみ選択できます', true);
+/** POSTs a revised .zip for primary re-review. */
+async function retryOpenfoamPrimaryWithFile(requestId, file) {
+  if (!/\.zip$/i.test(file.name)) {
+    showToast('.zip ファイルのみ選択できます', true);
     return;
   }
   if (!ensureCanBook()) return;
@@ -310,11 +288,11 @@ async function retryPrimaryWithFile(requestId, file) {
 
   setPrimaryReviewOverlay(true, '再審を送信中…');
   try {
-    await apiFormRequest(`fds-requests/${encodeURIComponent(requestId)}/retry-primary`, formData);
+    await apiFormRequest(`openfoam-requests/${encodeURIComponent(requestId)}/retry-primary`, formData);
     lastSubmittedRequestId = requestId;
     expandedRequestIds.add(requestId);
     showToast('再審を受け付けました。結果は「自分の依頼」に表示されます。');
-    await renderMyRequests();
+    await renderMyOpenfoamRequests();
   } catch (err) {
     showToast(err.message ?? '再審の送信に失敗しました', true);
   } finally {
@@ -323,20 +301,20 @@ async function retryPrimaryWithFile(requestId, file) {
 }
 
 /** Submits force-secondary for an existing primary_failed request. */
-async function forceSecondaryById(requestId) {
+async function forceOpenfoamSecondaryById(requestId) {
   if (!ensureCanBook()) return;
   if (!ensureSimPhoneVerified()) return;
 
   setPrimaryReviewOverlay(true, '二次審査へ申請中…');
   try {
-    await apiRequest(`fds-requests/${encodeURIComponent(requestId)}/force-secondary`, {
+    await apiRequest(`openfoam-requests/${encodeURIComponent(requestId)}/force-secondary`, {
       method: 'POST',
     });
     hidePrimaryReviewBlock();
     pendingForceSubmit = null;
     pendingForceRequestId = null;
     showToast('二次審査へ申請しました。担当者の確認後にシミュレーションが開始されます。');
-    await renderMyRequests();
+    await renderMyOpenfoamRequests();
   } catch (err) {
     showToast(err.message ?? '二次審査への申請に失敗しました', true);
   } finally {
@@ -366,11 +344,11 @@ function formatBytes(bytes) {
 
 /** Updates EC2 instance preview from MPI process count. */
 async function refreshInstancePreview() {
-  const mpiInput = document.getElementById('fds-mpi-processes');
-  const runtimeInput = document.getElementById('fds-max-runtime-hours');
-  const fileInput = document.getElementById('fds-input-file');
-  const previewEl = document.getElementById('fds-instance-preview');
-  const costEl = document.getElementById('fds-cost-estimate-hint');
+  const mpiInput = document.getElementById('openfoam-mpi-processes');
+  const runtimeInput = document.getElementById('openfoam-max-runtime-hours');
+  const fileInput = document.getElementById('openfoam-input-file');
+  const previewEl = document.getElementById('openfoam-instance-preview');
+  const costEl = document.getElementById('openfoam-cost-estimate-hint');
   if (!mpiInput || !previewEl) return;
 
   const mpi = parseInt(mpiInput.value, 10);
@@ -390,7 +368,7 @@ async function refreshInstancePreview() {
       max_runtime_hours: String(Number.isFinite(maxRuntime) ? maxRuntime : 10),
       input_size_bytes: String(inputSize),
     });
-    const data = await apiRequest(`fds-requests/instance-preview?${params}`);
+    const data = await apiRequest(`openfoam-requests/instance-preview?${params}`);
     previewEl.textContent = `${data.instance_type}（MPI ${mpi} / 最大 ${data.vcpus} vCPU）`;
     if (costEl && data.estimated_cost_jpy_max != null) {
       const storage = data.estimated_storage;
@@ -413,9 +391,9 @@ function scheduleInstancePreview() {
   }, 200);
 }
 
-/** Returns whether the file has a .fds extension. */
-function isFdsFile(file) {
-  return /\.fds$/i.test(file.name);
+/** Returns whether the file has a .zip extension. */
+function isOpenfoamZipFile(file) {
+  return /\.zip$/i.test(file.name);
 }
 
 /** Assigns a File to a file input for form submission. */
@@ -425,31 +403,31 @@ function assignFileToInput(fileInput, file) {
   fileInput.files = dt.files;
 }
 
-/** Updates the FDS drop zone status line. */
-function updateFdsFileStatus(file) {
-  const statusEl = document.getElementById('fds-file-status');
+/** Updates the OpenFOAM drop zone status line. */
+function updateOpenfoamFileStatus(file) {
+  const statusEl = document.getElementById('openfoam-file-status');
   if (!statusEl) return;
   statusEl.textContent = file ? `${file.name}（${formatBytes(file.size)}）` : '未選択';
 }
 
-/** Wires drag-and-drop and click-to-select for the FDS upload zone. */
-function setupFdsFileDropZone() {
-  const uploadZone = document.getElementById('fds-upload-zone');
-  const fileInput = document.getElementById('fds-input-file');
-  const alertEl = document.getElementById('fds-form-alert');
+/** Wires drag-and-drop and click-to-select for the OpenFOAM upload zone. */
+function setupOpenfoamFileDropZone() {
+  const uploadZone = document.getElementById('openfoam-upload-zone');
+  const fileInput = document.getElementById('openfoam-input-file');
+  const alertEl = document.getElementById('openfoam-form-alert');
   if (!uploadZone || !fileInput) return;
 
   const applyFile = (file) => {
-    if (!isFdsFile(file)) {
+    if (!isOpenfoamZipFile(file)) {
       if (alertEl) {
-        alertEl.textContent = '.fds ファイルのみ選択できます';
+        alertEl.textContent = '.zip ファイルのみ選択できます';
         alertEl.classList.remove('hidden');
       }
       return;
     }
     alertEl?.classList.add('hidden');
     assignFileToInput(fileInput, file);
-    updateFdsFileStatus(file);
+    updateOpenfoamFileStatus(file);
     scheduleInstancePreview();
   };
 
@@ -468,78 +446,25 @@ function setupFdsFileDropZone() {
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0];
     if (file) applyFile(file);
-    else updateFdsFileStatus(null);
+    else updateOpenfoamFileStatus(null);
   });
 }
 
-let openfoamPanelInitialized = false;
-
-/** Shows the panel for the selected simulation type. */
-function showSimTypePanel(simId) {
-  document.getElementById('fds-request-panel')?.classList.toggle('hidden', simId !== 'fds');
-  document.getElementById('openfoam-request-panel')?.classList.toggle('hidden', simId !== 'openfoam');
-  document.getElementById('my-fds-requests-section')?.classList.toggle('hidden', simId !== 'fds');
-  document.getElementById('my-openfoam-requests-section')?.classList.toggle('hidden', simId !== 'openfoam');
-  if (simId === 'openfoam' && !openfoamPanelInitialized) {
-    openfoamPanelInitialized = true;
-    initOpenfoamRequestPanel({
-      onDesiredDateSelect: (date) => {
-        selectedDesiredDate = date;
-        const label = document.getElementById('openfoam-desired-date-label');
-        if (label) label.textContent = date ? `希望日: ${date}` : '';
-      },
-    }).catch((err) => {
-      console.error(err);
-      showToast(err.message ?? 'OpenFOAM パネルの初期化に失敗しました', true);
-    });
+/** Loads OpenFOAM config and user requests. */
+async function loadOpenfoamConfigAndRequests() {
+  openfoamConfig = await apiRequest('openfoam-requests/config');
+  const mpiInput = document.getElementById('openfoam-mpi-processes');
+  const runtimeInput = document.getElementById('openfoam-max-runtime-hours');
+  if (runtimeInput && openfoamConfig?.max_runtime_hours) {
+    runtimeInput.max = String(openfoamConfig.max_runtime_hours);
+    runtimeInput.placeholder = `1〜${openfoamConfig.max_runtime_hours}`;
   }
-}
-
-/** Renders simulation type cards. */
-function renderSimTypeList() {
-  const mount = document.getElementById('sim-type-list');
-  if (!mount) return;
-
-  mount.innerHTML = SIM_TYPES.map((sim) => {
-    const disabled = !sim.available;
-    const comingSoon = Boolean(sim.comingSoon);
-    return `
-      <button type="button" class="sim-type-card${disabled ? ' is-disabled' : ''}${comingSoon ? ' is-coming-soon' : ''}" data-sim-id="${sim.id}" ${
-        disabled ? 'disabled' : ''
-      }>
-        <span class="sim-type-card-name">${sim.name}${comingSoon ? '<span class="sim-type-card-badge">準備中</span>' : ''}</span>
-        <span class="sim-type-card-desc">${sim.description}</span>
-      </button>
-    `;
-  }).join('');
-
-  mount.querySelectorAll('[data-sim-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-sim-id');
-      selectedSimType = id;
-      mount.querySelectorAll('.sim-type-card').forEach((el) => {
-        el.classList.toggle('is-selected', el.getAttribute('data-sim-id') === id);
-      });
-      showSimTypePanel(id);
-    });
-  });
-}
-
-/** Loads FDS config and user requests. */
-async function loadFdsConfigAndRequests() {
-  fdsConfig = await apiRequest('fds-requests/config');
-  const mpiInput = document.getElementById('fds-mpi-processes');
-  const runtimeInput = document.getElementById('fds-max-runtime-hours');
-  if (runtimeInput && fdsConfig?.max_runtime_hours) {
-    runtimeInput.max = String(fdsConfig.max_runtime_hours);
-    runtimeInput.placeholder = `1〜${fdsConfig.max_runtime_hours}`;
-  }
-  if (mpiInput && fdsConfig) {
-    mpiInput.min = String(fdsConfig.min_mpi_processes ?? 1);
-    mpiInput.max = String(fdsConfig.max_mpi_processes ?? 96);
+  if (mpiInput && openfoamConfig) {
+    mpiInput.min = String(openfoamConfig.min_mpi_processes ?? 1);
+    mpiInput.max = String(openfoamConfig.max_mpi_processes ?? 96);
   }
   await refreshInstancePreview();
-  await renderMyRequests();
+  await renderMyOpenfoamRequests();
 }
 
 /** Syncs form primary-review block when the latest submitted request fails primary review. */
@@ -548,7 +473,7 @@ function syncFormPrimaryReviewFromRow(row) {
   if (row.status === 'primary_failed' || row.status === 'primary_error') {
     showPrimaryReviewBlock(row);
     pendingForceRequestId = row.id;
-    pendingForceSubmit = () => forceSecondaryById(row.id);
+    pendingForceSubmit = () => forceOpenfoamSecondaryById(row.id);
     expandedRequestIds.add(row.id);
   } else if (row.status === 'pending_approval') {
     hidePrimaryReviewBlock();
@@ -556,13 +481,13 @@ function syncFormPrimaryReviewFromRow(row) {
   }
 }
 
-/** Renders the user's FDS request list. */
-async function renderMyRequests() {
-  const mount = document.getElementById('my-fds-requests');
+/** Renders the user's OpenFOAM request list. */
+async function renderMyOpenfoamRequests() {
+  const mount = document.getElementById('my-openfoam-requests');
   if (!mount) return;
 
   try {
-    const data = await apiRequest('fds-requests');
+    const data = await apiRequest('openfoam-requests');
     const rows = data.requests ?? [];
     startRequestsPollIfNeeded(rows);
 
@@ -578,29 +503,29 @@ async function renderMyRequests() {
     syncFormPrimaryReviewFromRow(tracked);
 
     mount.innerHTML = `
-      <ul class="fds-request-list">
+      <ul class="openfoam-request-list">
         ${rows
           .map((row) => {
             const expandable = requestHasDetailPanel(row);
             const expanded = expandedRequestIds.has(row.id);
-            const statusUi = fdsRequestStatusUi(row);
+            const statusUi = openfoamRequestStatusUi(row);
             const statusLabel = statusUi.label;
             const statusBadge = statusUi.badge;
             return `
-          <li class="fds-request-list-item fds-request-list-item--${row.status}${expanded ? ' is-expanded' : ''}" data-request-id="${escapeHtml(row.id)}">
-            <button type="button" class="fds-request-list-toggle${expandable ? '' : ' fds-request-list-toggle--static'}" ${
+          <li class="openfoam-request-list-item openfoam-request-list-item--${row.status}${expanded ? ' is-expanded' : ''}" data-request-id="${escapeHtml(row.id)}">
+            <button type="button" class="openfoam-request-list-toggle${expandable ? '' : ' openfoam-request-list-toggle--static'}" ${
               expandable ? '' : 'disabled'
             } aria-expanded="${expanded ? 'true' : 'false'}">
-              <div class="fds-request-list-head">
+              <div class="openfoam-request-list-head">
                 <strong>${escapeHtml(row.title)}</strong>
-                <span class="fds-request-status fds-request-status--${statusBadge}">${escapeHtml(statusLabel)}</span>
+                <span class="openfoam-request-status openfoam-request-status--${statusBadge}">${escapeHtml(statusLabel)}</span>
               </div>
-              <p class="hint fds-request-list-summary">${escapeHtml(row.input_filename)} · ${formatBytes(row.input_size_bytes)} · MPI ${row.mpi_processes}</p>
+              <p class="hint openfoam-request-list-summary">${escapeHtml(row.input_filename)} · ${formatBytes(row.input_size_bytes)} · MPI ${row.mpi_processes}</p>
               <p class="hint">依頼日時: ${escapeHtml(row.created_at)}${row.desired_date ? ` · 希望日: ${escapeHtml(row.desired_date)}` : ''}</p>
-              ${expandable ? '<span class="fds-request-list-chevron" aria-hidden="true"></span>' : ''}
+              ${expandable ? '<span class="openfoam-request-list-chevron" aria-hidden="true"></span>' : ''}
             </button>
             ${expanded && expandable ? renderRequestDetailPanel(row) : ''}
-            ${row.fds_job_id ? `<p class="hint fds-request-list-meta">ジョブ ID: <code>${escapeHtml(row.fds_job_id)}</code></p>` : ''}
+            ${row.zip_job_id ? `<p class="hint openfoam-request-list-meta">ジョブ ID: <code>${escapeHtml(row.zip_job_id)}</code></p>` : ''}
           </li>
         `;
           })
@@ -608,38 +533,38 @@ async function renderMyRequests() {
       </ul>
     `;
 
-    mount.querySelectorAll('.fds-request-list-toggle:not([disabled])').forEach((btn) => {
+    mount.querySelectorAll('.openfoam-request-list-toggle:not([disabled])').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.closest('[data-request-id]')?.getAttribute('data-request-id');
         if (id) toggleRequestExpanded(id);
       });
     });
 
-    mount.querySelectorAll('.fds-force-secondary-list-btn').forEach((btn) => {
+    mount.querySelectorAll('.openfoam-force-secondary-list-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = btn.getAttribute('data-request-id');
-        if (id) forceSecondaryById(id);
+        if (id) forceOpenfoamSecondaryById(id);
       });
     });
 
-    mount.querySelectorAll('.fds-rerun-btn').forEach((btn) => {
+    mount.querySelectorAll('.openfoam-rerun-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = btn.getAttribute('data-request-id');
-        if (id) rerunFdsRequest(id);
+        if (id) rerunOpenfoamRequest(id);
       });
     });
 
-    mount.querySelectorAll('.fds-retry-primary-btn').forEach((btn) => {
+    mount.querySelectorAll('.openfoam-retry-primary-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = btn.getAttribute('data-request-id');
-        if (id) promptRetryPrimaryFile(id);
+        if (id) promptOpenfoamRetryPrimaryFile(id);
       });
     });
 
-    mountExpandedFdsChats(rows);
+    mountExpandedOpenfoamChats(rows);
   } catch (err) {
     mount.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message ?? '一覧の取得に失敗しました')}</p>`;
   }
@@ -656,8 +581,8 @@ function escapeHtml(text) {
 
 /** Shows or hides the primary review loading overlay. */
 function setPrimaryReviewOverlay(visible, message = '一次審査中…') {
-  const overlay = document.getElementById('fds-primary-review-overlay');
-  const textEl = document.getElementById('fds-primary-review-overlay-text');
+  const overlay = document.getElementById('openfoam-primary-review-overlay');
+  const textEl = document.getElementById('openfoam-primary-review-overlay-text');
   if (textEl) textEl.textContent = message;
   if (!overlay) return;
   overlay.classList.toggle('hidden', !visible);
@@ -666,11 +591,11 @@ function setPrimaryReviewOverlay(visible, message = '一次審査中…') {
 
 /** Shows primary review failure UI with issue list and retry controls. */
 function showPrimaryReviewBlock(row) {
-  const block = document.getElementById('fds-primary-review-block');
-  const list = document.getElementById('fds-primary-review-issues');
-  const alertEl = document.getElementById('fds-form-alert');
-  const attemptsHint = document.getElementById('fds-primary-review-attempts-hint');
-  const retryBtn = document.getElementById('fds-retry-primary-form-btn');
+  const block = document.getElementById('openfoam-primary-review-block');
+  const list = document.getElementById('openfoam-primary-review-issues');
+  const alertEl = document.getElementById('openfoam-form-alert');
+  const attemptsHint = document.getElementById('openfoam-primary-review-attempts-hint');
+  const retryBtn = document.getElementById('openfoam-retry-primary-form-btn');
   if (alertEl) alertEl.classList.add('hidden');
   if (!block || !list) return;
 
@@ -681,7 +606,7 @@ function showPrimaryReviewBlock(row) {
     list.innerHTML = `<li>${escapeHtml(row.primary_review_error)}</li>`;
   }
 
-  const max = row?.primary_review_max_attempts ?? fdsConfig?.primary_review_max_attempts ?? 3;
+  const max = row?.primary_review_max_attempts ?? openfoamConfig?.primary_review_max_attempts ?? 3;
   const used = row?.primary_review_attempt_count ?? 0;
   if (attemptsHint) {
     if (row?.primary_review_can_retry) {
@@ -709,21 +634,21 @@ function showPrimaryReviewBlock(row) {
 
 /** Hides primary review failure UI. */
 function hidePrimaryReviewBlock() {
-  document.getElementById('fds-primary-review-block')?.classList.add('hidden');
+  document.getElementById('openfoam-primary-review-block')?.classList.add('hidden');
   pendingForceSubmit = null;
   pendingForceRequestId = null;
 }
 
-/** Submits the FDS request form (optional forced secondary on same upload). */
-async function submitFdsRequest(form, { forceSecondary = false } = {}) {
+/** Submits the OpenFOAM request form (optional forced secondary on same upload). */
+async function submitOpenfoamRequest(form, { forceSecondary = false } = {}) {
   const submitBtn = form.querySelector('[type="submit"]');
-  const alertEl = document.getElementById('fds-form-alert');
-  const fileInput = document.getElementById('fds-input-file');
+  const alertEl = document.getElementById('openfoam-form-alert');
+  const fileInput = document.getElementById('openfoam-input-file');
   const file = fileInput?.files?.[0];
 
   if (!file) {
     if (alertEl) {
-      alertEl.textContent = '.fds ファイルを選択してください';
+      alertEl.textContent = '.zip ファイルを選択してください';
       alertEl.classList.remove('hidden');
     }
     return;
@@ -748,7 +673,7 @@ async function submitFdsRequest(form, { forceSecondary = false } = {}) {
   setPrimaryReviewOverlay(true, forceSecondary ? '依頼を送信中…' : '依頼を送信中…');
 
   try {
-    const result = await apiFormRequest('fds-requests', formData);
+    const result = await apiFormRequest('openfoam-requests', formData);
     const requestId = result.request?.id;
     if (requestId) {
       lastSubmittedRequestId = requestId;
@@ -756,10 +681,10 @@ async function submitFdsRequest(form, { forceSecondary = false } = {}) {
     }
     form.reset();
     if (fileInput) fileInput.value = '';
-    updateFdsFileStatus(null);
+    updateOpenfoamFileStatus(null);
     if (!forceSecondary) hidePrimaryReviewBlock();
     showToast('依頼を受け付けました。一次審査の結果は「自分の依頼」に表示されます。');
-    await renderMyRequests();
+    await renderMyOpenfoamRequests();
   } catch (err) {
     if (alertEl) {
       alertEl.textContent = err.message ?? '依頼の送信に失敗しました';
@@ -772,14 +697,14 @@ async function submitFdsRequest(form, { forceSecondary = false } = {}) {
 }
 
 /** Re-submits a finished request with the same input and parameters. */
-async function rerunFdsRequest(requestId) {
+async function rerunOpenfoamRequest(requestId) {
   const ok = window.confirm(
     '同じ入力・MPI・最大実行時間で新しい依頼を作成します（一次審査から）。よろしいですか？'
   );
   if (!ok) return;
   try {
     await ensureSimPhoneVerified();
-    const data = await apiRequest(`fds-requests/${requestId}/rerun`, {
+    const data = await apiRequest(`openfoam-requests/${requestId}/rerun`, {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -787,9 +712,9 @@ async function rerunFdsRequest(requestId) {
       lastSubmittedRequestId = data.request.id;
       expandedRequestIds.add(data.request.id);
     }
-    await renderMyRequests();
+    await renderMyOpenfoamRequests();
   } catch (err) {
-    const alertEl = document.getElementById('fds-form-alert');
+    const alertEl = document.getElementById('openfoam-form-alert');
     if (alertEl) {
       alertEl.textContent = err instanceof Error ? err.message : '再依頼に失敗しました';
       alertEl.classList.remove('hidden');
@@ -797,67 +722,49 @@ async function rerunFdsRequest(requestId) {
   }
 }
 
-async function handleFdsSubmit(event) {
+async function handleOpenfoamSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  await submitFdsRequest(form, { forceSecondary: false });
+  await submitOpenfoamRequest(form, { forceSecondary: false });
 }
 
 /** Initializes the simulation request hub page. */
-async function init() {
-  const allowed = await checkAppAccess();
+export async function initOpenfoamRequestPanel(deps = {}) {
+  const { onDesiredDateSelect } = deps;
+
+  const allowed = true;
   if (!allowed) return;
 
-  await initAuth();
-  setupProfileGateForm(setupHomeroomCombobox);
+  
+  
   await initPhoneVerification();
 
-  const calMount = document.getElementById('shift-mini-calendar');
-  if (calMount) {
-    const miniCal = createShiftMiniCalendar(calMount);
-    miniCal.onDateSelect((date) => {
-      selectedDesiredDate = date;
-      const label = document.getElementById('fds-desired-date-label');
-      if (label) label.textContent = date ? `希望日: ${date}` : '';
-    });
-    await miniCal.load();
-  }
-
-  renderSimTypeList();
-  selectedSimType = 'fds';
-  document.getElementById('sim-type-list')?.querySelector('[data-sim-id="fds"]')?.classList.add('is-selected');
-  showSimTypePanel('fds');
-
-  document.getElementById('fds-mpi-processes')?.addEventListener('input', scheduleInstancePreview);
-  document.getElementById('fds-max-runtime-hours')?.addEventListener('input', scheduleInstancePreview);
-  setupFdsFileDropZone();
-  document.getElementById('fds-request-form')?.addEventListener('submit', handleFdsSubmit);
-  document.getElementById('fds-force-secondary-btn')?.addEventListener('click', () => {
+  document.getElementById('openfoam-mpi-processes')?.addEventListener('input', scheduleInstancePreview);
+  document.getElementById('openfoam-max-runtime-hours')?.addEventListener('input', scheduleInstancePreview);
+  setupOpenfoamFileDropZone();
+  document.getElementById('openfoam-request-form')?.addEventListener('submit', handleOpenfoamSubmit);
+  document.getElementById('openfoam-force-secondary-btn')?.addEventListener('click', () => {
     if (pendingForceRequestId) {
-      forceSecondaryById(pendingForceRequestId);
+      forceOpenfoamSecondaryById(pendingForceRequestId);
       return;
     }
     if (pendingForceSubmit) {
       pendingForceSubmit();
       return;
     }
-    const form = document.getElementById('fds-request-form');
-    if (form) submitFdsRequest(form, { forceSecondary: true });
+    const form = document.getElementById('openfoam-request-form');
+    if (form) submitOpenfoamRequest(form, { forceSecondary: true });
   });
 
-  document.getElementById('fds-retry-primary-form-btn')?.addEventListener('click', () => {
-    if (pendingForceRequestId) promptRetryPrimaryFile(pendingForceRequestId);
+  document.getElementById('openfoam-retry-primary-form-btn')?.addEventListener('click', () => {
+    if (pendingForceRequestId) promptOpenfoamRetryPrimaryFile(pendingForceRequestId);
   });
 
-  window.addEventListener('fds-request-input-replaced', () => {
-    renderMyRequests().catch(() => {});
+  window.addEventListener('openfoam-request-input-replaced', () => {
+    renderMyOpenfoamRequests().catch(() => {});
   });
 
-  await loadFdsConfigAndRequests();
+  await loadOpenfoamConfigAndRequests();
   applyPhoneVerificationUi();
 }
 
-init().catch((err) => {
-  console.error(err);
-  showToast(err.message ?? '初期化に失敗しました', true);
-});
