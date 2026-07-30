@@ -4,14 +4,75 @@
 
 import type { Env } from "../types";
 
+/** @see https://ai.google.dev/api/generate-content#ThinkingLevel */
+export type GeminiThinkingLevel =
+  | "MINIMAL"
+  | "LOW"
+  | "MEDIUM"
+  | "HIGH";
+
+/** @see https://ai.google.dev/api/generate-content#ServiceTier */
+export type GeminiServiceTier = "STANDARD" | "FLEX" | "PRIORITY";
+
+export interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  cachedContentTokenCount?: number;
+  thoughtsTokenCount?: number;
+  totalTokenCount?: number;
+}
+
 export interface GeminiGenerateOptions {
   model: string;
   prompt: string;
   systemInstruction?: string;
+  /** Gemini 2.x 向け。Gemini 3 では未指定推奨（API 既定） */
   temperature?: number;
   maxOutputTokens?: number;
   responseMimeType?: "application/json" | "text/plain";
   responseSchema?: Record<string, unknown>;
+  /** Gemini 3+ のみ。2.x では送らない */
+  thinkingLevel?: GeminiThinkingLevel;
+  /** Paid: 明示キャッシュ名 cachedContents/... */
+  cachedContent?: string;
+  serviceTier?: GeminiServiceTier;
+  /** Cloudflare ログ用ラベル */
+  usageLabel?: string;
+}
+
+function isGemini3Model(model: string): boolean {
+  return /gemini-3/i.test(model);
+}
+
+function buildGenerationConfig(
+  options: GeminiGenerateOptions
+): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    maxOutputTokens: options.maxOutputTokens ?? 8192,
+  };
+
+  const gemini3 = isGemini3Model(options.model);
+  if (!gemini3) {
+    config.temperature = options.temperature ?? 0.3;
+  } else if (options.temperature !== undefined) {
+    config.temperature = options.temperature;
+  }
+
+  if (gemini3 && options.thinkingLevel) {
+    config.thinkingConfig = {
+      thinkingLevel: options.thinkingLevel,
+      includeThoughts: false,
+    };
+  }
+
+  if (options.responseMimeType) {
+    config.responseMimeType = options.responseMimeType;
+  }
+  if (options.responseSchema) {
+    config.responseSchema = options.responseSchema;
+  }
+
+  return config;
 }
 
 interface GeminiGenerateResponse {
@@ -20,6 +81,39 @@ interface GeminiGenerateResponse {
     finishReason?: string;
   }>;
   promptFeedback?: { blockReason?: string };
+  usageMetadata?: GeminiUsageMetadata;
+}
+
+function serviceTierToApi(tier: GeminiServiceTier): string | null {
+  switch (tier) {
+    case "FLEX":
+      return "flex";
+    case "PRIORITY":
+      return "priority";
+    default:
+      // Standard はフィールド省略（公式: omit = standard）
+      return null;
+  }
+}
+
+function logGeminiUsage(
+  label: string | undefined,
+  model: string,
+  usage: GeminiUsageMetadata | undefined
+): void {
+  if (!usage) return;
+  console.log(
+    JSON.stringify({
+      type: "gemini_usage",
+      label: label ?? "unknown",
+      model,
+      prompt: usage.promptTokenCount,
+      output: usage.candidatesTokenCount,
+      cached: usage.cachedContentTokenCount,
+      thoughts: usage.thoughtsTokenCount,
+      total: usage.totalTokenCount,
+    })
+  );
 }
 
 /** API キーを取得 */
@@ -44,10 +138,22 @@ export function parseJsonFromModelText(text: string): unknown {
   }
   try {
     return JSON.parse(trimmed);
-  } catch {
+  } catch (firstError) {
     const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("JSON object not found");
-    return JSON.parse(jsonMatch[0]);
+    if (!jsonMatch) {
+      const hint =
+        firstError instanceof Error && firstError.message.includes("Unterminated")
+          ? "AI の JSON が途中で切れています（出力が長すぎる可能性があります）"
+          : "AI の JSON を解釈できませんでした";
+      throw new Error(hint);
+    }
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      throw new Error(
+        "AI の JSON が途中で切れています（出力が長すぎる可能性があります）"
+      );
+    }
   }
 }
 
@@ -61,22 +167,22 @@ export async function geminiGenerateText(
     options.model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const generationConfig: Record<string, unknown> = {
-    temperature: options.temperature ?? 0.3,
-    maxOutputTokens: options.maxOutputTokens ?? 8192,
-  };
-  if (options.responseMimeType) {
-    generationConfig.responseMimeType = options.responseMimeType;
-  }
-  if (options.responseSchema) {
-    generationConfig.responseSchema = options.responseSchema;
-  }
+  const generationConfig = buildGenerationConfig(options);
 
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: options.prompt }] }],
     generationConfig,
   };
-  if (options.systemInstruction?.trim()) {
+  if (options.cachedContent?.trim()) {
+    body.cachedContent = options.cachedContent.trim();
+  }
+  if (options.serviceTier) {
+    const tier = serviceTierToApi(options.serviceTier);
+    if (tier) {
+      body.serviceTier = tier;
+    }
+  }
+  if (options.systemInstruction?.trim() && !options.cachedContent?.trim()) {
     body.systemInstruction = {
       parts: [{ text: options.systemInstruction.trim() }],
     };
@@ -112,12 +218,19 @@ export async function geminiGenerateText(
   }
 
   const data = (await res.json()) as GeminiGenerateResponse;
+  logGeminiUsage(options.usageLabel, options.model, data.usageMetadata);
   const blockReason = data.promptFeedback?.blockReason;
   if (blockReason) {
     throw new Error("AI が入力をブロックしました。内容を見直してください");
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const finishReason = data.candidates?.[0]?.finishReason;
+  if (finishReason === "MAX_TOKENS") {
+    throw new Error(
+      "AI の応答が長すぎて途中で切れました。もう一度お試しください"
+    );
+  }
   if (!text?.trim()) {
     throw new Error("AI からの応答が空でした");
   }

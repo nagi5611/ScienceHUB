@@ -10,6 +10,7 @@
     "dev:all": "wrangler pages dev public --do EXCALIDRAW_COLLAB=ExcalidrawCollabRoom@excalidraw-collab --do DESIGN_COLLAB=DesignCollabRoom@design-collab",
     "build": "npm run types && npm run typecheck",
     "typecheck": "tsc --noEmit",
+    "test:workspace-edits": "npx tsx --test functions/lib/third-party/workspace-edits.test.ts",
     "predeploy": "npm run build && npm run db:migrate:remote",
     "deploy": "wrangler pages deploy public",
     "db:create": "wrangler d1 create sciencehub-db",

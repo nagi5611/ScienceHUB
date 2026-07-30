@@ -15,11 +15,64 @@ const PHASE_LABELS = {
   flash_review: "計画レビュー中",
   flash_revise_plan: "計画改訂中",
   flash_implement: "実装中",
+  flash_implement_tasks: "段階実装中",
   await_implement_confirm: "実装確認",
   draft_ready: "実装完了",
   app_maintain: "不具合対応中",
   app_maintain_done: "実装完了",
 };
+
+/** 現在のチャットモード */
+function getChatMode() {
+  return chatMode === "ask" ? "ask" : "agent";
+}
+
+/** チャットモードを保存・UI 反映 */
+function setChatMode(mode) {
+  chatMode = mode === "ask" ? "ask" : "agent";
+  if (currentProjectId) {
+    try {
+      sessionStorage.setItem(
+        `${CHAT_MODE_STORAGE_KEY}:${currentProjectId}`,
+        chatMode
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+  syncChatModeUi();
+}
+
+/** モード切替ボタンとプレースホルダを更新 */
+function syncChatModeUi() {
+  const group = document.getElementById("chat-mode");
+  if (group) {
+    for (const btn of group.querySelectorAll("[data-chat-mode]")) {
+      const active = btn.getAttribute("data-chat-mode") === chatMode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+  const input = document.getElementById("chat-input");
+  if (input) {
+    input.placeholder =
+      chatMode === "ask"
+        ? "コードや仕様について質問…（編集はしません）"
+        : "作りたいアプリを説明…";
+  }
+}
+
+function loadChatModeForProject(projectId) {
+  try {
+    const stored = sessionStorage.getItem(
+      `${CHAT_MODE_STORAGE_KEY}:${projectId}`
+    );
+    chatMode = stored === "ask" ? "ask" : "agent";
+  } catch {
+    chatMode = "agent";
+  }
+  syncChatModeUi();
+}
 
 /** API 呼び出し */
 async function tpApi(path, options = {}) {
@@ -61,6 +114,407 @@ let currentPendingForm = null;
 let titleSaveTimer = null;
 let chatBusy = false;
 let editingMessageId = null;
+/** @type {Array<{ id: string, role: string, content: string }>} */
+let currentMessages = [];
+/** @type {{ userText?: string, assistantWaiting: boolean, activityLabel?: string } | null} */
+let chatPending = null;
+/** @type {{ tasks: Array<{ id: string, title: string, status: string }>, current: number } | null} */
+let implementTasksState = null;
+
+const PENDING_USER_ID = "__pending_user__";
+const PENDING_ASSISTANT_ID = "__pending_assistant__";
+
+/** @type {"agent" | "ask"} */
+let chatMode = "agent";
+
+const CHAT_MODE_STORAGE_KEY = "tp-chat-mode";
+
+let workspaceTree = null;
+let selectedWorkspacePath = null;
+/** @type {Set<string>} */
+const expandedTreeDirs = new Set(["docs"]);
+
+const TREE_ICON_FILE =
+  '<svg class="tp-tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+const TREE_ICON_FOLDER =
+  '<svg class="tp-tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const TREE_CHEVRON =
+  '<svg class="tp-tree-chevron" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><path d="M3 2l4 3-4 3z"/></svg>';
+
+/** フェーズから待機ラベルを推測（SSE 未到達時のフォールバック） */
+function inferFallbackActivityLabel(phase) {
+  const map = {
+    write_req_and_plan: "要件定義書を作成中…",
+    flash_review: "実装計画をレビュー中…",
+    flash_revise_plan: "実装計画を改訂中…",
+    flash_implement: "index.html を実装中…",
+    flash_implement_tasks: "段階実装中…",
+    app_maintain: "不具合を調査中…",
+  };
+  return map[phase] || "Working…";
+}
+
+/** 実装タスクをチャットに出すか */
+function shouldShowChatTodos() {
+  const tasks = implementTasksState?.tasks;
+  if (!tasks?.length) return false;
+  if (currentPhase === "flash_implement_tasks") return true;
+  if (chatPending?.assistantWaiting) {
+    return tasks.some((t) => t.status !== "done");
+  }
+  return tasks.some((t) => t.status !== "done");
+}
+
+/** チャット用コンパクト TODO カード */
+function createImplementTodosElement() {
+  const tasks = implementTasksState?.tasks ?? [];
+  const current = implementTasksState?.current ?? 0;
+  const doneCount = tasks.filter((t) => t.status === "done").length;
+
+  const box = document.createElement("div");
+  box.className = "tp-chat-todos";
+  box.setAttribute("aria-label", "実装タスク");
+
+  const head = document.createElement("div");
+  head.className = "tp-chat-todos-head";
+  const title = document.createElement("span");
+  title.className = "tp-chat-todos-title";
+  title.textContent = "段階実装";
+  const meta = document.createElement("span");
+  meta.className = "tp-chat-todos-meta";
+  meta.textContent = `${doneCount} / ${tasks.length} 完了`;
+  head.appendChild(title);
+  head.appendChild(meta);
+  box.appendChild(head);
+
+  const list = document.createElement("ul");
+  list.className = "tp-chat-todos-list";
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const li = document.createElement("li");
+    li.className = "tp-chat-todo-item";
+    if (t.status === "done") li.classList.add("is-done");
+    if (t.status === "failed") li.classList.add("is-failed");
+    if (i === current && t.status === "pending") li.classList.add("is-current");
+
+    const icon = document.createElement("span");
+    icon.className = "tp-chat-todo-check";
+    icon.setAttribute("aria-hidden", "true");
+    if (t.status === "done") {
+      icon.textContent = "✓";
+    } else if (t.status === "failed") {
+      icon.textContent = "✕";
+    } else if (i === current) {
+      icon.textContent = "◉";
+    } else {
+      icon.textContent = "○";
+    }
+
+    const label = document.createElement("span");
+    label.className = "tp-chat-todo-label";
+    label.textContent = t.title;
+
+    li.appendChild(icon);
+    li.appendChild(label);
+    list.appendChild(li);
+  }
+  box.appendChild(list);
+  return box;
+}
+
+function appendImplementTodosRow(messagesEl) {
+  if (!shouldShowChatTodos()) return;
+  const row = document.createElement("div");
+  row.className = "tp-msg-row tp-msg-row--assistant tp-chat-todos-row";
+  row.appendChild(createImplementTodosElement());
+  messagesEl.appendChild(row);
+}
+
+/** 実装タスク一覧を更新（チャット内に描画） */
+function renderImplementTodos() {
+  renderMessagesFromState();
+}
+
+/** ワークスペースツリーにファイルがあるか */
+function workspaceTreeHasFile(path) {
+  if (!workspaceTree?.children) return false;
+  const walk = (nodes) => {
+    for (const n of nodes) {
+      if (n.type === "file" && n.path === path) return true;
+      if (n.type === "dir" && n.children?.length && walk(n.children)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return walk(workspaceTree.children);
+}
+
+/** R2 の implementation-tasks.json を読み込み */
+async function loadImplementTasksFromWorkspace() {
+  if (!currentProjectId) return;
+  if (!workspaceTree) {
+    try {
+      await refreshWorkspaceTree();
+    } catch {
+      implementTasksState = null;
+      renderImplementTodos();
+      return;
+    }
+  }
+  if (!workspaceTreeHasFile("docs/implementation-tasks.json")) {
+    implementTasksState = null;
+    renderImplementTodos();
+    return;
+  }
+  try {
+    const path = encodeURIComponent("docs/implementation-tasks.json");
+    const data = await tpApi(
+      `projects/${currentProjectId}/workspace/file?path=${path}`
+    );
+    const parsed = JSON.parse(data.content || "{}");
+    if (!parsed.tasks?.length) {
+      implementTasksState = null;
+      renderImplementTodos();
+      return;
+    }
+    implementTasksState = {
+      tasks: parsed.tasks,
+      current: parsed.current_task_index ?? 0,
+    };
+    renderImplementTodos();
+  } catch {
+    implementTasksState = null;
+    renderImplementTodos();
+  }
+}
+
+/** チャット POST（SSE 優先、失敗時 JSON） */
+async function postProjectChat(body) {
+  const payload = { ...body, chat_mode: getChatMode() };
+  const base = `/api/third-party/projects/${currentProjectId}/chat`;
+  const streamUrl = `${base}?stream=1`;
+  const res = await fetch(streamUrl, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const contentType = res.headers.get("content-type") || "";
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "リクエストに失敗しました");
+  }
+
+  if (!contentType.includes("text/event-stream") || !res.body) {
+    return await res.json();
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResult = null;
+
+  const handleEvent = (eventName, dataStr) => {
+    if (!dataStr) return;
+    let payload;
+    try {
+      payload = JSON.parse(dataStr);
+    } catch {
+      return;
+    }
+    if (eventName === "status" && payload.label) {
+      if (chatPending) {
+        chatPending.activityLabel = payload.label;
+        renderMessagesFromState();
+      }
+    } else if (eventName === "tasks" && Array.isArray(payload.tasks)) {
+      implementTasksState = {
+        tasks: payload.tasks,
+        current: payload.current ?? 0,
+      };
+      renderImplementTodos();
+    } else if (eventName === "artifact") {
+      const artifactPath = payload.path || "";
+      refreshWorkspaceTree()
+        .then(() => {
+          if (artifactPath === "docs/implementation-tasks.json") {
+            return loadImplementTasksFromWorkspace();
+          }
+          if (workspaceTreeHasFile("docs/implementation-tasks.json")) {
+            return loadImplementTasksFromWorkspace();
+          }
+        })
+        .catch(() => {});
+    } else if (eventName === "done") {
+      finalResult = payload;
+    } else if (eventName === "error") {
+      throw new Error(payload.message || "処理に失敗しました");
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() || "";
+    for (const block of blocks) {
+      const lines = block.split("\n");
+      let eventName = "message";
+      let dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+      handleEvent(eventName, dataLines.join("\n"));
+    }
+  }
+
+  if (buffer.trim()) {
+    const lines = buffer.split("\n");
+    let eventName = "message";
+    let dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    handleEvent(eventName, dataLines.join("\n"));
+  }
+
+  if (!finalResult) {
+    throw new Error("応答が不完全です");
+  }
+  return finalResult;
+}
+
+function setCanvasTab(tab) {
+  const previewPanel = document.getElementById("canvas-panel-preview");
+  const filesPanel = document.getElementById("canvas-panel-files");
+  const tabPreview = document.getElementById("canvas-tab-preview");
+  const tabFiles = document.getElementById("canvas-tab-files");
+  const toolbar = document.getElementById("canvas-toolbar-preview");
+  const isPreview = tab !== "files";
+
+  previewPanel.hidden = !isPreview;
+  filesPanel.hidden = isPreview;
+
+  tabPreview.classList.toggle("is-active", isPreview);
+  tabFiles.classList.toggle("is-active", !isPreview);
+  tabPreview.setAttribute("aria-selected", isPreview ? "true" : "false");
+  tabFiles.setAttribute("aria-selected", !isPreview ? "true" : "false");
+  if (toolbar) toolbar.hidden = !isPreview;
+}
+
+function treeDirKey(node) {
+  return node.path || node.name;
+}
+
+function renderWorkspaceTree(node) {
+  const container = document.getElementById("workspace-tree");
+  container.replaceChildren();
+  if (!node) return;
+
+  const rootLabel = document.createElement("div");
+  rootLabel.className = "tp-tree-root-label";
+  rootLabel.textContent = `${node.name}/`;
+  container.appendChild(rootLabel);
+
+  const ul = document.createElement("ul");
+  container.appendChild(ul);
+  appendTreeChildren(ul, node.children || []);
+}
+
+function appendTreeChildren(ul, children) {
+  for (const child of children) {
+    const li = document.createElement("li");
+    li.className = "tp-tree-item";
+
+    if (child.type === "dir") {
+      const key = treeDirKey(child);
+      const expanded = expandedTreeDirs.has(key);
+      const header = document.createElement("button");
+      header.type = "button";
+      header.className = "tp-tree-dir-header";
+      header.innerHTML = `${TREE_CHEVRON.replace(
+        'class="tp-tree-chevron"',
+        `class="tp-tree-chevron${expanded ? " is-expanded" : ""}"`
+      )}${TREE_ICON_FOLDER}<span class="tp-tree-name">${child.name}</span>`;
+      header.addEventListener("click", () => {
+        if (expandedTreeDirs.has(key)) {
+          expandedTreeDirs.delete(key);
+        } else {
+          expandedTreeDirs.add(key);
+        }
+        renderWorkspaceTree(workspaceTree);
+      });
+      li.appendChild(header);
+      if (child.children?.length && expanded) {
+        const sub = document.createElement("ul");
+        sub.className = "tp-tree-children";
+        appendTreeChildren(sub, child.children);
+        li.appendChild(sub);
+      }
+    } else {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tp-tree-file-btn";
+      if (selectedWorkspacePath === child.path) {
+        btn.classList.add("is-selected");
+      }
+      btn.innerHTML = `<span class="tp-tree-chevron tp-tree-chevron--spacer" aria-hidden="true"></span>${TREE_ICON_FILE}<span class="tp-tree-name">${child.name}</span>`;
+      btn.addEventListener("click", () => {
+        openWorkspaceFile(child.path).catch((err) => alert(err.message));
+      });
+      li.appendChild(btn);
+    }
+    ul.appendChild(li);
+  }
+}
+
+function setFileViewerState({ name, path, content }) {
+  const nameEl = document.getElementById("workspace-file-name");
+  const pathEl = document.getElementById("workspace-file-path");
+  const contentEl = document.getElementById("workspace-file-content");
+  nameEl.textContent = name || "ファイルを選択";
+  if (path) {
+    pathEl.textContent = path;
+    pathEl.hidden = false;
+  } else {
+    pathEl.textContent = "";
+    pathEl.hidden = true;
+  }
+  contentEl.textContent = content ?? "";
+}
+
+async function refreshWorkspaceTree() {
+  if (!currentProjectId) return;
+  const { tree } = await tpApi(`projects/${currentProjectId}/workspace/tree`);
+  workspaceTree = tree;
+  renderWorkspaceTree(tree);
+}
+
+async function openWorkspaceFile(path) {
+  if (!currentProjectId || !path) return;
+  selectedWorkspacePath = path;
+  setCanvasTab("files");
+  const fileName = path.split("/").pop() || path;
+  setFileViewerState({ name: fileName, path, content: "" });
+  if (workspaceTree) renderWorkspaceTree(workspaceTree);
+  const file = await tpApi(
+    `projects/${currentProjectId}/workspace/file?path=${encodeURIComponent(path)}`
+  );
+  setFileViewerState({
+    name: fileName,
+    path,
+    content: file.content ?? "",
+  });
+}
 
 function showGallery() {
   document.getElementById("gallery-view").hidden = false;
@@ -68,6 +522,9 @@ function showGallery() {
   currentProjectId = null;
   currentPhase = null;
   currentPendingForm = null;
+  currentMessages = [];
+  chatPending = null;
+  editingMessageId = null;
   setStudioUrl(null);
 }
 
@@ -75,6 +532,7 @@ function showStudio(projectId) {
   document.getElementById("gallery-view").hidden = true;
   document.getElementById("studio-view").hidden = false;
   currentProjectId = projectId;
+  setCanvasTab("preview");
 }
 
 /** スタジオ URL（再開・共有用） */
@@ -227,16 +685,17 @@ async function createAndOpenStudio(title) {
 
 function setChatBusy(busy) {
   chatBusy = busy;
-  const input = document.getElementById("chat-input");
   const send = document.getElementById("chat-send");
   const formSubmit = document.getElementById("chat-form-submit");
-  input.disabled = busy;
   send.disabled = busy;
   if (formSubmit) formSubmit.disabled = busy;
-  document.getElementById("gate-deepen").disabled = busy;
-  document.getElementById("gate-build").disabled = busy;
-  const implementStart = document.getElementById("gate-implement-start");
-  if (implementStart) implementStart.disabled = busy;
+  document
+    .querySelectorAll(
+      '[data-action="gate-deepen"], [data-action="gate-build"], [data-action="gate-implement-start"]'
+    )
+    .forEach((btn) => {
+      btn.disabled = busy;
+    });
   document.querySelectorAll(".tp-msg-action").forEach((btn) => {
     btn.disabled = busy;
   });
@@ -266,10 +725,10 @@ function updatePhaseUI(phase, pendingForm, reviewSummary) {
   suggestions.hidden = !showSuggest;
 
   const gate = document.getElementById("chat-gate");
-  gate.hidden = postBuild || currentPhase !== "gate_deepen_or_build";
+  if (gate) gate.hidden = true;
 
   const implementConfirm = document.getElementById("chat-implement-confirm");
-  implementConfirm.hidden = currentPhase !== "await_implement_confirm";
+  if (implementConfirm) implementConfirm.hidden = true;
 
   const banner = document.getElementById("chat-review-banner");
   if (reviewSummary) {
@@ -283,7 +742,7 @@ function updatePhaseUI(phase, pendingForm, reviewSummary) {
     banner.textContent = "";
   }
 
-  renderPendingForm(currentPendingForm);
+  renderMessagesFromState();
 
   const chatInput = document.getElementById("chat-input");
   if (postBuild) {
@@ -297,19 +756,14 @@ function updatePhaseUI(phase, pendingForm, reviewSummary) {
   }
 }
 
-function renderPendingForm(form) {
-  const container = document.getElementById("chat-dynamic-form");
-  container.replaceChildren();
-  if (!form?.questions?.length) {
-    container.hidden = true;
-    return;
-  }
+function buildPendingFormElement(form) {
+  const wrap = document.createElement("div");
+  wrap.className = "tp-msg tp-msg--assistant tp-msg--form";
 
-  container.hidden = false;
   const title = document.createElement("p");
   title.className = "tp-form-title";
   title.textContent = form.title || "回答してください";
-  container.appendChild(title);
+  wrap.appendChild(title);
 
   const formEl = document.createElement("form");
   formEl.className = "tp-dynamic-form";
@@ -351,7 +805,7 @@ function renderPendingForm(form) {
   submit.type = "submit";
   submit.className = "tp-btn tp-btn--primary";
   submit.id = "chat-form-submit";
-  submit.textContent = "フォームを送信";
+  submit.textContent = "送信";
   formEl.appendChild(submit);
 
   formEl.addEventListener("submit", (e) => {
@@ -359,7 +813,66 @@ function renderPendingForm(form) {
     submitPendingForm(form).catch((err) => alert(err.message));
   });
 
-  container.appendChild(formEl);
+  wrap.appendChild(formEl);
+  return wrap;
+}
+
+function appendChatInlineChrome(messagesEl) {
+  const postBuild =
+    currentPhase === "draft_ready" ||
+    currentPhase === "app_maintain" ||
+    currentPhase === "app_maintain_done";
+
+  if (currentPendingForm?.questions?.length) {
+    const row = document.createElement("div");
+    row.className = "tp-msg-row tp-msg-row--assistant";
+    row.appendChild(buildPendingFormElement(currentPendingForm));
+    messagesEl.appendChild(row);
+  }
+
+  if (!postBuild && currentPhase === "gate_deepen_or_build") {
+    const row = document.createElement("div");
+    row.className = "tp-msg-row tp-msg-row--assistant";
+    const actions = document.createElement("div");
+    actions.className = "tp-chat-inline-actions";
+    const deepen = document.createElement("button");
+    deepen.type = "button";
+    deepen.className = "tp-btn";
+    deepen.dataset.action = "gate-deepen";
+    deepen.textContent = "要件を深掘り";
+    const build = document.createElement("button");
+    build.type = "button";
+    build.className = "tp-btn tp-btn--primary";
+    build.dataset.action = "gate-build";
+    build.textContent = "実装に進む";
+    actions.appendChild(deepen);
+    actions.appendChild(build);
+    row.appendChild(actions);
+    messagesEl.appendChild(row);
+  }
+
+  if (currentPhase === "await_implement_confirm") {
+    const row = document.createElement("div");
+    row.className = "tp-msg-row tp-msg-row--assistant";
+    const actions = document.createElement("div");
+    actions.className = "tp-chat-inline-actions";
+    const start = document.createElement("button");
+    start.type = "button";
+    start.className = "tp-btn tp-btn--primary";
+    start.dataset.action = "gate-implement-start";
+    start.textContent = "実装開始";
+    actions.appendChild(start);
+    row.appendChild(actions);
+    messagesEl.appendChild(row);
+  }
+}
+
+function renderPendingForm(_form) {
+  const container = document.getElementById("chat-dynamic-form");
+  if (container) {
+    container.replaceChildren();
+    container.hidden = true;
+  }
 }
 
 function collectFormResponses(form) {
@@ -385,16 +898,65 @@ function collectFormResponses(form) {
   return responses;
 }
 
+/** サーバー保存前のフォーム回答表示用 */
+function formatFormResponsesForDisplay(form, responses) {
+  const lines = ["【フォーム回答】"];
+  for (const q of form.questions) {
+    const raw = responses[q.id];
+    let text = "";
+    if (Array.isArray(raw)) text = raw.join(", ");
+    else if (typeof raw === "string") text = raw;
+    lines.push(`${q.prompt}: ${text}`);
+  }
+  return lines.join("\n");
+}
+
+function getDisplayMessages() {
+  const list = [...currentMessages];
+  if (chatPending?.userText) {
+    list.push({
+      id: PENDING_USER_ID,
+      role: "user",
+      content: chatPending.userText,
+    });
+  }
+  if (chatPending?.assistantWaiting) {
+    list.push({
+      id: PENDING_ASSISTANT_ID,
+      role: "assistant",
+      content: "",
+      pending: true,
+      activityLabel:
+        chatPending.activityLabel ||
+        inferFallbackActivityLabel(currentPhase),
+    });
+  }
+  return list;
+}
+
+function renderMessagesFromState() {
+  renderMessages(getDisplayMessages());
+}
+
 async function submitPendingForm(form) {
   if (!currentProjectId || chatBusy) return;
   const form_responses = collectFormResponses(form);
+  chatPending = {
+    userText: formatFormResponsesForDisplay(form, form_responses),
+    assistantWaiting: true,
+    activityLabel: inferFallbackActivityLabel(currentPhase),
+  };
+  currentPendingForm = null;
+  renderMessagesFromState();
   setChatBusy(true);
   try {
-    const result = await tpApi(`projects/${currentProjectId}/chat`, {
-      method: "POST",
-      body: JSON.stringify({ form_responses }),
-    });
+    const result = await postProjectChat({ form_responses });
     applyChatResult(result);
+  } catch (err) {
+    chatPending = null;
+    currentPendingForm = form;
+    renderMessagesFromState();
+    throw err;
   } finally {
     setChatBusy(false);
   }
@@ -404,6 +966,7 @@ async function submitPendingForm(form) {
 async function openStudio(projectId) {
   showStudio(projectId);
   setStudioUrl(projectId);
+  loadChatModeForProject(projectId);
 
   const data = await tpApi(`projects/${projectId}`);
   const project = data.project;
@@ -412,18 +975,29 @@ async function openStudio(projectId) {
     project.status === "published" ? "公開済み" : "下書き";
 
   const { messages } = await tpApi(`projects/${projectId}/messages`);
-  renderMessages(messages);
+  currentMessages = messages;
+  chatPending = null;
+  renderMessagesFromState();
   updatePhaseUI(
     project.workflow_phase,
     data.pending_form ?? null,
     null
   );
   refreshPreview();
+  await refreshWorkspaceTree().catch(() => {});
+  await loadImplementTasksFromWorkspace().catch(() => {});
+  setFileViewerState({ name: null, path: null, content: "" });
 }
 
 function renderMessages(messages) {
   const el = document.getElementById("chat-messages");
   el.replaceChildren();
+
+  let lastUserMsgId = null;
+  for (const msg of messages) {
+    if (msg.role === "user") lastUserMsgId = msg.id;
+  }
+
   for (const msg of messages) {
     const row = document.createElement("div");
     row.className = `tp-msg-row tp-msg-row--${msg.role}`;
@@ -446,7 +1020,7 @@ function renderMessages(messages) {
       cancelBtn.textContent = "キャンセル";
       cancelBtn.addEventListener("click", () => {
         editingMessageId = null;
-        renderMessages(messages);
+        renderMessagesFromState();
       });
       const saveBtn = document.createElement("button");
       saveBtn.type = "button";
@@ -471,12 +1045,23 @@ function renderMessages(messages) {
     }
 
     const div = document.createElement("div");
-    div.className = `tp-msg tp-msg--${msg.role}`;
-    div.textContent = msg.content;
+    if (msg.pending || msg.id === PENDING_ASSISTANT_ID) {
+      div.className = "tp-msg tp-msg--assistant tp-msg--pending";
+      div.setAttribute("aria-busy", "true");
+      const activity = document.createElement("p");
+      activity.className = "tp-activity";
+      activity.textContent =
+        msg.activityLabel || inferFallbackActivityLabel(currentPhase);
+      div.appendChild(activity);
+    } else {
+      div.className = `tp-msg tp-msg--${msg.role}`;
+      div.textContent = msg.content;
+    }
     row.appendChild(div);
 
     if (
       msg.role === "user" &&
+      msg.id !== PENDING_USER_ID &&
       !msg.content.startsWith("【フォーム回答】")
     ) {
       const actions = document.createElement("div");
@@ -503,7 +1088,7 @@ function renderMessages(messages) {
       editBtn.textContent = "編集";
       editBtn.addEventListener("click", () => {
         editingMessageId = msg.id;
-        renderMessages(messages);
+        renderMessagesFromState();
       });
       actions.appendChild(resendBtn);
       actions.appendChild(editBtn);
@@ -511,7 +1096,13 @@ function renderMessages(messages) {
     }
 
     el.appendChild(row);
+
+    if (msg.role === "user" && msg.id === lastUserMsgId) {
+      appendImplementTodosRow(el);
+    }
   }
+
+  appendChatInlineChrome(el);
   el.scrollTop = el.scrollHeight;
 }
 
@@ -522,25 +1113,51 @@ function refreshPreview() {
 }
 
 function applyChatResult(result) {
-  renderMessages(result.messages);
+  chatPending = null;
+  currentMessages = result.messages;
+  renderMessagesFromState();
   if (result.htmlUpdated) refreshPreview();
+  refreshWorkspaceTree().catch(() => {});
+  loadImplementTasksFromWorkspace().catch(() => {});
   updatePhaseUI(result.phase, result.pending_form, result.review_summary);
+}
+
+function beginChatPending(text, rewindToMessageId) {
+  const trimmed = text.trim();
+  if (rewindToMessageId) {
+    const idx = currentMessages.findIndex((m) => m.id === rewindToMessageId);
+    if (idx >= 0) {
+      currentMessages = currentMessages.slice(0, idx);
+    }
+    editingMessageId = null;
+  }
+  chatPending = {
+    userText: trimmed,
+    assistantWaiting: true,
+    activityLabel:
+      getChatMode() === "ask"
+        ? "質問に回答中…"
+        : inferFallbackActivityLabel(currentPhase),
+  };
+  renderMessagesFromState();
 }
 
 async function sendChatWithRewind(messageId, text) {
   if (!currentProjectId || !text.trim() || chatBusy) return;
+  const trimmed = text.trim();
+  beginChatPending(trimmed, messageId);
   setChatBusy(true);
   const input = document.getElementById("chat-input");
   try {
-    const result = await tpApi(`projects/${currentProjectId}/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        message: text,
-        rewind_to_message_id: messageId,
-      }),
+    const result = await postProjectChat({
+      message: trimmed,
+      rewind_to_message_id: messageId,
     });
-    editingMessageId = null;
     applyChatResult(result);
+  } catch (err) {
+    chatPending = null;
+    renderMessagesFromState();
+    throw err;
   } finally {
     input.value = "";
     setChatBusy(false);
@@ -550,21 +1167,27 @@ async function sendChatWithRewind(messageId, text) {
 
 async function sendChat(text, rewindToMessageId = null) {
   if (!currentProjectId || !text.trim() || chatBusy) return;
-  setChatBusy(true);
+  const trimmed = text.trim();
   const input = document.getElementById("chat-input");
+  input.value = "";
+  input.focus();
+  beginChatPending(trimmed, rewindToMessageId);
+  setChatBusy(true);
   try {
-    const body = { message: text };
+    const body = { message: trimmed };
     if (rewindToMessageId) {
       body.rewind_to_message_id = rewindToMessageId;
     }
-    const result = await tpApi(`projects/${currentProjectId}/chat`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    editingMessageId = null;
+    const result = await postProjectChat(body);
     applyChatResult(result);
+  } catch (err) {
+    chatPending = null;
+    if (!rewindToMessageId) {
+      input.value = trimmed;
+    }
+    renderMessagesFromState();
+    throw err;
   } finally {
-    input.value = "";
     setChatBusy(false);
     input.focus();
   }
@@ -634,6 +1257,7 @@ function bindPreviewWidth() {
 }
 
 function bindEvents() {
+  syncChatModeUi();
   document.getElementById("new-app-btn").addEventListener("click", () => {
     openCreateModal();
   });
@@ -661,6 +1285,10 @@ function bindEvents() {
     loadGallery().catch(() => {});
   });
   document.getElementById("refresh-preview-btn").addEventListener("click", refreshPreview);
+  const canvasRefresh = document.getElementById("canvas-refresh-preview");
+  if (canvasRefresh) {
+    canvasRefresh.addEventListener("click", refreshPreview);
+  }
 
   document.getElementById("chat-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -669,6 +1297,16 @@ function bindEvents() {
     sendChat(text).catch((err) => alert(err.message));
   });
 
+  const chatModeGroup = document.getElementById("chat-mode");
+  if (chatModeGroup) {
+    chatModeGroup.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-chat-mode]");
+      if (!btn) return;
+      const mode = btn.getAttribute("data-chat-mode");
+      if (mode) setChatMode(mode);
+    });
+  }
+
   document.querySelectorAll(".tp-suggest").forEach((btn) => {
     btn.addEventListener("click", () => {
       const prompt = btn.getAttribute("data-prompt") || "";
@@ -676,14 +1314,21 @@ function bindEvents() {
     });
   });
 
-  document.getElementById("gate-deepen").addEventListener("click", () => {
-    sendChat("要件を深掘り").catch((err) => alert(err.message));
-  });
-  document.getElementById("gate-build").addEventListener("click", () => {
-    sendChat("実装に進む").catch((err) => alert(err.message));
-  });
-  document.getElementById("gate-implement-start").addEventListener("click", () => {
-    sendChat("実装開始").catch((err) => alert(err.message));
+  document.getElementById("chat-messages").addEventListener("click", (e) => {
+    const deepen = e.target.closest('[data-action="gate-deepen"]');
+    if (deepen) {
+      sendChat("要件を深掘り").catch((err) => alert(err.message));
+      return;
+    }
+    const build = e.target.closest('[data-action="gate-build"]');
+    if (build) {
+      sendChat("実装に進む").catch((err) => alert(err.message));
+      return;
+    }
+    const start = e.target.closest('[data-action="gate-implement-start"]');
+    if (start) {
+      sendChat("実装開始").catch((err) => alert(err.message));
+    }
   });
 
   document.getElementById("studio-title").addEventListener("input", () => {
@@ -704,6 +1349,15 @@ function bindEvents() {
   });
 
   bindPreviewWidth();
+
+  document.getElementById("canvas-tab-preview").addEventListener("click", () => {
+    setCanvasTab("preview");
+  });
+  document.getElementById("canvas-tab-files").addEventListener("click", () => {
+    setCanvasTab("files");
+    refreshWorkspaceTree().catch(() => {});
+  loadImplementTasksFromWorkspace().catch(() => {});
+  });
 }
 
 async function init() {

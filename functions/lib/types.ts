@@ -67,9 +67,9 @@ export interface Env {
   /** Google Gemini API（FDS 一次審査） */
   GEMINI_API_KEY?: string;
   GEMINI_FDS_REVIEW_MODEL?: string;
-  /** サードパーティ対話・要件（既定 gemini-2.5-flash-lite 等） */
+  /** サードパーティ対話・要件（既定 gemini-3.1-flash-lite 等） */
   GEMINI_TP_LITE_MODEL?: string;
-  /** サードパーティレビュー・実装（既定 gemini-2.5-flash 等） */
+  /** サードパーティレビュー・実装（既定 gemini-3.5-flash 等） */
   GEMINI_TP_FLASH_MODEL?: string;
   /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */
   FDS_REVIEW_SYNTAX_REFERENCE?: string;

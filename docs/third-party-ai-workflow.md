@@ -23,8 +23,8 @@ ScienceHUB のサードパーティスタジオで、ユーザーと AI がや�
 
 | 役割 | 環境変数（任意） | コード上の既定 |
 |------|------------------|----------------|
-| ヒアリング・フォーム・要件/計画 Markdown | `GEMINI_TP_LITE_MODEL` | `gemini-2.5-flash-lite` |
-| 計画レビュー・HTML 実装 | `GEMINI_TP_FLASH_MODEL` | `gemini-2.5-flash` |
+| ヒアリング・フォーム・要件/計画 Markdown | `GEMINI_TP_LITE_MODEL` | `gemini-3.1-flash-lite` |
+| 計画レビュー・HTML 実装 | `GEMINI_TP_FLASH_MODEL` | `gemini-3.5-flash` |
 
 ---
 

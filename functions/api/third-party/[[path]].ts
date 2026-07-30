@@ -3,7 +3,9 @@
  * GET/POST   /api/third-party/projects
  * GET/PATCH/DELETE /api/third-party/projects/:id
  * GET        /api/third-party/projects/:id/messages
- * POST       /api/third-party/projects/:id/chat
+ * GET        /api/third-party/projects/:id/workspace/tree
+ * GET        /api/third-party/projects/:id/workspace/file?path=
+ * POST       /api/third-party/projects/:id/chat?stream=1  (SSE)
  * GET        /api/third-party/projects/:id/preview
  * POST       /api/third-party/projects/:id/publish
  * GET        /api/third-party/gallery
@@ -24,6 +26,8 @@ import {
   getOwnedProject,
   getOwnedArtifactText,
   getOwnedProjectDetail,
+  getOwnedWorkspaceFile,
+  getOwnedWorkspaceTree,
   getProjectHtml,
   getPublishedMeta,
   htmlResponse,
@@ -36,6 +40,7 @@ import {
   updateTpProject,
   canViewPublished,
 } from "../../lib/third-party";
+import { createChatSseResponse } from "../../lib/third-party/chat-sse";
 
 function pathParts(params: string | string[] | undefined): string[] {
   if (!params) return [];
@@ -140,6 +145,26 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       return htmlResponse(html);
     }
 
+    if (sub === "workspace" && artifactKind === "tree") {
+      const tree = await getOwnedWorkspaceTree(db, bucket, auth.id, projectId);
+      if (!tree) return jsonError("プロジェクトが見つかりません", 404);
+      return Response.json({ tree });
+    }
+
+    if (sub === "workspace" && artifactKind === "file") {
+      const path = new URL(context.request.url).searchParams.get("path") ?? "";
+      const file = await getOwnedWorkspaceFile(
+        db,
+        bucket,
+        auth.id,
+        projectId,
+        path
+      );
+      if (!file) return jsonError("プロジェクトが見つかりません", 404);
+      if ("error" in file) return jsonError(file.error, 404);
+      return Response.json(file);
+    }
+
     if (sub === "artifacts" && artifactKind === "requirements") {
       const text = await getOwnedArtifactText(
         db,
@@ -210,7 +235,45 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         message?: string;
         form_responses?: Record<string, string | string[]>;
         rewind_to_message_id?: string;
+        chat_mode?: string;
       };
+      const wantsStream =
+        new URL(context.request.url).searchParams.get("stream") === "1";
+
+      if (wantsStream) {
+        return createChatSseResponse(async (send) => {
+          const callbacks = {
+            onActivity: (label: string, phase?: string) => {
+              send("status", { label, phase: phase ?? null });
+            },
+            onArtifact: (path: string) => {
+              send("artifact", { path, action: "written" });
+            },
+            onTasks: (payload: {
+              tasks: Array<{ id: string; title: string; status: string }>;
+              current: number;
+            }) => {
+              send("tasks", payload);
+            },
+          };
+          const result = await postGeminiChat(
+            context.env,
+            db,
+            bucket,
+            auth.id,
+            projectId,
+            {
+              message: body.message,
+              form_responses: body.form_responses,
+              rewind_to_message_id: body.rewind_to_message_id,
+              chat_mode: body.chat_mode,
+            },
+            callbacks
+          );
+          return result;
+        });
+      }
+
       const result = await postGeminiChat(
         context.env,
         db,
@@ -221,6 +284,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           message: body.message,
           form_responses: body.form_responses,
           rewind_to_message_id: body.rewind_to_message_id,
+          chat_mode: body.chat_mode,
         }
       );
       if (!result) return jsonError("プロジェクトが見つかりません", 404);

@@ -10,11 +10,21 @@ import {
   ARTIFACT_PLAN,
   ARTIFACT_REQUIREMENTS,
   ARTIFACT_REVIEW,
+  ARTIFACT_TASKS,
   getArtifact,
   putArtifact,
 } from "./artifacts";
 import {
-  FLASH_IMPLEMENT_SCHEMA,
+  applyImplementationTask,
+  EMPTY_SKELETON,
+  loadImplementationTasks,
+  planImplementationTasks,
+  prepareImplementGeminiContext,
+  saveImplementationTasks,
+  normalizeImplementBaseHtml,
+  stripScienceHubPlaceholderParagraph,
+} from "./implement-tasks";
+import {
   LITE_DOCS_SCHEMA,
   LITE_TURN_SCHEMA,
   PLAN_REVIEW_SCHEMA,
@@ -25,27 +35,27 @@ import {
   type TpWorkflowPhase,
   isPostBuildPhase,
   isTpWorkflowPhase,
+  parseTpChatMode,
+  type TpChatMode,
 } from "./schemas";
 import {
-  FLASH_IMPLEMENT_SYSTEM,
   FLASH_REVIEW_SYSTEM,
   LITE_DOCS_SYSTEM,
   LITE_SYSTEM,
   REVIEW_CHECKLIST_HINT,
 } from "./prompts";
 import { EMPTY_PLACEHOLDER_HTML } from "./stub-chat";
+import { runTpAskTurn } from "./ask-chat";
 import {
   runMaintainAgentTurn,
   wantsMaintainUserReport,
   type MaintainProjectContext,
 } from "./workspace-agent";
+import { resolveTpFlashModel, resolveTpLiteModel, tpGeminiProfileOptions } from "./tp-flash";
 
 const MAX_DAILY_TURNS = 30;
 const MAX_REVIEW_LOOPS = 2;
 const MAX_IMPLEMENT_ATTEMPTS = 3;
-
-const DEFAULT_LITE_MODEL = "gemini-2.5-flash-lite";
-const DEFAULT_FLASH_MODEL = "gemini-2.5-flash";
 
 export interface TpProjectPipelineRow {
   id: string;
@@ -79,12 +89,45 @@ export interface GeminiChatResult {
   dir_name: string;
 }
 
-function liteModel(env: Env): string {
-  return env.GEMINI_TP_LITE_MODEL?.trim() || DEFAULT_LITE_MODEL;
+export interface TpChatCallbacks {
+  onActivity?: (label: string, phase?: string) => void;
+  onArtifact?: (path: string) => void;
+  onTasks?: (payload: {
+    tasks: Array<{ id: string; title: string; status: string }>;
+    current: number;
+  }) => void;
 }
 
-function flashModel(env: Env): string {
-  return env.GEMINI_TP_FLASH_MODEL?.trim() || DEFAULT_FLASH_MODEL;
+function emitActivity(
+  callbacks: TpChatCallbacks | undefined,
+  label: string,
+  phase?: string
+): void {
+  callbacks?.onActivity?.(label, phase);
+}
+
+function emitArtifact(
+  callbacks: TpChatCallbacks | undefined,
+  path: string
+): void {
+  callbacks?.onArtifact?.(path);
+}
+
+function emitTasks(
+  callbacks: TpChatCallbacks | undefined,
+  tasksFile: {
+    tasks: Array<{ id: string; title: string; status: string }>;
+    current_task_index: number;
+  }
+): void {
+  callbacks?.onTasks?.({
+    tasks: tasksFile.tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+    })),
+    current: tasksFile.current_task_index,
+  });
 }
 
 async function insertMessage(
@@ -300,11 +343,11 @@ structured_form に進むときは pending_form に質問（2〜5問、選択肢
 gate_deepen_or_build では gate_choice_ids に deepen と implement_now を含める。`;
 
   return await geminiGenerateJson<LiteTurnResult>(env, {
-    model: liteModel(env),
+    model: resolveTpLiteModel(env),
     systemInstruction: LITE_SYSTEM,
     prompt,
-    temperature: 0.4,
     maxOutputTokens: 4096,
+    ...tpGeminiProfileOptions("lite_turn"),
     responseSchema: LITE_TURN_SCHEMA as unknown as Record<string, unknown>,
   });
 }
@@ -320,11 +363,11 @@ ${project.context_summary || ""}
 要件定義書と実装計画書を生成してください。`;
 
   return await geminiGenerateJson<LiteDocsResult>(env, {
-    model: liteModel(env),
+    model: resolveTpLiteModel(env),
     systemInstruction: LITE_DOCS_SYSTEM,
     prompt,
-    temperature: 0.3,
     maxOutputTokens: 8192,
+    ...tpGeminiProfileOptions("lite_docs"),
     responseSchema: LITE_DOCS_SCHEMA as unknown as Record<string, unknown>,
   });
 }
@@ -343,36 +386,12 @@ ${requirements}
 ${plan}`;
 
   return await geminiGenerateJson<PlanReviewResult>(env, {
-    model: flashModel(env),
+    model: resolveTpFlashModel(env),
     systemInstruction: FLASH_REVIEW_SYSTEM,
     prompt,
-    temperature: 0.2,
     maxOutputTokens: 8192,
+    ...tpGeminiProfileOptions("flash_review"),
     responseSchema: PLAN_REVIEW_SCHEMA as unknown as Record<string, unknown>,
-  });
-}
-
-async function runFlashImplement(
-  env: Env,
-  requirements: string,
-  plan: string,
-  title: string
-): Promise<{ index_html: string; assistant_message: string }> {
-  const prompt = `アプリ名: ${title}
-
---- 要件定義書 ---
-${requirements}
-
---- 実装計画書 ---
-${plan}`;
-
-  return await geminiGenerateJson(env, {
-    model: flashModel(env),
-    systemInstruction: FLASH_IMPLEMENT_SYSTEM,
-    prompt,
-    temperature: 0.25,
-    maxOutputTokens: 16384,
-    responseSchema: FLASH_IMPLEMENT_SCHEMA as unknown as Record<string, unknown>,
   });
 }
 
@@ -380,8 +399,10 @@ async function writeDocsPhase(
   env: Env,
   db: D1Database,
   bucket: R2Bucket,
-  project: TpProjectPipelineRow
+  project: TpProjectPipelineRow,
+  callbacks?: TpChatCallbacks
 ): Promise<{ message: string }> {
+  emitActivity(callbacks, "要件定義書を作成中…", "write_req_and_plan");
   const docs = await runLiteDocs(env, project);
   await putArtifact(
     bucket,
@@ -390,6 +411,8 @@ async function writeDocsPhase(
     docs.requirements_markdown,
     "text/markdown; charset=utf-8"
   );
+  emitArtifact(callbacks, ARTIFACT_REQUIREMENTS);
+  emitActivity(callbacks, "実装計画を作成中…", "write_req_and_plan");
   await putArtifact(
     bucket,
     project.dir_name,
@@ -397,6 +420,7 @@ async function writeDocsPhase(
     docs.plan_markdown,
     "text/markdown; charset=utf-8"
   );
+  emitArtifact(callbacks, ARTIFACT_PLAN);
   await insertMessage(db, project.id, "assistant", docs.assistant_message);
   await patchProject(db, project.id, {
     workflow_phase: "flash_review",
@@ -409,8 +433,10 @@ async function flashReviewPhase(
   env: Env,
   db: D1Database,
   bucket: R2Bucket,
-  project: TpProjectPipelineRow
+  project: TpProjectPipelineRow,
+  callbacks?: TpChatCallbacks
 ): Promise<{ message: string; passed: boolean }> {
+  emitActivity(callbacks, "実装計画をレビュー中…", "flash_review");
   const requirements =
     (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
   const plan = (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
@@ -480,7 +506,8 @@ async function flashImplementPhase(
   env: Env,
   db: D1Database,
   bucket: R2Bucket,
-  project: TpProjectPipelineRow
+  project: TpProjectPipelineRow,
+  callbacks?: TpChatCallbacks
 ): Promise<{ message: string; htmlUpdated: boolean }> {
   if (project.implement_attempts >= MAX_IMPLEMENT_ATTEMPTS) {
     throw new Error("実装の再試行上限に達しました");
@@ -489,29 +516,121 @@ async function flashImplementPhase(
   const requirements =
     (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
   const plan = (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
-  const impl = await runFlashImplement(env, requirements, plan, project.title);
 
+  emitActivity(callbacks, "実装タスクを準備中…", "flash_implement_tasks");
+  await patchProject(db, project.id, {
+    workflow_phase: "flash_implement_tasks",
+  });
+
+  let tasksFile = await loadImplementationTasks(bucket, project.dir_name);
+  if (!tasksFile) {
+    tasksFile = await planImplementationTasks(
+      env,
+      requirements,
+      plan,
+      project.title
+    );
+    await saveImplementationTasks(bucket, project.dir_name, tasksFile);
+    emitArtifact(callbacks, ARTIFACT_TASKS);
+  }
+  emitTasks(callbacks, tasksFile);
+
+  let html =
+    (await getArtifact(bucket, project.dir_name, ARTIFACT_INDEX)) ?? "";
+  if (!html.trim()) {
+    html = EMPTY_SKELETON;
+  }
+  html = normalizeImplementBaseHtml(html, project.title);
+
+  const summaries: string[] = [];
+
+  const implementGemini = await prepareImplementGeminiContext(
+    env,
+    requirements,
+    plan
+  );
+
+  while (tasksFile.current_task_index < tasksFile.tasks.length) {
+    const idx = tasksFile.current_task_index;
+    const task = tasksFile.tasks[idx];
+    if (task.status === "done") {
+      tasksFile.current_task_index += 1;
+      continue;
+    }
+
+    emitActivity(
+      callbacks,
+      `タスク ${idx + 1}/${tasksFile.tasks.length}: ${task.title}`,
+      "flash_implement_tasks"
+    );
+
+    try {
+      const result = await applyImplementationTask(
+        env,
+        html,
+        task,
+        requirements,
+        plan,
+        project.title,
+        {
+          onActivity: (label) =>
+            emitActivity(callbacks, label, "flash_implement_tasks"),
+          gemini: implementGemini,
+        }
+      );
+      html = result.html;
+      await putArtifact(
+        bucket,
+        project.dir_name,
+        ARTIFACT_INDEX,
+        html,
+        "text/html; charset=utf-8"
+      );
+      await bucket.put(`${project.r2_prefix}index.html`, html, {
+        httpMetadata: { contentType: "text/html; charset=utf-8" },
+      });
+      emitArtifact(callbacks, ARTIFACT_INDEX);
+
+      task.status = "done";
+      summaries.push(result.assistantMessage);
+      tasksFile.current_task_index += 1;
+      await saveImplementationTasks(bucket, project.dir_name, tasksFile);
+      emitTasks(callbacks, tasksFile);
+    } catch (error) {
+      task.status = "failed";
+      await saveImplementationTasks(bucket, project.dir_name, tasksFile);
+      emitTasks(callbacks, tasksFile);
+      const msg =
+        error instanceof Error ? error.message : "タスクの実装に失敗しました";
+      throw new Error(`${task.title}: ${msg}`);
+    }
+  }
+
+  html = stripScienceHubPlaceholderParagraph(html);
   await putArtifact(
     bucket,
     project.dir_name,
     ARTIFACT_INDEX,
-    impl.index_html,
+    html,
     "text/html; charset=utf-8"
   );
-  await bucket.put(
-    `${project.r2_prefix}index.html`,
-    impl.index_html,
-    { httpMetadata: { contentType: "text/html; charset=utf-8" } }
-  );
+  await bucket.put(`${project.r2_prefix}index.html`, html, {
+    httpMetadata: { contentType: "text/html; charset=utf-8" },
+  });
 
-  await insertMessage(db, project.id, "assistant", impl.assistant_message);
+  const assistantMessage =
+    summaries.length > 0
+      ? summaries[summaries.length - 1]
+      : "index.html の段階実装が完了しました。";
+
+  await insertMessage(db, project.id, "assistant", assistantMessage);
   await patchProject(db, project.id, {
     workflow_phase: "draft_ready",
     implement_attempts: project.implement_attempts + 1,
     awaiting_implement_confirm: 0,
   });
 
-  return { message: impl.assistant_message, htmlUpdated: true };
+  return { message: assistantMessage, htmlUpdated: true };
 }
 
 /** Gemini パイプライン 1 ターン */
@@ -524,10 +643,16 @@ export async function runTpGeminiChat(
   input: {
     message?: string;
     form_responses?: Record<string, string | string[]>;
-  }
+    chat_mode?: TpChatMode | string;
+  },
+  callbacks?: TpChatCallbacks
 ): Promise<GeminiChatResult | null> {
   const project = await loadPipelineProject(db, userId, projectId);
   if (!project) return null;
+
+  const chatMode = parseTpChatMode(input.chat_mode);
+
+  emitActivity(callbacks, "Working…", project.workflow_phase);
 
   let userText = (input.message ?? "").trim();
   const pendingForm = parsePendingForm(project.pending_form_json);
@@ -558,6 +683,33 @@ export async function runTpGeminiChat(
     await insertMessage(db, projectId, "user", userText);
   }
 
+  if (chatMode === "ask" && userText) {
+    emitActivity(callbacks, "質問に回答中…", current.workflow_phase);
+    const messages = await listMessages(db, projectId);
+    const reply = await runTpAskTurn(
+      env,
+      bucket,
+      current,
+      userText,
+      messages
+    );
+    await insertMessage(db, projectId, "assistant", reply);
+    const finalProject = await loadPipelineProject(db, userId, projectId);
+    if (!finalProject) return null;
+    const outMessages = await listMessages(db, projectId);
+    const phaseOut = isTpWorkflowPhase(finalProject.workflow_phase)
+      ? finalProject.workflow_phase
+      : "discovery";
+    return {
+      messages: outMessages,
+      phase: phaseOut,
+      pending_form: parsePendingForm(finalProject.pending_form_json),
+      review_summary: null,
+      htmlUpdated: false,
+      dir_name: finalProject.dir_name,
+    };
+  }
+
   let htmlUpdated = false;
   let reviewSummary: string | null = null;
 
@@ -565,7 +717,7 @@ export async function runTpGeminiChat(
   if (implementStartTrigger) {
     await patchProject(db, projectId, { workflow_phase: "flash_implement" });
     current = (await loadPipelineProject(db, userId, projectId))!;
-    const impl = await flashImplementPhase(env, db, bucket, current);
+    const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
     htmlUpdated = impl.htmlUpdated;
   }
 
@@ -584,7 +736,7 @@ export async function runTpGeminiChat(
   } else if (gateBuildTrigger) {
     await patchProject(db, projectId, { workflow_phase: "write_req_and_plan" });
     current = (await loadPipelineProject(db, userId, projectId))!;
-    await writeDocsPhase(env, db, bucket, current);
+    await writeDocsPhase(env, db, bucket, current, callbacks);
   }
 
   current = (await loadPipelineProject(db, userId, projectId))!;
@@ -592,16 +744,16 @@ export async function runTpGeminiChat(
 
   // 自動フェーズ処理
   if (phase === "write_req_and_plan") {
-    await writeDocsPhase(env, db, bucket, current);
+    await writeDocsPhase(env, db, bucket, current, callbacks);
   }
 
   current = (await loadPipelineProject(db, userId, projectId))!;
   if (current.workflow_phase === "flash_review") {
-    const r = await flashReviewPhase(env, db, bucket, current);
+    const r = await flashReviewPhase(env, db, bucket, current, callbacks);
     reviewSummary = r.message;
     current = (await loadPipelineProject(db, userId, projectId))!;
     if (r.passed && current.workflow_phase === "flash_implement") {
-      const impl = await flashImplementPhase(env, db, bucket, current);
+      const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
       htmlUpdated = impl.htmlUpdated;
     }
   }
@@ -610,18 +762,19 @@ export async function runTpGeminiChat(
   if (current.workflow_phase === "flash_revise_plan") {
     await patchProject(db, projectId, { workflow_phase: "flash_review" });
     current = (await loadPipelineProject(db, userId, projectId))!;
-    const r = await flashReviewPhase(env, db, bucket, current);
+    const r = await flashReviewPhase(env, db, bucket, current, callbacks);
     reviewSummary = r.message;
   }
 
   current = (await loadPipelineProject(db, userId, projectId))!;
   if (
-    current.workflow_phase === "flash_implement" &&
+    (current.workflow_phase === "flash_implement" ||
+      current.workflow_phase === "flash_implement_tasks") &&
     !htmlUpdated &&
     userText &&
     !implementStartTrigger
   ) {
-    const impl = await flashImplementPhase(env, db, bucket, current);
+    const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
     htmlUpdated = impl.htmlUpdated;
   }
 
@@ -638,6 +791,7 @@ export async function runTpGeminiChat(
       pending_form_json: null,
     });
     current = (await loadPipelineProject(db, userId, projectId))!;
+    emitActivity(callbacks, "不具合を調査中…", "app_maintain");
     const messages = await listMessages(db, projectId);
     const maintainCtx: MaintainProjectContext = {
       id: current.id,
@@ -653,7 +807,11 @@ export async function runTpGeminiChat(
       bucket,
       maintainCtx,
       userText,
-      recentChatBlock(messages)
+      recentChatBlock(messages),
+      {
+        onActivity: (label) =>
+          emitActivity(callbacks, label, "app_maintain"),
+      }
     );
     await insertMessage(
       db,
@@ -686,6 +844,7 @@ export async function runTpGeminiChat(
     !wantsGateBuildDocs(userText, current.workflow_phase) &&
     !wantsDeepenRequirements(userText)
   ) {
+    emitActivity(callbacks, "応答を作成中…", current.workflow_phase);
     const messages = await listMessages(db, projectId);
     const turn = await runLiteTurn(env, current, userText, messages);
     await insertMessage(db, projectId, "assistant", turn.assistant_message);
@@ -712,7 +871,7 @@ export async function runTpGeminiChat(
 
     if (nextPhase === "write_req_and_plan") {
       current = (await loadPipelineProject(db, userId, projectId))!;
-      await writeDocsPhase(env, db, bucket, current);
+      await writeDocsPhase(env, db, bucket, current, callbacks);
     }
   }
 
