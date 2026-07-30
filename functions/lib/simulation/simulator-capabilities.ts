@@ -3,7 +3,7 @@
 export interface SimulatorCapabilities {
   can_record_result_video: boolean;
   nozzle_sizes_mm: string[];
-  /** FDS 用 EC2 インスタンスタイプ（例: c7a.xlarge） */
+  /** FDS 用 EC2 インスタンスタイプ（例: hpc6a.48xlarge） */
   ec2_instance_type?: string | null;
   /** EC2 vCPU 数（表示・照合用） */
   vcpus?: number | null;

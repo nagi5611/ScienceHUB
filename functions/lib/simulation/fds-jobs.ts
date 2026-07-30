@@ -91,7 +91,7 @@ export interface FdsJobApiModel {
 }
 
 export const FDS_JOB_MAX_RUNTIME_HOURS = 10;
-export const FDS_DEFAULT_INSTANCE_TYPE = "t3.micro";
+export const FDS_DEFAULT_INSTANCE_TYPE = "hpc6a.48xlarge";
 export const FDS_MAX_INPUT_BYTES = 50 * 1024 * 1024;
 
 /** Artifact availability flags for API formatting. */

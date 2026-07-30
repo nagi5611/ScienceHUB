@@ -342,7 +342,7 @@ async function refreshInstancePreview() {
       input_size_bytes: String(inputSize),
     });
     const data = await apiRequest(`fds-requests/instance-preview?${params}`);
-    previewEl.textContent = `${data.instance_type}（${data.vcpus} vCPU）`;
+    previewEl.textContent = `${data.instance_type}（MPI ${mpi} / 最大 ${data.vcpus} vCPU）`;
     if (costEl && data.estimated_cost_jpy_max != null) {
       const storage = data.estimated_storage;
       const storageHint = storage
@@ -463,7 +463,7 @@ async function loadFdsConfigAndRequests() {
   }
   if (mpiInput && fdsConfig) {
     mpiInput.min = String(fdsConfig.min_mpi_processes ?? 1);
-    mpiInput.max = String(fdsConfig.max_mpi_processes ?? 192);
+    mpiInput.max = String(fdsConfig.max_mpi_processes ?? 96);
   }
   await refreshInstancePreview();
   await renderMyRequests();
