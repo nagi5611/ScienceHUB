@@ -3228,6 +3228,57 @@ tr:hover td {
 
 .sim-type-card.is-selected { border-color: var(--color-primary); }
 
+.sim-type-card.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sim-type-card.is-coming-soon:not(.is-selected) {
+  border-style: dashed;
+}
+
+.sim-type-card-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.sim-type-card-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
+  border-radius: 999px;
+}
+
+.sim-type-card-desc {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #64748b);
+}
+
+.sim-coming-soon-notice {
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius);
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+}
+
+.sim-coming-soon-notice p {
+  margin: 0 0 0.5rem;
+}
+
+.sim-coming-soon-notice p:last-child {
+  margin-bottom: 0;
+}
+
 .fds-request-admin-list { list-style: none; margin: 0; padding: 0; }
 
 .fds-request-admin-item {

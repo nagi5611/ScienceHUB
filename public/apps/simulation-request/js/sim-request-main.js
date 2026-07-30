@@ -25,6 +25,13 @@ const SIM_TYPES = [
     description: '火災動的シミュレーション（.fds）',
     available: true,
   },
+  {
+    id: 'openfoam',
+    name: 'OpenFOAM',
+    description: '計算流体力学（ケースファイル）',
+    available: true,
+    comingSoon: true,
+  },
 ];
 
 const REQUEST_STATUS_LABELS = {
@@ -464,6 +471,12 @@ function setupFdsFileDropZone() {
   });
 }
 
+/** Shows the panel for the selected simulation type. */
+function showSimTypePanel(simId) {
+  document.getElementById('fds-request-panel')?.classList.toggle('hidden', simId !== 'fds');
+  document.getElementById('openfoam-request-panel')?.classList.toggle('hidden', simId !== 'openfoam');
+}
+
 /** Renders simulation type cards. */
 function renderSimTypeList() {
   const mount = document.getElementById('sim-type-list');
@@ -471,11 +484,12 @@ function renderSimTypeList() {
 
   mount.innerHTML = SIM_TYPES.map((sim) => {
     const disabled = !sim.available;
+    const comingSoon = Boolean(sim.comingSoon);
     return `
-      <button type="button" class="sim-type-card${disabled ? ' is-disabled' : ''}" data-sim-id="${sim.id}" ${
+      <button type="button" class="sim-type-card${disabled ? ' is-disabled' : ''}${comingSoon ? ' is-coming-soon' : ''}" data-sim-id="${sim.id}" ${
         disabled ? 'disabled' : ''
       }>
-        <span class="sim-type-card-name">${sim.name}</span>
+        <span class="sim-type-card-name">${sim.name}${comingSoon ? '<span class="sim-type-card-badge">準備中</span>' : ''}</span>
         <span class="sim-type-card-desc">${sim.description}</span>
       </button>
     `;
@@ -488,7 +502,7 @@ function renderSimTypeList() {
       mount.querySelectorAll('.sim-type-card').forEach((el) => {
         el.classList.toggle('is-selected', el.getAttribute('data-sim-id') === id);
       });
-      document.getElementById('fds-request-panel')?.classList.toggle('hidden', id !== 'fds');
+      showSimTypePanel(id);
     });
   });
 }
@@ -794,7 +808,7 @@ async function init() {
   renderSimTypeList();
   selectedSimType = 'fds';
   document.getElementById('sim-type-list')?.querySelector('[data-sim-id="fds"]')?.classList.add('is-selected');
-  document.getElementById('fds-request-panel')?.classList.remove('hidden');
+  showSimTypePanel('fds');
 
   document.getElementById('fds-mpi-processes')?.addEventListener('input', scheduleInstancePreview);
   document.getElementById('fds-max-runtime-hours')?.addEventListener('input', scheduleInstancePreview);
