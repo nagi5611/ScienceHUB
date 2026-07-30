@@ -6,7 +6,8 @@ import {
   ARTIFACT_INDEX,
   ARTIFACT_PLAN,
   ARTIFACT_REQUIREMENTS,
-  ARTIFACT_REVIEW,
+  ARTIFACT_TASKS,
+  DOCS_GITKEEP,
   artifactExists,
   getArtifact,
   putArtifact,
@@ -16,17 +17,18 @@ export const WORKSPACE_ALLOWLIST = [
   ARTIFACT_INDEX,
   ARTIFACT_REQUIREMENTS,
   ARTIFACT_PLAN,
-  ARTIFACT_REVIEW,
+  ARTIFACT_TASKS,
+  DOCS_GITKEEP,
 ] as const;
 
 export type WorkspaceFileName = (typeof WORKSPACE_ALLOWLIST)[number];
 
 const MAX_READ_CHARS = 24000;
 
-/** 許可パスか検証 */
+/** 許可パスか検証（ルートまたは docs/ 配下1段） */
 export function resolveWorkspacePath(path: string): WorkspaceFileName | null {
   const normalized = path.replace(/\\/g, "/").replace(/^\/+/, "").trim();
-  if (!normalized || normalized.includes("..") || normalized.includes("/")) {
+  if (!normalized || normalized.includes("..")) {
     return null;
   }
   if ((WORKSPACE_ALLOWLIST as readonly string[]).includes(normalized)) {
@@ -41,6 +43,17 @@ export interface WorkspaceFileMeta {
   size_bytes: number | null;
 }
 
+export interface WorkspaceTreeNode {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  children?: WorkspaceTreeNode[];
+}
+
+function artifactKey(dirName: string, name: string): string {
+  return `third-party/${dirName}/${name}`;
+}
+
 /** ワークスペース内ファイル一覧 */
 export async function listWorkspaceFiles(
   bucket: R2Bucket,
@@ -48,7 +61,7 @@ export async function listWorkspaceFiles(
 ): Promise<WorkspaceFileMeta[]> {
   const out: WorkspaceFileMeta[] = [];
   for (const path of WORKSPACE_ALLOWLIST) {
-    const head = await bucket.head(`third-party/${dirName}/${path}`);
+    const head = await bucket.head(artifactKey(dirName, path));
     out.push({
       path,
       exists: head !== null,
@@ -56,6 +69,71 @@ export async function listWorkspaceFiles(
     });
   }
   return out;
+}
+
+/** ファイルエクスプローラー用ツリー */
+export async function buildWorkspaceTree(
+  bucket: R2Bucket,
+  dirName: string,
+  rootLabel: string
+): Promise<WorkspaceTreeNode> {
+  const hasIndex = await artifactExists(bucket, dirName, ARTIFACT_INDEX);
+  const hasReq = await artifactExists(bucket, dirName, ARTIFACT_REQUIREMENTS);
+  const hasPlan = await artifactExists(bucket, dirName, ARTIFACT_PLAN);
+  const hasTasks = await artifactExists(bucket, dirName, ARTIFACT_TASKS);
+  const hasGitkeep = await bucket.head(artifactKey(dirName, DOCS_GITKEEP));
+
+  const docChildren: WorkspaceTreeNode[] = [];
+  if (hasReq) {
+    docChildren.push({
+      name: "requirements.md",
+      path: ARTIFACT_REQUIREMENTS,
+      type: "file",
+    });
+  }
+  if (hasPlan) {
+    docChildren.push({
+      name: "implementation-plan.md",
+      path: ARTIFACT_PLAN,
+      type: "file",
+    });
+  }
+  if (hasTasks) {
+    docChildren.push({
+      name: "implementation-tasks.json",
+      path: ARTIFACT_TASKS,
+      type: "file",
+    });
+  }
+  if (!docChildren.length && hasGitkeep) {
+    docChildren.push({
+      name: "(空)",
+      path: DOCS_GITKEEP,
+      type: "file",
+    });
+  }
+
+  const children: WorkspaceTreeNode[] = [];
+  if (hasIndex) {
+    children.push({
+      name: "index.html",
+      path: ARTIFACT_INDEX,
+      type: "file",
+    });
+  }
+  children.push({
+    name: "docs",
+    path: "docs",
+    type: "dir",
+    children: docChildren,
+  });
+
+  return {
+    name: rootLabel,
+    path: "",
+    type: "dir",
+    children,
+  };
 }
 
 export interface ReadFileOptions {
@@ -84,6 +162,16 @@ export async function readWorkspaceFile(
   if (!resolved) return { error: "許可されていないパスです" };
 
   const text = await getArtifact(bucket, dirName, resolved);
+  if (text === null && resolved === DOCS_GITKEEP) {
+    return {
+      path: resolved,
+      content: "",
+      total_lines: 0,
+      truncated: false,
+      start_line: 1,
+      end_line: 0,
+    };
+  }
   if (!text) return { error: "ファイルが存在しません" };
 
   const lines = text.split("\n");

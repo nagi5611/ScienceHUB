@@ -1,5 +1,5 @@
 // functions/lib/simulation/ec2-simulator-catalog.ts
-import { FDS_INSTANCE_SIZES } from './fds-instance-sizing';
+import { SIMULATION_EC2_INSTANCE_SIZES } from './fds-instance-sizing';
 import {
   createSimulator,
   getAllSimulators,
@@ -30,7 +30,7 @@ export async function buildEc2InstanceCatalog(db: D1Database): Promise<Ec2Instan
     if (type) byType.set(type, simulator);
   }
 
-  return FDS_INSTANCE_SIZES.map((row) => {
+  return SIMULATION_EC2_INSTANCE_SIZES.map((row) => {
     const registered = byType.get(row.instanceType);
     return {
       instance_type: row.instanceType,
@@ -59,10 +59,10 @@ export async function findSimulatorByEc2InstanceType(
   return null;
 }
 
-/** Validates instance type against the FDS Hpc6a catalog. */
+/** Validates instance type against the FDS EC2 catalog (C7a + Hpc6a). */
 export function resolveEc2CatalogEntry(instanceType: string): { instanceType: string; vcpus: number } | null {
   const normalized = instanceType.trim();
-  const row = FDS_INSTANCE_SIZES.find((entry) => entry.instanceType === normalized);
+  const row = SIMULATION_EC2_INSTANCE_SIZES.find((entry) => entry.instanceType === normalized);
   if (!row) return null;
   return { instanceType: row.instanceType, vcpus: row.vcpus };
 }

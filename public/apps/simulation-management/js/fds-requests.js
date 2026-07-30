@@ -1,12 +1,23 @@
 // public/apps/simulation-management/js/fds-requests.js
 import { apiRequest } from '../../simulation-request/js/api.js';
+import {
+  mountFdsRequestChat,
+  isFdsRequestChatAvailable,
+  canStaffReplaceFdsInputStatus,
+} from '../../simulation-request/js/fds-request-chat.js';
 
 const STATUS_LABELS = {
+  primary_reviewing: '一次審査中',
+  primary_failed: '一次審査：指摘あり',
+  primary_error: '一次審査エラー',
   pending_approval: '二次審査中',
   approved: '承認済み',
   rejected: '却下',
   cancelled: 'キャンセル',
 };
+
+const expandedAdminRequestIds = new Set();
+const adminChatDestroyers = new Map();
 
 /** Formats bytes for display. */
 function formatBytes(bytes) {
@@ -24,55 +35,140 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
+/** Destroys mounted admin chat panels. */
+function destroyAllAdminChats() {
+  for (const destroy of adminChatDestroyers.values()) {
+    destroy?.();
+  }
+  adminChatDestroyers.clear();
+}
+
+/** Mounts chat for expanded admin queue items. */
+function mountExpandedAdminChats(rows) {
+  destroyAllAdminChats();
+  for (const row of rows) {
+    if (!expandedAdminRequestIds.has(row.id) || !isFdsRequestChatAvailable(row.status)) continue;
+    const mount = document.querySelector(
+      `.fds-request-admin-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
+    );
+    if (!mount) continue;
+    const destroy = mountFdsRequestChat(mount, {
+      requestId: row.id,
+      apiPrefix: 'admin/fds-requests',
+      isStaff: true,
+      canReplaceInput: canStaffReplaceFdsInputStatus(row.status),
+      requestStatus: row.status,
+    });
+    adminChatDestroyers.set(row.id, destroy);
+  }
+}
+
+/** Toggles expanded detail for an admin queue item. */
+function toggleAdminRequestExpanded(requestId) {
+  if (expandedAdminRequestIds.has(requestId)) {
+    expandedAdminRequestIds.delete(requestId);
+    adminChatDestroyers.get(requestId)?.();
+    adminChatDestroyers.delete(requestId);
+  } else {
+    expandedAdminRequestIds.add(requestId);
+  }
+  renderFdsRequestQueue().catch(() => {});
+}
+
+/** Renders expanded detail panel for an admin queue item. */
+function renderAdminRequestDetail(row) {
+  const canApprove = row.status === 'pending_approval';
+  const canReplace = canStaffReplaceFdsInputStatus(row.status);
+  const chatAvailable = isFdsRequestChatAvailable(row.status);
+
+  return `
+    <div class="fds-request-admin-detail">
+      ${row.review_message ? `<p class="hint">却下理由: ${escapeHtml(row.review_message)}</p>` : ''}
+      <div class="fds-request-admin-actions">
+        <a class="btn btn-secondary btn-sm" href="/api/simulation/admin/fds-requests/${escapeHtml(row.id)}/input/download" download>入力 .fds をダウンロード</a>
+        ${
+          canApprove
+            ? `<button type="button" class="btn btn-primary btn-sm" data-action="approve">認可して実行</button>
+               <button type="button" class="btn btn-secondary btn-sm" data-action="reject">却下</button>`
+            : ''
+        }
+      </div>
+      ${
+        chatAvailable
+          ? `<div class="fds-request-admin-chat-mount" data-request-id="${escapeHtml(row.id)}"></div>`
+          : ''
+      }
+      ${
+        !canReplace && row.status === 'approved'
+          ? '<p class="hint fds-chat-replace-disabled">承認済みのため .fds の置き換えはできません。</p>'
+          : ''
+      }
+      <div class="fds-request-admin-result" hidden></div>
+    </div>
+  `;
+}
+
 /** Renders the pending FDS request queue. */
 export async function renderFdsRequestQueue() {
   const mount = document.getElementById('fds-requests-queue-mount');
   if (!mount) return;
 
   try {
-    const data = await apiRequest('admin/fds-requests?pending=1');
-    const rows = data.requests ?? [];
+    const data = await apiRequest('admin/fds-requests');
+    const rows = (data.requests ?? []).filter(
+      (row) => row.status !== 'approved' && row.status !== 'cancelled'
+    );
     if (!rows.length) {
-      mount.innerHTML = '<p class="hint">二次審査待ちの依頼はありません。</p>';
+      destroyAllAdminChats();
+      mount.innerHTML = '<p class="hint">対応中の依頼はありません。</p>';
       return;
     }
 
     mount.innerHTML = `
       <ul class="fds-request-admin-list">
         ${rows
-          .map(
-            (row) => `
-          <li class="fds-request-admin-item" data-request-id="${escapeHtml(row.id)}">
-            <div class="fds-request-admin-head">
-              <strong>${escapeHtml(row.title)}</strong>
-              <span class="fds-request-status">${STATUS_LABELS[row.status] ?? row.status}</span>
-            </div>
-            <p class="hint">${escapeHtml(row.input_filename)} · ${formatBytes(row.input_size_bytes)}</p>
-            <p class="hint">MPI ${row.mpi_processes} · ${escapeHtml(row.ec2_instance_type)} · 最大 ${row.max_runtime_hours} 時間</p>
-            ${row.desired_date ? `<p class="hint">希望日: ${escapeHtml(row.desired_date)}</p>` : ''}
-            ${row.notes ? `<p class="hint">メモ: ${escapeHtml(row.notes)}</p>` : ''}
-            ${row.primary_review_forced && row.primary_review_issues?.length ? `<details class="fds-primary-review-admin-details"><summary>一次審査の指摘（強制申請）</summary><ul class="fds-primary-review-issues">${row.primary_review_issues.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul></details>` : ''}
-            ${row.primary_review_passed && !row.primary_review_forced ? `<p class="hint">一次審査: 問題なし（AI）</p>` : ''}
-            <p class="hint">依頼日時: ${escapeHtml(row.created_at)}</p>
-            <div class="fds-request-admin-actions">
-              <a class="btn btn-secondary btn-sm" href="/api/simulation/admin/fds-requests/${escapeHtml(row.id)}/input/download" download>入力 .fds をダウンロード</a>
-              <button type="button" class="btn btn-primary btn-sm" data-action="approve">認可して実行</button>
-              <button type="button" class="btn btn-secondary btn-sm" data-action="reject">却下</button>
-            </div>
-            <div class="fds-request-admin-result" hidden></div>
+          .map((row) => {
+            const expanded = expandedAdminRequestIds.has(row.id);
+            return `
+          <li class="fds-request-admin-item${expanded ? ' is-expanded' : ''}" data-request-id="${escapeHtml(row.id)}">
+            <button type="button" class="fds-request-admin-toggle" aria-expanded="${expanded ? 'true' : 'false'}">
+              <div class="fds-request-admin-head">
+                <strong>${escapeHtml(row.title)}</strong>
+                <span class="fds-request-status">${STATUS_LABELS[row.status] ?? row.status}</span>
+                <span class="fds-request-admin-chevron" aria-hidden="true">▶</span>
+              </div>
+              <p class="hint">${escapeHtml(row.input_filename)} · ${formatBytes(row.input_size_bytes)}</p>
+              <p class="hint">MPI ${row.mpi_processes} · ${escapeHtml(row.ec2_instance_type)} · 最大 ${row.max_runtime_hours} 時間</p>
+            </button>
+            ${expanded ? renderAdminRequestDetail(row) : ''}
           </li>
-        `
-          )
+        `;
+          })
           .join('')}
       </ul>
     `;
 
+    mount.querySelectorAll('.fds-request-admin-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.closest('[data-request-id]')?.getAttribute('data-request-id');
+        if (id) toggleAdminRequestExpanded(id);
+      });
+    });
+
     mount.querySelectorAll('[data-action="approve"]').forEach((btn) => {
-      btn.addEventListener('click', () => handleApprove(btn));
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleApprove(btn);
+      });
     });
     mount.querySelectorAll('[data-action="reject"]').forEach((btn) => {
-      btn.addEventListener('click', () => handleReject(btn));
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleReject(btn);
+      });
     });
+
+    mountExpandedAdminChats(rows);
   } catch (err) {
     mount.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message ?? '読み込みに失敗しました')}</p>`;
   }
@@ -104,7 +200,11 @@ async function handleApprove(button) {
       }`;
     }
     item.querySelector('.fds-request-admin-actions')?.remove();
+    expandedAdminRequestIds.delete(requestId);
+    adminChatDestroyers.get(requestId)?.();
+    adminChatDestroyers.delete(requestId);
     document.dispatchEvent(new CustomEvent('fds-request-approved'));
+    await renderFdsRequestQueue();
   } catch (err) {
     if (resultEl) {
       resultEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message ?? '承認に失敗しました')}</p>`;
@@ -129,11 +229,10 @@ async function handleReject(button) {
       method: 'POST',
       body: JSON.stringify({ message }),
     });
-    item.remove();
-    const mount = document.getElementById('fds-requests-queue-mount');
-    if (mount && !mount.querySelector('.fds-request-admin-item')) {
-      mount.innerHTML = '<p class="hint">二次審査待ちの依頼はありません。</p>';
-    }
+    expandedAdminRequestIds.delete(requestId);
+    adminChatDestroyers.get(requestId)?.();
+    adminChatDestroyers.delete(requestId);
+    await renderFdsRequestQueue();
   } catch (err) {
     window.alert(err.message ?? '却下に失敗しました');
     button.disabled = false;
@@ -148,5 +247,8 @@ export function initFdsRequestQueue() {
   });
   document.addEventListener('fds-request-approved', () => {
     import('./fds-test.js').then((mod) => mod.renderFdsTestPanel?.()).catch(() => {});
+  });
+  window.addEventListener('fds-request-input-replaced', () => {
+    renderFdsRequestQueue().catch(() => {});
   });
 }

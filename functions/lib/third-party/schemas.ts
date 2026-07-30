@@ -11,8 +11,9 @@ export const TP_WORKFLOW_PHASES = [
   "write_req_and_plan",
   "flash_review",
   "flash_revise_plan",
-  "flash_implement",
-  "await_implement_confirm",
+    "flash_implement",
+    "flash_implement_tasks",
+    "await_implement_confirm",
   "draft_ready",
   "app_maintain",
   "app_maintain_done",
@@ -154,17 +155,104 @@ export type MaintainAgentAction =
   | "read"
   | "grep"
   | "analyze"
+  | "apply_edits"
   | "patch_html"
   | "reply";
 
+export interface WorkspaceEditOpJson {
+  op: string;
+  start_line?: number;
+  end_line?: number;
+  line?: number;
+  content?: string;
+}
+
 export interface MaintainAgentStep {
-  action: MaintainAgentAction;
+  action: MaintainAgentAction | string;
   assistant_message: string;
   path?: string;
   line_start?: number;
   line_end?: number;
   pattern?: string;
   index_html?: string;
+  edits?: WorkspaceEditOpJson[];
+}
+
+export const WORKSPACE_EDIT_OP_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    op: {
+      type: "STRING",
+      description:
+        "replace_lines | insert_after | insert_before | delete_lines",
+    },
+    start_line: {
+      type: "INTEGER",
+      nullable: true,
+      description: "replace_lines / delete_lines の開始行（L001 の番号）",
+    },
+    end_line: {
+      type: "INTEGER",
+      nullable: true,
+      description: "replace_lines / delete_lines の終了行（含む）",
+    },
+    line: {
+      type: "INTEGER",
+      nullable: true,
+      description: "insert_after / insert_before の基準行",
+    },
+    content: {
+      type: "STRING",
+      nullable: true,
+      description:
+        "挿入・置換後のテキスト。改行可。delete_lines では不要",
+    },
+  },
+  required: ["op"],
+} as const;
+
+export const MAINTAIN_EDIT_PLAN_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    assistant_message: {
+      type: "STRING",
+      description: "ユーザー向け日本語。HTML ソースは書かない",
+    },
+    edits: {
+      type: "ARRAY",
+      description: "index.html への行単位編集。最小件数でタスクを満たす",
+      items: WORKSPACE_EDIT_OP_SCHEMA,
+    },
+  },
+  required: ["assistant_message", "edits"],
+} as const;
+
+/** 段階実装: 編集先ファイルを明示してから行番号 edits のみ返す */
+export const IMPLEMENT_EDIT_PLAN_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    target_path: {
+      type: "STRING",
+      description: "編集対象ファイル。常に index.html",
+    },
+    assistant_message: {
+      type: "STRING",
+      description: "ユーザー向け日本語。HTML ソースは書かない",
+    },
+    edits: {
+      type: "ARRAY",
+      description:
+        "target_path のファイルへの行単位編集。L001 の行番号と一致。content は該当ブロック内のテキストのみ",
+      items: WORKSPACE_EDIT_OP_SCHEMA,
+    },
+  },
+  required: ["target_path", "assistant_message", "edits"],
+} as const;
+
+export interface MaintainEditPlanResult {
+  assistant_message: string;
+  edits: WorkspaceEditOpJson[];
+  target_path?: string;
 }
 
 export const MAINTAIN_AGENT_STEP_SCHEMA = {
@@ -177,6 +265,11 @@ export const MAINTAIN_AGENT_STEP_SCHEMA = {
     line_end: { type: "INTEGER", nullable: true },
     pattern: { type: "STRING", nullable: true },
     index_html: { type: "STRING", nullable: true },
+    edits: {
+      type: "ARRAY",
+      nullable: true,
+      items: WORKSPACE_EDIT_OP_SCHEMA,
+    },
   },
   required: ["action", "assistant_message"],
 } as const;
@@ -189,6 +282,65 @@ export function isPostBuildPhase(phase: string): boolean {
   );
 }
 
+export type TpChatMode = "agent" | "ask";
+
+export function parseTpChatMode(value: unknown): TpChatMode {
+  return value === "ask" ? "ask" : "agent";
+}
+
 export function isTpWorkflowPhase(value: string): value is TpWorkflowPhase {
   return (TP_WORKFLOW_PHASES as readonly string[]).includes(value);
+}
+
+export type ImplementationTaskTarget =
+  | "skeleton"
+  | "markup"
+  | "styles"
+  | "script"
+  | "polish";
+
+export interface ImplementationTask {
+  id: string;
+  title: string;
+  depends_on: string[];
+  target: ImplementationTaskTarget;
+  acceptance_hint: string;
+  status: "pending" | "done" | "failed";
+}
+
+export interface ImplementationTasksFile {
+  version: 1;
+  current_task_index: number;
+  tasks: ImplementationTask[];
+}
+
+export const IMPLEMENTATION_TASKS_PLAN_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    tasks: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          id: { type: "STRING" },
+          title: { type: "STRING" },
+          depends_on: { type: "ARRAY", items: { type: "STRING" } },
+          target: { type: "STRING" },
+          acceptance_hint: { type: "STRING" },
+        },
+        required: ["id", "title", "depends_on", "target", "acceptance_hint"],
+      },
+    },
+  },
+  required: ["tasks"],
+} as const;
+
+export interface ImplementationTasksPlanResult {
+  tasks: Array<{
+    id: string;
+    title: string;
+    depends_on: string[];
+    target: string;
+    acceptance_hint: string;
+  }>;
 }

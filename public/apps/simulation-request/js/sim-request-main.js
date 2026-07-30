@@ -13,6 +13,10 @@ import {
   ensureCanBook,
   setupProfileGateForm,
 } from './sciencehub-auth.js';
+import {
+  mountFdsRequestChat,
+  isFdsRequestChatAvailable,
+} from './fds-request-chat.js';
 
 const SIM_TYPES = [
   {
@@ -41,6 +45,7 @@ let lastSubmittedRequestId = null;
 
 let fdsConfig = null;
 let selectedSimType = null;
+const fdsChatDestroyers = new Map();
 
 /** Returns display label and CSS badge key for a request row. */
 function fdsRequestStatusUi(row) {
@@ -156,6 +161,12 @@ function renderRequestDetailPanel(row) {
 
   appendPrimaryReviewActions(parts, row);
 
+  if (isFdsRequestChatAvailable(row.status)) {
+    parts.push(
+      `<div class="fds-request-chat-mount" data-request-id="${escapeHtml(row.id)}" data-request-status="${escapeHtml(row.status)}"></div>`
+    );
+  }
+
   if (!parts.length) {
     parts.push('<p class="hint">詳細情報はありません。</p>');
   }
@@ -225,10 +236,40 @@ function startRequestsPollIfNeeded(rows) {
   }, 2500);
 }
 
+/** Destroys all mounted FDS chat panels. */
+function destroyAllFdsChats() {
+  for (const destroy of fdsChatDestroyers.values()) {
+    destroy?.();
+  }
+  fdsChatDestroyers.clear();
+}
+
+/** Mounts chat panels for currently expanded request rows. */
+function mountExpandedFdsChats(rows) {
+  destroyAllFdsChats();
+  for (const row of rows) {
+    if (!expandedRequestIds.has(row.id) || !isFdsRequestChatAvailable(row.status)) continue;
+    const mount = document.querySelector(
+      `.fds-request-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
+    );
+    if (!mount) continue;
+    const destroy = mountFdsRequestChat(mount, {
+      requestId: row.id,
+      apiPrefix: 'fds-requests',
+      isStaff: false,
+      canReplaceInput: false,
+      requestStatus: row.status,
+    });
+    fdsChatDestroyers.set(row.id, destroy);
+  }
+}
+
 /** Toggles expanded detail for a request row. */
 function toggleRequestExpanded(requestId) {
   if (expandedRequestIds.has(requestId)) {
     expandedRequestIds.delete(requestId);
+    fdsChatDestroyers.get(requestId)?.();
+    fdsChatDestroyers.delete(requestId);
   } else {
     expandedRequestIds.add(requestId);
   }
@@ -565,6 +606,8 @@ async function renderMyRequests() {
         if (id) promptRetryPrimaryFile(id);
       });
     });
+
+    mountExpandedFdsChats(rows);
   } catch (err) {
     mount.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message ?? '一覧の取得に失敗しました')}</p>`;
   }
@@ -772,6 +815,10 @@ async function init() {
 
   document.getElementById('fds-retry-primary-form-btn')?.addEventListener('click', () => {
     if (pendingForceRequestId) promptRetryPrimaryFile(pendingForceRequestId);
+  });
+
+  window.addEventListener('fds-request-input-replaced', () => {
+    renderMyRequests().catch(() => {});
   });
 
   await loadFdsConfigAndRequests();

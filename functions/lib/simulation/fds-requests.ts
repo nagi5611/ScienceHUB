@@ -1,7 +1,7 @@
 // functions/lib/simulation/fds-requests.ts
 
 import type { Env } from "../types";
-import { pickFdsInstanceType } from "./fds-instance-sizing";
+import { pickEc2InstanceType } from "./fds-instance-sizing";
 import { FDS_JOB_MAX_RUNTIME_HOURS, getFdsJobById, type FdsJob, type FdsJobStatus } from "./fds-jobs";
 import { reviewFdsInputWithGemini } from "./fds-primary-review";
 import { buildSimulationAdminUrl, notifyFdsSecondaryReviewPending } from "./discord";
@@ -366,7 +366,7 @@ export async function createFdsRequest(
     primaryReviewError?: string | null;
   }
 ): Promise<FdsRequest> {
-  const sizing = pickFdsInstanceType(data.mpiProcesses);
+  const sizing = pickEc2InstanceType(data.mpiProcesses);
   const issues = data.primaryReviewIssues ?? [];
   const issuesJson = issues.length > 0 ? JSON.stringify(issues) : null;
   const status = data.status ?? "primary_reviewing";
@@ -677,4 +677,72 @@ export async function markFdsRequestRejected(
     )
     .bind(reviewedByUserId, reviewedAt, message, requestId)
     .run();
+}
+
+const FDS_INPUT_REPLACEABLE_STATUSES: FdsRequestStatus[] = [
+  "primary_reviewing",
+  "primary_failed",
+  "primary_error",
+  "pending_approval",
+  "rejected",
+];
+
+/** Returns whether staff may replace the request input .fds file. */
+export function canStaffReplaceFdsRequestInput(status: FdsRequestStatus): boolean {
+  return FDS_INPUT_REPLACEABLE_STATUSES.includes(status);
+}
+
+/** Replaces request input .fds by staff and re-queues primary review. */
+export async function replaceFdsRequestInputByStaff(
+  db: D1Database,
+  requestId: string,
+  data: {
+    inputR2Key: string;
+    inputFilename: string;
+    inputSizeBytes: number;
+    inputSha256?: string | null;
+  }
+): Promise<FdsRequest> {
+  const row = await getFdsRequestById(db, requestId);
+  if (!row) {
+    throw new Error("依頼が見つかりません");
+  }
+  if (!canStaffReplaceFdsRequestInput(row.status)) {
+    throw new Error("この依頼の入力ファイルは置き換えできません");
+  }
+
+  const result = await db
+    .prepare(
+      `UPDATE sim_fds_requests
+       SET status = 'primary_reviewing',
+           input_r2_key = ?,
+           input_filename = ?,
+           input_size_bytes = ?,
+           input_sha256 = ?,
+           primary_review_passed = 0,
+           primary_review_forced = 0,
+           primary_review_issues = NULL,
+           primary_review_error = NULL,
+           reviewed_by_user_id = NULL,
+           reviewed_at = NULL,
+           review_message = NULL
+       WHERE id = ?
+         AND status IN ('primary_reviewing', 'primary_failed', 'primary_error', 'pending_approval', 'rejected')`
+    )
+    .bind(
+      data.inputR2Key,
+      data.inputFilename,
+      data.inputSizeBytes,
+      data.inputSha256 ?? null,
+      requestId
+    )
+    .run();
+
+  if (!result.meta.changes) {
+    throw new Error("入力ファイルの置き換えに失敗しました");
+  }
+
+  const updated = await getFdsRequestById(db, requestId);
+  if (!updated) throw new Error("依頼の更新に失敗しました");
+  return updated;
 }

@@ -15,6 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/apps/simulation-management.css" />
+  <link rel="stylesheet" href="/css/apps/simulation-request.css" />
 </head>
 <body>
   <section id="admin-section">
@@ -200,11 +201,11 @@
 
         <div class="admin-panel hidden" id="panel-simulators">
           <h1 class="page-heading">シミュレーター管理</h1>
-          <p class="page-subheading">FDS 実行に使える AWS EC2（hpc6a）インスタンスタイプを登録し、利用可能なシミュレーターとして管理します。</p>
+          <p class="page-subheading">FDS 実行に使える AWS EC2（c7a / hpc6a）インスタンスタイプを登録し、利用可能なシミュレーターとして管理します。</p>
 
           <section class="card" id="ec2-instance-catalog-section">
             <h2 class="section-heading">シミュレーターを追加（EC2 インスタンス）</h2>
-            <p class="hint">FDS ジョブで使用する hpc6a.48xlarge（96 コア）をシミュレーターとして登録できます。</p>
+            <p class="hint">FDS ジョブで選択可能な c7a / hpc6a インスタンスの一覧です。未登録の行から「利用可能として登録」を押してください。</p>
             <div id="ec2-instance-catalog-alert"></div>
             <div id="ec2-instance-catalog-mount"><p class="hint">読み込み中…</p></div>
           </section>
@@ -334,7 +335,7 @@
 
           <section class="card" id="fds-requests-section">
             <div class="section-heading-row">
-              <h2 class="section-heading">二次審査待ちの依頼</h2>
+              <h2 class="section-heading">対応中の FDS 依頼</h2>
               <button type="button" class="btn btn-secondary btn-sm" id="fds-requests-refresh-btn">更新</button>
             </div>
             <div id="fds-requests-queue-mount"><p class="hint">読み込み中...</p></div>

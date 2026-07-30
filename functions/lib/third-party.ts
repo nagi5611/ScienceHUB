@@ -18,7 +18,9 @@ import {
   allocateDirName,
   artifactExists,
   deleteProjectArtifacts,
+  ensureDocsFolder,
   getArtifact,
+  migrateLegacyDocsIfNeeded,
   reallocateDirNameIfDraft,
   ARTIFACT_PLAN,
   ARTIFACT_REQUIREMENTS,
@@ -27,7 +29,13 @@ import {
   runTpGeminiChat,
   runTpStubFallback,
   type GeminiChatResult,
+  type TpChatCallbacks,
 } from "./third-party/gemini-pipeline";
+import {
+  buildWorkspaceTree,
+  readWorkspaceFile,
+  type WorkspaceTreeNode,
+} from "./third-party/workspace";
 import {
   isPostBuildPhase,
   type StructuredForm,
@@ -282,6 +290,7 @@ export async function createTpProject(
     .run();
 
   await putProjectHtml(bucket, r2Prefix, EMPTY_PLACEHOLDER_HTML);
+  await ensureDocsFolder(bucket, dirName);
 
   const welcome =
     "こんにちは。作りたいアプリを教えてください。目的や誰が使うかを話すと、こちらから質問フォームを出します。";
@@ -461,7 +470,9 @@ export async function postGeminiChat(
     message?: string;
     form_responses?: Record<string, string | string[]>;
     rewind_to_message_id?: string;
-  }
+    chat_mode?: string;
+  },
+  callbacks?: TpChatCallbacks
 ): Promise<GeminiChatResult | null> {
   const project = await getOwnedProject(db, userId, projectId);
   if (!project) return null;
@@ -496,7 +507,37 @@ export async function postGeminiChat(
     throw new Error("メッセージを入力してください");
   }
 
-  return await runTpGeminiChat(env, db, bucket, userId, projectId, chatInput);
+  return await runTpGeminiChat(env, db, bucket, userId, projectId, chatInput, callbacks);
+}
+
+/** ワークスペースツリー（Files タブ用） */
+export async function getOwnedWorkspaceTree(
+  db: D1Database,
+  bucket: R2Bucket,
+  userId: string,
+  projectId: string
+): Promise<WorkspaceTreeNode | null> {
+  const row = await getOwnedProject(db, userId, projectId);
+  if (!row) return null;
+  await migrateLegacyDocsIfNeeded(bucket, row.dir_name);
+  const label = row.title?.trim() || row.dir_name;
+  return await buildWorkspaceTree(bucket, row.dir_name, label);
+}
+
+/** ワークスペースファイル本文 */
+export async function getOwnedWorkspaceFile(
+  db: D1Database,
+  bucket: R2Bucket,
+  userId: string,
+  projectId: string,
+  path: string
+): Promise<{ path: string; content: string } | { error: string } | null> {
+  const row = await getOwnedProject(db, userId, projectId);
+  if (!row) return null;
+  await migrateLegacyDocsIfNeeded(bucket, row.dir_name);
+  const result = await readWorkspaceFile(bucket, row.dir_name, path);
+  if ("error" in result) return { error: result.error };
+  return { path: result.path, content: result.content };
 }
 
 /** プロジェクト詳細（アーティファクト有無付き） */
@@ -511,6 +552,7 @@ export async function getOwnedProjectDetail(
 } | null> {
   const row = await getOwnedProject(db, userId, projectId);
   if (!row) return null;
+  await migrateLegacyDocsIfNeeded(bucket, row.dir_name);
   const summary = toSummary(row);
   summary.has_requirements = await artifactExists(
     bucket,
