@@ -463,7 +463,7 @@ async function loadFdsConfigAndRequests() {
   }
   if (mpiInput && fdsConfig) {
     mpiInput.min = String(fdsConfig.min_mpi_processes ?? 1);
-    mpiInput.max = String(fdsConfig.max_mpi_processes ?? 192);
+    mpiInput.max = String(fdsConfig.max_mpi_processes ?? 96);
   }
   await refreshInstancePreview();
   await renderMyRequests();

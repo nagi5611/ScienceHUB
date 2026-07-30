@@ -1,7 +1,7 @@
 // functions/lib/simulation/fds-requests.ts
 
 import type { Env } from "../types";
-import { pickC7aInstanceType } from "./fds-instance-sizing";
+import { pickEc2InstanceType } from "./fds-instance-sizing";
 import { FDS_JOB_MAX_RUNTIME_HOURS, getFdsJobById, type FdsJob, type FdsJobStatus } from "./fds-jobs";
 import { reviewFdsInputWithGemini } from "./fds-primary-review";
 import { buildSimulationAdminUrl, notifyFdsSecondaryReviewPending } from "./discord";
@@ -366,7 +366,7 @@ export async function createFdsRequest(
     primaryReviewError?: string | null;
   }
 ): Promise<FdsRequest> {
-  const sizing = pickC7aInstanceType(data.mpiProcesses);
+  const sizing = pickEc2InstanceType(data.mpiProcesses);
   const issues = data.primaryReviewIssues ?? [];
   const issuesJson = issues.length > 0 ? JSON.stringify(issues) : null;
   const status = data.status ?? "primary_reviewing";
