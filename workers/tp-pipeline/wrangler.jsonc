@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "tp-pipeline",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-06",
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sciencehub-db",
+      "database_id": "1cce62b0-51f4-4619-9207-6a808557984c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "sciencehub-files"
+    }
+  ]
+}

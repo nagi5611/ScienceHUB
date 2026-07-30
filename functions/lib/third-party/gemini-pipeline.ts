@@ -10,20 +10,9 @@ import {
   ARTIFACT_PLAN,
   ARTIFACT_REQUIREMENTS,
   ARTIFACT_REVIEW,
-  ARTIFACT_TASKS,
   getArtifact,
   putArtifact,
 } from "./artifacts";
-import {
-  applyImplementationTask,
-  EMPTY_SKELETON,
-  loadImplementationTasks,
-  planImplementationTasks,
-  prepareImplementGeminiContext,
-  saveImplementationTasks,
-  normalizeImplementBaseHtml,
-  stripScienceHubPlaceholderParagraph,
-} from "./implement-tasks";
 import {
   LITE_DOCS_SCHEMA,
   LITE_TURN_SCHEMA,
@@ -52,6 +41,14 @@ import {
   type MaintainProjectContext,
 } from "./workspace-agent";
 import { resolveTpFlashModel, resolveTpLiteModel, tpGeminiProfileOptions } from "./tp-flash";
+import { runTpIntentClassify, classifyIntentByRules } from "./intent-classify";
+import { createTpJob, pollJobUntilDone, jobProgress } from "./jobs";
+import {
+  isTpPipelineWorkerConfigured,
+  triggerImplementJobOnWorker,
+} from "./pipeline-client";
+import { runImplementJob } from "./implement-runner";
+import { verifyProjectHtml } from "./browser-verify";
 
 const MAX_DAILY_TURNS = 30;
 const MAX_REVIEW_LOOPS = 2;
@@ -95,6 +92,21 @@ export interface TpChatCallbacks {
   onTasks?: (payload: {
     tasks: Array<{ id: string; title: string; status: string }>;
     current: number;
+  }) => void;
+  onJob?: (payload: {
+    jobId: string;
+    status: string;
+    progress?: {
+      current?: number;
+      total?: number;
+      label?: string;
+      phase?: string;
+    } | null;
+  }) => void;
+  onVerify?: (payload: {
+    passed: boolean;
+    errors: string[];
+    warnings: string[];
   }) => void;
 }
 
@@ -513,124 +525,97 @@ async function flashImplementPhase(
     throw new Error("実装の再試行上限に達しました");
   }
 
-  const requirements =
-    (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
-  const plan = (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
+  const runnerCallbacks = {
+    onActivity: (label: string, phase?: string) =>
+      emitActivity(callbacks, label, phase),
+    onArtifact: (path: string) => emitArtifact(callbacks, path),
+    onTasks: (payload: {
+      tasks: Array<{ id: string; title: string; status: string }>;
+      current: number;
+    }) => emitTasks(callbacks, {
+      tasks: payload.tasks,
+      current_task_index: payload.current,
+    }),
+    onVerify: (result: {
+      passed: boolean;
+      errors: string[];
+      warnings: string[];
+    }) => callbacks?.onVerify?.(result),
+  };
 
-  emitActivity(callbacks, "実装タスクを準備中…", "flash_implement_tasks");
-  await patchProject(db, project.id, {
-    workflow_phase: "flash_implement_tasks",
-  });
-
-  let tasksFile = await loadImplementationTasks(bucket, project.dir_name);
-  if (!tasksFile) {
-    tasksFile = await planImplementationTasks(
-      env,
-      requirements,
-      plan,
-      project.title
+  if (isTpPipelineWorkerConfigured(env)) {
+    const job = await createTpJob(
+      db,
+      project.id,
+      project.owner_user_id,
+      "implement"
     );
-    await saveImplementationTasks(bucket, project.dir_name, tasksFile);
-    emitArtifact(callbacks, ARTIFACT_TASKS);
-  }
-  emitTasks(callbacks, tasksFile);
+    callbacks?.onJob?.({
+      jobId: job.id,
+      status: job.status,
+      progress: jobProgress(job),
+    });
 
-  let html =
-    (await getArtifact(bucket, project.dir_name, ARTIFACT_INDEX)) ?? "";
-  if (!html.trim()) {
-    html = EMPTY_SKELETON;
-  }
-  html = normalizeImplementBaseHtml(html, project.title);
+    await triggerImplementJobOnWorker(env, job.id, project.id);
 
-  const summaries: string[] = [];
-
-  const implementGemini = await prepareImplementGeminiContext(
-    env,
-    requirements,
-    plan
-  );
-
-  while (tasksFile.current_task_index < tasksFile.tasks.length) {
-    const idx = tasksFile.current_task_index;
-    const task = tasksFile.tasks[idx];
-    if (task.status === "done") {
-      tasksFile.current_task_index += 1;
-      continue;
-    }
-
-    emitActivity(
-      callbacks,
-      `タスク ${idx + 1}/${tasksFile.tasks.length}: ${task.title}`,
-      "flash_implement_tasks"
-    );
-
-    try {
-      const result = await applyImplementationTask(
-        env,
-        html,
-        task,
-        requirements,
-        plan,
-        project.title,
-        {
-          onActivity: (label) =>
-            emitActivity(callbacks, label, "flash_implement_tasks"),
-          gemini: implementGemini,
+    const finalJob = await pollJobUntilDone(db, job.id, {
+      intervalMs: 1000,
+      timeoutMs: 300000,
+      onPoll: async (j) => {
+        callbacks?.onJob?.({
+          jobId: j.id,
+          status: j.status,
+          progress: jobProgress(j),
+        });
+        const progress = jobProgress(j);
+        if (progress?.label) {
+          emitActivity(callbacks, progress.label, progress.phase);
         }
-      );
-      html = result.html;
-      await putArtifact(
-        bucket,
-        project.dir_name,
-        ARTIFACT_INDEX,
-        html,
-        "text/html; charset=utf-8"
-      );
-      await bucket.put(`${project.r2_prefix}index.html`, html, {
-        httpMetadata: { contentType: "text/html; charset=utf-8" },
-      });
-      emitArtifact(callbacks, ARTIFACT_INDEX);
+      },
+    });
 
-      task.status = "done";
-      summaries.push(result.assistantMessage);
-      tasksFile.current_task_index += 1;
-      await saveImplementationTasks(bucket, project.dir_name, tasksFile);
-      emitTasks(callbacks, tasksFile);
-    } catch (error) {
-      task.status = "failed";
-      await saveImplementationTasks(bucket, project.dir_name, tasksFile);
-      emitTasks(callbacks, tasksFile);
-      const msg =
-        error instanceof Error ? error.message : "タスクの実装に失敗しました";
-      throw new Error(`${task.title}: ${msg}`);
+    if (finalJob.status === "failed") {
+      throw new Error(finalJob.error_message ?? "実装ジョブに失敗しました");
     }
+
+    const messages = await listMessages(db, project.id);
+    const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+    return {
+      message: lastAssistant?.content ?? "実装が完了しました。",
+      htmlUpdated: true,
+    };
   }
 
-  html = stripScienceHubPlaceholderParagraph(html);
-  await putArtifact(
-    bucket,
-    project.dir_name,
-    ARTIFACT_INDEX,
-    html,
-    "text/html; charset=utf-8"
+  const job = await createTpJob(
+    db,
+    project.id,
+    project.owner_user_id,
+    "implement"
   );
-  await bucket.put(`${project.r2_prefix}index.html`, html, {
-    httpMetadata: { contentType: "text/html; charset=utf-8" },
+  callbacks?.onJob?.({
+    jobId: job.id,
+    status: "running",
+    progress: null,
   });
 
-  const assistantMessage =
-    summaries.length > 0
-      ? summaries[summaries.length - 1]
-      : "index.html の段階実装が完了しました。";
-
-  await insertMessage(db, project.id, "assistant", assistantMessage);
-  await patchProject(db, project.id, {
-    workflow_phase: "draft_ready",
-    implement_attempts: project.implement_attempts + 1,
-    awaiting_implement_confirm: 0,
-  });
-
-  return { message: assistantMessage, htmlUpdated: true };
+  try {
+    const result = await runImplementJob(
+      env,
+      db,
+      bucket,
+      project,
+      job.id,
+      runnerCallbacks
+    );
+    callbacks?.onJob?.({ jobId: job.id, status: "succeeded", progress: null });
+    return { message: result.assistantMessage, htmlUpdated: result.htmlUpdated };
+  } catch (error) {
+    const msg =
+      error instanceof Error ? error.message : "実装に失敗しました";
+    const { failImplementJob } = await import("./implement-runner");
+    await failImplementJob(db, job.id, project.id, msg);
+    throw error;
+  }
 }
 
 /** Gemini パイプライン 1 ターン */
@@ -778,53 +763,116 @@ export async function runTpGeminiChat(
     htmlUpdated = impl.htmlUpdated;
   }
 
-  // 実装後メンテ（ワークスペースエージェント）
+  // 実装後フェーズ — LLM 意図分類
   current = (await loadPipelineProject(db, userId, projectId))!;
   const maintainPhases = ["draft_ready", "app_maintain", "app_maintain_done"];
-  if (
-    userText &&
-    maintainPhases.includes(current.workflow_phase) &&
-    wantsMaintainUserReport(userText, current.workflow_phase)
-  ) {
-    await patchProject(db, projectId, {
-      workflow_phase: "app_maintain",
-      pending_form_json: null,
-    });
-    current = (await loadPipelineProject(db, userId, projectId))!;
-    emitActivity(callbacks, "不具合を調査中…", "app_maintain");
-    const messages = await listMessages(db, projectId);
-    const maintainCtx: MaintainProjectContext = {
-      id: current.id,
-      title: current.title,
-      r2_prefix: current.r2_prefix,
-      dir_name: current.dir_name,
-      context_summary: current.context_summary,
-      maintain_attempts: current.maintain_attempts ?? 0,
-    };
-    const maintainResult = await runMaintainAgentTurn(
-      env,
-      db,
-      bucket,
-      maintainCtx,
-      userText,
-      recentChatBlock(messages),
-      {
-        onActivity: (label) =>
-          emitActivity(callbacks, label, "app_maintain"),
+  if (userText && maintainPhases.includes(current.workflow_phase)) {
+    let intent: string | null = null;
+    try {
+      const classified = await runTpIntentClassify(env, {
+        phase: current.workflow_phase,
+        userText,
+        chatMode,
+        contextSummary: current.context_summary,
+      });
+      intent = classified.intent;
+    } catch {
+      intent =
+        classifyIntentByRules(userText, current.workflow_phase) ??
+        (wantsMaintainUserReport(userText, current.workflow_phase)
+          ? "maintain"
+          : null);
+    }
+
+    if (intent === "ask" || intent === "general_chat") {
+      emitActivity(callbacks, "質問に回答中…", current.workflow_phase);
+      const messages = await listMessages(db, projectId);
+      const reply = await runTpAskTurn(
+        env,
+        bucket,
+        current,
+        userText,
+        messages
+      );
+      await insertMessage(db, projectId, "assistant", reply);
+    } else if (intent === "gate_build") {
+      await patchProject(db, projectId, {
+        workflow_phase: "write_req_and_plan",
+        pending_form_json: null,
+      });
+      current = (await loadPipelineProject(db, userId, projectId))!;
+      await writeDocsPhase(env, db, bucket, current, callbacks);
+    } else if (intent === "gate_deepen") {
+      await patchProject(db, projectId, {
+        workflow_phase: "deepen_requirements",
+        pending_form_json: null,
+      });
+      await insertMessage(
+        db,
+        projectId,
+        "assistant",
+        "要件をさらに固めましょう。追加で知りたいことを教えてください。"
+      );
+    } else if (intent === "implement_start") {
+      await patchProject(db, projectId, { workflow_phase: "flash_implement" });
+      current = (await loadPipelineProject(db, userId, projectId))!;
+      const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
+      htmlUpdated = impl.htmlUpdated;
+    } else if (
+      intent === "maintain" ||
+      wantsMaintainUserReport(userText, current.workflow_phase)
+    ) {
+      await patchProject(db, projectId, {
+        workflow_phase: "app_maintain",
+        pending_form_json: null,
+      });
+      current = (await loadPipelineProject(db, userId, projectId))!;
+      emitActivity(callbacks, "不具合を調査中…", "app_maintain");
+      const messages = await listMessages(db, projectId);
+      const maintainCtx: MaintainProjectContext = {
+        id: current.id,
+        title: current.title,
+        r2_prefix: current.r2_prefix,
+        dir_name: current.dir_name,
+        context_summary: current.context_summary,
+        maintain_attempts: current.maintain_attempts ?? 0,
+      };
+      const maintainResult = await runMaintainAgentTurn(
+        env,
+        db,
+        bucket,
+        maintainCtx,
+        userText,
+        recentChatBlock(messages),
+        {
+          onActivity: (label) =>
+            emitActivity(callbacks, label, "app_maintain"),
+        }
+      );
+      await insertMessage(
+        db,
+        projectId,
+        "assistant",
+        maintainResult.assistantMessage
+      );
+      await patchProject(db, projectId, {
+        workflow_phase: maintainResult.workflowPhase,
+        pending_form_json: null,
+      });
+      if (maintainResult.htmlUpdated) {
+        htmlUpdated = true;
+        const verifyResult = await verifyProjectHtml(
+          env,
+          bucket,
+          current.id,
+          current.dir_name
+        );
+        callbacks?.onVerify?.({
+          passed: verifyResult.passed,
+          errors: verifyResult.errors,
+          warnings: verifyResult.warnings,
+        });
       }
-    );
-    await insertMessage(
-      db,
-      projectId,
-      "assistant",
-      maintainResult.assistantMessage
-    );
-    await patchProject(db, projectId, {
-      workflow_phase: maintainResult.workflowPhase,
-      pending_form_json: null,
-    });
-    if (maintainResult.htmlUpdated) {
-      htmlUpdated = true;
     }
   }
 

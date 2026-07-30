@@ -3,7 +3,6 @@
  */
 
 import type { Env } from "../types";
-import { createId, now } from "../types";
 import { geminiGenerateJson, geminiGenerateText } from "../gemini/generate";
 import { ARTIFACT_INDEX, getArtifact } from "./artifacts";
 import { FLASH_MAINTAIN_PATCH_SYSTEM, FLASH_MAINTAIN_SYSTEM } from "./prompts";
@@ -28,6 +27,7 @@ import {
   readWorkspaceFile,
   writeWorkspaceIndexHtml,
 } from "./workspace";
+import { recordHtmlRevision } from "./revisions";
 
 const MAX_MAINTAIN_TOOL_ROUNDS = 12;
 const MAX_MAINTAIN_ATTEMPTS = 10;
@@ -68,25 +68,24 @@ function isMaintainAction(value: string): MaintainAgentAction | null {
     : null;
 }
 
-async function recordRevision(
+async function recordMaintainRevision(
   db: D1Database,
-  projectId: string,
+  bucket: R2Bucket,
+  project: MaintainProjectContext,
+  html: string,
   summary: string
 ): Promise<void> {
-  const max = await db
-    .prepare(
-      "SELECT COALESCE(MAX(revision_number), 0) AS n FROM tp_revisions WHERE project_id = ?"
-    )
-    .bind(projectId)
-    .first<{ n: number }>();
-  const num = (max?.n ?? 0) + 1;
-  await db
-    .prepare(
-      `INSERT INTO tp_revisions (id, project_id, revision_number, summary, created_at)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .bind(createId("tpver"), projectId, num, summary.slice(0, 200), now())
-    .run();
+  await recordHtmlRevision(
+    db,
+    bucket,
+    {
+      id: project.id,
+      dir_name: project.dir_name,
+      r2_prefix: project.r2_prefix,
+    },
+    html,
+    summary.slice(0, 200) || "メンテ修正"
+  );
 }
 
 /** ツール実行結果をテキスト化 */
@@ -179,10 +178,12 @@ async function executeMaintainAction(
         project.r2_prefix,
         applied.text
       );
-      await recordRevision(
+      await recordMaintainRevision(
         db,
-        project.id,
-        step.assistant_message.slice(0, 200) || "メンテ修正"
+        bucket,
+        project,
+        applied.text,
+        step.assistant_message.slice(0, 200) || summarizeEdits(edits)
       );
       return {
         result: `index.html を更新しました（${summarizeEdits(edits)}）`,
@@ -208,10 +209,12 @@ async function executeMaintainAction(
         project.r2_prefix,
         html
       );
-      await recordRevision(
+      await recordMaintainRevision(
         db,
-        project.id,
-        step.assistant_message.slice(0, 200) || "メンテ修正"
+        bucket,
+        project,
+        html,
+        step.assistant_message.slice(0, 200) || "HTML 全文更新"
       );
       return {
         result: "index.html を更新しました",

@@ -82,7 +82,7 @@ export function buildProjectSkeleton(title: string): string {
 </html>`;
 }
 
-function isBareOrDefaultSkeleton(html: string): boolean {
+export function isBareOrDefaultSkeleton(html: string): boolean {
   const t = html.trim();
   if (!t) return true;
   if (t === EMPTY_SKELETON.trim()) return true;
@@ -485,6 +485,63 @@ target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L0
   }
 
   throw new Error(lastError);
+}
+
+/** タスクの編集プランのみ生成（並列バッチ用） */
+export async function planImplementationTaskEdits(
+  env: Env,
+  currentHtml: string,
+  task: ImplementationTask,
+  requirements: string,
+  plan: string,
+  title: string,
+  gemini?: EditPlanGeminiContext
+): Promise<MaintainEditPlanResult> {
+  currentHtml = normalizeImplementBaseHtml(currentHtml, title);
+  const prompt = buildImplementTaskEditPrompt(
+    currentHtml,
+    task,
+    title,
+    requirements,
+    plan,
+    Boolean(gemini?.docsCacheName)
+  );
+  return await generateEditPlan(
+    env,
+    FLASH_IMPLEMENT_TASK_EDIT_SYSTEM,
+    prompt,
+    {
+      docsCacheName: gemini?.docsCacheName,
+      planKind: "implement",
+    }
+  );
+}
+
+/** プラン済み edits を適用 */
+export function applyPlannedTaskEdits(
+  currentHtml: string,
+  task: ImplementationTask,
+  planResult: MaintainEditPlanResult,
+  _title: string
+): { html: string; assistantMessage: string } {
+  const edits = normalizeWorkspaceEdits(planResult.edits);
+  if (!edits?.length) {
+    throw new Error("edits が空です");
+  }
+  const scopeError = validateImplementEdits(currentHtml, edits, task.target);
+  if (scopeError) throw new Error(scopeError);
+
+  const applied = applyWorkspaceEdits(currentHtml, edits);
+  if (!applied.ok) throw new Error(applied.error);
+  if (!isCompleteIndexHtml(applied.text)) {
+    throw new Error("HTML が不完全です");
+  }
+
+  return {
+    html: stripScienceHubPlaceholderParagraph(applied.text),
+    assistantMessage:
+      planResult.assistant_message?.trim() || `${task.title} を反映しました。`,
+  };
 }
 
 /** メンテ用: 番号付き全文から edits を生成 */

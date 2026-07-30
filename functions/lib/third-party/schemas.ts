@@ -274,6 +274,30 @@ export const MAINTAIN_AGENT_STEP_SCHEMA = {
   required: ["action", "assistant_message"],
 } as const;
 
+export type TpUserIntent =
+  | "maintain"
+  | "ask"
+  | "gate_build"
+  | "gate_deepen"
+  | "general_chat"
+  | "implement_start";
+
+export interface IntentClassifyResult {
+  intent: TpUserIntent;
+  confidence: number;
+  reason: string;
+}
+
+export const INTENT_CLASSIFY_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    intent: { type: "STRING" },
+    confidence: { type: "NUMBER" },
+    reason: { type: "STRING" },
+  },
+  required: ["intent", "confidence", "reason"],
+} as const;
+
 export function isPostBuildPhase(phase: string): boolean {
   return (
     phase === "draft_ready" ||

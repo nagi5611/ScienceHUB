@@ -39,6 +39,11 @@ import {
   publishTpProject,
   updateTpProject,
   canViewPublished,
+  forkTpProject,
+  forkPublishedTpProject,
+  listOwnedRevisions,
+  getOwnedRevisionDetail,
+  restoreOwnedRevision,
 } from "../../lib/third-party";
 import { createChatSseResponse } from "../../lib/third-party/chat-sse";
 
@@ -193,6 +198,28 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       });
     }
 
+    if (sub === "revisions" && !artifactKind) {
+      const revisions = await listOwnedRevisions(db, auth.id, projectId);
+      if (!revisions) return jsonError("プロジェクトが見つかりません", 404);
+      return Response.json({ revisions });
+    }
+
+    if (sub === "revisions" && artifactKind) {
+      const revNum = Number.parseInt(artifactKind, 10);
+      if (!Number.isFinite(revNum) || revNum < 1) {
+        return jsonError("不正なリビジョン番号です", 400);
+      }
+      const detail = await getOwnedRevisionDetail(
+        db,
+        bucket,
+        auth.id,
+        projectId,
+        revNum
+      );
+      if (!detail) return jsonError("リビジョンが見つかりません", 404);
+      return Response.json({ revision: detail });
+    }
+
     if (sub) return jsonError("不正なリクエストです", 404);
 
     const detail = await getOwnedProjectDetail(db, bucket, auth.id, projectId);
@@ -215,6 +242,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const bucket = context.env.FILES;
 
   try {
+    if (parts[0] === "published" && parts[1] && parts[2] === "fork") {
+      const project = await forkPublishedTpProject(
+        db,
+        bucket,
+        auth,
+        parts[1]
+      );
+      return Response.json({ project }, { status: 201 });
+    }
+
     if (parts[0] !== "projects") {
       return jsonError("不正なリクエストです", 404);
     }
@@ -228,7 +265,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ project }, { status: 201 });
     }
 
-    const [projectId, sub] = projectParts;
+    const [projectId, sub, third, fourth] = projectParts;
+
+    if (sub === "fork") {
+      const project = await forkTpProject(db, bucket, auth, projectId);
+      return Response.json({ project }, { status: 201 });
+    }
+
+    if (sub === "revisions" && third && fourth === "restore") {
+      const revNum = Number.parseInt(third, 10);
+      if (!Number.isFinite(revNum) || revNum < 1) {
+        return jsonError("不正なリビジョン番号です", 400);
+      }
+      const result = await restoreOwnedRevision(
+        db,
+        bucket,
+        auth.id,
+        projectId,
+        revNum
+      );
+      if (!result) return jsonError("プロジェクトが見つかりません", 404);
+      return Response.json({ ok: true, revision_number: result.revision_number });
+    }
 
     if (sub === "chat") {
       const body = (await context.request.json().catch(() => ({}))) as {
@@ -254,6 +312,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               current: number;
             }) => {
               send("tasks", payload);
+            },
+            onJob: (payload: {
+              jobId: string;
+              status: string;
+              progress?: {
+                current?: number;
+                total?: number;
+                label?: string;
+                phase?: string;
+              } | null;
+            }) => {
+              send("job", payload);
+            },
+            onVerify: (payload: {
+              passed: boolean;
+              errors: string[];
+              warnings: string[];
+            }) => {
+              send("verify", payload);
             },
           };
           const result = await postGeminiChat(
