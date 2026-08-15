@@ -12,6 +12,19 @@ export function canUseFfmpegMultithread() {
   return isCrossOriginIsolated() && typeof SharedArrayBuffer !== "undefined";
 }
 
+/** @type {boolean} */
+let ffmpegMultithreadActive = false;
+
+/** ffmpeg-loader が core-mt でロード完了したか（capabilities 経由で参照） */
+export function isFfmpegMultithreadLoaded() {
+  return ffmpegMultithreadActive;
+}
+
+/** @param {boolean} active */
+export function setFfmpegMultithreadLoaded(active) {
+  ffmpegMultithreadActive = active;
+}
+
 /**
  * H.264 ハードウェア VideoEncoder をプローブ
  * @param {number} width
