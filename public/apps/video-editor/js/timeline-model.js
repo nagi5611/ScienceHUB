@@ -118,6 +118,25 @@ export function ensureA2Track(timeline) {
   return a2;
 }
 
+/** @returns {TimelineModel} */
+export function createEmptyTimeline() {
+  return {
+    mediaBin: [],
+    tracks: [
+      { id: "v1", type: "video", clips: [] },
+      { id: "a1", type: "audio", clips: [] },
+      { id: "a2", type: "audio", clips: [] },
+    ],
+    duration: 0,
+  };
+}
+
+/** @param {TimelineModel} timeline */
+export function hasVideoClips(timeline) {
+  const vTrack = timeline.tracks.find((t) => t.id === "v1");
+  return (vTrack?.clips.length ?? 0) > 0;
+}
+
 /**
  * @param {File} file
  * @param {number} duration
@@ -388,16 +407,31 @@ export function addAudioMedia(timeline, file, duration, objectUrl) {
 
 /** @param {TimelineModel} timeline @param {string} mediaId @param {number} sourceIn @param {number} sourceOut */
 export function appendClip(timeline, mediaId, sourceIn, sourceOut) {
+  placeVideoClip(timeline, mediaId, timeline.duration, sourceIn, sourceOut);
+}
+
+/** @param {TimelineModel} timeline @param {string} mediaId @param {number} timelineStart @param {number} sourceIn @param {number} sourceOut */
+export function placeVideoClip(timeline, mediaId, timelineStart, sourceIn, sourceOut) {
   const vTrack = timeline.tracks.find((t) => t.id === "v1");
   const aTrack = timeline.tracks.find((t) => t.id === "a1");
-  if (!vTrack || !aTrack) return;
+  if (!vTrack || !aTrack) return null;
 
-  const start = timeline.duration;
+  const start = Math.max(0, timelineStart);
   const vId = createClipId();
 
   vTrack.clips.push({ id: vId, mediaId, sourceIn, sourceOut, timelineStart: start, transitionOut: 0 });
-  aTrack.clips.push({ id: pairedAudioClipId(vId), mediaId, sourceIn, sourceOut, timelineStart: start });
+  aTrack.clips.push({
+    id: pairedAudioClipId(vId),
+    mediaId,
+    sourceIn,
+    sourceOut,
+    timelineStart: start,
+    transitionOut: 0,
+  });
+  vTrack.clips.sort((a, b) => a.timelineStart - b.timelineStart);
+  aTrack.clips.sort((a, b) => a.timelineStart - b.timelineStart);
   recomputeTimelineDuration(timeline);
+  return vId;
 }
 
 /** @param {TimelineModel} timeline @param {string} mediaId @param {number} timelineStart @param {number} sourceIn @param {number} sourceOut */

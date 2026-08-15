@@ -112,8 +112,10 @@ function hasBgmClips(timeline) {
 /** タイムライン合成が必要か */
 export function needsTimelineCompose(settings) {
   if (!settings.timeline) return false;
-  const multi = settings.timeline.tracks.some((t) => t.type === "video" && t.clips.length > 1);
-  return multi || hasBgmClips(settings.timeline) || hasTransitions(settings.timeline);
+  const vTrack = settings.timeline.tracks.find((t) => t.id === "v1");
+  const multiClip = (vTrack?.clips.length ?? 0) > 1;
+  const multiMedia = new Set(vTrack?.clips.map((c) => c.mediaId) ?? []).size > 1;
+  return multiClip || multiMedia || hasBgmClips(settings.timeline) || hasTransitions(settings.timeline);
 }
 
 /** 再エンコードが必要か */

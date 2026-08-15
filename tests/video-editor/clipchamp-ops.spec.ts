@@ -113,10 +113,11 @@ test.describe("Clipchamp-style operations", () => {
     await expect(page.locator("#format-picker-label")).toHaveText("WebM");
   });
 
-  test("exit returns to landing", async ({ page }) => {
+  test("exit resets to empty editor project", async ({ page }) => {
     await page.locator("#exit-btn").click();
-    await expect(page.locator("#landing-view")).toBeVisible();
-    await expect(page.locator("#editor-view")).toBeHidden();
+    await expect(page.locator("#editor-view")).toBeVisible();
+    await expect(page.locator("#landing-view")).toBeHidden();
+    await expect(page.locator("#file-name")).toHaveText("新規プロジェクト");
   });
 
   test("timeline timecode updates on playhead move", async ({ page }) => {

@@ -4,10 +4,9 @@
 
 import {
   appendBgmClip,
-  appendClip,
   bladeSplit,
   moveClip,
-  placeOnTop,
+  placeVideoClip,
   rippleDelete,
   rollEdit,
   setTransition,
@@ -54,22 +53,15 @@ export function createTimelineView(deps) {
       if (item.kind === "audio") btn.classList.add("ve-media-bin-item--audio");
       btn.dataset.mediaId = item.id;
       btn.title = item.name;
-      const kindLabel = item.kind === "audio" ? "🎵 " : "";
+      const kindLabel = item.kind === "audio" ? "🎵 " : "🎬 ";
       btn.innerHTML = `<span class="ve-media-bin-name">${kindLabel}${item.name}</span><span class="ve-media-bin-dur">${formatTimeShort(item.duration)}</span>`;
       btn.addEventListener("click", () => {
         onBeforeEdit?.();
         if (item.kind === "audio") {
           appendBgmClip(timeline, item.id, getPlayhead(), 0, item.duration);
         } else {
-          appendClip(timeline, item.id, 0, item.duration);
+          placeVideoClip(timeline, item.id, getPlayhead(), 0, item.duration);
         }
-        onChange();
-        render();
-      });
-      btn.addEventListener("dblclick", () => {
-        if (item.kind === "audio") return;
-        onBeforeEdit?.();
-        placeOnTop(timeline, item.id, getPlayhead(), 0, Math.min(5, item.duration));
         onChange();
         render();
       });

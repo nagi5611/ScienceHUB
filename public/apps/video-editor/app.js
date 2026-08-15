@@ -18,10 +18,13 @@ import { generateWaveformPeaks } from "./js/waveform.js";
 import { initCropOverlay } from "./js/crop-tool.js";
 import {
   createTimelineFromFile,
+  createEmptyTimeline,
   syncSingleClipToTimeline,
   addMediaToBin,
   addAudioMedia,
   appendBgmClip,
+  placeVideoClip,
+  hasVideoClips,
   isMultiClipTimeline,
   findClipAtTime,
   clipDuration,
@@ -269,7 +272,7 @@ function updateInspectorForSelection() {
 }
 
 function syncTimelineModel() {
-  if (!state.timeline || !state.file) return;
+  if (!state.timeline || !projectHasVideo() || isMultiClipTimeline(state.timeline)) return;
   syncSingleClipToTimeline(state.timeline, {
     startTime: state.startTime,
     endTime: state.endTime,
@@ -295,16 +298,13 @@ async function checkAccess() {
     return false;
   }
 
-  landingView.hidden = false;
+  landingView.hidden = true;
   return true;
 }
 
 /** 画面モード切替 */
 function showLanding() {
-  landingView.hidden = false;
-  editorView.hidden = true;
-  document.body.classList.add("ve-app--landing", "cc-app--landing");
-  document.body.classList.remove("ve-app--editing", "cc-app--editing");
+  showEditor();
 }
 
 function showEditor() {
@@ -312,6 +312,22 @@ function showEditor() {
   editorView.hidden = false;
   document.body.classList.remove("ve-app--landing", "cc-app--landing");
   document.body.classList.add("ve-app--editing", "cc-app--editing");
+}
+
+/** 空の編集画面を表示 */
+function showEmptyEditor() {
+  showEditor();
+  if (!state.timeline) {
+    state.timeline = createEmptyTimeline();
+  }
+  if (editorSidebar instanceof HTMLElement) editorSidebar.hidden = false;
+  if (trimEditor instanceof HTMLElement) trimEditor.hidden = true;
+  fileNameEl.textContent = "新規プロジェクト";
+  fileMetaEl.textContent = "動画または音楽を追加";
+  previewPlaceholder.hidden = false;
+  previewPlaceholder.textContent = "「動画を追加」からメディアを読み込んでください";
+  timelineView?.render();
+  updateUndoRedoUi();
 }
 
 /** 左パネル表示 */
@@ -695,53 +711,88 @@ function updateCropOverlay() {
 
 /** メタ情報表示 */
 function updateFileMeta() {
-  if (!state.file) {
-    fileNameEl.textContent = "—";
+  if (!projectHasVideo()) {
+    const binCount = state.timeline?.mediaBin.length ?? 0;
+    if (binCount === 0) {
+      fileNameEl.textContent = "新規プロジェクト";
+      fileMetaEl.textContent = "動画または音楽を追加";
+    } else {
+      const videos = state.timeline.mediaBin.filter((m) => m.kind === "video").length;
+      const audios = state.timeline.mediaBin.filter((m) => m.kind === "audio").length;
+      fileNameEl.textContent = "新規プロジェクト";
+      fileMetaEl.textContent = `動画 ${videos} · 音楽 ${audios}`;
+    }
+    return;
+  }
+
+  const primary = state.file ?? getPrimaryExportFile();
+  if (!primary) {
+    fileNameEl.textContent = "新規プロジェクト";
     fileMetaEl.textContent = "—";
     return;
   }
-  fileNameEl.textContent = state.file.name;
+
+  fileNameEl.textContent = primary.name;
+  const videoCount = state.timeline?.mediaBin.filter((m) => m.kind === "video").length ?? 1;
   const parts = [
-    formatBytes(state.file.size),
-    state.duration > 0 ? formatTimeShort(state.duration) : null,
+    formatBytes(primary.size),
+    state.duration > 0 ? formatTimeShort(state.timeline?.duration ?? state.duration) : null,
     state.videoWidth && state.videoHeight ? `${state.videoWidth}×${state.videoHeight}` : null,
+    videoCount > 1 ? `クリップ ${state.timeline?.tracks.find((t) => t.id === "v1")?.clips.length ?? 0}` : null,
   ].filter(Boolean);
   fileMetaEl.textContent = parts.join(" · ");
 }
 
-/** 動画ファイルを読み込む */
-async function loadVideoFile(file) {
-  if (!file) return;
-  if (file.size > MAX_VIDEO_BYTES) {
-    alert("4 GB を超えるファイルはサポートされていません。");
-    return;
-  }
+/** プロジェクトに動画があるか */
+function projectHasVideo() {
+  return state.timeline ? hasVideoClips(state.timeline) : false;
+}
 
-  resetEditor(false);
-  state.file = file;
-  state.objectUrl = URL.createObjectURL(file);
-  preview.src = state.objectUrl;
-  previewPlaceholder.hidden = false;
-  previewPlaceholder.textContent = "プレビューを読み込み中…";
-  showEditor();
+/** 書き出し用の代表動画ファイル */
+function getPrimaryExportFile() {
+  if (state.file) return state.file;
+  const vTrack = state.timeline?.tracks.find((t) => t.id === "v1");
+  const clip = vTrack?.clips[0];
+  if (!clip || !state.timeline) return null;
+  const media = state.timeline.mediaBin.find((m) => m.id === clip.mediaId);
+  return media?.file ?? null;
+}
 
+/** 動画のメタデータを取得 */
+async function probeVideoFile(file, objectUrl) {
+  const probe = document.createElement("video");
+  probe.src = objectUrl;
   await new Promise((resolve, reject) => {
-    preview.onloadedmetadata = () => resolve(undefined);
-    preview.onerror = () => reject(new Error("動画を読み込めませんでした"));
+    probe.onloadedmetadata = () => resolve(undefined);
+    probe.onerror = () => reject(new Error("動画を読み込めませんでした"));
   });
+  const meta = {
+    duration: probe.duration,
+    videoWidth: probe.videoWidth,
+    videoHeight: probe.videoHeight,
+  };
+  probe.removeAttribute("src");
+  probe.load();
+  return meta;
+}
 
-  state.duration = preview.duration;
+/** 最初の動画でプロジェクトを初期化 */
+async function bootstrapProjectWithVideo(file, duration, objectUrl, meta) {
+  state.file = file;
+  state.objectUrl = objectUrl;
+  preview.src = objectUrl;
+  state.duration = duration;
   state.startTime = 0;
-  state.endTime = state.duration;
+  state.endTime = duration;
   state.slipOffset = 0;
   state.audioStart = 0;
-  state.audioEnd = state.duration;
+  state.audioEnd = duration;
   state.audioLinked = true;
   state.timelinePlayhead = 0;
   state.selectedClipId = null;
   state.fps = 30;
-  state.videoWidth = preview.videoWidth;
-  state.videoHeight = preview.videoHeight;
+  state.videoWidth = meta.videoWidth;
+  state.videoHeight = meta.videoHeight;
   preview.currentTime = 0;
   preview.muted = false;
   preview.volume = Math.min(1, state.volume / 100);
@@ -752,7 +803,7 @@ async function loadVideoFile(file) {
   if (editorSidebar instanceof HTMLElement) editorSidebar.hidden = false;
   if (trimEditor instanceof HTMLElement) trimEditor.hidden = false;
 
-  state.timeline = createTimelineFromFile(file, state.duration, state.objectUrl);
+  state.timeline = createTimelineFromFile(file, duration, objectUrl);
   timelineView?.render();
 
   syncTrimState();
@@ -778,11 +829,62 @@ async function loadVideoFile(file) {
   updateUndoRedoUi();
 }
 
+/** 動画をプロジェクトに追加（空なら初期化、既存なら再生位置に配置） */
+async function importVideoFile(file) {
+  if (!file) return;
+  if (file.size > MAX_VIDEO_BYTES) {
+    alert("4 GB を超えるファイルはサポートされていません。");
+    return;
+  }
+
+  if (!state.timeline) {
+    state.timeline = createEmptyTimeline();
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  previewPlaceholder.hidden = false;
+  previewPlaceholder.textContent = "プレビューを読み込み中…";
+  showEditor();
+
+  let meta;
+  try {
+    meta = await probeVideoFile(file, objectUrl);
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    previewPlaceholder.hidden = false;
+    previewPlaceholder.textContent = "動画を選択してください";
+    alert(error instanceof Error ? error.message : "動画を読み込めませんでした");
+    return;
+  }
+
+  if (!projectHasVideo()) {
+    await bootstrapProjectWithVideo(file, meta.duration, objectUrl, meta);
+    return;
+  }
+
+  commitEdit(() => {
+    const mediaId = addMediaToBin(state.timeline, file, meta.duration, objectUrl, "video");
+    placeVideoClip(state.timeline, mediaId, state.timelinePlayhead, 0, meta.duration);
+  });
+  previewPlaceholder.hidden = true;
+  timelineView?.render();
+  syncTimelineModel();
+  updateFileMeta();
+  refreshReencodeUi();
+  await previewEngine?.seekToTimelineTime(state.timelinePlayhead);
+}
+
+/** 動画ファイルを読み込む（プロジェクトを置き換え） */
+async function loadVideoFile(file) {
+  resetEditor(false);
+  await importVideoFile(file);
+}
+
 /** 音声ファイルを BGM として読み込む */
 async function loadAudioFile(file) {
-  if (!file || !state.timeline) {
-    alert("先に動画を読み込んでください。");
-    return;
+  if (!file) return;
+  if (!state.timeline) {
+    state.timeline = createEmptyTimeline();
   }
 
   const objectUrl = URL.createObjectURL(file);
@@ -801,6 +903,9 @@ async function loadAudioFile(file) {
     const mediaId = addAudioMedia(state.timeline, file, duration, objectUrl);
     appendBgmClip(state.timeline, mediaId, state.timelinePlayhead, 0, duration);
   });
+  timelineView?.render();
+  syncTimelineModel();
+  await previewEngine?.seekToTimelineTime(state.timelinePlayhead);
 }
 
 /** 編集状態をリセット */
@@ -892,13 +997,13 @@ function resetEditor(clearFile = true) {
 
   if (clearFile) {
     fileInput.value = "";
-    showLanding();
+    showEmptyEditor();
   }
 }
 
 /** 再生/停止 */
 function togglePlay() {
-  if (!state.file) return;
+  if (!projectHasVideo()) return;
   previewEngine?.togglePlay().catch(() => {});
 }
 
@@ -918,7 +1023,8 @@ function handleRedo() {
 
 /** 書き出し */
 async function handleExport() {
-  if (!state.file || state.exporting) return;
+  const exportFile = getPrimaryExportFile();
+  if (!exportFile || !projectHasVideo() || state.exporting) return;
 
   state.exporting = true;
   exportBtn.disabled = true;
@@ -928,7 +1034,7 @@ async function handleExport() {
 
   try {
     const settings = getExportSettings();
-    const blob = await exportVideo(state.file, settings, {
+    const blob = await exportVideo(exportFile, settings, {
       onProgress: (ratio, message) => {
         exportProgressBar.style.width = `${Math.round(ratio * 100)}%`;
         if (message) exportOverlayText.textContent = message;
@@ -936,7 +1042,7 @@ async function handleExport() {
     });
 
     state.lastExportBlob = blob;
-    state.lastExportName = buildDownloadName(state.file.name, settings.format);
+    state.lastExportName = buildDownloadName(exportFile.name, settings.format);
     cloudSaveBtn.disabled = false;
 
     const link = document.createElement("a");
@@ -949,7 +1055,7 @@ async function handleExport() {
   } finally {
     state.exporting = false;
     exportOverlay.hidden = true;
-    exportBtn.disabled = !state.file;
+    exportBtn.disabled = !projectHasVideo();
   }
 }
 
@@ -1150,7 +1256,7 @@ function initTimelineView() {
   timelineView = createTimelineView({
     mediaBinEl,
     multiTrackEl,
-    getTimeline: () => state.timeline ?? createTimelineFromFile(new File([], "empty"), 0, ""),
+    getTimeline: () => state.timeline ?? createEmptyTimeline(),
     getPlayhead: () => state.timelinePlayhead,
     setPlayhead: (t) => {
       state.timelinePlayhead = t;
@@ -1264,7 +1370,14 @@ function bindDropZone(el) {
     event.preventDefault();
     el.classList.remove("ve-drop-zone--active");
     const file = filesFromDataTransfer(event.dataTransfer)[0];
-    if (file) loadVideoFile(file);
+    if (!file) return;
+    if (file.type.startsWith("video/") || /\.(mp4|webm|avi|mov|mkv|wmv|mpeg|mpg|3gp|m4v)$/i.test(file.name)) {
+      importVideoFile(file).catch((err) => alert(err instanceof Error ? err.message : "動画の読み込みに失敗しました"));
+      return;
+    }
+    if (file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name)) {
+      loadAudioFile(file).catch((err) => alert(err instanceof Error ? err.message : "音声の読み込みに失敗しました"));
+    }
   });
   el.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -1282,11 +1395,16 @@ function bindDropZone(el) {
 /** イベント登録 */
 function bindEvents() {
   bindDropZone(dropZone);
+  bindDropZone(editorView);
 
   fileInput?.addEventListener("change", () => {
     const file = fileInput.files?.[0];
-    if (file) loadVideoFile(file);
+    if (file) importVideoFile(file).catch((err) => alert(err instanceof Error ? err.message : "動画の読み込みに失敗しました"));
     fileInput.value = "";
+  });
+
+  document.getElementById("add-video-btn")?.addEventListener("click", () => {
+    fileInput?.click();
   });
 
   playBtn?.addEventListener("click", togglePlay);
@@ -1436,7 +1554,7 @@ function bindEvents() {
     handleExport().catch((err) => alert(err instanceof Error ? err.message : "書き出し失敗"));
   });
   document.getElementById("reset-edits-btn")?.addEventListener("click", () => {
-    if (!state.file || state.duration <= 0) return;
+    if (!projectHasVideo() || state.duration <= 0) return;
     state.rotation = 0;
     state.flipH = false;
     state.flipV = false;
@@ -1503,7 +1621,7 @@ function bindEvents() {
     ) {
       return;
     }
-    if (!state.file) return;
+    if (!projectHasVideo()) return;
 
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key.toLowerCase() === "z" && !event.shiftKey) {
@@ -1584,7 +1702,7 @@ if (previewWrap instanceof HTMLElement) {
       state.crop = crop;
       refreshReencodeUi();
     },
-    () => state.cropEnabled && !!state.file
+    () => state.cropEnabled && projectHasVideo()
   );
 }
 qualityValue.textContent = qualityInput.value;
@@ -1595,7 +1713,7 @@ const allowed =
   (await checkAccess());
 
 if (allowed) {
-  showLanding();
+  showEmptyEditor();
   const storagePath = new URLSearchParams(location.search).get("storagePath")?.trim();
   if (storagePath) {
     openFromStoragePath(storagePath).catch((error) => {

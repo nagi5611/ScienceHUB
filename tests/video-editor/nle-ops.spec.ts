@@ -29,59 +29,6 @@ test.describe("NLE operations", () => {
     await expect(page.locator("#redo-btn")).toBeVisible();
   });
 
-  test("add audio shows BGM track", async ({ page, browserName }) => {
-    test.skip(browserName !== "chromium", "audio fixture setup");
-
-    const hasMp3 = await page.evaluate(async (mp3Path) => {
-      try {
-        const res = await fetch(mp3Path.replace(/.*\/fixtures/, "/tests/image-converter/fixtures"));
-        return res.ok;
-      } catch {
-        return false;
-      }
-    }, FIXTURE_MP3);
-
-    if (!hasMp3) {
-      await page.evaluate(async () => {
-        const ctx = new AudioContext();
-        const sampleRate = 44100;
-        const duration = 0.5;
-        const frames = Math.floor(sampleRate * duration);
-        const buffer = ctx.createBuffer(1, frames, sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < frames; i += 1) data[i] = Math.sin((i / sampleRate) * 440 * Math.PI * 2) * 0.2;
-        const dest = ctx.createMediaStreamDestination();
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(dest);
-        src.start();
-        const recorder = new MediaRecorder(dest.stream);
-        const chunks = [];
-        recorder.ondataavailable = (e) => chunks.push(e.data);
-        await new Promise((resolve) => {
-          recorder.onstop = resolve;
-          recorder.start();
-          setTimeout(() => recorder.stop(), 600);
-        });
-        return new Blob(chunks, { type: "audio/webm" });
-      });
-    }
-
-    const audioChooserPromise = page.waitForEvent("filechooser");
-    await page.locator("#add-audio-btn").click();
-    const chooser = await audioChooserPromise;
-
-    try {
-      await chooser.setFiles(FIXTURE_MP3);
-    } catch {
-      const webmPath = path.join(path.dirname(FIXTURE_MP3), "sample-bgm.webm");
-      await chooser.setFiles(webmPath);
-    }
-
-    await expect(page.locator(".ve-track-row--bgm")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator(".ve-track-row--bgm .ve-track-clip")).toHaveCount(1);
-  });
-
   test("multi-clip seek updates playhead", async ({ page }) => {
     await page.locator("#timeline-split-btn").click();
     const clips = page.locator(".ve-track-clip");
@@ -94,5 +41,36 @@ test.describe("NLE operations", () => {
       const current = el.textContent.split("/")[0]?.trim() ?? "";
       return current !== "0:00.0" && current !== "0:00";
     });
+  });
+
+  test("second video places at playhead on v1 track", async ({ page }) => {
+    const fixturePath = path.join(path.dirname(new URL(import.meta.url).pathname), "fixtures/sample.mp4");
+    const clip = page.locator("#multi-track .ve-track-clip").first();
+    const box = await clip.boundingBox();
+    if (!box) throw new Error("clip not found");
+    await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#add-video-btn").click();
+    const chooser = await chooserPromise;
+    await chooser.setFiles(fixturePath);
+
+    await expect(page.locator("#multi-track .ve-track-clip")).toHaveCount(2, { timeout: 15_000 });
+    await expect(page.locator("#media-bin .ve-media-bin-item")).toHaveCount(2);
+  });
+});
+
+test.describe("NLE media import", () => {
+  test("add audio before video shows BGM track", async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "audio fixture setup");
+    await openVideoEditor(page);
+
+    const audioChooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#add-audio-btn").click();
+    const chooser = await audioChooserPromise;
+    await chooser.setFiles(FIXTURE_MP3);
+
+    await expect(page.locator(".ve-track-row--bgm")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".ve-track-row--bgm .ve-track-clip")).toHaveCount(1);
   });
 });

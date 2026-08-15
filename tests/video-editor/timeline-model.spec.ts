@@ -40,4 +40,27 @@ test.describe("timeline-model and export graph", () => {
     expect(result.filter).toContain("amix");
     expect(result.hasAudio).toBe(true);
   });
+
+  test("placeVideoClip adds clip at playhead", async ({ page }) => {
+    await page.goto("/video-editor-e2e.html");
+    await page.waitForFunction(() => typeof window.__VE_E2E__ === "boolean");
+
+    const result = await page.evaluate(async () => {
+      const model = await import("/apps/video-editor/js/timeline-model.js");
+      const fileA = new File(["a"], "a.mp4", { type: "video/mp4" });
+      const fileB = new File(["b"], "b.mp4", { type: "video/mp4" });
+      const timeline = model.createTimelineFromFile(fileA, 5, "blob:a");
+      const mediaB = model.addMediaToBin(timeline, fileB, 4, "blob:b", "video");
+      model.placeVideoClip(timeline, mediaB, 2, 0, 4);
+      return {
+        clipCount: timeline.tracks.find((t) => t.id === "v1")?.clips.length ?? 0,
+        secondStart: timeline.tracks.find((t) => t.id === "v1")?.clips[1]?.timelineStart ?? -1,
+        duration: timeline.duration,
+      };
+    });
+
+    expect(result.clipCount).toBe(2);
+    expect(result.secondStart).toBe(2);
+    expect(result.duration).toBe(6);
+  });
 });
