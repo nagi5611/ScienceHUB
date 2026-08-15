@@ -47,6 +47,12 @@
     accept="video/*,.mp4,.webm,.avi,.mov,.mkv,.wmv,.mpeg,.mpg,.3gp,.m4v"
     hidden
   >
+  <input
+    type="file"
+    id="audio-file-input"
+    accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+    hidden
+  >
 
   <!-- Clipchamp 風ランディング -->
   <section class="cc-landing ve-landing" id="landing-view" hidden>
@@ -90,6 +96,8 @@
         </div>
       </div>
       <div class="cc-topbar-end">
+        <button type="button" class="cc-topbar-btn" id="undo-btn" title="元に戻す (Ctrl+Z)" disabled aria-label="元に戻す">↶</button>
+        <button type="button" class="cc-topbar-btn" id="redo-btn" title="やり直す (Ctrl+Shift+Z)" disabled aria-label="やり直す">↷</button>
         <button type="button" class="cc-topbar-btn cc-topbar-btn--text" id="reset-edits-btn">リセット</button>
         <button type="button" class="cc-topbar-btn" id="cloud-load-btn" title="クラウドから読み込み" aria-label="クラウドから読み込み">☁</button>
         <button type="button" class="cc-topbar-btn" id="cloud-save-btn" disabled title="クラウドに保存" aria-label="クラウドに保存">↑</button>
@@ -155,6 +163,7 @@
             <h2 class="cc-panel-title">メディア</h2>
             <div class="ve-media-bin">
               <div class="ve-media-bin-list" id="media-bin"></div>
+              <button type="button" class="cc-btn cc-btn--secondary cc-btn--block ve-add-audio-btn" id="add-audio-btn">音楽を追加</button>
               <p class="ve-sidebar-hint cc-panel-hint">クリック: 末尾に追加 / ダブルクリック: 上に配置</p>
             </div>
             <div class="ve-nle-tools cc-nle-row">
@@ -222,6 +231,7 @@
         </div>
         <div class="ve-work-area cc-stage-canvas" id="preview-wrap">
           <video id="preview" class="ve-preview" playsinline muted preload="auto"></video>
+          <audio id="bgm-preview" hidden preload="auto"></audio>
           <div class="ve-texts-container" id="texts-container" hidden></div>
           <div class="ve-trim-editor cc-trim-preview" id="trim-editor" hidden>
             <p class="ve-trim-editor-label">編集点プレビュー</p>
@@ -281,6 +291,7 @@
           </div>
           <div class="ve-pop-inner" data-pop="volume" hidden>
             <label class="ve-pop-field">音量 <output id="volume-value">100</output>%<input type="range" id="volume" class="ve-pop-range" min="0" max="200" value="100"></label>
+            <label class="ve-pop-field">BGM <output id="bgm-volume-value">80</output>%<input type="range" id="bgm-volume" class="ve-pop-range" min="0" max="100" value="80"></label>
             <div class="ve-pop-row">
               <label class="ve-pop-field ve-pop-field--half">フェードイン<input type="number" id="fade-in" class="ve-pop-input" min="0" max="10" step="0.1" value="0"></label>
               <label class="ve-pop-field ve-pop-field--half">フェードアウト<input type="number" id="fade-out" class="ve-pop-input" min="0" max="10" step="0.1" value="0"></label>

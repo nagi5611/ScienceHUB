@@ -20,8 +20,17 @@ import {
   createTimelineFromFile,
   syncSingleClipToTimeline,
   addMediaToBin,
+  addAudioMedia,
+  appendBgmClip,
+  isMultiClipTimeline,
+  findClipAtTime,
+  clipDuration,
+  trimClipStart,
+  trimClipEnd,
 } from "./js/timeline-model.js";
 import { createTimelineView } from "./js/timeline-view.js";
+import { createPreviewEngine } from "./js/preview-engine.js";
+import { createEditHistory } from "./js/edit-history.js";
 import { createCloudSaveModal } from "../../js/cloud-save-modal.js";
 import { createCloudOpenModal } from "../../js/cloud-open-modal.js";
 import { fetchDownloadBlob } from "../cloud-storage/js/api.js";
@@ -42,8 +51,10 @@ const landingView = document.getElementById("landing-view");
 /** @type {HTMLElement | null} */
 const editorView = document.getElementById("editor-view");
 const fileInput = document.getElementById("file-input");
+const audioFileInput = document.getElementById("audio-file-input");
 const dropZone = document.getElementById("drop-zone");
 const preview = /** @type {HTMLVideoElement} */ (document.getElementById("preview"));
+const bgmPreview = /** @type {HTMLAudioElement | null} */ (document.getElementById("bgm-preview"));
 
 const previewWrap = document.getElementById("preview-wrap");
 const textsContainer = document.getElementById("texts-container");
@@ -111,6 +122,10 @@ const volumeInput = /** @type {HTMLInputElement} */ (document.getElementById("vo
 const volumeValue = document.getElementById("volume-value");
 const speedInput = /** @type {HTMLInputElement} */ (document.getElementById("speed"));
 const speedValue = document.getElementById("speed-value");
+const bgmVolumeInput = /** @type {HTMLInputElement | null} */ (document.getElementById("bgm-volume"));
+const bgmVolumeValue = document.getElementById("bgm-volume-value");
+const undoBtn = document.getElementById("undo-btn");
+const redoBtn = document.getElementById("redo-btn");
 
 /** @type {{
  *   file: File | null,
@@ -123,6 +138,7 @@ const speedValue = document.getElementById("speed-value");
  *   flipV: boolean,
  *   volume: number,
  *   speed: number,
+ *   bgmVolume: number,
  *   fadeIn: number,
  *   fadeOut: number,
  *   cropEnabled: boolean,
@@ -163,6 +179,7 @@ const state = {
   flipV: false,
   volume: 100,
   speed: 100,
+  bgmVolume: 80,
   fadeIn: 0,
   fadeOut: 0,
   cropEnabled: false,
@@ -201,11 +218,54 @@ let cloudOpenModal = null;
 let dualTimeline = null;
 /** @type {ReturnType<typeof createTimelineView> | null} */
 let timelineView = null;
+/** @type {ReturnType<typeof createPreviewEngine> | null} */
+let previewEngine = null;
+/** @type {ReturnType<typeof createEditHistory> | null} */
+let editHistory = null;
+let isPlaying = false;
 /** @type {ReturnType<typeof initCropOverlay> | null} */
 let cropOverlay = null;
 
 function patchState(partial) {
   Object.assign(state, partial);
+}
+
+function updateUndoRedoUi() {
+  if (undoBtn instanceof HTMLButtonElement) undoBtn.disabled = !editHistory?.canUndo();
+  if (redoBtn instanceof HTMLButtonElement) redoBtn.disabled = !editHistory?.canRedo();
+}
+
+/** 編集操作を履歴付きで実行 */
+function commitEdit(fn) {
+  if (state.timeline) editHistory?.push(state.timeline, state);
+  fn();
+  refreshAfterEdit();
+}
+
+function refreshAfterEdit() {
+  syncTrimState();
+  applyPreviewTransform();
+  renderTexts();
+  updateCropOverlay();
+  updateFileMeta();
+  refreshReencodeUi();
+  updateInspectorForSelection();
+  timelineView?.render();
+  previewEngine?.seekToTimelineTime(state.timelinePlayhead).catch(() => {});
+  updateUndoRedoUi();
+}
+
+/** 選択クリップに応じてインスペクタを更新 */
+function updateInspectorForSelection() {
+  if (!state.timeline || !isMultiClipTimeline(state.timeline)) return;
+  const clipId = state.selectedClipId;
+  if (!clipId) return;
+  const vTrack = state.timeline.tracks.find((t) => t.id === "v1");
+  const clip = vTrack?.clips.find((c) => c.id === clipId);
+  if (!clip) return;
+  startTimeInput.value = formatTimePrecise(clip.sourceIn);
+  endTimeInput.value = formatTimePrecise(clip.sourceOut);
+  trimDurationEl.textContent = formatTimePrecise(clipDuration(clip));
 }
 
 function syncTimelineModel() {
@@ -711,6 +771,36 @@ async function loadVideoFile(file) {
 
   dualTimeline?.buildFilmstrip().catch(() => {});
   dualTimeline?.buildTrimEditorStrip().catch(() => {});
+
+  editHistory?.clear();
+  previewEngine?.attach(preview, bgmPreview);
+  await previewEngine?.seekToTimelineTime(0);
+  updateUndoRedoUi();
+}
+
+/** 音声ファイルを BGM として読み込む */
+async function loadAudioFile(file) {
+  if (!file || !state.timeline) {
+    alert("先に動画を読み込んでください。");
+    return;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  const probe = document.createElement("audio");
+  probe.src = objectUrl;
+
+  await new Promise((resolve, reject) => {
+    probe.onloadedmetadata = () => resolve(undefined);
+    probe.onerror = () => reject(new Error("音声を読み込めませんでした"));
+  });
+
+  const duration = probe.duration;
+  probe.removeAttribute("src");
+
+  commitEdit(() => {
+    const mediaId = addAudioMedia(state.timeline, file, duration, objectUrl);
+    appendBgmClip(state.timeline, mediaId, state.timelinePlayhead, 0, duration);
+  });
 }
 
 /** 編集状態をリセット */
@@ -718,7 +808,19 @@ function resetEditor(clearFile = true) {
   if (state.objectUrl) {
     URL.revokeObjectURL(state.objectUrl);
   }
+  if (state.timeline) {
+    for (const media of state.timeline.mediaBin) {
+      if (media.objectUrl && media.objectUrl !== state.objectUrl) {
+        URL.revokeObjectURL(media.objectUrl);
+      }
+    }
+  }
   preview.pause();
+  bgmPreview?.pause();
+  if (bgmPreview) {
+    bgmPreview.removeAttribute("src");
+    bgmPreview.load();
+  }
   preview.removeAttribute("src");
   preview.load();
 
@@ -732,6 +834,7 @@ function resetEditor(clearFile = true) {
   state.flipV = false;
   state.volume = 100;
   state.speed = 100;
+  state.bgmVolume = 80;
   state.fadeIn = 0;
   state.fadeOut = 0;
   state.cropEnabled = false;
@@ -751,6 +854,8 @@ function resetEditor(clearFile = true) {
   state.timeline = null;
   state.selectedClipId = null;
   state.timelinePlayhead = 0;
+  editHistory?.clear();
+  previewEngine?.detach();
 
   document.querySelectorAll(".ve-rotate-btn").forEach((btn) => {
     btn.classList.toggle("ve-rotate-btn--active", btn.getAttribute("data-rotation") === "0");
@@ -762,6 +867,8 @@ function resetEditor(clearFile = true) {
   volumeValue.textContent = "100";
   speedInput.value = "100";
   speedValue.textContent = "100";
+  if (bgmVolumeInput) bgmVolumeInput.value = "80";
+  if (bgmVolumeValue) bgmVolumeValue.textContent = "80";
   document.getElementById("fade-in").value = "0";
   document.getElementById("fade-out").value = "0";
   noReencodeInput.checked = true;
@@ -792,16 +899,21 @@ function resetEditor(clearFile = true) {
 /** 再生/停止 */
 function togglePlay() {
   if (!state.file) return;
-  const { effectiveStart, effectiveEnd } = getEffectiveRange(state);
-  if (preview.paused) {
-    if (preview.currentTime >= effectiveEnd - 0.05 || preview.currentTime < effectiveStart) {
-      preview.currentTime = effectiveStart;
-    }
-    preview.playbackRate = state.speed / 100;
-    preview.play().catch(() => {});
-  } else {
-    preview.pause();
-  }
+  previewEngine?.togglePlay().catch(() => {});
+}
+
+function handleUndo() {
+  if (!state.timeline || !editHistory) return;
+  const snap = editHistory.undo(state.timeline, state);
+  if (!snap) return;
+  refreshAfterEdit();
+}
+
+function handleRedo() {
+  if (!state.timeline || !editHistory) return;
+  const snap = editHistory.redo(state.timeline, state);
+  if (!snap) return;
+  refreshAfterEdit();
 }
 
 /** 書き出し */
@@ -1042,16 +1154,53 @@ function initTimelineView() {
     getPlayhead: () => state.timelinePlayhead,
     setPlayhead: (t) => {
       state.timelinePlayhead = t;
-      preview.currentTime = clamp(t, 0, state.duration);
       dualTimeline?.update();
       updateTimecode();
     },
-    onChange: syncTimelineModel,
+    onChange: () => {
+      syncTimelineModel();
+      updateUndoRedoUi();
+    },
     getSelectedClipId: () => state.selectedClipId,
     setSelectedClipId: (id) => {
       state.selectedClipId = id;
     },
-    onClipSelect: () => setActiveTool("cut"),
+    onClipSelect: () => {
+      setActiveTool("cut");
+      updateInspectorForSelection();
+    },
+    onBeforeEdit: () => {
+      if (state.timeline) editHistory?.push(state.timeline, state);
+    },
+    onSeekPreview: (t) => {
+      previewEngine?.seekToTimelineTime(t).catch(() => {});
+    },
+  });
+}
+
+function initPreviewEngine() {
+  editHistory = createEditHistory();
+  previewEngine = createPreviewEngine({
+    getTimeline: () => state.timeline,
+    getPlayhead: () => state.timelinePlayhead,
+    setPlayhead: (t) => {
+      state.timelinePlayhead = t;
+      dualTimeline?.update();
+      updateTimecode();
+    },
+    getTrimState: () => ({
+      startTime: state.startTime,
+      endTime: state.endTime,
+      slipOffset: state.slipOffset,
+      duration: state.duration,
+      speed: state.speed,
+      volume: state.volume,
+      bgmVolume: state.bgmVolume,
+    }),
+    isPlaying: () => isPlaying,
+    setPlaying: (playing) => {
+      isPlaying = playing;
+    },
   });
 }
 
@@ -1150,30 +1299,50 @@ function bindEvents() {
 
   startTimeInput?.addEventListener("change", () => {
     const parsed = parseTimeInput(startTimeInput.value);
-    if (parsed !== null) state.startTime = parsed;
+    if (parsed === null) return;
+    if (state.timeline && isMultiClipTimeline(state.timeline) && state.selectedClipId) {
+      commitEdit(() => {
+        const vTrack = state.timeline.tracks.find((t) => t.id === "v1");
+        const clip = vTrack?.clips.find((c) => c.id === state.selectedClipId);
+        if (!clip) return;
+        const delta = parsed - clip.sourceIn;
+        trimClipStart(state.timeline, "v1", clip.id, delta);
+      });
+      return;
+    }
+    state.startTime = parsed;
     syncTrimState();
   });
   endTimeInput?.addEventListener("change", () => {
     const parsed = parseTimeInput(endTimeInput.value);
-    if (parsed !== null) state.endTime = parsed;
+    if (parsed === null) return;
+    if (state.timeline && isMultiClipTimeline(state.timeline) && state.selectedClipId) {
+      commitEdit(() => {
+        const vTrack = state.timeline.tracks.find((t) => t.id === "v1");
+        const clip = vTrack?.clips.find((c) => c.id === state.selectedClipId);
+        if (!clip) return;
+        const delta = parsed - clip.sourceOut;
+        trimClipEnd(state.timeline, "v1", clip.id, delta);
+      });
+      return;
+    }
+    state.endTime = parsed;
     syncTrimState();
   });
 
   preview?.addEventListener("timeupdate", () => {
-    const { effectiveEnd } = getEffectiveRange(state);
-    if (preview.currentTime >= effectiveEnd && !preview.paused) {
-      preview.pause();
-      preview.currentTime = effectiveEnd;
-    }
-    state.timelinePlayhead = preview.currentTime;
+    if (isPlaying) return;
+    previewEngine?.onVideoTimeUpdate();
     updateTimelineUi();
   });
   preview?.addEventListener("play", () => {
+    isPlaying = true;
     playBtn?.classList.add("is-playing");
     playBtn?.querySelector(".ve-play-icon")?.setAttribute("hidden", "");
     playBtn?.querySelector(".ve-pause-icon")?.removeAttribute("hidden");
   });
   preview?.addEventListener("pause", () => {
+    if (!bgmPreview || bgmPreview.paused) isPlaying = false;
     playBtn?.classList.remove("is-playing");
     playBtn?.querySelector(".ve-play-icon")?.removeAttribute("hidden");
     playBtn?.querySelector(".ve-pause-icon")?.setAttribute("hidden", "");
@@ -1307,6 +1476,24 @@ function bindEvents() {
   document.getElementById("cloud-load-btn-landing")?.addEventListener("click", openCloudLoad);
   cloudSaveBtn?.addEventListener("click", openCloudSave);
 
+  undoBtn?.addEventListener("click", handleUndo);
+  redoBtn?.addEventListener("click", handleRedo);
+
+  document.getElementById("add-audio-btn")?.addEventListener("click", () => {
+    audioFileInput?.click();
+  });
+  audioFileInput?.addEventListener("change", () => {
+    const file = audioFileInput.files?.[0];
+    if (file) loadAudioFile(file).catch((err) => alert(err instanceof Error ? err.message : "音声の読み込みに失敗しました"));
+    audioFileInput.value = "";
+  });
+
+  bgmVolumeInput?.addEventListener("input", () => {
+    state.bgmVolume = Number(bgmVolumeInput.value);
+    if (bgmVolumeValue) bgmVolumeValue.textContent = bgmVolumeInput.value;
+    if (bgmPreview) bgmPreview.volume = Math.min(1, state.bgmVolume / 100);
+  });
+
   document.addEventListener("keydown", (event) => {
     const target = event.target;
     if (
@@ -1317,6 +1504,19 @@ function bindEvents() {
       return;
     }
     if (!state.file) return;
+
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key.toLowerCase() === "z" && !event.shiftKey) {
+      event.preventDefault();
+      handleUndo();
+      return;
+    }
+    if (mod && (event.key.toLowerCase() === "z" && event.shiftKey || event.key.toLowerCase() === "y")) {
+      event.preventDefault();
+      handleRedo();
+      return;
+    }
+
     if (event.code === "Space") {
       event.preventDefault();
       togglePlay();
@@ -1326,9 +1526,11 @@ function bindEvents() {
       event.preventDefault();
       timelineView?.handleBlade();
     } else if (event.key.toLowerCase() === "i") {
+      if (state.timeline && isMultiClipTimeline(state.timeline)) return;
       state.startTime = clamp(preview.currentTime, 0, state.endTime - 0.1);
       syncTrimState();
     } else if (event.key.toLowerCase() === "o") {
+      if (state.timeline && isMultiClipTimeline(state.timeline)) return;
       state.endTime = clamp(preview.currentTime, state.startTime + 0.1, state.duration);
       syncTrimState();
     } else if (["j", "k", "l", "J", "K", "L", ",", "."].includes(event.key)) {
@@ -1368,6 +1570,7 @@ initTextTool();
 initFormatPicker();
 initTimeSteppers();
 initDualTimeline();
+initPreviewEngine();
 initTimelineView();
 initNleButtons();
 bindEvents();
