@@ -2,9 +2,9 @@
  * ffmpeg.wasm による動画書き出し（トリム・クロップ・回転・テキスト等）
  */
 
-import { getFfmpeg, isFfmpegMultithreadLoaded } from "../../../js/ffmpeg-loader.js";
+import { getFfmpeg } from "../../../js/ffmpeg-loader.js";
 import { execFfmpegOrThrow, prepareFfmpegInputs } from "../../../js/ffmpeg-input.js";
-import { canUseFfmpegMultithread } from "../../../js/ffmpeg-capabilities.js";
+import { canUseFfmpegMultithread, isFfmpegMultithreadLoaded } from "../../../js/ffmpeg-capabilities.js";
 import { clipDuration, clipTimelineEnd, getClipColorEffects, getClipPipEffects, hasColorEffects, hasTransitions, hasV2Clips } from "./timeline-model.js";
 
 const MOUNT_POINT = "/ve-input";

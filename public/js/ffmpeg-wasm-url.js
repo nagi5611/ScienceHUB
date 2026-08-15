@@ -14,8 +14,8 @@ const ST_WASM_URL_CANDIDATES = [
 ];
 
 const MT_WASM_URL_CANDIDATES = [
-  "/api/image-converter/assets/ffmpeg-core-mt.wasm",
   `https://unpkg.com/@ffmpeg/core-mt@${FFMPEG_CORE_VERSION}/dist/umd/ffmpeg-core.wasm`,
+  "/api/image-converter/assets/ffmpeg-core-mt.wasm",
 ];
 
 /**

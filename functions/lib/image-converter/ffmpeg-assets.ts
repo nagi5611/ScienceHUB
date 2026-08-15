@@ -6,6 +6,8 @@ import { getFiles } from "../r2";
 import type { Env } from "../types";
 
 export const FFMPEG_CORE_WASM_R2_KEY = "static/image-converter/ffmpeg/ffmpeg-core.wasm";
+export const FFMPEG_CORE_MT_WASM_R2_KEY =
+  "static/image-converter/ffmpeg/ffmpeg-core-mt.wasm";
 
 /** 公開 API で配信を許可するファイル名 */
 export const FFMPEG_PUBLIC_ASSETS: Record<
@@ -14,6 +16,10 @@ export const FFMPEG_PUBLIC_ASSETS: Record<
 > = {
   "ffmpeg-core.wasm": {
     r2Key: FFMPEG_CORE_WASM_R2_KEY,
+    contentType: "application/wasm",
+  },
+  "ffmpeg-core-mt.wasm": {
+    r2Key: FFMPEG_CORE_MT_WASM_R2_KEY,
     contentType: "application/wasm",
   },
 };

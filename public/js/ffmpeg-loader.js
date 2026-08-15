@@ -3,7 +3,7 @@
  * crossOriginIsolated 時は @ffmpeg/core-mt で CPU 全コアを使用
  */
 
-import { canUseFfmpegMultithread } from "./ffmpeg-capabilities.js";
+import { canUseFfmpegMultithread, setFfmpegMultithreadLoaded } from "./ffmpeg-capabilities.js";
 import { getFfmpegCoreUrls } from "./ffmpeg-wasm-url.js";
 
 const WORKER_BASE = "/apps/image-converter/vendor/ffmpeg-js";
@@ -14,11 +14,6 @@ let ffmpegInstance = null;
 let ffmpegLoadPromise = null;
 /** @type {boolean | null} */
 let loadedMultithread = null;
-
-/** 現在ロード済みの ffmpeg がマルチスレッド版か */
-export function isFfmpegMultithreadLoaded() {
-  return loadedMultithread === true;
-}
 
 /** ffmpeg をロード（1回のみ） */
 export async function getFfmpeg() {
@@ -38,6 +33,7 @@ export async function getFfmpeg() {
       if (useMt) {
         urls = await getFfmpegCoreUrls({ multithread: false });
         loadedMultithread = false;
+        setFfmpegMultithreadLoaded(false);
       } else {
         ffmpegLoadPromise = null;
         throw error;
@@ -47,6 +43,7 @@ export async function getFfmpeg() {
     if (loadedMultithread === null) {
       loadedMultithread = urls.multithread === true;
     }
+    setFfmpegMultithreadLoaded(loadedMultithread === true);
 
     try {
       /** @type {Record<string, string>} */
@@ -63,6 +60,7 @@ export async function getFfmpeg() {
     } catch (error) {
       ffmpegLoadPromise = null;
       loadedMultithread = null;
+      setFfmpegMultithreadLoaded(false);
 
       if (useMt) {
         try {
@@ -73,6 +71,7 @@ export async function getFfmpeg() {
             wasmURL: await toBlobURL(stUrls.wasm, "application/wasm"),
           });
           loadedMultithread = false;
+          setFfmpegMultithreadLoaded(false);
         } catch (fallbackError) {
           const message =
             fallbackError instanceof Error ? fallbackError.message : String(fallbackError);

@@ -11,8 +11,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, "..");
 
 export const R2_KEY = "static/image-converter/ffmpeg/ffmpeg-core.wasm";
+export const R2_MT_KEY = "static/image-converter/ffmpeg/ffmpeg-core-mt.wasm";
 export const BUCKET = "sciencehub-files";
 export const R2_OBJECT_PATH = `${BUCKET}/${R2_KEY}`;
+export const R2_MT_OBJECT_PATH = `${BUCKET}/${R2_MT_KEY}`;
 
 export const PUBLIC_WASM_PATH = path.join(
   ROOT,
@@ -24,9 +26,17 @@ const WASM_CANDIDATES = [
   path.join(ROOT, "node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm"),
 ];
 
-/** node_modules から wasm ソースパスを解決 */
-export async function resolveWasmSourcePath() {
-  for (const candidate of WASM_CANDIDATES) {
+const WASM_MT_CANDIDATES = [
+  path.join(ROOT, "node_modules/@ffmpeg/core-mt/dist/umd/ffmpeg-core.wasm"),
+  path.join(ROOT, "node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.wasm"),
+];
+
+/**
+ * @param {string[]} candidates
+ * @param {string} label
+ */
+async function resolveWasmFromCandidates(candidates, label) {
+  for (const candidate of candidates) {
     try {
       await fs.access(candidate);
       return candidate;
@@ -35,8 +45,18 @@ export async function resolveWasmSourcePath() {
     }
   }
   throw new Error(
-    "ffmpeg-core.wasm が見つかりません。npm install を実行するか、@ffmpeg/core を確認してください。",
+    `${label} が見つかりません。npm install を実行するか、@ffmpeg/core を確認してください。`,
   );
+}
+
+/** node_modules から wasm ソースパスを解決 */
+export async function resolveWasmSourcePath() {
+  return resolveWasmFromCandidates(WASM_CANDIDATES, "ffmpeg-core.wasm");
+}
+
+/** node_modules から core-mt wasm ソースパスを解決 */
+export async function resolveMtWasmSourcePath() {
+  return resolveWasmFromCandidates(WASM_MT_CANDIDATES, "ffmpeg-core-mt.wasm");
 }
 
 /** public 配下の wasm コピーを削除（デプロイサイズ超過防止） */
@@ -110,21 +130,20 @@ export async function r2ObjectExists(local) {
   }
 }
 
-/** wasm を R2 にアップロード */
-export async function uploadWasmToR2(local) {
-  const wasmPath = await resolveWasmSourcePath();
+/** 単一 wasm を R2 にアップロード */
+async function uploadSingleWasm(local, wasmPath, objectPath) {
   const stat = await fs.stat(wasmPath);
   const mib = (stat.size / (1024 * 1024)).toFixed(1);
 
   console.log(
-    `[ffmpeg-r2] uploading ${wasmPath} (${mib} MiB) → ${R2_OBJECT_PATH} (${local ? "local" : "remote"})`,
+    `[ffmpeg-r2] uploading ${wasmPath} (${mib} MiB) → ${objectPath} (${local ? "local" : "remote"})`,
   );
 
   await runWrangler([
     "r2",
     "object",
     "put",
-    R2_OBJECT_PATH,
+    objectPath,
     "--file",
     wasmPath,
     "--content-type",
@@ -133,6 +152,21 @@ export async function uploadWasmToR2(local) {
     "public,max-age=31536000,immutable",
     local ? "--local" : "--remote",
   ]);
+}
+
+/** wasm を R2 にアップロード（シングルスレッド + マルチスレッド） */
+export async function uploadWasmToR2(local) {
+  const wasmPath = await resolveWasmSourcePath();
+  await uploadSingleWasm(local, wasmPath, R2_OBJECT_PATH);
+
+  try {
+    const mtWasmPath = await resolveMtWasmSourcePath();
+    await uploadSingleWasm(local, mtWasmPath, R2_MT_OBJECT_PATH);
+  } catch (error) {
+    console.warn(
+      `[ffmpeg-r2] ffmpeg-core-mt.wasm skipped: ${error instanceof Error ? error.message : error}`,
+    );
+  }
 
   await removePublicWasmCopy();
   console.log("[ffmpeg-r2] upload complete.");
