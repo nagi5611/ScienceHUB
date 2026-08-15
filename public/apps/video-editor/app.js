@@ -295,6 +295,7 @@ function zoomTimelineAt(focusRatio, factor) {
   state.timelineViewStart = newStart;
   state.timelineViewEnd = newStart + newSpan;
   timelineView?.render();
+  dualTimeline?.update();
 }
 
 /** カラースライダーを選択クリップに同期 */
@@ -1364,6 +1365,11 @@ function initDualTimeline() {
     trimModeHint,
     getState: () => state,
     patchState,
+    getTrimZoomHalf: () => {
+      const view = getTimelineViewWindow();
+      const span = Math.max(0.1, view.end - view.start);
+      return clamp(span / 2, 2, 30);
+    },
     onSync: () => {
       if (state.duration <= 0) return;
       startTimeInput.value = formatTimePrecise(state.startTime);
@@ -1484,11 +1490,14 @@ function initColorControls() {
   document.getElementById("color-preset-reset")?.addEventListener("click", () => {
     applyColor({ brightness: 0, contrast: 0, saturation: 0 });
   });
+  document.getElementById("color-preset-cinema")?.addEventListener("click", () => {
+    applyColor({ brightness: -8, contrast: 15, saturation: -20 });
+  });
+  document.getElementById("color-preset-mono")?.addEventListener("click", () => {
+    applyColor({ brightness: 0, contrast: 10, saturation: -100 });
+  });
   document.getElementById("color-preset-vivid")?.addEventListener("click", () => {
     applyColor({ brightness: 5, contrast: 10, saturation: 35 });
-  });
-  document.getElementById("color-preset-muted")?.addEventListener("click", () => {
-    applyColor({ brightness: -5, contrast: -10, saturation: -25 });
   });
 }
 
@@ -1528,6 +1537,7 @@ function initTimelineZoom() {
   document.getElementById("timeline-zoom-fit")?.addEventListener("click", () => {
     resetTimelineZoom();
     timelineView?.render();
+    dualTimeline?.update();
   });
   multiTrackEl?.addEventListener(
     "wheel",
