@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#903163">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>動画編集 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/video-editor.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="ve-app cc-app ve-app--landing">
+  <header class="hub-header cc-landing-header" id="site-header">
+    <div class="hub-header-inner cc-landing-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <input
+    type="file"
+    id="file-input"
+    accept="video/*,.mp4,.webm,.avi,.mov,.mkv,.wmv,.mpeg,.mpg,.3gp,.m4v"
+    hidden
+  >
+
+  <!-- Clipchamp 風ランディング -->
+  <section class="cc-landing ve-landing" id="landing-view" hidden>
+    <div class="cc-landing-inner">
+      <div class="cc-landing-hero">
+        <p class="cc-landing-kicker">オンライン ビデオ エディター</p>
+        <h1 class="cc-landing-title">動画をブラウザで編集</h1>
+        <p class="cc-landing-lead">カット・テキスト・効果・書き出しまで。ファイルは端末内で処理され、サーバーへ送信されません。</p>
+      </div>
+
+      <div class="cc-landing-actions">
+        <div class="ve-drop-zone cc-drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="動画ファイルを選択またはドロップ">
+          <span class="cc-drop-icon" aria-hidden="true">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect width="48" height="48" rx="12" fill="currentColor" opacity="0.12"/><path d="M24 14v14m0 0l-5-5m5 5l5-5M16 32h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <p class="ve-drop-title cc-drop-title">動画をインポート</p>
+          <p class="ve-drop-sub">ドラッグ＆ドロップ、または</p>
+          <button type="button" class="cc-btn cc-btn--primary" id="select-file-btn">ファイルを参照</button>
+          <p class="ve-drop-formats">MP4 · WebM · MOV · MKV · AVI（最大 4 GB）</p>
+        </div>
+
+        <button type="button" class="cc-btn cc-btn--secondary cc-btn--block" id="cloud-load-btn-landing">クラウドストレージから読み込み</button>
+      </div>
+
+      <ul class="cc-feature-grid" aria-label="機能">
+        <li><strong>タイムライン編集</strong><span>トリム・分割・波形・マルチトラック</span></li>
+        <li><strong>テキストと効果</strong><span>字幕・回転・クロップ・音量/速度</span></li>
+        <li><strong>HD 書き出し</strong><span>MP4 / WebM · 再エンコードなしも可</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Clipchamp 風編集画面 -->
+  <div class="cc-editor ve-editor" id="editor-view" hidden>
+    <header class="cc-topbar">
+      <div class="cc-topbar-start">
+        <button type="button" class="cc-topbar-btn" id="exit-btn" title="ホームに戻る">←</button>
+        <div class="cc-project-meta">
+          <p class="ve-editor-filename cc-project-name" id="file-name">—</p>
+          <p class="ve-editor-meta cc-project-sub" id="file-meta" aria-live="polite">—</p>
+        </div>
+      </div>
+      <div class="cc-topbar-end">
+        <button type="button" class="cc-topbar-btn cc-topbar-btn--text" id="reset-edits-btn">リセット</button>
+        <button type="button" class="cc-topbar-btn" id="cloud-load-btn" title="クラウドから読み込み" aria-label="クラウドから読み込み">☁</button>
+        <button type="button" class="cc-topbar-btn" id="cloud-save-btn" disabled title="クラウドに保存" aria-label="クラウドに保存">↑</button>
+        <div class="ve-format-picker cc-format-picker" id="format-picker">
+          <button type="button" class="ve-format-picker-btn cc-format-btn" id="format-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+            <span id="format-picker-label">MP4</span>
+            <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M5.293 8.293a1 1 0 0 1 1.414 0L10 11.586l3.293-3.293a1 1 0 0 1 1.414 1.414L10 14.414 5.293 9.707a1 1 0 0 1 0-1.414z"/></svg>
+          </button>
+          <div class="ve-format-dropdown cc-format-menu" id="format-dropdown" hidden role="listbox">
+            <button type="button" class="ve-format-option is-active" data-format="mp4" role="option">MP4 (H.264)</button>
+            <button type="button" class="ve-format-option" data-format="webm" role="option">WebM (VP9)</button>
+            <div class="ve-format-extra" id="quality-field">
+              <label class="ve-pop-field">品質 <output id="quality-value">23</output><input type="range" id="quality" class="ve-pop-range" min="18" max="35" value="23"></label>
+              <label class="ve-pop-check" id="no-reencode-wrap"><input type="checkbox" id="no-reencode"> 再エンコードなし</label>
+              <p class="ve-format-hint" id="no-reencode-hint"></p>
+            </div>
+          </div>
+        </div>
+        <button type="button" class="cc-btn cc-btn--export ve-btn-cut" id="export-btn" disabled>エクスポート</button>
+      </div>
+    </header>
+
+    <div class="cc-workspace">
+      <!-- 左: ツールバー + パネル -->
+      <aside class="cc-sidebar">
+        <nav class="cc-rail" id="main-toolbar" role="toolbar" aria-label="編集ツール">
+          <button type="button" class="cc-rail-btn ve-tool-btn is-active" data-tool="cut" title="メディア / カット">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h7v2H6v5H4V4Zm9 0h7v7h-2V6h-5V4ZM4 15v5h7v-2H6v-3H4Zm13 0h2v3h-3v2h-5v-2h3v-3h3Z"/></svg>
+            <span>メディア</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="text" title="テキスト">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14v2h-5v12h-4V6H5V4Z"/></svg>
+            <span>テキスト</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" id="trim-mode-btn" data-tool="trim" title="Trim (T)">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 6h12v2H8V6Zm0 5h8v2H8v-2Zm0 5h12v2H8v-2ZM4 6h2v12H4V6Z"/></svg>
+            <span>トリム</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="crop" title="クロップ">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h7v2H6v5H4V4Zm9 0h7v7h-2V6h-5V4ZM4 15v5h7v-2H6v-3H4Zm13 0h2v3h-3v2h-5v-2h3v-3h3Z"/></svg>
+            <span>クロップ</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="rotate" title="回転">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 4a8 8 0 1 0 7.2 4.5H17l3 3 3-3h-2.4A10 10 0 1 1 12 2v2Z"/></svg>
+            <span>回転</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="volume" title="音量">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9v6h4l5 3V6L8 9H4Zm8 3a4 4 0 0 0-1.7-3.3v6.6A4 4 0 0 0 12 12Zm0-6v2.2A6 6 0 0 1 15.5 12 6 6 0 0 1 12 15.8V18a8 8 0 0 0 8-8 8 8 0 0 0-8-8Z"/></svg>
+            <span>音量</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="speed" title="速度">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2a8 8 0 0 1 6.1 12.8l-1.4-1.4A6 6 0 1 0 12 6V4Z"/></svg>
+            <span>速度</span>
+          </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="flip" title="反転">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v2H4V5Zm0 6h10v2H4v-2Zm0 6h16v2H4v-2Zm14-8 3 3-3 3V9Z"/></svg>
+            <span>反転</span>
+          </button>
+        </nav>
+
+        <div class="cc-panel">
+          <section class="cc-panel-section" id="panel-media" data-panel="cut">
+            <h2 class="cc-panel-title">メディア</h2>
+            <div class="ve-media-bin">
+              <div class="ve-media-bin-list" id="media-bin"></div>
+              <p class="ve-sidebar-hint cc-panel-hint">クリック: 末尾に追加 / ダブルクリック: 上に配置</p>
+            </div>
+            <div class="ve-nle-tools cc-nle-row">
+              <button type="button" class="ve-nle-btn" id="blade-btn" title="Blade (B)">分割</button>
+              <button type="button" class="ve-nle-btn" id="ripple-delete-btn">Ripple 削除</button>
+              <button type="button" class="ve-nle-btn" id="transition-btn">ディゾルブ</button>
+            </div>
+          </section>
+
+          <section class="cc-panel-section" id="panel-text" data-panel="text" hidden>
+            <h2 class="cc-panel-title">テキスト</h2>
+            <div class="ve-tool-add-text" id="tool-add-text">
+              <button type="button" class="ve-add-text-btn cc-btn cc-btn--secondary" id="add-text-btn">
+                <span id="add-text-btn-label">テキストを追加</span>
+              </button>
+              <div class="ve-add-text-controls" id="add-text-controls" hidden>
+                <div class="ve-add-text-block ve-add-text-block--fonts">
+                  <button type="button" class="ve-add-text-dropdown-btn" id="text-font-btn" aria-haspopup="listbox">
+                    <span id="text-font-label">Arial</span>
+                    <i class="ve-add-text-arrow" aria-hidden="true"></i>
+                  </button>
+                  <div class="ve-add-text-dropdown" id="text-font-menu" hidden role="listbox"></div>
+                </div>
+                <div class="ve-add-text-block ve-add-text-block--size">
+                  <button type="button" class="ve-add-text-dropdown-btn" id="text-size-btn" aria-haspopup="listbox">
+                    <span id="text-size-label">32</span>
+                    <i class="ve-add-text-arrow" aria-hidden="true"></i>
+                  </button>
+                  <div class="ve-add-text-dropdown" id="text-size-menu" hidden role="listbox"></div>
+                </div>
+                <div class="ve-add-text-block ve-add-text-block--color">
+                  <label class="ve-add-text-color-wrap" title="色">
+                    <i class="ve-add-text-color-icon" aria-hidden="true"></i>
+                    <input type="color" id="text-color" class="ve-add-text-color-input" value="#ffffff">
+                  </label>
+                </div>
+                <div class="ve-add-text-block ve-add-text-block--style">
+                  <button type="button" class="ve-add-text-style-btn" id="text-bold-btn" title="太字">B</button>
+                  <button type="button" class="ve-add-text-style-btn ve-add-text-style-btn--italic" id="text-italic-btn" title="斜体">I</button>
+                </div>
+                <div class="ve-add-text-block ve-add-text-block--align" role="group" aria-label="配置">
+                  <button type="button" class="ve-add-text-align-btn is-active" data-align="left" title="左揃え"><i class="ve-align-icon ve-align-icon--left"></i></button>
+                  <button type="button" class="ve-add-text-align-btn" data-align="center" title="中央"><i class="ve-align-icon ve-align-icon--center"></i></button>
+                  <button type="button" class="ve-add-text-align-btn" data-align="right" title="右揃え"><i class="ve-align-icon ve-align-icon--right"></i></button>
+                </div>
+                <div class="ve-add-text-block ve-add-text-block--opacity">
+                  <i class="ve-add-text-opacity-icon" aria-hidden="true"></i>
+                  <input type="range" id="text-opacity" class="ve-add-text-opacity-range" min="0" max="100" value="100">
+                  <output id="text-opacity-value" class="ve-add-text-opacity-out">100</output>
+                </div>
+                <button type="button" class="ve-add-text-delete" id="text-delete-btn" title="テキストを削除">×</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <!-- 中央: プレビュー -->
+      <main class="cc-stage">
+        <div class="cc-floating-bar" id="shortcuts-bar" aria-label="ショートカット">
+          <span class="ve-kbd"><kbd>Space</kbd> 再生</span>
+          <span class="ve-kbd"><kbd>I</kbd><kbd>O</kbd> 入点/出点</span>
+          <span class="ve-kbd"><kbd>T</kbd> トリム</span>
+          <span class="ve-kbd"><kbd>B</kbd> 分割</span>
+        </div>
+        <div class="ve-work-area cc-stage-canvas" id="preview-wrap">
+          <video id="preview" class="ve-preview" playsinline muted preload="auto"></video>
+          <div class="ve-texts-container" id="texts-container" hidden></div>
+          <div class="ve-trim-editor cc-trim-preview" id="trim-editor" hidden>
+            <p class="ve-trim-editor-label">編集点プレビュー</p>
+            <div class="ve-trim-editor-strip" id="trim-editor-strip"></div>
+          </div>
+          <p class="ve-preview-placeholder" id="preview-placeholder">プレビューを読み込み中…</p>
+        </div>
+        <div class="cc-transport">
+          <button type="button" class="ve-play-btn cc-play-btn" id="play-btn" disabled aria-label="再生">
+            <svg class="ve-play-icon" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+            <svg class="ve-pause-icon" width="28" height="28" viewBox="0 0 24 24" hidden aria-hidden="true"><path fill="currentColor" d="M6 5h4v14H6V5Zm8 0h4v14h-4V5Z"/></svg>
+          </button>
+          <output class="ve-trim-duration cc-trim-badge" id="trim-duration" hidden>0:00.0</output>
+        </div>
+      </main>
+
+      <!-- 右: プロパティパネル -->
+      <aside class="cc-inspector ve-editor-sidebar" id="editor-sidebar">
+        <h2 class="cc-inspector-title" id="inspector-title">トリム</h2>
+        <div class="ve-tools-center cc-inspector-block" id="tools-center">
+          <div class="ve-time-steppers">
+            <div class="ve-time-stepper">
+              <span class="ve-stepper-label">開始</span>
+              <input type="text" id="start-time" class="ve-stepper-input" inputmode="decimal" value="0:00.0" aria-label="開始時間">
+              <div class="ve-stepper-arrows">
+                <button type="button" class="ve-stepper-arrow ve-stepper-arrow--up" data-target="start" data-dir="1" aria-label="開始を進める"></button>
+                <button type="button" class="ve-stepper-arrow ve-stepper-arrow--down" data-target="start" data-dir="-1" aria-label="開始を戻す"></button>
+              </div>
+            </div>
+            <span class="ve-time-dash" aria-hidden="true">—</span>
+            <div class="ve-time-stepper">
+              <span class="ve-stepper-label">終了</span>
+              <input type="text" id="end-time" class="ve-stepper-input" inputmode="decimal" value="0:00.0" aria-label="終了時間">
+              <div class="ve-stepper-arrows">
+                <button type="button" class="ve-stepper-arrow ve-stepper-arrow--up" data-target="end" data-dir="1" aria-label="終了を進める"></button>
+                <button type="button" class="ve-stepper-arrow ve-stepper-arrow--down" data-target="end" data-dir="-1" aria-label="終了を戻す"></button>
+              </div>
+            </div>
+          </div>
+          <label class="ve-inverse-toggle">
+            <input type="checkbox" id="inverse-toggle">
+            <span>反転トリム</span>
+          </label>
+        </div>
+        <div class="ve-tool-popover cc-inspector-popover" id="tool-popover" hidden>
+          <div class="ve-pop-inner" data-pop="crop" hidden>
+            <label class="ve-pop-check"><input type="checkbox" id="crop-enabled"> クロップを有効化</label>
+            <label class="ve-pop-field">アスペクト比 <select id="aspect-select" class="ve-pop-select"></select></label>
+          </div>
+          <div class="ve-pop-inner" data-pop="rotate" hidden>
+            <div class="ve-pop-btns" role="group" aria-label="回転">
+              <button type="button" class="ve-pop-btn ve-rotate-btn ve-rotate-btn--active" data-rotation="0">0°</button>
+              <button type="button" class="ve-pop-btn ve-rotate-btn" data-rotation="90">90°</button>
+              <button type="button" class="ve-pop-btn ve-rotate-btn" data-rotation="180">180°</button>
+              <button type="button" class="ve-pop-btn ve-rotate-btn" data-rotation="270">270°</button>
+            </div>
+          </div>
+          <div class="ve-pop-inner" data-pop="volume" hidden>
+            <label class="ve-pop-field">音量 <output id="volume-value">100</output>%<input type="range" id="volume" class="ve-pop-range" min="0" max="200" value="100"></label>
+            <div class="ve-pop-row">
+              <label class="ve-pop-field ve-pop-field--half">フェードイン<input type="number" id="fade-in" class="ve-pop-input" min="0" max="10" step="0.1" value="0"></label>
+              <label class="ve-pop-field ve-pop-field--half">フェードアウト<input type="number" id="fade-out" class="ve-pop-input" min="0" max="10" step="0.1" value="0"></label>
+            </div>
+          </div>
+          <div class="ve-pop-inner" data-pop="speed" hidden>
+            <label class="ve-pop-field">速度 <output id="speed-value">100</output>%<input type="range" id="speed" class="ve-pop-range" min="50" max="200" value="100" step="5"></label>
+          </div>
+          <div class="ve-pop-inner" data-pop="flip" hidden>
+            <label class="ve-pop-check"><input type="checkbox" id="flip-h"> 左右反転</label>
+            <label class="ve-pop-check"><input type="checkbox" id="flip-v"> 上下反転</label>
+          </div>
+        </div>
+        <div class="cc-inspector-nle ve-nle-tools">
+          <button type="button" class="ve-nle-btn" id="roll-left-btn" title="Roll -">Roll ◀</button>
+          <button type="button" class="ve-nle-btn" id="roll-right-btn" title="Roll +">Roll ▶</button>
+          <button type="button" class="ve-nle-btn" id="slide-left-btn" title="Slide -">Slide ◀</button>
+          <button type="button" class="ve-nle-btn" id="slide-right-btn" title="Slide +">Slide ▶</button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 下部: タイムライン -->
+    <footer class="cc-timeline-dock">
+      <div class="cc-timeline-toolbar" aria-label="タイムライン操作">
+        <button type="button" class="cc-timeline-btn" id="timeline-split-btn" title="分割 (B)">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 6h12v2H8V6Zm0 5h8v2H8v-2Zm0 5h12v2H8v-2Z"/></svg>
+          分割
+        </button>
+        <button type="button" class="cc-timeline-btn" id="timeline-play-btn" title="再生 (Space)">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+        </button>
+        <span class="cc-timecode" id="timeline-timecode" aria-live="polite">0:00 / 0:00</span>
+      </div>
+      <p class="ve-trim-mode-hint cc-trim-hint" id="trim-mode-hint" hidden></p>
+      <div class="ve-navigation cc-timeline-body" aria-label="タイムライン">
+        <div class="ve-storyboard ve-storyboard--overview" id="storyboard">
+          <span class="ve-timeline-label">全体</span>
+          <div class="ve-storyboard-frames" id="storyboard-frames"></div>
+          <div class="ve-control-bars" id="timeline-track">
+            <div class="ve-mask ve-mask--left" id="mask-left"></div>
+            <div class="ve-mask ve-mask--right" id="mask-right"></div>
+            <button type="button" class="ve-control-bar ve-control-bar--start" id="handle-start" aria-label="開始位置"></button>
+            <button type="button" class="ve-control-bar ve-control-bar--end" id="handle-end" aria-label="終了位置"></button>
+          </div>
+          <div class="ve-time-stripe" id="timeline-playhead" data-value="0:00"></div>
+        </div>
+        <div class="ve-storyboard ve-storyboard--trim-zoom" id="trim-zoom-track">
+          <span class="ve-timeline-label">拡大トリム</span>
+          <div class="ve-storyboard-frames" id="trim-zoom-frames"></div>
+          <canvas class="ve-waveform-canvas" id="waveform-canvas" aria-label="波形"></canvas>
+          <div class="ve-control-bars" id="trim-zoom-controls">
+            <div class="ve-mask ve-mask--left" id="trim-mask-left"></div>
+            <div class="ve-mask ve-mask--right" id="trim-mask-right"></div>
+            <div class="ve-slip-range" aria-hidden="true"></div>
+            <button type="button" class="ve-control-bar ve-control-bar--start" id="trim-handle-start" aria-label="開始位置（ズーム）"></button>
+            <button type="button" class="ve-control-bar ve-control-bar--end" id="trim-handle-end" aria-label="終了位置（ズーム）"></button>
+          </div>
+          <div class="ve-time-stripe" id="trim-playhead" data-value="0:00"></div>
+        </div>
+        <div class="ve-multi-track" id="multi-track" aria-label="マルチトラック"></div>
+      </div>
+    </footer>
+
+    <select id="format-select" hidden aria-hidden="true">
+      <option value="mp4">MP4</option>
+      <option value="webm">WebM</option>
+    </select>
+  </div>
+
+  <div class="ve-denied cc-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="cc-btn cc-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <dialog class="cloud-save-dialog" id="ve-cloud-save-dialog" aria-labelledby="ve-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="ve-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="ve-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="ve-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="ve-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="ve-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="ve-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="ve-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="ve-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。表示中のフォルダに保存されます。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="ve-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="ve-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="ve-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="ve-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="ve-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog class="cloud-save-dialog" id="ve-cloud-open-dialog" aria-labelledby="ve-cloud-open-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="ve-cloud-open-title">クラウドストレージから読み込み</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-open-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="ve-cloud-open-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="ve-cloud-open-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="ve-cloud-open-body">
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="ルート">
+            <p class="cloud-save-section-label">場所</p>
+            <div class="cloud-save-roots" id="ve-cloud-open-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="ve-cloud-open-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="ve-cloud-open-items"></div>
+            <p class="cloud-save-hint">フォルダを開くか、読み込む動画ファイルにチェックを入れてください。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="ve-cloud-open-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-open-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="ve-cloud-open-submit">読み込む</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <div class="ve-overlay cc-overlay" id="export-overlay" hidden aria-live="polite" aria-busy="true">
+    <div class="ve-overlay-card cc-overlay-card">
+      <span class="ve-spinner ve-spinner--large" aria-hidden="true"></span>
+      <p class="ve-overlay-text" id="export-overlay-text">書き出し中…</p>
+      <div class="ve-progress-track">
+        <div class="ve-progress-bar" id="export-progress-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/apps/video-editor/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

@@ -112,7 +112,7 @@ export async function extractOpenfoamTextForReview(buffer: ArrayBuffer): Promise
       continue;
     }
 
-    const text = new TextDecoder("utf-8", { fatal: false }).decode(data).trim();
+    const text = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true }).decode(data).trim();
     if (!text) continue;
 
     const chunk = `### ${entry.name}\n${text}`;

@@ -58,7 +58,11 @@ const RESERVED_SLUGS = new Set([
   "third-party",
   "design",
   "image-editor",
+  "image-converter",
   "cloud-storage",
+  "video-editor",
+  "audio-editor",
+  "website-publish",
 ]);
 
 export interface TpProjectRow {

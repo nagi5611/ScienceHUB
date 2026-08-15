@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>動画変換 E2E</title>
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/video-converter.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard vcv-app">
+  <input
+    type="file"
+    id="file-input"
+    accept="video/*,.mp4,.webm,.avi"
+    hidden
+  >
+  <p id="status" aria-live="polite">待機中</p>
+  <button type="button" id="convert-btn">変換</button>
+
+  <script type="module">
+    import { convertVideoFile } from "/apps/video-converter/js/convert-video.js";
+
+    const statusEl = document.getElementById("status");
+    const fileInput = document.getElementById("file-input");
+    const convertBtn = document.getElementById("convert-btn");
+
+    convertBtn?.addEventListener("click", async () => {
+      const file = fileInput?.files?.[0];
+      if (!file) {
+        statusEl.textContent = "ファイル未選択";
+        return;
+      }
+      statusEl.textContent = "変換中…";
+      try {
+        const blob = await convertVideoFile(file, { format: "mp4", crf: 23 }, {
+          onProgress: (d) => {
+            statusEl.textContent = d.message ?? "変換中…";
+          },
+        });
+        statusEl.textContent = `完了 (${blob.size} bytes, ${blob.type})`;
+        statusEl.dataset.done = "1";
+      } catch (error) {
+        statusEl.textContent =
+          error instanceof Error ? error.message : String(error);
+        statusEl.dataset.error = "1";
+        console.error("convert failed", error);
+      }
+    });
+  </script>
+</body>
+</html>

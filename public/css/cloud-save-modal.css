@@ -200,6 +200,44 @@
   color: #b91c1c;
 }
 
+.cloud-save-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.cloud-save-file-row:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.cloud-save-file-check {
+  flex-shrink: 0;
+  accent-color: #6965db;
+}
+
+.cloud-save-file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-save-file-size {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
 .cloud-save-hint {
   margin: 0.75rem 0 0;
   font-size: 0.8125rem;

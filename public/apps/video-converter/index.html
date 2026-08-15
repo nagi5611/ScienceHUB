@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#2563EB">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>動画変換 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/video-converter.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard vcv-app">
+  <header class="hub-header vcv-header">
+    <div class="hub-header-inner vcv-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <span class="vcv-header-divider" aria-hidden="true"></span>
+        <h1 class="vcv-page-title">動画変換</h1>
+      </div>
+      <span class="vcv-badge">端末内処理</span>
+    </div>
+  </header>
+
+  <input
+    type="file"
+    id="file-input"
+    accept="video/*,.mp4,.webm,.avi,.mov,.mkv,.wmv,.mpeg,.mpg,.3gp,.m4v,.flv,.ogv"
+    multiple
+    hidden
+  >
+
+  <div class="vcv-layout" id="app-main" hidden>
+    <aside class="vcv-sidebar" aria-label="変換オプション">
+      <div
+        class="vcv-drop-zone"
+        id="drop-zone"
+        tabindex="0"
+        role="button"
+        aria-label="動画ファイルをドロップまたはクリックして選択"
+      >
+        <span class="vcv-drop-icon" aria-hidden="true">↑</span>
+        <p class="vcv-drop-title">動画をドロップ</p>
+        <p class="vcv-drop-sub">またはクリックして選択（複数可）</p>
+        <p class="vcv-drop-formats">
+          MP4 · WebM · AVI · MOV · MKV · WMV · MPEG · 3GP · M4V
+        </p>
+      </div>
+
+      <div class="vcv-cloud-actions" aria-label="クラウドストレージ">
+        <button type="button" class="vcv-btn vcv-btn--secondary vcv-btn--block" id="cloud-load-btn">
+          クラウドストレージから読み込み
+        </button>
+        <button type="button" class="vcv-btn vcv-btn--secondary vcv-btn--block" id="cloud-save-btn" disabled>
+          クラウドストレージに保存
+        </button>
+      </div>
+
+      <section class="vcv-card">
+        <h2 class="vcv-card-title">出力形式</h2>
+        <label class="vcv-field">
+          <span class="vcv-field-label">形式</span>
+          <select id="format-select" class="vcv-select" aria-label="出力形式"></select>
+        </label>
+        <label class="vcv-field">
+          <span class="vcv-field-label">品質（CRF） <output id="quality-value">23</output></span>
+          <input type="range" id="quality" class="vcv-range" min="18" max="35" value="23">
+          <p class="vcv-field-hint">数値が小さいほど高画質（ファイルサイズ大）</p>
+        </label>
+      </section>
+
+      <div class="vcv-actions">
+        <button type="button" class="vcv-btn vcv-btn--primary" id="convert-btn" disabled>変換する</button>
+        <button type="button" class="vcv-btn" id="clear-btn" disabled>キューをクリア</button>
+      </div>
+
+      <p class="vcv-hint">
+        ブラウザ内 ffmpeg で変換します。大きな動画は自動でパートに分割して処理し、最後に1本の動画に結合します（サーバーへ送信しません）。拡張子が .avi でも中身が JPEG などの画像の場合はエラーになります — その場合は画像変換アプリをご利用ください。
+      </p>
+    </aside>
+
+    <section class="vcv-panel" aria-label="変換キュー">
+      <div class="vcv-panel-head">
+        <div class="vcv-panel-head-start">
+          <h2 class="vcv-panel-title">ファイル一覧</h2>
+          <p class="vcv-status" id="status" aria-live="polite">動画ファイルを追加してください</p>
+        </div>
+        <div class="vcv-panel-head-actions">
+          <button type="button" class="vcv-btn vcv-btn--secondary" id="download-all-btn" disabled>
+            変換済みを保存
+          </button>
+        </div>
+      </div>
+
+      <p class="vcv-empty" id="file-empty">まだファイルがありません</p>
+      <ul class="vcv-file-list" id="file-list"></ul>
+    </section>
+  </div>
+
+  <div class="vcv-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="vcv-btn vcv-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <dialog class="cloud-save-dialog" id="vcv-cloud-save-dialog" aria-labelledby="vcv-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="vcv-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="vcv-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="vcv-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="vcv-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="vcv-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="vcv-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="vcv-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="vcv-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。表示中のフォルダに保存されます。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="vcv-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="vcv-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="vcv-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="vcv-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="vcv-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog class="cloud-save-dialog" id="vcv-cloud-open-dialog" aria-labelledby="vcv-cloud-open-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="vcv-cloud-open-title">クラウドストレージから読み込み</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-open-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="vcv-cloud-open-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="vcv-cloud-open-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="vcv-cloud-open-body">
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="ルート">
+            <p class="cloud-save-section-label">場所</p>
+            <div class="cloud-save-roots" id="vcv-cloud-open-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="vcv-cloud-open-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="vcv-cloud-open-items"></div>
+            <p class="cloud-save-hint">フォルダを開くか、読み込むファイルにチェックを入れてください。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="vcv-cloud-open-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-open-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="vcv-cloud-open-submit">読み込む</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <script src="/apps/video-converter/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

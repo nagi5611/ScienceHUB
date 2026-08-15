@@ -75,6 +75,8 @@ export interface Env {
   TP_PIPELINE_WORKER_URL?: string;
   /** サードパーティ実装/検証 Worker 内部認証 */
   TP_PIPELINE_WORKER_SECRET?: string;
+  /** ジョブ記録用 FDS バージョン表示 */
+  FDS_SOLVER_VERSION?: string;
   /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */
   FDS_REVIEW_SYNTAX_REFERENCE?: string;
   /** OpenFOAM 入り AMI（/opt/openfoam 等） */
@@ -87,6 +89,10 @@ export interface Env {
   GEMINI_OPENFOAM_REVIEW_MODEL?: string;
   /** 一次審査プロンプト用 OpenFOAM 構文リファレンス全文の上書き */
   OPENFOAM_REVIEW_SYNTAX_REFERENCE?: string;
+  /** 画像変換 Worker（Cloudflare Images） */
+  IMAGE_CONVERTER?: Fetcher;
+  /** 画像変換 Worker 内部認証 */
+  IMAGE_CONVERTER_WORKER_SECRET?: string;
 }
 
 export interface RoleRow {

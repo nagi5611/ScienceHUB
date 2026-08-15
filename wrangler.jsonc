@@ -45,5 +45,11 @@
 				"script_name": "design-collab"
 			}
 		]
-	}
+	},
+	"services": [
+		{
+			"binding": "IMAGE_CONVERTER",
+			"service": "image-converter"
+		}
+	]
 }

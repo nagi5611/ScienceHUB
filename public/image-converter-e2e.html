@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>画像変換 E2E</title>
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/image-converter.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "pdfjs-dist": "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs",
+        "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm",
+        "fflate": "https://esm.sh/fflate@0.8.2?target=es2022",
+        "gifenc": "/apps/image-converter/vendor/gifenc.mjs",
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard icv-app">
+  <input
+    type="file"
+    id="file-input"
+    accept="image/*,.svg,.ico,.avif,.bmp,.pdf,.heic,.heif,.tif,.tiff,.dng,.cr2,.nef,.arw,.orf,.rw2,.mp4,.webm,.avi,video/*,application/pdf"
+    multiple
+    hidden
+  >
+
+  <div class="icv-layout" id="app-main">
+    <aside class="icv-sidebar">
+      <div class="icv-drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
+        <span class="icv-drop-icon" aria-hidden="true">↑</span>
+        <p class="icv-drop-title">ファイルをドロップ</p>
+        <p class="icv-drop-sub">またはクリックして選択（複数可）</p>
+      </div>
+
+      <div class="icv-cloud-actions" aria-label="クラウドストレージ">
+        <button type="button" class="icv-btn icv-btn--secondary icv-btn--block" id="cloud-load-btn">
+          クラウドストレージから読み込み
+        </button>
+        <button type="button" class="icv-btn icv-btn--secondary icv-btn--block" id="cloud-save-btn" disabled>
+          クラウドストレージに保存
+        </button>
+      </div>
+
+      <section class="icv-card">
+        <h2 class="icv-card-title">出力形式</h2>
+        <label class="icv-field icv-field--compact">
+          <span class="icv-field-label">形式</span>
+          <select id="format-select" class="icv-select" aria-label="出力形式"></select>
+        </label>
+        <p class="icv-format-desc" id="format-desc" hidden></p>
+      </section>
+
+      <section class="icv-card icv-card--options">
+        <h2 class="icv-card-title">オプション</h2>
+        <label class="icv-field icv-field--compact">
+          <span class="icv-field-label">最大辺（px）</span>
+          <input type="number" id="max-edge" class="icv-input" min="0" step="1" value="0">
+        </label>
+        <div class="icv-format-context" id="format-context" hidden>
+          <label class="icv-field" id="quality-field" hidden>
+            <span class="icv-field-label">品質 <output id="quality-value">85</output>%</span>
+            <input type="range" id="quality" class="icv-range" min="40" max="100" value="85">
+          </label>
+          <label class="icv-field" id="pdf-pages-field" hidden>
+            <span class="icv-field-label">PDF ページ</span>
+            <select id="pdf-pages" class="icv-select">
+              <option value="all">全ページ</option>
+              <option value="first">1ページ目のみ</option>
+            </select>
+          </label>
+          <div class="icv-field" id="ico-sizes-field" hidden>
+            <span class="icv-field-label">ICO サイズ（px）</span>
+            <div class="icv-ico-grid" id="ico-sizes-grid" role="group" aria-label="ICO サイズ">
+              <label class="icv-ico-option"><input type="checkbox" value="16" checked> 16</label>
+              <label class="icv-ico-option"><input type="checkbox" value="32" checked> 32</label>
+              <label class="icv-ico-option"><input type="checkbox" value="48" checked> 48</label>
+              <label class="icv-ico-option"><input type="checkbox" value="64"> 64</label>
+              <label class="icv-ico-option"><input type="checkbox" value="128"> 128</label>
+              <label class="icv-ico-option"><input type="checkbox" value="256"> 256</label>
+            </div>
+          </div>
+          <p class="icv-format-note" id="svg-note-field" hidden>
+            ラスタ画像の埋め込み形式です。ベクター化ではありません。
+          </p>
+        </div>
+      </section>
+
+      <div class="icv-actions">
+        <button type="button" class="icv-btn icv-btn--primary" id="convert-btn" disabled>変換する</button>
+        <button type="button" class="icv-btn" id="clear-btn" disabled>キューをクリア</button>
+      </div>
+    </aside>
+
+    <section class="icv-panel">
+      <div class="icv-panel-head">
+        <div class="icv-panel-head-start">
+          <h2 class="icv-panel-title">ファイル一覧</h2>
+          <p class="icv-status" id="status" aria-live="polite">ファイルを追加してください</p>
+        </div>
+        <div class="icv-panel-head-actions">
+          <button type="button" class="icv-btn icv-btn--secondary" id="download-zip-btn" disabled>
+            ZIPでまとめて保存
+          </button>
+        </div>
+      </div>
+      <p class="icv-empty" id="file-empty">まだファイルがありません</p>
+      <ul class="icv-file-list" id="file-list"></ul>
+    </section>
+  </div>
+
+  <div class="icv-overlay" id="convert-overlay" hidden aria-live="polite" aria-busy="true">
+    <div class="icv-overlay-card">
+      <span class="icv-spinner icv-spinner--large" aria-hidden="true"></span>
+      <p class="icv-overlay-text" id="convert-overlay-text">変換中…</p>
+      <div class="icv-progress-track">
+        <div class="icv-progress-bar" id="convert-progress-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>window.__ICV_E2E__ = true;</script>
+  <script src="/apps/image-converter/app.js" type="module"></script>
+</body>
+</html>

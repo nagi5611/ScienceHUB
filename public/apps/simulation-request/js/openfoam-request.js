@@ -9,8 +9,8 @@ import {
 } from './phone-verification.js';
 import { ensureCanBook } from './sciencehub-auth.js';
 import {
-  mountFdsRequestChat,
-  isFdsRequestChatAvailable,
+  mountOpenfoamRequestChat,
+  isOpenfoamRequestChatAvailable,
 } from './openfoam-request-chat.js';
 
 const REQUEST_STATUS_LABELS = {
@@ -147,7 +147,7 @@ function renderRequestDetailPanel(row) {
 
   appendPrimaryReviewActions(parts, row);
 
-  if (isFdsRequestChatAvailable(row.status)) {
+  if (isOpenfoamRequestChatAvailable(row.status)) {
     parts.push(
       `<div class="openfoam-request-chat-mount" data-request-id="${escapeHtml(row.id)}" data-request-status="${escapeHtml(row.status)}"></div>`
     );
@@ -234,12 +234,12 @@ function destroyAllOpenfoamChats() {
 function mountExpandedOpenfoamChats(rows) {
   destroyAllOpenfoamChats();
   for (const row of rows) {
-    if (!expandedRequestIds.has(row.id) || !isFdsRequestChatAvailable(row.status)) continue;
+    if (!expandedRequestIds.has(row.id) || !isOpenfoamRequestChatAvailable(row.status)) continue;
     const mount = document.querySelector(
       `.openfoam-request-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
     );
     if (!mount) continue;
-    const destroy = mountFdsRequestChat(mount, {
+    const destroy = mountOpenfoamRequestChat(mount, {
       requestId: row.id,
       apiPrefix: 'openfoam-requests',
       isStaff: false,

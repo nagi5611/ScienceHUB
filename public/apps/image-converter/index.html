@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>画像変換 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/image-converter.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "pdfjs-dist": "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs",
+        "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm",
+        "fflate": "https://esm.sh/fflate@0.8.2?target=es2022",
+        "gifenc": "/apps/image-converter/vendor/gifenc.mjs",
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard icv-app">
+  <header class="hub-header icv-header">
+    <div class="hub-header-inner icv-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <span class="icv-header-divider" aria-hidden="true"></span>
+        <h1 class="icv-page-title">画像変換</h1>
+      </div>
+      <span class="icv-badge">端末内 + Cloudflare</span>
+    </div>
+  </header>
+
+  <input
+    type="file"
+    id="file-input"
+    accept="image/*,.svg,.ico,.avif,.bmp,.pdf,.heic,.heif,.tif,.tiff,.dng,.cr2,.nef,.arw,.orf,.rw2,.mp4,.webm,.avi,video/*,application/pdf"
+    multiple
+    hidden
+  >
+
+  <div class="icv-layout" id="app-main" hidden>
+    <aside class="icv-sidebar" aria-label="変換オプション">
+      <div
+        class="icv-drop-zone"
+        id="drop-zone"
+        tabindex="0"
+        role="button"
+        aria-label="ファイルをドロップまたはクリックして選択"
+      >
+        <span class="icv-drop-icon" aria-hidden="true">↑</span>
+        <p class="icv-drop-title">ファイルをドロップ</p>
+        <p class="icv-drop-sub">またはクリックして選択（複数可）</p>
+        <p class="icv-drop-formats">
+          JPEG · PNG · WebP · GIF · BMP · SVG · AVIF · ICO · PDF · HEIC · TIFF · RAW · MP4 · WebM · AVI
+        </p>
+      </div>
+
+      <div class="icv-cloud-actions" aria-label="クラウドストレージ">
+        <button type="button" class="icv-btn icv-btn--secondary icv-btn--block" id="cloud-load-btn">
+          クラウドストレージから読み込み
+        </button>
+        <button type="button" class="icv-btn icv-btn--secondary icv-btn--block" id="cloud-save-btn" disabled>
+          クラウドストレージに保存
+        </button>
+      </div>
+
+      <section class="icv-card">
+        <h2 class="icv-card-title">出力形式</h2>
+        <label class="icv-field icv-field--compact">
+          <span class="icv-field-label">形式</span>
+          <select id="format-select" class="icv-select" aria-label="出力形式"></select>
+        </label>
+        <p class="icv-format-desc" id="format-desc" hidden></p>
+      </section>
+
+      <section class="icv-card icv-card--options">
+        <h2 class="icv-card-title">オプション</h2>
+
+        <label class="icv-field icv-field--compact">
+          <span class="icv-field-label">最大辺（px）</span>
+          <input type="number" id="max-edge" class="icv-input" min="0" step="1" value="0" placeholder="0 = リサイズなし">
+        </label>
+
+        <div class="icv-format-context" id="format-context" hidden>
+          <label class="icv-field" id="quality-field" hidden>
+            <span class="icv-field-label">品質 <output id="quality-value">85</output>%</span>
+            <input type="range" id="quality" class="icv-range" min="40" max="100" value="85">
+          </label>
+
+          <label class="icv-field" id="pdf-pages-field" hidden>
+            <span class="icv-field-label">PDF ページ</span>
+            <select id="pdf-pages" class="icv-select">
+              <option value="all">全ページ</option>
+              <option value="first">1ページ目のみ</option>
+            </select>
+          </label>
+
+          <div class="icv-field" id="ico-sizes-field" hidden>
+            <span class="icv-field-label">ICO サイズ（px）</span>
+            <div class="icv-ico-grid" id="ico-sizes-grid" role="group" aria-label="ICO サイズ">
+              <label class="icv-ico-option"><input type="checkbox" value="16" checked> 16</label>
+              <label class="icv-ico-option"><input type="checkbox" value="32" checked> 32</label>
+              <label class="icv-ico-option"><input type="checkbox" value="48" checked> 48</label>
+              <label class="icv-ico-option"><input type="checkbox" value="64"> 64</label>
+              <label class="icv-ico-option"><input type="checkbox" value="128"> 128</label>
+              <label class="icv-ico-option"><input type="checkbox" value="256"> 256</label>
+            </div>
+          </div>
+
+          <p class="icv-format-note" id="svg-note-field" hidden>
+            ラスタ画像の埋め込み形式です。ベクター化ではありません。
+          </p>
+        </div>
+      </section>
+
+      <div class="icv-actions">
+        <button type="button" class="icv-btn icv-btn--primary" id="convert-btn" disabled>変換する</button>
+        <button type="button" class="icv-btn" id="clear-btn" disabled>キューをクリア</button>
+      </div>
+
+      <p class="icv-hint">
+        通常の画像・PDF はブラウザ内で変換します。HEIC / TIFF / RAW は Cloudflare Images へ送信します（20MB 以下）。
+      </p>
+    </aside>
+
+    <section class="icv-panel" aria-label="変換キュー">
+      <div class="icv-panel-head">
+        <div class="icv-panel-head-start">
+          <h2 class="icv-panel-title">ファイル一覧</h2>
+          <p class="icv-status" id="status" aria-live="polite">ファイルを追加してください</p>
+        </div>
+        <div class="icv-panel-head-actions">
+          <button type="button" class="icv-btn icv-btn--secondary" id="download-zip-btn" disabled>
+            ZIPでまとめて保存
+          </button>
+        </div>
+      </div>
+
+      <p class="icv-empty" id="file-empty">まだファイルがありません</p>
+      <ul class="icv-file-list" id="file-list"></ul>
+    </section>
+  </div>
+
+  <div class="icv-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="icv-btn icv-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <div class="icv-overlay" id="convert-overlay" hidden aria-live="polite" aria-busy="true">
+    <div class="icv-overlay-card">
+      <span class="icv-spinner icv-spinner--large" aria-hidden="true"></span>
+      <p class="icv-overlay-text" id="convert-overlay-text">変換中…</p>
+      <div class="icv-progress-track">
+        <div class="icv-progress-bar" id="convert-progress-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <dialog class="cloud-save-dialog" id="icv-cloud-save-dialog" aria-labelledby="icv-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="icv-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="icv-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="icv-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="icv-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="icv-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="icv-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="icv-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="icv-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。表示中のフォルダに保存されます。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="icv-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="icv-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="icv-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="icv-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="icv-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog class="cloud-save-dialog" id="icv-cloud-open-dialog" aria-labelledby="icv-cloud-open-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="icv-cloud-open-title">クラウドストレージから読み込み</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-open-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="icv-cloud-open-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="icv-cloud-open-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="icv-cloud-open-body">
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="ルート">
+            <p class="cloud-save-section-label">場所</p>
+            <div class="cloud-save-roots" id="icv-cloud-open-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="icv-cloud-open-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="icv-cloud-open-items"></div>
+            <p class="cloud-save-hint">フォルダを開くか、読み込むファイルにチェックを入れてください。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="icv-cloud-open-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-open-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="icv-cloud-open-submit">読み込む</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <script src="/apps/image-converter/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

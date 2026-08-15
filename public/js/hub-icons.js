@@ -20,14 +20,19 @@ const ICONS = {
   calendar: `<rect x="3" y="5" width="18" height="16" rx="2" ${STROKE}/><path d="M3 10h18M8 3v4M16 3v4" ${STROKE}/>`,
   clipboard: `<rect x="6" y="4" width="12" height="17" rx="2" ${STROKE}/><path d="M9 4.5h6v2H9z" ${STROKE}/><path d="M9 11h6M9 15h4" ${STROKE}/>`,
   chart: `<path d="M4 19V5M4 19h16M8 17V11M12 17V7M16 17v-4" ${STROKE}/>`,
+  globe: `<circle cx="12" cy="12" r="9" ${STROKE}/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" ${STROKE}/>`,
 };
 
 const SLUG_ICON = {
   "image-editor": "image",
+  "image-converter": "image",
+  "video-converter": "image",
+  "audio-converter": "image",
   uvcreator: "layout",
   "project-management": "clipboard",
   excalidraw: "edit",
   "tennis-motion": "chart",
+  "website-publish": "globe",
 };
 
 const EMOJI_ICON = {

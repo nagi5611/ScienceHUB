@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>音声編集 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/audio-editor.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard ae-app">
+  <header class="hub-header ae-header">
+    <div class="hub-header-inner ae-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <span class="ae-header-divider" aria-hidden="true"></span>
+        <h1 class="ae-page-title">音声編集</h1>
+      </div>
+      <span class="ae-badge">端末内処理</span>
+    </div>
+  </header>
+
+  <input
+    type="file"
+    id="file-input"
+    accept="audio/*,video/*,.mp3,.wav,.flac,.ogg,.aac,.m4a,.wma,.opus,.mp4,.webm,.avi,.mov,.mkv"
+    hidden
+  >
+
+  <section class="ae-landing" id="landing-view" hidden>
+    <div class="ae-landing-inner">
+      <div class="ae-hero">
+        <h2 class="ae-hero-title">オーディオをトリミング</h2>
+        <p class="ae-hero-sub">
+          曲の一部分を切り出したり、フェード・正規化・無音削除で仕上げたり、iPhone 着信音（m4r）を作成できます。動画から音声を抽出することも可能です。
+        </p>
+      </div>
+
+      <div
+        class="ae-drop-zone ae-drop-zone--hero"
+        id="drop-zone"
+        tabindex="0"
+        role="button"
+        aria-label="音声または動画ファイルをドロップまたはクリックして選択"
+      >
+        <span class="ae-drop-icon" aria-hidden="true">↑</span>
+        <p class="ae-drop-title">ファイルを選択</p>
+        <p class="ae-drop-sub">またはここにドロップ</p>
+        <p class="ae-drop-formats">
+          MP3 · WAV · FLAC · OGG · M4A · MP4 · WebM · MOV など
+        </p>
+      </div>
+
+      <div class="ae-cloud-actions" aria-label="クラウドストレージ">
+        <button type="button" class="ae-btn ae-btn--secondary ae-btn--block" id="cloud-load-btn-landing">
+          クラウドストレージから読み込み
+        </button>
+      </div>
+
+      <ul class="ae-features" aria-label="機能">
+        <li class="ae-feature">
+          <span class="ae-feature-icon" aria-hidden="true">✂</span>
+          <div>
+            <strong>手軽にトリミング</strong>
+            <p>波形上で範囲を選び、ワンクリックで切り出します。</p>
+          </div>
+        </li>
+        <li class="ae-feature">
+          <span class="ae-feature-icon" aria-hidden="true">⌇</span>
+          <div>
+            <strong>用途プリセット</strong>
+            <p>着信音・ポッドキャスト・ボイスメモ・高音質（FLAC）をワンクリックで設定。</p>
+          </div>
+        </li>
+        <li class="ae-feature">
+          <span class="ae-feature-icon" aria-hidden="true">🔁</span>
+          <div>
+            <strong>区間ループと波形ズーム</strong>
+            <p>切り出し前に選択区間をループ再生。Ctrl+スクロールで精密に調整。</p>
+          </div>
+        </li>
+        <li class="ae-feature">
+          <span class="ae-feature-icon" aria-hidden="true">📱</span>
+          <div>
+            <strong>iPhone 着信音</strong>
+            <p>M4R 形式・最大 40 秒で書き出し。iTunes 経由で転送できます。</p>
+          </div>
+        </li>
+        <li class="ae-feature">
+          <span class="ae-feature-icon" aria-hidden="true">🎬</span>
+          <div>
+            <strong>動画から音声抽出</strong>
+            <p>動画ファイルをアップロードすると音声トラックだけを編集できます。</p>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="ae-editor" id="editor-view" hidden>
+    <div class="ae-editor-card">
+      <header class="ae-editor-head">
+        <div class="ae-editor-head-main">
+          <h2 class="ae-editor-title" id="file-name">—</h2>
+          <p class="ae-editor-meta" id="file-meta">—</p>
+        </div>
+        <div class="ae-editor-head-actions">
+          <button type="button" class="ae-btn ae-btn--ghost ae-btn--small" id="shortcuts-btn" title="キーボードショートカット">?</button>
+          <button type="button" class="ae-btn ae-btn--ghost ae-btn--small" id="reset-edits-btn">編集をリセット</button>
+          <button type="button" class="ae-btn ae-btn--secondary ae-btn--small" id="new-file-btn">別のファイル</button>
+        </div>
+      </header>
+
+      <div class="ae-wave-section">
+        <div class="ae-wave-toolbar">
+          <p class="ae-wave-hint">橙色の範囲が書き出し区間です。ハンドルをドラッグするか、下の数値で調整できます。</p>
+          <div class="ae-wave-zoom" aria-label="波形ズーム">
+            <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="zoom-out-btn" title="ズームアウト" aria-label="ズームアウト">−</button>
+            <button type="button" class="ae-btn ae-btn--ghost ae-btn--small" id="zoom-fit-btn">全体表示</button>
+            <button type="button" class="ae-btn ae-btn--ghost ae-btn--small" id="zoom-selection-btn">選択範囲</button>
+            <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="zoom-in-btn" title="ズームイン" aria-label="ズームイン">+</button>
+          </div>
+        </div>
+        <div class="ae-wave-stage" id="wave-stage" aria-label="波形エディタ">
+        <canvas id="wave-canvas" class="ae-wave-canvas" aria-hidden="true"></canvas>
+        <div class="ae-wave-overlay" id="wave-overlay">
+          <div class="ae-wave-shade ae-wave-shade--left" id="wave-shade-left"></div>
+          <div class="ae-wave-selection" id="wave-selection"></div>
+          <div class="ae-wave-shade ae-wave-shade--right" id="wave-shade-right"></div>
+          <div class="ae-wave-playhead" id="wave-playhead"></div>
+          <button type="button" class="ae-wave-handle ae-wave-handle--start" id="handle-start" aria-label="開始位置">
+            <span aria-hidden="true"></span>
+          </button>
+          <button type="button" class="ae-wave-handle ae-wave-handle--end" id="handle-end" aria-label="終了位置">
+            <span aria-hidden="true"></span>
+          </button>
+        </div>
+        <p class="ae-wave-placeholder" id="wave-placeholder">波形を読み込み中…</p>
+        </div>
+      </div>
+
+      <div class="ae-panel-section">
+        <h3 class="ae-section-title">再生</h3>
+        <div class="ae-transport-bar">
+          <div class="ae-transport-main">
+            <button type="button" class="ae-play-btn" id="play-btn" disabled aria-label="再生">
+              <span class="ae-play-icon" aria-hidden="true">▶</span>
+            </button>
+            <div class="ae-time-readout">
+              <span class="ae-time-readout-label">再生位置</span>
+              <span id="timeline-current-label">0:00</span>
+              <span class="ae-time-sep">/</span>
+              <span id="timeline-end-label">0:00</span>
+            </div>
+          </div>
+          <div class="ae-nudge-group" aria-label="区間を微調整">
+            <div class="ae-nudge-block">
+              <span class="ae-nudge-label">開始位置</span>
+              <div class="ae-nudge-buttons">
+                <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="nudge-start-minus" title="0.1秒戻す" aria-label="開始を0.1秒戻す">−</button>
+                <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="nudge-start-plus" title="0.1秒進める" aria-label="開始を0.1秒進める">+</button>
+              </div>
+            </div>
+            <div class="ae-nudge-block">
+              <span class="ae-nudge-label">終了位置</span>
+              <div class="ae-nudge-buttons">
+                <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="nudge-end-minus" title="0.1秒戻す" aria-label="終了を0.1秒戻す">−</button>
+                <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="nudge-end-plus" title="0.1秒進める" aria-label="終了を0.1秒進める">+</button>
+              </div>
+            </div>
+          </div>
+          <label class="ae-check ae-loop-check">
+            <input type="checkbox" id="loop-selection">
+            <span>選択区間をループ再生</span>
+          </label>
+        </div>
+        <p class="ae-field-hint ae-transport-hint">← → 開始 · Shift+← → 終了 · I/O 再生位置へ · Space 再生 · Ctrl+スクロールでズーム</p>
+      </div>
+
+      <div class="ae-panel-section">
+        <h3 class="ae-section-title">切り出し範囲</h3>
+        <div class="ae-trim-stats">
+          <label class="ae-stat ae-stat--editable">
+            <span class="ae-stat-label">開始 <kbd>I</kbd></span>
+            <input type="text" id="start-time" class="ae-stat-input" inputmode="decimal" value="0:00.0" aria-label="開始時刻">
+          </label>
+          <label class="ae-stat ae-stat--editable">
+            <span class="ae-stat-label">終了 <kbd>O</kbd></span>
+            <input type="text" id="end-time" class="ae-stat-input" inputmode="decimal" value="0:00.0" aria-label="終了時刻">
+          </label>
+          <div class="ae-stat ae-stat--highlight">
+            <span class="ae-stat-label">選択長</span>
+            <output class="ae-stat-value" id="trim-duration">0:00.0</output>
+          </div>
+        </div>
+      </div>
+
+      <div class="ae-panel-section">
+        <h3 class="ae-section-title">用途プリセット</h3>
+        <div class="ae-preset-row">
+          <button type="button" class="ae-btn ae-btn--secondary ae-btn--small" id="preset-ringtone-btn">着信音</button>
+          <button type="button" class="ae-btn ae-btn--secondary ae-btn--small" id="preset-podcast-btn">ポッドキャスト</button>
+          <button type="button" class="ae-btn ae-btn--secondary ae-btn--small" id="preset-voice-btn">ボイスメモ</button>
+          <button type="button" class="ae-btn ae-btn--secondary ae-btn--small" id="preset-hifi-btn">高音質</button>
+        </div>
+      </div>
+
+      <div class="ae-panel-section">
+        <h3 class="ae-section-title">音声調整</h3>
+        <div class="ae-controls-grid">
+        <label class="ae-control">
+          <span class="ae-control-label">フェードイン <output id="fade-in-value">0</output>s</span>
+          <input type="range" id="fade-in" class="ae-range" min="0" max="10" step="0.1" value="0">
+        </label>
+        <label class="ae-control">
+          <span class="ae-control-label">フェードアウト <output id="fade-out-value">0</output>s</span>
+          <input type="range" id="fade-out" class="ae-range" min="0" max="10" step="0.1" value="0">
+        </label>
+        <label class="ae-control">
+          <span class="ae-control-label">音量 <output id="volume-value">100</output>%</span>
+          <input type="range" id="volume" class="ae-range" min="0" max="200" value="100">
+        </label>
+        <label class="ae-control">
+          <span class="ae-control-label">速度 <output id="speed-value">100</output>%</span>
+          <input type="range" id="speed" class="ae-range" min="50" max="200" value="100" step="5">
+        </label>
+        <label class="ae-control">
+          <span class="ae-control-label">ピッチ <output id="pitch-value">0</output> 半音</span>
+          <input type="range" id="pitch" class="ae-range" min="-12" max="12" value="0" step="1">
+        </label>
+        <label class="ae-control" id="bitrate-field">
+          <span class="ae-control-label">ビットレート <output id="bitrate-value">192</output> kbps</span>
+          <input type="range" id="bitrate" class="ae-range" min="64" max="320" value="192" step="32">
+        </label>
+        </div>
+        <div class="ae-effect-toggles">
+          <label class="ae-check">
+            <input type="checkbox" id="normalize">
+            <span>音量を正規化</span>
+          </label>
+          <label class="ae-check">
+            <input type="checkbox" id="reverse">
+            <span>逆再生</span>
+          </label>
+          <label class="ae-check">
+            <input type="checkbox" id="trim-silence">
+            <span>前後の無音を削除</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="ae-panel-section ae-panel-section--export">
+        <h3 class="ae-section-title">書き出し</h3>
+        <div class="ae-export-bar">
+        <label class="ae-export-format">
+          <span class="ae-control-label">出力形式</span>
+          <select id="format-select" class="ae-select" aria-label="出力形式">
+            <option value="mp3">MP3</option>
+            <option value="wav">WAV</option>
+            <option value="flac">FLAC</option>
+            <option value="m4a">M4A</option>
+            <option value="m4r">M4R（iPhone 着信音）</option>
+            <option value="ogg">OGG</option>
+          </select>
+        </label>
+        <label class="ae-export-meta">
+          <span class="ae-control-label">タイトル（任意）</span>
+          <input type="text" id="metadata-title" class="ae-input" placeholder="書き出しファイル名の表示用" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="ae-check ae-export-check" id="no-reencode-wrap">
+          <input type="checkbox" id="no-reencode" checked>
+          <span>再エンコードなし</span>
+        </label>
+        <button type="button" class="ae-btn ae-btn--primary ae-btn--cut" id="export-btn" disabled>切り取ってダウンロード</button>
+        </div>
+        <p class="ae-export-summary" id="export-summary" aria-live="polite">—</p>
+        <p class="ae-field-hint" id="no-reencode-hint">音量・速度・フェード・形式変換時は再エンコードが必要です。</p>
+        <p class="ae-field-hint" id="ringtone-hint" hidden>M4R は最大 40 秒。超える場合は終了位置を自動調整します。</p>
+      </div>
+
+      <div class="ae-panel-section ae-panel-section--footer">
+        <button type="button" class="ae-btn ae-btn--secondary" id="cloud-load-btn">クラウドから読み込み</button>
+        <button type="button" class="ae-btn ae-btn--secondary ae-btn--small" id="cloud-save-btn" disabled>クラウドに保存</button>
+      </div>
+    </div>
+
+    <audio id="preview-audio" class="ae-media" preload="auto"></audio>
+    <video id="preview-video" class="ae-media" preload="auto" playsinline hidden></video>
+  </section>
+
+  <div class="ae-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="ae-btn ae-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <dialog class="cloud-save-dialog" id="ae-cloud-save-dialog" aria-labelledby="ae-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="ae-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="ae-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="ae-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="ae-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="ae-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="ae-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="ae-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="ae-cloud-save-folders"></div>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="ae-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="ae-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="ae-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="ae-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="ae-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog class="cloud-save-dialog" id="ae-cloud-open-dialog" aria-labelledby="ae-cloud-open-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="ae-cloud-open-title">クラウドストレージから読み込み</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-open-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="ae-cloud-open-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="ae-cloud-open-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="ae-cloud-open-body">
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="ルート">
+            <p class="cloud-save-section-label">場所</p>
+            <div class="cloud-save-roots" id="ae-cloud-open-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="ae-cloud-open-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="ae-cloud-open-items"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="ae-cloud-open-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-open-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="ae-cloud-open-submit">読み込む</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog class="ae-shortcuts-dialog" id="shortcuts-dialog" aria-labelledby="shortcuts-dialog-title">
+    <header class="ae-shortcuts-head">
+      <h2 id="shortcuts-dialog-title">キーボードショートカット</h2>
+      <button type="button" class="ae-btn ae-btn--ghost ae-btn--icon" id="shortcuts-close-btn" aria-label="閉じる">×</button>
+    </header>
+    <dl class="ae-shortcuts-list">
+      <div><dt>Space</dt><dd>再生 / 一時停止</dd></div>
+      <div><dt>I</dt><dd>再生位置を開始に設定</dd></div>
+      <div><dt>O</dt><dd>再生位置を終了に設定</dd></div>
+      <div><dt>Shift+I</dt><dd>開始位置へジャンプ</dd></div>
+      <div><dt>Shift+O</dt><dd>終了位置へジャンプ</dd></div>
+      <div><dt>← →</dt><dd>開始位置を 0.1 秒移動</dd></div>
+      <div><dt>Shift+← →</dt><dd>終了位置を 0.1 秒移動</dd></div>
+      <div><dt>Home / End</dt><dd>再生位置を開始 / 終了へ</dd></div>
+      <div><dt>Ctrl+スクロール</dt><dd>波形をズーム</dd></div>
+      <div><dt>?</dt><dd>この一覧を表示</dd></div>
+    </dl>
+  </dialog>
+
+  <div class="ae-overlay" id="export-overlay" hidden aria-live="polite" aria-busy="true">
+    <div class="ae-overlay-card">
+      <span class="ae-spinner ae-spinner--large" aria-hidden="true"></span>
+      <p class="ae-overlay-text" id="export-overlay-text">書き出し中…</p>
+      <div class="ae-progress-track">
+        <div class="ae-progress-bar" id="export-progress-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/apps/audio-editor/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

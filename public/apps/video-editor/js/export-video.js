@@ -1,0 +1,549 @@
+/**
+ * ffmpeg.wasm による動画書き出し（トリム・クロップ・回転・テキスト等）
+ */
+
+import { resolveFfmpegWasmUrl } from "../../../js/ffmpeg-wasm-url.js";
+
+const FFMPEG_CORE_JS_BASE = "/apps/image-converter/vendor/ffmpeg";
+const MOUNT_POINT = "/ve-input";
+
+/** @type {import('@ffmpeg/ffmpeg').FFmpeg | null} */
+let ffmpegInstance = null;
+/** @type {Promise<import('@ffmpeg/ffmpeg').FFmpeg> | null} */
+let ffmpegLoadPromise = null;
+
+/** ffmpeg をシングルトンでロード */
+async function getFfmpeg() {
+  if (ffmpegInstance?.loaded) return ffmpegInstance;
+  if (ffmpegLoadPromise) return ffmpegLoadPromise;
+
+  ffmpegLoadPromise = (async () => {
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+    const { toBlobURL } = await import("@ffmpeg/util");
+    const ffmpeg = new FFmpeg();
+    const workerBase = "/apps/image-converter/vendor/ffmpeg-js";
+    const wasmUrl = await resolveFfmpegWasmUrl();
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${FFMPEG_CORE_JS_BASE}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(wasmUrl, "application/wasm"),
+      workerURL: await toBlobURL(`${workerBase}/worker.js`, "text/javascript"),
+    });
+    ffmpegInstance = ffmpeg;
+    return ffmpeg;
+  })();
+
+  return ffmpegLoadPromise;
+}
+
+/**
+ * @typedef {Object} CropRect
+ * @property {number} x 正規化 0-1
+ * @property {number} y 正規化 0-1
+ * @property {number} w 正規化 0-1
+ * @property {number} h 正規化 0-1
+ */
+
+/**
+ * @typedef {Object} TextOverlayExport
+ * @property {string} content
+ * @property {number} x
+ * @property {number} y
+ * @property {number} fontSize
+ * @property {string} color
+ * @property {number} opacity
+ * @property {string} [fontFamily]
+ * @property {boolean} [bold]
+ * @property {boolean} [italic]
+ * @property {"left" | "center" | "right"} [align]
+ * @property {number} [boxWidth]
+ */
+
+/**
+ * @typedef {Object} ExportSettings
+ * @property {number} start
+ * @property {number} end
+ * @property {number} [slipOffset]
+ * @property {number} [audioStart]
+ * @property {number} [audioEnd]
+ * @property {boolean} [audioLinked]
+ * @property {number} rotation
+ * @property {boolean} flipH
+ * @property {boolean} flipV
+ * @property {number} volume
+ * @property {number} speed
+ * @property {number} fadeIn
+ * @property {number} fadeOut
+ * @property {boolean} cropEnabled
+ * @property {CropRect} crop
+ * @property {boolean} textEnabled
+ * @property {TextOverlayExport[]} textOverlays
+ * @property {string} format mp4 | webm
+ * @property {number} quality CRF
+ * @property {boolean} noReencode
+ * @property {boolean} inverse
+ * @property {number} duration
+ * @property {number} videoWidth
+ * @property {number} videoHeight
+ * @property {import("./timeline-model.js").TimelineModel | null} [timeline]
+ */
+
+/** 書き出し用の実効トリム区間 */
+export function getExportTrimRange(settings) {
+  const clipLen = Math.max(0.1, settings.end - settings.start);
+  const slip = settings.slipOffset ?? 0;
+  const effectiveStart = Math.max(0, settings.start + slip);
+  const effectiveEnd = Math.min(settings.duration || effectiveStart + clipLen, effectiveStart + clipLen);
+  const linked = settings.audioLinked !== false;
+  const audioStart = linked ? effectiveStart : (settings.audioStart ?? effectiveStart);
+  const audioEnd = linked ? effectiveEnd : (settings.audioEnd ?? effectiveEnd);
+  const audioSplit =
+    !linked &&
+    (Math.abs(audioStart - effectiveStart) > 0.02 || Math.abs(audioEnd - effectiveEnd) > 0.02);
+  return { effectiveStart, effectiveEnd, clipLen, audioStart, audioEnd, audioSplit };
+}
+
+/** 再エンコードが必要か */
+export function needsReencode(settings) {
+  const { audioSplit } = getExportTrimRange(settings);
+  const hasMultiTimeline =
+    settings.timeline &&
+    settings.timeline.tracks.some((t) => t.type === "video" && t.clips.length > 1);
+  return (
+    settings.inverse ||
+    settings.rotation !== 0 ||
+    settings.flipH ||
+    settings.flipV ||
+    settings.cropEnabled ||
+    settings.textEnabled ||
+    settings.volume !== 100 ||
+    settings.speed !== 100 ||
+    settings.fadeIn > 0 ||
+    settings.fadeOut > 0 ||
+    settings.format === "webm" ||
+    (settings.slipOffset ?? 0) !== 0 ||
+    audioSplit ||
+    !!hasMultiTimeline
+  );
+}
+
+/** drawtext 用にテキストをエスケープ */
+function escapeDrawtext(text) {
+  return String(text)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/%/g, "\\%");
+}
+
+/** テキスト位置を drawtext パラメータに変換 */
+function drawtextPosition(position) {
+  switch (position) {
+    case "top":
+      return ":x=(w-text_w)/2:y=40";
+    case "center":
+      return ":x=(w-text_w)/2:y=(h-text_h)/2";
+    case "bottom":
+    default:
+      return ":x=(w-text_w)/2:y=h-text_h-40";
+  }
+}
+
+/** 色 #RRGGBB → 0xRRGGBB */
+function colorToFfmpeg(hex) {
+  const clean = String(hex).replace("#", "");
+  return `0x${clean}`;
+}
+
+/** クロップ矩形（ピクセル） */
+function cropPixels(settings) {
+  const vw = Math.max(1, settings.videoWidth);
+  const vh = Math.max(1, settings.videoHeight);
+  const x = Math.round(settings.crop.x * vw);
+  const y = Math.round(settings.crop.y * vh);
+  const w = Math.max(2, Math.round(settings.crop.w * vw));
+  const h = Math.max(2, Math.round(settings.crop.h * vh));
+  const evenW = w % 2 === 0 ? w : w - 1;
+  const evenH = h % 2 === 0 ? h : h - 1;
+  return { x, y, w: Math.max(2, evenW), h: Math.max(2, evenH) };
+}
+
+/** drawtext 用フォント名（ffmpeg fontconfig 向け） */
+function fontFamilyToDrawtext(fontFamily) {
+  if (!fontFamily) return "";
+  const first = String(fontFamily).split(",")[0].replace(/['"]/g, "").trim();
+  if (!first) return "";
+  return `:font='${escapeDrawtext(first)}'`;
+}
+
+/** drawtext フィルタを1件分生成 */
+function drawtextFilter(overlay) {
+  const escaped = escapeDrawtext(overlay.content.trim());
+  const alpha = Math.max(0, Math.min(1, overlay.opacity / 100));
+  const color = colorToFfmpeg(overlay.color);
+  const size = overlay.bold ? Math.round(overlay.fontSize * 1.08) : overlay.fontSize;
+  let xExpr = String(overlay.x);
+  if (overlay.align === "center" && overlay.boxWidth) {
+    xExpr = `${overlay.x}+(${overlay.boxWidth}-text_w)/2`;
+  } else if (overlay.align === "right" && overlay.boxWidth) {
+    xExpr = `${overlay.x}+${overlay.boxWidth}-text_w`;
+  }
+  const font = fontFamilyToDrawtext(overlay.fontFamily);
+  const italicSuffix = overlay.italic ? ":expansion=none" : "";
+  return `drawtext=text='${escaped}'${font}:fontsize=${size}:fontcolor=${color}@${alpha.toFixed(2)}:x=${xExpr}:y=${overlay.y}${italicSuffix}`;
+}
+
+/** 映像フィルタチェーンを組み立て */
+function buildVideoFilters(settings) {
+  /** @type {string[]} */
+  const filters = [];
+
+  if (settings.cropEnabled) {
+    const c = cropPixels(settings);
+    filters.push(`crop=${c.w}:${c.h}:${c.x}:${c.y}`);
+  }
+
+  if (settings.rotation === 90) filters.push("transpose=1");
+  else if (settings.rotation === 180) filters.push("transpose=1,transpose=1");
+  else if (settings.rotation === 270) filters.push("transpose=2");
+
+  if (settings.flipH) filters.push("hflip");
+  if (settings.flipV) filters.push("vflip");
+
+  const overlays = settings.textOverlays ?? [];
+
+  for (const overlay of overlays) {
+    if (overlay.content.trim()) {
+      filters.push(drawtextFilter(overlay));
+    }
+  }
+
+  if (settings.speed !== 100) {
+    const factor = settings.speed / 100;
+    filters.push(`setpts=PTS/${factor}`);
+  }
+
+  const clipDuration = Math.max(0.1, settings.end - settings.start);
+  if (settings.fadeIn > 0) {
+    filters.push(`fade=t=in:st=0:d=${settings.fadeIn}`);
+  }
+  if (settings.fadeOut > 0) {
+    const fadeStart = Math.max(0, clipDuration - settings.fadeOut);
+    filters.push(`fade=t=out:st=${fadeStart}:d=${settings.fadeOut}`);
+  }
+
+  return filters.length ? filters.join(",") : null;
+}
+
+/** 音声フィルタチェーンを組み立て */
+function buildAudioFilters(settings) {
+  /** @type {string[]} */
+  const filters = [];
+
+  if (settings.volume !== 100) {
+    filters.push(`volume=${(settings.volume / 100).toFixed(3)}`);
+  }
+
+  if (settings.speed !== 100) {
+    let factor = settings.speed / 100;
+    while (factor > 2.0) {
+      filters.push("atempo=2.0");
+      factor /= 2.0;
+    }
+    while (factor < 0.5) {
+      filters.push("atempo=0.5");
+      factor /= 0.5;
+    }
+    if (Math.abs(factor - 1) > 0.001) {
+      filters.push(`atempo=${factor.toFixed(4)}`);
+    }
+  }
+
+  const clipDuration = Math.max(0.1, settings.end - settings.start);
+  if (settings.fadeIn > 0) {
+    filters.push(`afade=t=in:st=0:d=${settings.fadeIn}`);
+  }
+  if (settings.fadeOut > 0) {
+    const fadeStart = Math.max(0, clipDuration - settings.fadeOut);
+    filters.push(`afade=t=out:st=${fadeStart}:d=${settings.fadeOut}`);
+  }
+
+  return filters.length ? filters.join(",") : null;
+}
+
+/** 逆転トリム用 filter_complex（再エンコード必須） */
+function buildInverseTrimFilter(settings) {
+  const start = Math.max(0, settings.start);
+  const end = Math.max(start, settings.end);
+  const duration = Math.max(end, settings.duration || end);
+  /** @type {string[]} */
+  const parts = [];
+  /** @type {string[]} */
+  const concatPairs = [];
+  let idx = 0;
+
+  if (start > 0.05) {
+    parts.push(`[0:v]trim=start=0:end=${start},setpts=PTS-STARTPTS[v${idx}]`);
+    parts.push(`[0:a]atrim=start=0:end=${start},asetpts=PTS-STARTPTS[a${idx}]`);
+    concatPairs.push(`[v${idx}][a${idx}]`);
+    idx += 1;
+  }
+
+  if (end < duration - 0.05) {
+    parts.push(`[0:v]trim=start=${end},setpts=PTS-STARTPTS[v${idx}]`);
+    parts.push(`[0:a]atrim=start=${end},asetpts=PTS-STARTPTS[a${idx}]`);
+    concatPairs.push(`[v${idx}][a${idx}]`);
+    idx += 1;
+  }
+
+  if (concatPairs.length === 0) return null;
+
+  if (concatPairs.length === 1) {
+    return parts.join(";").replace("[v0]", "[outv]").replace("[a0]", "[outa]");
+  }
+
+  parts.push(`${concatPairs.join("")}concat=n=${concatPairs.length}:v=1:a=1[outv][outa]`);
+  return parts.join(";");
+}
+
+/** 出力ファイル名 */
+function outputFilename(format) {
+  return format === "webm" ? "output.webm" : "output.mp4";
+}
+
+/** MIME タイプ */
+function outputMime(format) {
+  return format === "webm" ? "video/webm" : "video/mp4";
+}
+
+/**
+ * 動画を書き出す
+ * @param {File} file
+ * @param {ExportSettings} settings
+ * @param {{ onProgress?: (ratio: number, message?: string) => void }} [callbacks]
+ */
+/**
+ * タイムライン filter_complex を組み立て（Phase 2）
+ * @param {import("./timeline-model.js").TimelineModel} timeline
+ * @param {Map<string, string>} inputPaths mediaId -> path
+ */
+export function buildTimelineGraph(timeline, inputPaths) {
+  const vTrack = timeline.tracks.find((t) => t.id === "v1");
+  if (!vTrack || vTrack.clips.length === 0) return null;
+
+  /** @type {string[]} */
+  const inputFiles = [];
+  /** @type {Map<string, number>} */
+  const mediaToInputIdx = new Map();
+
+  for (const clip of vTrack.clips) {
+    if (mediaToInputIdx.has(clip.mediaId)) continue;
+    const path = inputPaths.get(clip.mediaId);
+    if (!path) continue;
+    mediaToInputIdx.set(clip.mediaId, inputFiles.length);
+    inputFiles.push(path);
+  }
+
+  /** @type {string[]} */
+  const parts = [];
+  /** @type {string[]} */
+  const vLabels = [];
+  /** @type {string[]} */
+  const aLabels = [];
+
+  vTrack.clips.forEach((clip, i) => {
+    const inputIdx = mediaToInputIdx.get(clip.mediaId);
+    if (inputIdx === undefined) return;
+    const vLabel = `vc${i}`;
+    const aLabel = `ac${i}`;
+    parts.push(
+      `[${inputIdx}:v]trim=start=${clip.sourceIn}:end=${clip.sourceOut},setpts=PTS-STARTPTS[${vLabel}]`
+    );
+    parts.push(
+      `[${inputIdx}:a]atrim=start=${clip.sourceIn}:end=${clip.sourceOut},asetpts=PTS-STARTPTS[${aLabel}]`
+    );
+    vLabels.push(`[${vLabel}]`);
+    aLabels.push(`[${aLabel}]`);
+  });
+
+  if (vLabels.length === 0) return null;
+
+  if (vLabels.length === 1) {
+    return {
+      filter: parts.join(";").replace("[vc0]", "[outv]").replace("[ac0]", "[outa]"),
+      inputFiles,
+    };
+  }
+
+  parts.push(`${vLabels.join("")}concat=n=${vLabels.length}:v=1:a=0[outv]`);
+  parts.push(`${aLabels.join("")}concat=n=${aLabels.length}:v=0:a=1[outa]`);
+  return { filter: parts.join(";"), inputFiles };
+}
+
+export async function exportVideo(file, settings, callbacks = {}) {
+  const ffmpeg = await getFfmpeg();
+  callbacks.onProgress?.(0.05, "ffmpeg を準備中…");
+
+  const filesToMount = [file];
+  if (settings.timeline) {
+    for (const media of settings.timeline.mediaBin) {
+      if (media.file !== file && !filesToMount.includes(media.file)) {
+        filesToMount.push(media.file);
+      }
+    }
+  }
+
+  await ffmpeg.mount("WORKERFS", { files: filesToMount }, MOUNT_POINT);
+  const inputPath = `${MOUNT_POINT}/${file.name}`;
+  const outName = outputFilename(settings.format);
+  const streamCopy = settings.noReencode && !needsReencode(settings);
+  const trimRange = getExportTrimRange(settings);
+
+  ffmpeg.on("progress", ({ progress, time }) => {
+    if (Number.isFinite(progress) && progress > 0) {
+      callbacks.onProgress?.(Math.min(0.95, 0.1 + progress * 0.85), "エンコード中…");
+    } else if (time > 0) {
+      callbacks.onProgress?.(0.5, "処理中…");
+    }
+  });
+
+  try {
+    if (settings.inverse) {
+      const filter = buildInverseTrimFilter(settings);
+      if (!filter) throw new Error("逆転トリムの対象区間がありません");
+      callbacks.onProgress?.(0.15, "逆転トリム中…");
+      /** @type {string[]} */
+      const args = ["-hide_banner", "-i", inputPath, "-filter_complex", filter, "-map", "[outv]", "-map", "[outa]"];
+      if (settings.format === "webm") {
+        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");
+      } else {
+        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
+      }
+      args.push("-movflags", "+faststart", "-y", outName);
+      await ffmpeg.exec(args);
+    } else if (
+      settings.timeline &&
+      settings.timeline.tracks.some((t) => t.type === "video" && t.clips.length > 1)
+    ) {
+      callbacks.onProgress?.(0.15, "タイムライン合成中…");
+      /** @type {Map<string, string>} */
+      const inputPaths = new Map();
+      for (const media of settings.timeline.mediaBin) {
+        inputPaths.set(media.id, `${MOUNT_POINT}/${media.file.name}`);
+      }
+      const graph = buildTimelineGraph(settings.timeline, inputPaths);
+      if (!graph) throw new Error("タイムラインが空です");
+
+      /** @type {string[]} */
+      const args = ["-hide_banner"];
+      for (const path of graph.inputFiles) {
+        args.push("-i", path);
+      }
+      args.push("-filter_complex", graph.filter, "-map", "[outv]", "-map", "[outa]");
+
+      if (settings.format === "webm") {
+        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");
+      } else {
+        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
+      }
+      args.push("-movflags", "+faststart", "-y", outName);
+      await ffmpeg.exec(args);
+    } else if (streamCopy) {
+      callbacks.onProgress?.(0.15, "トリミング中（再エンコードなし）…");
+      await ffmpeg.exec([
+        "-hide_banner",
+        "-ss",
+        String(trimRange.effectiveStart),
+        "-to",
+        String(trimRange.effectiveEnd),
+        "-i",
+        inputPath,
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "1",
+        "-y",
+        outName,
+      ]);
+    } else if (trimRange.audioSplit) {
+      callbacks.onProgress?.(0.15, "映像・音声を個別トリム中…");
+      const vf = buildVideoFilters(settings);
+      const af = buildAudioFilters(settings);
+      const vChain = [
+        `[0:v]trim=start=${trimRange.effectiveStart}:end=${trimRange.effectiveEnd},setpts=PTS-STARTPTS`,
+        vf ? vf : "null",
+      ].join(",");
+      const aChain = [
+        `[0:a]atrim=start=${trimRange.audioStart}:end=${trimRange.audioEnd},asetpts=PTS-STARTPTS`,
+        af ? af : "anull",
+      ].join(",");
+      const filter = `${vChain}[outv];${aChain}[outa]`;
+      /** @type {string[]} */
+      const args = [
+        "-hide_banner",
+        "-i",
+        inputPath,
+        "-filter_complex",
+        filter,
+        "-map",
+        "[outv]",
+        "-map",
+        "[outa]",
+      ];
+      if (settings.format === "webm") {
+        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");
+      } else {
+        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
+      }
+      args.push("-movflags", "+faststart", "-y", outName);
+      await ffmpeg.exec(args);
+    } else {
+      callbacks.onProgress?.(0.15, "エンコード中…");
+      /** @type {string[]} */
+      const args = [
+        "-hide_banner",
+        "-ss",
+        String(trimRange.effectiveStart),
+        "-to",
+        String(trimRange.effectiveEnd),
+        "-i",
+        inputPath,
+      ];
+
+      const vf = buildVideoFilters(settings);
+      const af = buildAudioFilters(settings);
+      if (vf) args.push("-vf", vf);
+      if (af) args.push("-af", af);
+
+      if (settings.format === "webm") {
+        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0");
+        args.push("-c:a", "libopus", "-b:a", "128k");
+      } else {
+        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast");
+        args.push("-c:a", "aac", "-b:a", "128k");
+      }
+
+      args.push("-movflags", "+faststart", "-y", outName);
+      await ffmpeg.exec(args);
+    }
+
+    callbacks.onProgress?.(0.96, "ファイルを読み込み中…");
+    const data = await ffmpeg.readFile(outName);
+    await ffmpeg.deleteFile(outName);
+    callbacks.onProgress?.(1, "完了");
+    return new Blob([data], { type: outputMime(settings.format) });
+  } finally {
+    ffmpeg.off("progress");
+    try {
+      await ffmpeg.unmount(MOUNT_POINT);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/** 出力ファイル名を生成 */
+export function buildDownloadName(originalName, format) {
+  const base = originalName.replace(/\.[^.]+$/, "") || "video";
+  const ext = format === "webm" ? "webm" : "mp4";
+  return `${base}-edited.${ext}`;
+}

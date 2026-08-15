@@ -10,7 +10,7 @@ import {
   isAdminPanelPath,
 } from "./lib/admin-session";
 
-const PUBLIC_PREFIXES = ["/css/", "/js/", "/login"];
+const PUBLIC_PREFIXES = ["/css/", "/js/", "/login", "/api/image-converter/assets/", "/web/"];
 
 function normalizePath(pathname: string): string {
   if (pathname === "" || pathname === "/index.html") return "/";
@@ -23,8 +23,11 @@ function isPublicAsset(path: string): boolean {
   if (PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix))) {
     return true;
   }
-  // 共有ページなどから読み込む ES モジュール（HTML は引き続き認証必須）
-  if (/^\/apps\/[^/]+\/.+\.js$/.test(path)) {
+  // ES モジュールは HTML ではなく JS として配信する（未認証時の 302 → text/html で MIME エラーになるのを防ぐ）
+  if (/\.m?js$/i.test(path)) {
+    return true;
+  }
+  if (path.startsWith("/apps/") && /\.(css|m?js|wasm|json|map)$/i.test(path)) {
     return true;
   }
   return false;

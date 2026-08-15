@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.secret/
 .wrangler/
 .dev.vars
 .env
@@ -9,4 +10,8 @@ dist/
 .DS_Store
 Thumbs.db
 worker-configuration.d.ts
-.secret/
+test-results/
+playwright-report/
+blob-report/
+.wrangler/ffmpeg-core-check.wasm
+public/apps/image-converter/vendor/ffmpeg/ffmpeg-core.wasm

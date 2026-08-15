@@ -5,13 +5,15 @@
   "description": "科学研究向けファイル共有・プロジェクト管理 HUB（Cloudflare Pages + D1 + R2）",
   "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev public",
+    "dev": "node scripts/ensure-ffmpeg-wasm.mjs && wrangler pages dev public -c wrangler.jsonc -c workers/image-converter/wrangler.jsonc",
     "dev:collab": "wrangler dev --config workers/excalidraw-collab/wrangler.jsonc --port 8790",
     "dev:all": "wrangler pages dev public --do EXCALIDRAW_COLLAB=ExcalidrawCollabRoom@excalidraw-collab --do DESIGN_COLLAB=DesignCollabRoom@design-collab",
     "build": "npm run types && npm run typecheck",
     "typecheck": "tsc --noEmit",
     "test:workspace-edits": "npx tsx --test functions/lib/third-party/workspace-edits.test.ts",
-    "predeploy": "npm run build && npm run db:migrate:remote",
+    "predeploy": "npm run build && npm run assets:upload-ffmpeg && npm run db:migrate:remote",
+    "assets:upload-ffmpeg": "node scripts/upload-ffmpeg-core.mjs",
+    "assets:upload-ffmpeg:local": "node scripts/upload-ffmpeg-core.mjs --local",
     "deploy": "wrangler pages deploy public",
     "db:create": "wrangler d1 create sciencehub-db",
     "db:migrate:local": "wrangler d1 migrations apply sciencehub-db --local",
@@ -23,19 +25,33 @@
     "collab:deploy": "wrangler deploy --config workers/excalidraw-collab/wrangler.jsonc",
     "design-collab:deploy": "wrangler deploy --config workers/design-collab/wrangler.jsonc",
     "tp-pipeline:deploy": "wrangler deploy --config workers/tp-pipeline/wrangler.jsonc",
+    "image-converter:deploy": "wrangler deploy --config workers/image-converter/wrangler.jsonc",
     "test:tp-pipeline": "npx tsx --test functions/lib/third-party/implement-parallel.test.ts functions/lib/third-party/intent-classify.test.ts functions/lib/third-party/workspace-edits.test.ts",
-    "pwa:icons": "node scripts/generate-pwa-icons.mjs"
+    "pwa:icons": "node scripts/generate-pwa-icons.mjs",
+    "test:image-converter": "playwright test tests/image-converter",
+    "test:image-converter:ui": "playwright test tests/image-converter --ui",
+    "test:video-converter": "playwright test tests/video-converter",
+    "test:video-editor": "playwright test tests/video-editor",
+    "test:video-editor:ui": "playwright test tests/video-editor --ui",
+    "test:website-publish": "playwright test tests/website-publish"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250701.0",
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "@playwright/test": "^1.62.1",
     "sharp": "^0.35.3",
     "typescript": "^5.8.3",
     "wrangler": "^4.24.4"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.0.4",
+    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
     "aws4fetch": "^1.0.20",
     "firebase": "^12.16.0",
-    "jose": "^6.2.4"
+    "gifenc": "^1.0.3",
+    "jose": "^6.2.4",
+    "mp4box": "^0.5.3",
+    "fflate": "^0.8.2"
   }
 }

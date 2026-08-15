@@ -511,13 +511,13 @@ async function handleOpenfoamRequestChatAttachmentDownload(
   params: { requestId: string; messageId: string; userId: string }
 ): Promise<Response> {
   try {
-    await assertOpenfoamRequestChatAccess(db, params.userId, params.requestId);
-    const result = await getOpenfoamRequestAttachmentForDownload(env, params.messageId, params.userId);
-    if (!result) return error("添付ファイルが見つかりません", 404);
-    return new Response(result.body, {
+    const resolved = await getOpenfoamRequestAttachmentForDownload(env, db, params);
+    const obj = await env.FILES.get(resolved.r2Key);
+    if (!obj) return error("添付ファイルが見つかりません", 410);
+    return new Response(obj.body, {
       headers: {
-        "Content-Type": result.contentType,
-        "Content-Disposition": attachmentFilename(result.filename),
+        "Content-Type": resolved.contentType,
+        "Content-Disposition": attachmentFilename(resolved.filename),
       },
     });
   } catch (err) {

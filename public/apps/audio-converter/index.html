@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#7C3AED">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>音声変換 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/audio-converter.css">
+  <link rel="stylesheet" href="/css/cloud-save-modal.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard acv-app">
+  <header class="hub-header acv-header">
+    <div class="hub-header-inner acv-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <span class="acv-header-divider" aria-hidden="true"></span>
+        <h1 class="acv-page-title">音声変換</h1>
+      </div>
+      <span class="acv-badge">端末内処理</span>
+    </div>
+  </header>
+
+  <input
+    type="file"
+    id="file-input"
+    accept="audio/*,video/*,.mp3,.wav,.flac,.ogg,.opus,.aac,.m4a,.m4r,.wma,.aiff,.aif,.weba,.mp4,.webm,.avi,.mov,.mkv,.wmv,.mpeg,.mpg,.3gp,.m4v,.flv,.ogv"
+    multiple
+    hidden
+  >
+
+  <div class="acv-layout" id="app-main" hidden>
+    <aside class="acv-sidebar" aria-label="変換オプション">
+      <div
+        class="acv-drop-zone"
+        id="drop-zone"
+        tabindex="0"
+        role="button"
+        aria-label="音声ファイルをドロップまたはクリックして選択"
+      >
+        <span class="acv-drop-icon" aria-hidden="true">↑</span>
+        <p class="acv-drop-title">音声をドロップ</p>
+        <p class="acv-drop-sub">またはクリックして選択（複数可）</p>
+        <p class="acv-drop-formats">
+          MP3 · WAV · FLAC · OGG · M4A · AAC · WMA · AIFF · 動画から音声抽出
+        </p>
+      </div>
+
+      <div class="acv-cloud-actions" aria-label="クラウドストレージ">
+        <button type="button" class="acv-btn acv-btn--secondary acv-btn--block" id="cloud-load-btn">
+          クラウドストレージから読み込み
+        </button>
+        <button type="button" class="acv-btn acv-btn--secondary acv-btn--block" id="cloud-save-btn" disabled>
+          クラウドストレージに保存
+        </button>
+      </div>
+
+      <section class="acv-card">
+        <h2 class="acv-card-title">出力形式</h2>
+        <label class="acv-field">
+          <span class="acv-field-label">形式</span>
+          <select id="format-select" class="acv-select" aria-label="出力形式"></select>
+        </label>
+        <label class="acv-field" id="bitrate-field">
+          <span class="acv-field-label">ビットレート <output id="bitrate-value">192</output> kbps</span>
+          <input type="range" id="bitrate" class="acv-range" min="64" max="320" step="32" value="192">
+          <p class="acv-field-hint">MP3 / M4A / OGG のみ適用（WAV・FLAC は非圧縮／可逆）</p>
+        </label>
+      </section>
+
+      <div class="acv-actions">
+        <button type="button" class="acv-btn acv-btn--primary" id="convert-btn" disabled>変換する</button>
+        <button type="button" class="acv-btn" id="clear-btn" disabled>キューをクリア</button>
+      </div>
+
+      <p class="acv-hint">
+        ブラウザ内 ffmpeg で変換します。長い音声は自動でパートに分割して処理し、最後に1本のファイルに結合します（サーバーへ送信しません）。動画ファイルは音声トラックのみを抽出します。拡張子と中身が一致しない画像ファイルはエラーになります。MP3 は環境によって失敗する場合があります — その場合は M4A / WAV / OGG をお試しください。
+      </p>
+    </aside>
+
+    <section class="acv-panel" aria-label="変換キュー">
+      <div class="acv-panel-head">
+        <div class="acv-panel-head-start">
+          <h2 class="acv-panel-title">ファイル一覧</h2>
+          <p class="acv-status" id="status" aria-live="polite">音声ファイルを追加してください</p>
+        </div>
+        <div class="acv-panel-head-actions">
+          <button type="button" class="acv-btn acv-btn--secondary" id="download-all-btn" disabled>
+            変換済みを保存
+          </button>
+        </div>
+      </div>
+
+      <p class="acv-empty" id="file-empty">まだファイルがありません</p>
+      <ul class="acv-file-list" id="file-list"></ul>
+    </section>
+  </div>
+
+  <div class="acv-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="acv-btn acv-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <dialog class="cloud-save-dialog" id="acv-cloud-save-dialog" aria-labelledby="acv-cloud-save-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="acv-cloud-save-title">クラウドストレージに保存</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-save-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="acv-cloud-save-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="acv-cloud-save-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="acv-cloud-save-body">
+        <label class="cloud-save-field">
+          <span>ファイル名</span>
+          <input type="text" id="acv-cloud-save-filename" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="保存先ルート">
+            <p class="cloud-save-section-label">保存先</p>
+            <div class="cloud-save-roots" id="acv-cloud-save-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="acv-cloud-save-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="acv-cloud-save-folders"></div>
+            <p class="cloud-save-hint">フォルダをクリックして移動します。表示中のフォルダに保存されます。</p>
+          </div>
+        </div>
+        <div class="cloud-save-progress" id="acv-cloud-save-progress" hidden>
+          <div class="cloud-save-progress-track" aria-hidden="true">
+            <div class="cloud-save-progress-bar" id="acv-cloud-save-progress-bar"></div>
+          </div>
+          <p class="cloud-save-progress-label" id="acv-cloud-save-progress-label"></p>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="acv-cloud-save-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-save-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="acv-cloud-save-submit">保存する</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog class="cloud-save-dialog" id="acv-cloud-open-dialog" aria-labelledby="acv-cloud-open-title">
+    <header class="cloud-save-dialog-header">
+      <h2 class="cloud-save-dialog-title" id="acv-cloud-open-title">クラウドストレージから読み込み</h2>
+      <button type="button" class="cloud-save-dialog-close" data-cloud-open-close aria-label="閉じる">×</button>
+    </header>
+    <div class="cloud-save-dialog-body">
+      <div id="acv-cloud-open-alert" class="cloud-save-alert" hidden role="alert"></div>
+      <div id="acv-cloud-open-denied" class="cloud-save-denied" hidden>
+        <p>クラウドストレージアプリへのアクセス権限がありません。</p>
+        <a href="/apps/cloud-storage/" class="cloud-save-btn" target="_blank" rel="noopener noreferrer">クラウドストレージを開く</a>
+      </div>
+      <div id="acv-cloud-open-body">
+        <div class="cloud-save-layout">
+          <aside class="cloud-save-roots-wrap" aria-label="ルート">
+            <p class="cloud-save-section-label">場所</p>
+            <div class="cloud-save-roots" id="acv-cloud-open-roots"></div>
+          </aside>
+          <div class="cloud-save-folder-pane">
+            <nav class="cloud-save-breadcrumb" id="acv-cloud-open-breadcrumb" aria-label="フォルダパス"></nav>
+            <div class="cloud-save-folders" id="acv-cloud-open-items"></div>
+            <p class="cloud-save-hint">フォルダを開くか、読み込むファイルにチェックを入れてください。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <footer class="cloud-save-dialog-footer">
+      <button type="button" class="cloud-save-btn" id="acv-cloud-open-open">クラウドストレージで開く</button>
+      <div class="cloud-save-dialog-footer-right">
+        <button type="button" class="cloud-save-btn" data-cloud-open-close>キャンセル</button>
+        <button type="button" class="cloud-save-btn cloud-save-btn--primary" id="acv-cloud-open-submit">読み込む</button>
+      </div>
+    </footer>
+  </dialog>
+
+  <script src="/apps/audio-converter/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

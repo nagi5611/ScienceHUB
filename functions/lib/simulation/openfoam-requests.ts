@@ -477,7 +477,7 @@ export async function sendOpenfoamPendingApprovalDiscordNotification(
   if (!row || row.status !== "pending_approval") return;
 
   const webhookUrl = await resolveSimDiscordWebhookUrl(db, env);
-  const mentionIds = await listOpenfoamDiscordMentionUserIds(db);
+  const mentionIds = await listFdsDiscordMentionUserIds(db);
   const base = env.OAUTH_REDIRECT_BASE?.trim().replace(/\/$/, "") || "https://s.mmh-virtual.jp";
   const apiModel = formatOpenfoamRequestForApi(row);
 

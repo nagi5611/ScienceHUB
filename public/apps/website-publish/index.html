@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#10B981">
+  <title>ウェブサイト公開 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/website-publish.css">
+</head>
+<body class="hub-dashboard wsp-app">
+  <header class="hub-header wsp-header">
+    <div class="hub-header-inner wsp-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <span class="wsp-header-divider" aria-hidden="true"></span>
+        <h1 class="wsp-page-title">ウェブサイト公開</h1>
+      </div>
+      <a href="/" class="wsp-header-link">ダッシュボード</a>
+    </div>
+  </header>
+
+  <main class="wsp-main" id="access-denied" hidden>
+    <p class="wsp-message wsp-message--error">このアプリへのアクセス権限がありません。</p>
+  </main>
+
+  <main class="wsp-main" id="app-main" hidden>
+    <section class="wsp-panel" id="sites-panel">
+      <div class="wsp-panel-head">
+        <div>
+          <h2 class="wsp-panel-title">マイサイト</h2>
+          <p class="wsp-panel-sub">最大3サイト・各5GB。静的ファイルを <code>/web/</code> 配下で公開します。</p>
+        </div>
+        <button type="button" class="wsp-btn wsp-btn--primary" id="create-site-btn">新規サイト</button>
+      </div>
+      <ul class="wsp-site-list" id="site-list" aria-label="サイト一覧"></ul>
+      <p class="wsp-empty" id="site-empty" hidden>サイトがありません。新規作成してください。</p>
+    </section>
+
+    <section class="wsp-panel wsp-panel--explorer" id="files-panel" hidden>
+      <div class="wsp-site-header">
+        <button type="button" class="wsp-back-btn" id="back-to-sites">← サイト一覧</button>
+        <div class="wsp-site-header-main">
+          <h2 class="wsp-panel-title" id="current-site-title">—</h2>
+          <p class="wsp-panel-sub">
+            公開 URL:
+            <a class="wsp-public-link" id="current-site-url" href="#" target="_blank" rel="noopener noreferrer">—</a>
+          </p>
+        </div>
+        <button type="button" class="wsp-btn wsp-btn--danger" id="delete-site-btn">サイト削除</button>
+      </div>
+
+      <div class="wsp-stats" id="site-stats" aria-label="サイト統計"></div>
+      <div class="wsp-quota" id="site-quota" aria-label="使用量"></div>
+
+      <div class="wsp-explorer" id="explorer-drop-zone">
+        <div class="wsp-toolbar" role="toolbar" aria-label="ファイル操作">
+          <button type="button" class="wsp-btn wsp-btn--primary" id="explorer-upload-btn">アップロード</button>
+          <button type="button" class="wsp-btn wsp-btn--secondary" id="explorer-folder-btn">フォルダをアップロード</button>
+          <button type="button" class="wsp-btn wsp-btn--secondary" id="explorer-zip-btn">ZIP アップロード</button>
+          <button type="button" class="wsp-btn wsp-btn--danger" id="explorer-delete-btn" disabled>削除</button>
+        </div>
+
+        <p class="wsp-status" id="status" role="status" aria-live="polite"></p>
+        <p class="wsp-current-dir" id="explorer-current-dir"></p>
+
+        <nav class="wsp-breadcrumb" id="explorer-breadcrumb" aria-label="フォルダパス"></nav>
+
+        <div class="wsp-table-wrap">
+          <table class="wsp-file-table" id="file-table">
+            <thead>
+              <tr>
+                <th class="wsp-col-check" scope="col"><span class="wsp-th-label">選択</span></th>
+                <th scope="col">名前</th>
+                <th scope="col">サイズ</th>
+                <th scope="col">更新</th>
+              </tr>
+            </thead>
+            <tbody id="file-list"></tbody>
+          </table>
+          <p class="wsp-empty" id="file-empty" hidden>ファイルがありません。ドロップまたはアップロードしてください。</p>
+        </div>
+
+        <p class="wsp-drop-hint">このエリアにファイルをドロップしてアップロード</p>
+      </div>
+
+      <input type="file" id="file-input" multiple hidden>
+      <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+      <input type="file" id="zip-input" accept=".zip,application/zip" hidden>
+
+  <div id="wsp-context-menu" class="wsp-context-menu" hidden role="menu" aria-label="ファイルメニュー">
+    <p class="wsp-context-menu-title" id="wsp-context-menu-title"></p>
+    <div class="wsp-context-menu-items" id="wsp-context-menu-items"></div>
+  </div>
+
+  <dialog class="wsp-dialog wsp-dialog--editor" id="edit-dialog">
+    <form method="dialog" class="wsp-dialog-inner wsp-editor-form" id="edit-form">
+      <h2 class="wsp-dialog-title">ファイル編集</h2>
+      <p class="wsp-editor-path" id="edit-path-label"></p>
+      <textarea id="edit-content" class="wsp-editor-textarea" spellcheck="false"></textarea>
+      <div class="wsp-dialog-actions">
+        <button type="button" class="wsp-btn wsp-btn--secondary" id="edit-cancel">キャンセル</button>
+        <button type="submit" class="wsp-btn wsp-btn--primary" id="edit-save">保存</button>
+      </div>
+    </form>
+  </dialog>
+    </section>
+  </main>
+
+  <dialog class="wsp-dialog" id="create-dialog">
+    <form method="dialog" class="wsp-dialog-inner" id="create-form">
+      <h2 class="wsp-dialog-title">新規サイト</h2>
+      <label class="wsp-field">
+        <span class="wsp-field-label">タイトル</span>
+        <input type="text" id="create-title" class="wsp-input" required maxlength="120" placeholder="マイサイト">
+      </label>
+      <label class="wsp-field">
+        <span class="wsp-field-label">公開パス</span>
+        <span class="wsp-path-preview">/web/<input type="text" id="create-path" class="wsp-input wsp-input--inline" required maxlength="32" pattern="[a-z0-9_-]+" placeholder="my-site">/</span>
+      </label>
+      <p class="wsp-hint">英小文字・数字・ハイフン・アンダースコア（2〜32文字）</p>
+      <div class="wsp-dialog-actions">
+        <button type="button" class="wsp-btn wsp-btn--secondary" id="create-cancel">キャンセル</button>
+        <button type="submit" class="wsp-btn wsp-btn--primary">作成</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/apps/website-publish/app.js" type="module"></script>
+</body>
+</html>
