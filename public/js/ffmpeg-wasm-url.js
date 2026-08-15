@@ -4,8 +4,13 @@
 
 const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d];
 
+/** @ffmpeg/core のバージョン（package.json と一致させる） */
+const FFMPEG_CORE_VERSION = "0.12.6";
+
 const WASM_URL_CANDIDATES = [
   "/api/image-converter/assets/ffmpeg-core.wasm",
+  "/apps/image-converter/vendor/ffmpeg/ffmpeg-core.wasm",
+  `https://unpkg.com/@ffmpeg/core@${FFMPEG_CORE_VERSION}/dist/umd/ffmpeg-core.wasm`,
 ];
 
 /**
@@ -42,6 +47,6 @@ export async function resolveFfmpegWasmUrl() {
   }
 
   throw new Error(
-    "ffmpeg-core.wasm が見つかりません。npm run dev を再起動するか、npm run assets:upload-ffmpeg:local を実行してください。",
+    "ffmpeg-core.wasm が見つかりません。ネットワーク接続を確認するか、ページを再読み込みしてください。管理者は npm run assets:upload-ffmpeg を実行してください。",
   );
 }

@@ -60,6 +60,6 @@ test.describe("export color filters", () => {
     });
 
     expect(result).toContain("overlay=x=main_w*");
-    expect(result).toContain("enable='between(t,");
+    expect(result).toContain("enable=between(t\\,");
   });
 });
