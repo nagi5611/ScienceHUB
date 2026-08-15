@@ -22,7 +22,8 @@
     {
       "imports": {
         "@ffmpeg/ffmpeg": "/apps/image-converter/vendor/ffmpeg-js/index.js",
-        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js"
+        "@ffmpeg/util": "/apps/image-converter/vendor/ffmpeg-util/index.js",
+        "mp4-muxer": "/apps/video-editor/vendor/mp4-muxer/mp4-muxer.mjs"
       }
     }
   </script>
@@ -111,6 +112,14 @@
             <button type="button" class="ve-format-option" data-format="webm" role="option">WebM (VP9)</button>
             <div class="ve-format-extra" id="quality-field">
               <label class="ve-pop-field">品質 <output id="quality-value">23</output><input type="range" id="quality" class="ve-pop-range" min="18" max="35" value="23"></label>
+              <label class="ve-pop-field">加速
+                <select id="acceleration-mode" class="ve-pop-select" aria-describedby="acceleration-hint">
+                  <option value="auto">自動</option>
+                  <option value="cpu-max">CPU 最大</option>
+                  <option value="gpu">GPU 優先</option>
+                </select>
+              </label>
+              <p class="ve-format-hint" id="acceleration-hint">エンコード加速を確認中…</p>
               <label class="ve-pop-check" id="no-reencode-wrap"><input type="checkbox" id="no-reencode"> 再エンコードなし</label>
               <p class="ve-format-hint" id="no-reencode-hint"></p>
             </div>

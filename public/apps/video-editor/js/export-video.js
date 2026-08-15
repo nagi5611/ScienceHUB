@@ -2,8 +2,9 @@
  * ffmpeg.wasm による動画書き出し（トリム・クロップ・回転・テキスト等）
  */
 
-import { getFfmpeg } from "../../../js/ffmpeg-loader.js";
+import { getFfmpeg, isFfmpegMultithreadLoaded } from "../../../js/ffmpeg-loader.js";
 import { execFfmpegOrThrow } from "../../../js/ffmpeg-input.js";
+import { canUseFfmpegMultithread } from "../../../js/ffmpeg-capabilities.js";
 import { clipDuration, clipTimelineEnd, getClipColorEffects, getClipPipEffects, hasColorEffects, hasTransitions, hasV2Clips } from "./timeline-model.js";
 
 const MOUNT_POINT = "/ve-input";
@@ -58,6 +59,8 @@ const MOUNT_POINT = "/ve-input";
  * @property {number} videoWidth
  * @property {number} videoHeight
  * @property {import("./timeline-model.js").TimelineModel | null} [timeline]
+ * @property {"auto" | "cpu-max" | "gpu"} [accelerationMode]
+ * @property {number} [fps]
  */
 
 /** 書き出し用の実効トリム区間 */
@@ -325,6 +328,57 @@ function outputMime(format) {
 }
 
 /**
+ * 映像エンコード用 ffmpeg 引数（CPU スレッド / プリセット最適化）
+ * @param {ExportSettings} settings
+ * @param {"auto" | "cpu-max" | "gpu"} [accelerationMode]
+ */
+export function buildVideoEncodeArgs(settings, accelerationMode = "auto") {
+  const cpuMax = accelerationMode === "cpu-max" || accelerationMode === "auto";
+  const cores =
+    typeof navigator !== "undefined" ? Math.max(1, navigator.hardwareConcurrency ?? 4) : 4;
+  const mt = isFfmpegMultithreadLoaded() || canUseFfmpegMultithread();
+
+  if (settings.format === "webm") {
+    /** @type {string[]} */
+    const args = [
+      "-c:v",
+      "libvpx-vp9",
+      "-crf",
+      String(settings.quality + 7),
+      "-b:v",
+      "0",
+      "-row-mt",
+      "1",
+    ];
+    if (cpuMax && mt) {
+      args.push("-threads", String(cores));
+    }
+    return args;
+  }
+
+  const preset = cpuMax ? "veryfast" : "fast";
+  /** @type {string[]} */
+  const args = ["-c:v", "libx264", "-crf", String(settings.quality), "-preset", preset, "-threads", "0"];
+  if (cpuMax && mt && cores > 1) {
+    args.push("-x264-params", `threads=${cores}:sliced-threads=1`);
+  }
+  return args;
+}
+
+/** 音声エンコード用 ffmpeg 引数 */
+function buildAudioEncodeArgs(settings) {
+  if (settings.format === "webm") {
+    return ["-c:a", "libopus", "-b:a", "128k"];
+  }
+  return ["-c:a", "aac", "-b:a", "128k"];
+}
+
+/** 映像+音声のエンコード引数 */
+function buildAVCodecArgs(settings, accelerationMode) {
+  return [...buildVideoEncodeArgs(settings, accelerationMode), ...buildAudioEncodeArgs(settings)];
+}
+
+/**
  * 動画を書き出す
  * @param {File} file
  * @param {ExportSettings} settings
@@ -533,8 +587,35 @@ export function buildTimelineGraph(timeline, inputPaths) {
 }
 
 export async function exportVideo(file, settings, callbacks = {}) {
+  const accelerationMode = settings.accelerationMode ?? "auto";
+
+  if (accelerationMode === "auto" || accelerationMode === "gpu") {
+    const { canUseWebCodecsGpuExport, exportVideoWebCodecsGpu } = await import(
+      "./export-webcodecs-gpu.js",
+    );
+    if (canUseWebCodecsGpuExport(settings)) {
+      try {
+        callbacks.onProgress?.(0.02, "GPU エンコードを試行中…");
+        return await exportVideoWebCodecsGpu(file, settings, callbacks);
+      } catch (error) {
+        if (accelerationMode === "gpu") {
+          throw error instanceof Error ? error : new Error(String(error));
+        }
+        console.warn("GPU export failed, falling back to ffmpeg:", error);
+      }
+    } else if (accelerationMode === "gpu") {
+      throw new Error(
+        "このプロジェクトは GPU エンコードに対応していません（シンプルなトリムのみ対応）。自動または CPU 最大を選択してください。",
+      );
+    }
+  }
+
   const ffmpeg = await getFfmpeg();
-  callbacks.onProgress?.(0.05, "ffmpeg を準備中…");
+  const mt = isFfmpegMultithreadLoaded();
+  callbacks.onProgress?.(
+    0.05,
+    mt ? `ffmpeg を準備中（CPU ${navigator.hardwareConcurrency ?? "?"} コア）…` : "ffmpeg を準備中…",
+  );
 
   const filesToMount = [file];
   if (settings.timeline) {
@@ -571,11 +652,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
       callbacks.onProgress?.(0.15, "逆転トリム中…");
       /** @type {string[]} */
       const args = ["-hide_banner", "-i", inputPath, "-filter_complex", filter, "-map", "[outv]", "-map", "[outa]"];
-      if (settings.format === "webm") {
-        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");
-      } else {
-        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
-      }
+      args.push(...buildAVCodecArgs(settings, accelerationMode));
       args.push("-movflags", "+faststart", "-y", outName);
       await execFfmpegOrThrow(ffmpeg, args);
     } else if (settings.timeline && needsTimelineCompose(settings)) {
@@ -596,11 +673,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
       args.push("-filter_complex", graph.filter, "-map", "[outv]");
       if (graph.hasAudio) args.push("-map", "[outa]");
 
-      if (settings.format === "webm") {
-        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");
-      } else {
-        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
-      }
+      args.push(...buildAVCodecArgs(settings, accelerationMode));
       args.push("-movflags", "+faststart", "-y", outName);
       await execFfmpegOrThrow(ffmpeg, args);
     } else if (streamCopy) {
@@ -645,11 +718,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
         "-map",
         "[outa]",
       ];
-      if (settings.format === "webm") {
-        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");
-      } else {
-        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
-      }
+      args.push(...buildAVCodecArgs(settings, accelerationMode));
       args.push("-movflags", "+faststart", "-y", outName);
       await execFfmpegOrThrow(ffmpeg, args);
     } else {
@@ -671,10 +740,10 @@ export async function exportVideo(file, settings, callbacks = {}) {
       if (af) args.push("-af", af);
 
       if (settings.format === "webm") {
-        args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0");
+        args.push(...buildVideoEncodeArgs(settings, accelerationMode));
         args.push("-c:a", "libopus", "-b:a", "128k");
       } else {
-        args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast");
+        args.push(...buildVideoEncodeArgs(settings, accelerationMode));
         args.push("-c:a", "aac", "-b:a", "128k");
       }
 
