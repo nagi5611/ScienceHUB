@@ -1,11 +1,12 @@
 /**
- * Phase 3 — マルチトラックタイムライン UI + クリップ DnD
+ * Phase 3/4 — マルチトラックタイムライン UI + クリップ DnD + ズーム + V2
  */
 
 import {
   appendBgmClip,
   bladeSplit,
   moveClip,
+  placeOnTop,
   placeVideoClip,
   rippleDelete,
   rollEdit,
@@ -25,6 +26,7 @@ export function createTimelineView(deps) {
     multiTrackEl,
     getTimeline,
     getPlayhead,
+    getViewWindow,
     setPlayhead,
     onChange,
     getSelectedClipId,
@@ -32,13 +34,34 @@ export function createTimelineView(deps) {
     onClipSelect,
     onBeforeEdit,
     onSeekPreview,
+    onPlaceOnTop,
   } = deps;
 
   /** @type {{ mode: string, trackId: string, clipId: string, startX: number, startVal: number, laneWidth: number } | null} */
   let dragState = null;
 
-  function pxToSeconds(px, laneWidth, duration) {
-    return (px / laneWidth) * duration;
+  function getDuration() {
+    return getTimeline().duration || 1;
+  }
+
+  function getWindow() {
+    const duration = getDuration();
+    if (typeof getViewWindow === "function") {
+      const view = getViewWindow();
+      if (view && Number.isFinite(view.start) && Number.isFinite(view.end) && view.end > view.start) {
+        return {
+          start: Math.max(0, view.start),
+          end: Math.min(duration, view.end),
+        };
+      }
+    }
+    return { start: 0, end: duration };
+  }
+
+  function pxToSeconds(px, laneWidth) {
+    const { start, end } = getWindow();
+    const span = Math.max(0.001, end - start);
+    return (px / laneWidth) * span;
   }
 
   function renderMediaBin() {
@@ -55,10 +78,12 @@ export function createTimelineView(deps) {
       btn.title = item.name;
       const kindLabel = item.kind === "audio" ? "🎵 " : "🎬 ";
       btn.innerHTML = `<span class="ve-media-bin-name">${kindLabel}${item.name}</span><span class="ve-media-bin-dur">${formatTimeShort(item.duration)}</span>`;
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (event) => {
         onBeforeEdit?.();
         if (item.kind === "audio") {
           appendBgmClip(timeline, item.id, getPlayhead(), 0, item.duration);
+        } else if (event.shiftKey && typeof onPlaceOnTop === "function") {
+          onPlaceOnTop(item.id, getPlayhead(), 0, item.duration);
         } else {
           placeVideoClip(timeline, item.id, getPlayhead(), 0, item.duration);
         }
@@ -82,7 +107,6 @@ export function createTimelineView(deps) {
       onBeforeEdit?.();
 
       const rect = lane.getBoundingClientRect();
-      const timeline = getTimeline();
       dragState = {
         mode: isStart ? "trim-start" : isEnd ? "trim-end" : "move",
         trackId,
@@ -90,7 +114,6 @@ export function createTimelineView(deps) {
         startX: event.clientX,
         startVal: 0,
         laneWidth: rect.width,
-        duration: timeline.duration,
       };
 
       el.setPointerCapture(event.pointerId);
@@ -101,7 +124,7 @@ export function createTimelineView(deps) {
       if (!dragState || dragState.clipId !== clipId) return;
       const timeline = getTimeline();
       const deltaPx = event.clientX - dragState.startX;
-      const deltaSec = pxToSeconds(deltaPx, dragState.laneWidth, dragState.duration);
+      const deltaSec = pxToSeconds(deltaPx, dragState.laneWidth);
 
       if (dragState.mode === "move") {
         const track = timeline.tracks.find((t) => t.id === trackId);
@@ -134,27 +157,42 @@ export function createTimelineView(deps) {
   }
 
   function renderTrackRow(track, timeline) {
+    const { start, end } = getWindow();
+    const span = Math.max(0.001, end - start);
+
     const row = document.createElement("div");
     row.className = "ve-track-row";
     if (track.id === "a2") row.classList.add("ve-track-row--bgm");
+    if (track.id === "v2") row.classList.add("ve-track-row--overlay");
     row.dataset.trackId = track.id;
+    row.dataset.testid = `track-${track.id}`;
 
     const label = document.createElement("span");
     label.className = "ve-track-label";
-    label.textContent = track.id === "a2" ? "BGM" : track.id.toUpperCase();
+    if (track.id === "a2") label.textContent = "BGM";
+    else if (track.id === "v2") label.textContent = "V2";
+    else label.textContent = track.id.toUpperCase();
     row.appendChild(label);
 
     const lane = document.createElement("div");
     lane.className = "ve-track-lane";
 
+    if (track.clips.length === 0 && track.id === "v2") {
+      const empty = document.createElement("div");
+      empty.className = "ve-track-empty";
+      empty.textContent = "Shift+クリックでオーバーレイ";
+      lane.appendChild(empty);
+    }
+
     for (const clip of track.clips) {
       const clipLen = clip.sourceOut - clip.sourceIn;
-      const leftPct = (clip.timelineStart / timeline.duration) * 100;
-      const widthPct = (clipLen / timeline.duration) * 100;
+      const leftPct = ((clip.timelineStart - start) / span) * 100;
+      const widthPct = (clipLen / span) * 100;
       const media = timeline.mediaBin.find((m) => m.id === clip.mediaId);
 
       const el = document.createElement("div");
       el.className = "ve-track-clip";
+      if (track.id === "v2") el.classList.add("ve-track-clip--overlay");
       el.role = "button";
       el.tabIndex = 0;
       if (clip.id === getSelectedClipId()) el.classList.add("is-selected");
@@ -194,7 +232,7 @@ export function createTimelineView(deps) {
         render();
       });
 
-      if (track.id === "v1" || track.id === "a2") {
+      if (track.id === "v1" || track.id === "v2" || track.id === "a2") {
         bindClipDrag(el, track.id, clip.id, lane);
       }
 
@@ -203,14 +241,14 @@ export function createTimelineView(deps) {
 
     const playhead = document.createElement("div");
     playhead.className = "ve-track-playhead";
-    playhead.style.left = `${(getPlayhead() / timeline.duration) * 100}%`;
+    playhead.style.left = `${((getPlayhead() - start) / span) * 100}%`;
     lane.appendChild(playhead);
 
     lane.addEventListener("click", (event) => {
       if (event.target instanceof HTMLElement && event.target.closest(".ve-track-clip")) return;
       const rect = lane.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-      const t = ratio * timeline.duration;
+      const t = start + ratio * span;
       setPlayhead(t);
       onSeekPreview?.(t);
       render();
@@ -229,7 +267,7 @@ export function createTimelineView(deps) {
 
     for (const track of timeline.tracks) {
       if (track.type === "audio" && track.id === "a1") continue;
-      if (track.type === "video" || (track.id === "a2" && track.clips.length > 0)) {
+      if (track.id === "v2" || track.type === "video" || (track.id === "a2" && track.clips.length > 0)) {
         multiTrackEl.appendChild(renderTrackRow(track, timeline));
       }
     }
@@ -257,6 +295,7 @@ export function createTimelineView(deps) {
     const timeline = getTimeline();
     rippleDelete(timeline, "v1", clipId);
     rippleDelete(timeline, "a1", clipId.replace(/-a$/, "") || clipId);
+    rippleDelete(timeline, "v2", clipId);
     setSelectedClipId(null);
     onChange();
     render();

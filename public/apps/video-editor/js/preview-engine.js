@@ -1,13 +1,17 @@
 /**
- * タイムライン駆動プレビュー — マルチクリップ再生 + BGM 同期
+ * タイムライン駆動プレビュー — マルチクリップ + トランジション + PiP + BGM
  */
 
 import {
   clipTimelineEnd,
   findClipAtTimelineTime,
+  getClipColorEffects,
+  getClipPipEffects,
   getNextClip,
+  getTransitionState,
   isMultiClipTimeline,
 } from "./timeline-model.js";
+import { colorEffectsFromClip, createPreviewCompositor } from "./preview-compositor.js";
 import { clamp } from "./time.js";
 
 /**
@@ -23,11 +27,20 @@ export function createPreviewEngine(deps) {
   const { getTimeline, getPlayhead, setPlayhead, getTrimState, isPlaying, setPlaying } = deps;
 
   /** @type {HTMLVideoElement | null} */
-  let video = null;
+  let videoA = null;
+  /** @type {HTMLVideoElement | null} */
+  let videoB = null;
   /** @type {HTMLAudioElement | null} */
   let bgm = null;
+  /** @type {HTMLCanvasElement | null} */
+  let canvas = null;
+  /** @type {ReturnType<typeof createPreviewCompositor> | null} */
+  let compositor = null;
+
   /** @type {string | null} */
-  let activeVideoMediaId = null;
+  let activeMediaA = null;
+  /** @type {string | null} */
+  let activeMediaB = null;
   /** @type {string | null} */
   let activeBgmMediaId = null;
   /** @type {string | null} */
@@ -37,6 +50,10 @@ export function createPreviewEngine(deps) {
 
   function getV1Track() {
     return getTimeline()?.tracks.find((t) => t.id === "v1") ?? null;
+  }
+
+  function getV2Track() {
+    return getTimeline()?.tracks.find((t) => t.id === "v2") ?? null;
   }
 
   function getA2Track() {
@@ -55,28 +72,35 @@ export function createPreviewEngine(deps) {
     return { effectiveStart, effectiveEnd };
   }
 
-  async function setVideoSource(mediaId, sourceTime) {
+  /**
+   * @param {HTMLVideoElement} el
+   * @param {string | null} activeId
+   * @param {string} mediaId
+   * @param {number} sourceTime
+   */
+  async function ensureVideoSource(el, activeId, mediaId, sourceTime) {
     const timeline = getTimeline();
-    if (!video || !timeline) return;
+    if (!timeline) return activeId;
     const media = timeline.mediaBin.find((m) => m.id === mediaId);
-    if (!media) return;
+    if (!media) return activeId;
 
-    if (activeVideoMediaId !== mediaId) {
-      activeVideoMediaId = mediaId;
-      video.src = media.objectUrl;
+    if (activeId !== mediaId) {
+      el.src = media.objectUrl;
       await new Promise((resolve) => {
-        if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        if (el.readyState >= HTMLMediaElement.HAVE_METADATA) {
           resolve(undefined);
           return;
         }
-        video.addEventListener("loadedmetadata", () => resolve(undefined), { once: true });
+        el.addEventListener("loadedmetadata", () => resolve(undefined), { once: true });
       });
+      activeId = mediaId;
     }
 
-    const t = clamp(sourceTime, 0, Math.max(0, video.duration - 0.001));
-    if (Math.abs(video.currentTime - t) > 0.05) {
-      video.currentTime = t;
+    const t = clamp(sourceTime, 0, Math.max(0, el.duration - 0.001));
+    if (Math.abs(el.currentTime - t) > 0.05) {
+      el.currentTime = t;
     }
+    return activeId;
   }
 
   async function setBgmSource(mediaId, sourceTime) {
@@ -104,13 +128,15 @@ export function createPreviewEngine(deps) {
     }
   }
 
-  async function syncMediaAtTimelineTime(timelineTime, { autoplay = false } = {}) {
+  async function renderFrame(timelineTime, { autoplay = false } = {}) {
+    if (!videoA || !compositor || !canvas) return;
     const timeline = getTimeline();
-    if (!video || !timeline) return;
+    if (!timeline) return;
 
     const trim = getTrimState();
-    video.volume = Math.min(1, trim.volume / 100);
-    video.playbackRate = trim.speed / 100;
+    videoA.volume = Math.min(1, trim.volume / 100);
+    videoA.playbackRate = trim.speed / 100;
+    if (videoB) videoB.playbackRate = trim.speed / 100;
     if (bgm) {
       bgm.volume = Math.min(1, trim.bgmVolume / 100);
       bgm.playbackRate = trim.speed / 100;
@@ -118,23 +144,74 @@ export function createPreviewEngine(deps) {
 
     const multi = isMultiClipTimeline(timeline);
     const vTrack = getV1Track();
+    /** @type {import("./timeline-model.js").TimelineClip | null} */
+    let baseClip = null;
+    /** @type {import("./timeline-model.js").TimelineClip | null} */
+    let overlayClip = null;
+    let crossfade = 0;
 
     if (!multi && vTrack?.clips[0]) {
       const { effectiveStart, effectiveEnd } = singleClipRange();
-      const clip = vTrack.clips[0];
+      baseClip = vTrack.clips[0];
       const t = clamp(timelineTime, effectiveStart, effectiveEnd);
-      activeVideoClipId = clip.id;
-      await setVideoSource(clip.mediaId, t);
+      activeVideoClipId = baseClip.id;
+      activeMediaA = await ensureVideoSource(videoA, activeMediaA, baseClip.mediaId, t);
       setPlayhead(t);
     } else if (vTrack) {
-      const clip = findClipAtTimelineTime(vTrack, timelineTime);
-      if (clip) {
-        activeVideoClipId = clip.id;
-        const sourceTime = resolveSourceTime(clip, timelineTime);
-        await setVideoSource(clip.mediaId, sourceTime);
+      const trans = getTransitionState(vTrack, timelineTime);
+      if (trans) {
+        baseClip = trans.from;
+        overlayClip = trans.to;
+        crossfade = trans.progress;
+        activeVideoClipId = baseClip.id;
+        const srcA = resolveSourceTime(baseClip, timelineTime);
+        const srcB = resolveSourceTime(overlayClip, timelineTime);
+        activeMediaA = await ensureVideoSource(videoA, activeMediaA, baseClip.mediaId, srcA);
+        if (videoB) {
+          activeMediaB = await ensureVideoSource(videoB, activeMediaB, overlayClip.mediaId, srcB);
+        }
+      } else {
+        const clip = findClipAtTimelineTime(vTrack, timelineTime);
+        if (clip) {
+          baseClip = clip;
+          activeVideoClipId = clip.id;
+          const sourceTime = resolveSourceTime(clip, timelineTime);
+          activeMediaA = await ensureVideoSource(videoA, activeMediaA, clip.mediaId, sourceTime);
+        }
       }
       setPlayhead(timelineTime);
     }
+
+    const v2 = getV2Track();
+    /** @type {import("./preview-compositor.js").Parameters<typeof compositor.render>[0]["pip"]} */
+    let pipLayer = null;
+    if (v2 && videoB) {
+      const pipClip = findClipAtTimelineTime(v2, timelineTime);
+      if (pipClip) {
+        const pipFx = getClipPipEffects(pipClip);
+        const src = resolveSourceTime(pipClip, timelineTime);
+        activeMediaB = await ensureVideoSource(videoB, activeMediaB, pipClip.mediaId, src);
+        pipLayer = {
+          video: videoB,
+          x: pipFx.x,
+          y: pipFx.y,
+          scale: pipFx.scale,
+          opacity: pipFx.opacity,
+          effects: getClipColorEffects(pipClip),
+        };
+        overlayClip = null;
+        crossfade = 0;
+      }
+    }
+
+    compositor.render({
+      baseVideo: videoA,
+      overlayVideo: overlayClip && !pipLayer ? videoB : null,
+      crossfade: pipLayer ? 0 : crossfade,
+      baseEffects: colorEffectsFromClip(baseClip),
+      overlayEffects: colorEffectsFromClip(overlayClip),
+      pip: pipLayer,
+    });
 
     const a2 = getA2Track();
     if (bgm && a2) {
@@ -142,11 +219,8 @@ export function createPreviewEngine(deps) {
       if (bgmClip) {
         const sourceTime = resolveSourceTime(bgmClip, timelineTime);
         await setBgmSource(bgmClip.mediaId, sourceTime);
-        if (autoplay && isPlaying()) {
-          bgm.play().catch(() => {});
-        } else if (!autoplay) {
-          bgm.pause();
-        }
+        if (autoplay && isPlaying()) bgm.play().catch(() => {});
+        else if (!autoplay) bgm.pause();
       } else {
         bgm.pause();
         activeBgmMediaId = null;
@@ -154,12 +228,14 @@ export function createPreviewEngine(deps) {
     }
 
     if (autoplay && isPlaying()) {
-      video.play().catch(() => {});
+      videoA.play().catch(() => {});
+      if (overlayClip && videoB && crossfade > 0) videoB.play().catch(() => {});
+      if (pipLayer && videoB) videoB.play().catch(() => {});
     }
   }
 
   function tick(now) {
-    if (!isPlaying() || !video) return;
+    if (!isPlaying() || !videoA) return;
     const timeline = getTimeline();
     if (!timeline || timeline.duration <= 0) return;
 
@@ -176,13 +252,13 @@ export function createPreviewEngine(deps) {
 
     if (!multi && vTrack?.clips[0]) {
       const { effectiveStart, effectiveEnd } = singleClipRange();
-      const t = clamp(video.currentTime, effectiveStart, effectiveEnd);
+      const t = clamp(videoA.currentTime, effectiveStart, effectiveEnd);
       setPlayhead(t);
+      renderFrame(t, { autoplay: true }).catch(() => {});
       if (t >= effectiveEnd - 0.02) {
         pause();
         setPlayhead(effectiveEnd);
       }
-      syncBgmOnly(t).catch(() => {});
       rafId = requestAnimationFrame(tick);
       return;
     }
@@ -191,18 +267,19 @@ export function createPreviewEngine(deps) {
       const clip = vTrack.clips.find((c) => c.id === activeVideoClipId);
       if (clip) {
         const clipEnd = clipTimelineEnd(clip);
-        if (nextTime >= clipEnd - 0.02) {
-          const nextClip = getNextClip(vTrack, clip.id);
+        const trans = clip.transitionOut ?? 0;
+        const nextClip = getNextClip(vTrack, clip.id);
+        const adjacent = nextClip && Math.abs(nextClip.timelineStart - clipEnd) < 0.05;
+        const inTransition = trans > 0 && adjacent && nextTime >= clipEnd - trans;
+
+        if (!inTransition && nextTime >= clipEnd - 0.02) {
           if (nextClip) {
             activeVideoClipId = nextClip.id;
-            nextTime = nextClip.timelineStart;
-            syncMediaAtTimelineTime(nextTime, { autoplay: true }).catch(() => {});
-            setPlayhead(nextTime);
-            rafId = requestAnimationFrame(tick);
-            return;
+            nextTime = Math.max(nextClip.timelineStart, nextTime);
+          } else {
+            nextTime = clipEnd;
+            pause();
           }
-          nextTime = clipEnd;
-          pause();
         }
       }
     }
@@ -213,36 +290,39 @@ export function createPreviewEngine(deps) {
     }
 
     setPlayhead(nextTime);
-    syncBgmOnly(nextTime).catch(() => {});
+    renderFrame(nextTime, { autoplay: true }).catch(() => {});
     rafId = requestAnimationFrame(tick);
   }
 
-  async function syncBgmOnly(timelineTime) {
-    const a2 = getA2Track();
-    if (!bgm || !a2) return;
-    const bgmClip = findClipAtTimelineTime(a2, timelineTime);
-    if (!bgmClip) {
-      bgm.pause();
-      return;
-    }
-    const sourceTime = resolveSourceTime(bgmClip, timelineTime);
-    await setBgmSource(bgmClip.mediaId, sourceTime);
-    if (isPlaying()) bgm.play().catch(() => {});
-  }
-
-  function attach(videoEl, bgmEl = null) {
-    video = videoEl;
+  function attach(videoEl, bgmEl = null, videoBEl = null, canvasEl = null) {
+    videoA = videoEl;
+    videoB = videoBEl;
     bgm = bgmEl;
-    activeVideoMediaId = null;
+    canvas = canvasEl;
+    if (canvas && videoA && videoB) {
+      compositor = createPreviewCompositor(canvas, videoA, videoB);
+      videoA.classList.add("ve-preview--hidden");
+      videoB.classList.add("ve-preview--hidden");
+      videoB.hidden = false;
+      canvas.hidden = false;
+    }
+    activeMediaA = null;
+    activeMediaB = null;
     activeBgmMediaId = null;
     activeVideoClipId = null;
   }
 
   function detach() {
     stopTick();
-    video = null;
+    videoA?.classList.remove("ve-preview--hidden");
+    videoB?.classList.remove("ve-preview--hidden");
+    videoA = null;
+    videoB = null;
     bgm = null;
-    activeVideoMediaId = null;
+    canvas = null;
+    compositor = null;
+    activeMediaA = null;
+    activeMediaB = null;
     activeBgmMediaId = null;
     activeVideoClipId = null;
   }
@@ -259,7 +339,7 @@ export function createPreviewEngine(deps) {
     if (!timeline) return;
     const t = clamp(timelineTime, 0, timeline.duration);
     setPlayhead(t);
-    await syncMediaAtTimelineTime(t, { autoplay: !pauseAfter && isPlaying() });
+    await renderFrame(t, { autoplay: !pauseAfter && isPlaying() });
     if (isPlaying() && !pauseAfter) {
       rafId = requestAnimationFrame(tick);
     }
@@ -267,7 +347,7 @@ export function createPreviewEngine(deps) {
 
   async function play() {
     const timeline = getTimeline();
-    if (!video || !timeline) return;
+    if (!videoA || !timeline) return;
 
     const multi = isMultiClipTimeline(timeline);
     if (!multi) {
@@ -278,20 +358,21 @@ export function createPreviewEngine(deps) {
     } else if (getPlayhead() >= timeline.duration - 0.05) {
       await seekToTimelineTime(0, { pauseAfter: false });
     } else {
-      await syncMediaAtTimelineTime(getPlayhead(), { autoplay: true });
+      await renderFrame(getPlayhead(), { autoplay: true });
     }
 
     setPlaying(true);
     stopTick();
     rafId = requestAnimationFrame(tick);
-    video.play().catch(() => {});
+    videoA.play().catch(() => {});
     if (bgm) bgm.play().catch(() => {});
   }
 
   function pause() {
     setPlaying(false);
     stopTick();
-    video?.pause();
+    videoA?.pause();
+    videoB?.pause();
     bgm?.pause();
   }
 
@@ -304,12 +385,16 @@ export function createPreviewEngine(deps) {
     if (isPlaying()) return;
     const timeline = getTimeline();
     const vTrack = getV1Track();
-    if (!video || !timeline || !vTrack || isMultiClipTimeline(timeline)) return;
-
+    if (!videoA || !timeline || !vTrack || isMultiClipTimeline(timeline)) return;
     const { effectiveStart } = singleClipRange();
-    const clip = vTrack.clips[0];
-    if (!clip) return;
-    setPlayhead(video.currentTime);
+    if (!vTrack.clips[0]) return;
+    setPlayhead(videoA.currentTime);
+    renderFrame(videoA.currentTime).catch(() => {});
+  }
+
+  function resize() {
+    compositor?.resize();
+    renderFrame(getPlayhead()).catch(() => {});
   }
 
   return {
@@ -319,8 +404,9 @@ export function createPreviewEngine(deps) {
     play,
     pause,
     togglePlay,
-    syncMediaAtTimelineTime,
+    syncMediaAtTimelineTime: renderFrame,
     onVideoTimeUpdate,
     stopTick,
+    resize,
   };
 }

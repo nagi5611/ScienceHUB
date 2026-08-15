@@ -24,12 +24,16 @@ import {
   addAudioMedia,
   appendBgmClip,
   placeVideoClip,
+  placeOnTop,
   hasVideoClips,
   isMultiClipTimeline,
   findClipAtTime,
   clipDuration,
   trimClipStart,
   trimClipEnd,
+  setClipEffects,
+  getClipColorEffects,
+  getClipPipEffects,
 } from "./js/timeline-model.js";
 import { createTimelineView } from "./js/timeline-view.js";
 import { createPreviewEngine } from "./js/preview-engine.js";
@@ -57,6 +61,8 @@ const fileInput = document.getElementById("file-input");
 const audioFileInput = document.getElementById("audio-file-input");
 const dropZone = document.getElementById("drop-zone");
 const preview = /** @type {HTMLVideoElement} */ (document.getElementById("preview"));
+const previewB = /** @type {HTMLVideoElement | null} */ (document.getElementById("preview-b"));
+const previewCanvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById("preview-canvas"));
 const bgmPreview = /** @type {HTMLAudioElement | null} */ (document.getElementById("bgm-preview"));
 
 const previewWrap = document.getElementById("preview-wrap");
@@ -129,6 +135,22 @@ const bgmVolumeInput = /** @type {HTMLInputElement | null} */ (document.getEleme
 const bgmVolumeValue = document.getElementById("bgm-volume-value");
 const undoBtn = document.getElementById("undo-btn");
 const redoBtn = document.getElementById("redo-btn");
+const pipInspector = document.getElementById("pip-inspector");
+const colorBrightnessInput = /** @type {HTMLInputElement | null} */ (document.getElementById("color-brightness"));
+const colorContrastInput = /** @type {HTMLInputElement | null} */ (document.getElementById("color-contrast"));
+const colorSaturationInput = /** @type {HTMLInputElement | null} */ (document.getElementById("color-saturation"));
+const colorBrightnessValue = document.getElementById("color-brightness-value");
+const colorContrastValue = document.getElementById("color-contrast-value");
+const colorSaturationValue = document.getElementById("color-saturation-value");
+const colorClipHint = document.getElementById("color-clip-hint");
+const pipXInput = /** @type {HTMLInputElement | null} */ (document.getElementById("pip-x"));
+const pipYInput = /** @type {HTMLInputElement | null} */ (document.getElementById("pip-y"));
+const pipScaleInput = /** @type {HTMLInputElement | null} */ (document.getElementById("pip-scale"));
+const pipOpacityInput = /** @type {HTMLInputElement | null} */ (document.getElementById("pip-opacity"));
+const pipXValue = document.getElementById("pip-x-value");
+const pipYValue = document.getElementById("pip-y-value");
+const pipScaleValue = document.getElementById("pip-scale-value");
+const pipOpacityValue = document.getElementById("pip-opacity-value");
 
 /** @type {{
  *   file: File | null,
@@ -210,7 +232,10 @@ const state = {
   jklSpeed: 0,
   timeline: null,
   selectedClipId: null,
+  selectedClipTrackId: null,
   timelinePlayhead: 0,
+  timelineViewStart: 0,
+  timelineViewEnd: 0,
 };
 
 /** @type {ReturnType<typeof createCloudSaveModal> | null} */
@@ -228,6 +253,92 @@ let editHistory = null;
 let isPlaying = false;
 /** @type {ReturnType<typeof initCropOverlay> | null} */
 let cropOverlay = null;
+
+/** 選択中クリップ情報 */
+function getSelectedClipInfo() {
+  if (!state.timeline || !state.selectedClipId) return null;
+  for (const track of state.timeline.tracks) {
+    const clip = track.clips.find((c) => c.id === state.selectedClipId);
+    if (clip) return { track, clip };
+  }
+  return null;
+}
+
+/** タイムライン表示ウィンドウ（秒） */
+function getTimelineViewWindow() {
+  const duration = state.timeline?.duration ?? state.duration ?? 1;
+  if (duration <= 0) return { start: 0, end: 1 };
+  const start = state.timelineViewStart ?? 0;
+  const end = state.timelineViewEnd > start ? state.timelineViewEnd : duration;
+  return {
+    start: Math.max(0, start),
+    end: Math.min(duration, end),
+  };
+}
+
+/** タイムラインズームをリセット */
+function resetTimelineZoom() {
+  const duration = state.timeline?.duration ?? state.duration ?? 0;
+  state.timelineViewStart = 0;
+  state.timelineViewEnd = duration;
+}
+
+/** 指定比率を中心にタイムラインズーム */
+function zoomTimelineAt(focusRatio, factor) {
+  const duration = state.timeline?.duration ?? 0;
+  if (duration <= 0) return;
+  const view = getTimelineViewWindow();
+  const span = Math.max(0.1, view.end - view.start);
+  const newSpan = clamp(span * factor, 0.1, duration);
+  const focus = view.start + focusRatio * span;
+  const newStart = clamp(focus - newSpan * focusRatio, 0, duration - newSpan);
+  state.timelineViewStart = newStart;
+  state.timelineViewEnd = newStart + newSpan;
+  timelineView?.render();
+}
+
+/** カラースライダーを選択クリップに同期 */
+function syncColorSliders() {
+  const info = getSelectedClipInfo();
+  const fx = info ? getClipColorEffects(info.clip) : { brightness: 0, contrast: 0, saturation: 0 };
+  if (colorBrightnessInput) colorBrightnessInput.value = String(fx.brightness);
+  if (colorContrastInput) colorContrastInput.value = String(fx.contrast);
+  if (colorSaturationInput) colorSaturationInput.value = String(fx.saturation);
+  if (colorBrightnessValue) colorBrightnessValue.textContent = String(fx.brightness);
+  if (colorContrastValue) colorContrastValue.textContent = String(fx.contrast);
+  if (colorSaturationValue) colorSaturationValue.textContent = String(fx.saturation);
+  if (colorClipHint) {
+    colorClipHint.textContent = info
+      ? `${info.track.id.toUpperCase()} クリップを調整中`
+      : "クリップを選択して調整";
+  }
+}
+
+/** PiP スライダーを選択クリップに同期 */
+function syncPipSliders() {
+  const info = getSelectedClipInfo();
+  const showPip = info?.track.id === "v2";
+  if (pipInspector instanceof HTMLElement) pipInspector.hidden = !showPip;
+  if (!showPip || !info) return;
+  const pip = getClipPipEffects(info.clip);
+  if (pipXInput) pipXInput.value = String(Math.round(pip.x * 100));
+  if (pipYInput) pipYInput.value = String(Math.round(pip.y * 100));
+  if (pipScaleInput) pipScaleInput.value = String(Math.round(pip.scale * 100));
+  if (pipOpacityInput) pipOpacityInput.value = String(Math.round((pip.opacity ?? 1) * 100));
+  if (pipXValue) pipXValue.textContent = String(Math.round(pip.x * 100));
+  if (pipYValue) pipYValue.textContent = String(Math.round(pip.y * 100));
+  if (pipScaleValue) pipScaleValue.textContent = String(Math.round(pip.scale * 100));
+  if (pipOpacityValue) pipOpacityValue.textContent = String(Math.round((pip.opacity ?? 1) * 100));
+}
+
+/** プレビューエンジンをアタッチ */
+function attachPreviewEngine() {
+  if (previewB && previewCanvas) {
+    previewEngine?.attach(preview, bgmPreview, previewB, previewCanvas);
+  } else {
+    previewEngine?.attach(preview, bgmPreview);
+  }
+}
 
 function patchState(partial) {
   Object.assign(state, partial);
@@ -260,12 +371,12 @@ function refreshAfterEdit() {
 
 /** 選択クリップに応じてインスペクタを更新 */
 function updateInspectorForSelection() {
+  syncColorSliders();
+  syncPipSliders();
   if (!state.timeline || !isMultiClipTimeline(state.timeline)) return;
-  const clipId = state.selectedClipId;
-  if (!clipId) return;
-  const vTrack = state.timeline.tracks.find((t) => t.id === "v1");
-  const clip = vTrack?.clips.find((c) => c.id === clipId);
-  if (!clip) return;
+  const info = getSelectedClipInfo();
+  if (!info || info.track.id !== "v1") return;
+  const { clip } = info;
   startTimeInput.value = formatTimePrecise(clip.sourceIn);
   endTimeInput.value = formatTimePrecise(clip.sourceOut);
   trimDurationEl.textContent = formatTimePrecise(clipDuration(clip));
@@ -320,6 +431,7 @@ function showEmptyEditor() {
   if (!state.timeline) {
     state.timeline = createEmptyTimeline();
   }
+  resetTimelineZoom();
   if (editorSidebar instanceof HTMLElement) editorSidebar.hidden = false;
   if (trimEditor instanceof HTMLElement) trimEditor.hidden = true;
   fileNameEl.textContent = "新規プロジェクト";
@@ -415,6 +527,13 @@ function getExportSettings() {
     videoWidth: state.videoWidth,
     videoHeight: state.videoHeight,
     timeline: state.timeline,
+    colorEffects: (() => {
+      const info = getSelectedClipInfo();
+      if (info) return getClipColorEffects(info.clip);
+      const vTrack = state.timeline?.tracks.find((t) => t.id === "v1");
+      if (vTrack?.clips[0]) return getClipColorEffects(vTrack.clips[0]);
+      return { brightness: 0, contrast: 0, saturation: 0 };
+    })(),
   };
 }
 
@@ -430,7 +549,7 @@ function refreshReencodeUi() {
   if (noReencodeWrap) noReencodeWrap.hidden = state.outputFormat === "webm";
   if (noReencodeHint) {
     noReencodeHint.textContent = reencodeRequired
-      ? "回転・クロップ・テキスト・音量/速度/フェード・WebM 出力時は再エンコードが必要です。"
+      ? "回転・クロップ・テキスト・カラー・音量/速度/フェード・WebM 出力時は再エンコードが必要です。"
       : "トリムのみの場合は再エンコードなしで高速に書き出せます。";
   }
   if (qualityField) qualityField.hidden = state.noReencode && !reencodeRequired;
@@ -445,6 +564,7 @@ const INSPECTOR_TITLES = {
   volume: "音量",
   speed: "速度",
   flip: "反転",
+  color: "カラー",
 };
 
 function updateInspectorTitle(toolName) {
@@ -804,6 +924,7 @@ async function bootstrapProjectWithVideo(file, duration, objectUrl, meta) {
   if (trimEditor instanceof HTMLElement) trimEditor.hidden = false;
 
   state.timeline = createTimelineFromFile(file, duration, objectUrl);
+  resetTimelineZoom();
   timelineView?.render();
 
   syncTrimState();
@@ -824,7 +945,7 @@ async function bootstrapProjectWithVideo(file, duration, objectUrl, meta) {
   dualTimeline?.buildTrimEditorStrip().catch(() => {});
 
   editHistory?.clear();
-  previewEngine?.attach(preview, bgmPreview);
+  attachPreviewEngine();
   await previewEngine?.seekToTimelineTime(0);
   updateUndoRedoUi();
 }
@@ -958,7 +1079,10 @@ function resetEditor(clearFile = true) {
   state.jklSpeed = 0;
   state.timeline = null;
   state.selectedClipId = null;
+  state.selectedClipTrackId = null;
   state.timelinePlayhead = 0;
+  state.timelineViewStart = 0;
+  state.timelineViewEnd = 0;
   editHistory?.clear();
   previewEngine?.detach();
 
@@ -1258,12 +1382,17 @@ function initTimelineView() {
     multiTrackEl,
     getTimeline: () => state.timeline ?? createEmptyTimeline(),
     getPlayhead: () => state.timelinePlayhead,
+    getViewWindow: () => getTimelineViewWindow(),
     setPlayhead: (t) => {
       state.timelinePlayhead = t;
       dualTimeline?.update();
       updateTimecode();
     },
     onChange: () => {
+      const duration = state.timeline?.duration ?? 0;
+      if (duration > 0 && (state.timelineViewEnd <= 0 || state.timelineViewEnd > duration)) {
+        state.timelineViewEnd = duration;
+      }
       syncTimelineModel();
       updateUndoRedoUi();
     },
@@ -1271,7 +1400,8 @@ function initTimelineView() {
     setSelectedClipId: (id) => {
       state.selectedClipId = id;
     },
-    onClipSelect: () => {
+    onClipSelect: (trackId) => {
+      state.selectedClipTrackId = trackId;
       setActiveTool("cut");
       updateInspectorForSelection();
     },
@@ -1280,6 +1410,13 @@ function initTimelineView() {
     },
     onSeekPreview: (t) => {
       previewEngine?.seekToTimelineTime(t).catch(() => {});
+    },
+    onPlaceOnTop: (mediaId, time, sourceIn, sourceOut) => {
+      commitEdit(() => {
+        const clipId = placeOnTop(state.timeline, mediaId, time, sourceIn, sourceOut);
+        state.selectedClipId = clipId;
+        state.selectedClipTrackId = "v2";
+      });
     },
   });
 }
@@ -1320,6 +1457,89 @@ function initNleButtons() {
   document.getElementById("slide-left-btn")?.addEventListener("click", () => timelineView?.handleSlide(-0.25));
   document.getElementById("slide-right-btn")?.addEventListener("click", () => timelineView?.handleSlide(0.25));
   document.getElementById("transition-btn")?.addEventListener("click", () => timelineView?.handleTransition(0.5));
+}
+
+/** カラー調整 UI */
+function initColorControls() {
+  const applyColor = (partial) => {
+    const info = getSelectedClipInfo();
+    if (!info || !state.timeline) return;
+    setClipEffects(state.timeline, info.clip.id, partial);
+    syncColorSliders();
+    previewEngine?.seekToTimelineTime(state.timelinePlayhead).catch(() => {});
+    refreshReencodeUi();
+  };
+
+  const bindSlider = (input, valueEl, key) => {
+    input?.addEventListener("input", () => {
+      if (valueEl) valueEl.textContent = input.value;
+      applyColor({ [key]: Number(input.value) });
+    });
+  };
+
+  bindSlider(colorBrightnessInput, colorBrightnessValue, "brightness");
+  bindSlider(colorContrastInput, colorContrastValue, "contrast");
+  bindSlider(colorSaturationInput, colorSaturationValue, "saturation");
+
+  document.getElementById("color-preset-reset")?.addEventListener("click", () => {
+    applyColor({ brightness: 0, contrast: 0, saturation: 0 });
+  });
+  document.getElementById("color-preset-vivid")?.addEventListener("click", () => {
+    applyColor({ brightness: 5, contrast: 10, saturation: 35 });
+  });
+  document.getElementById("color-preset-muted")?.addEventListener("click", () => {
+    applyColor({ brightness: -5, contrast: -10, saturation: -25 });
+  });
+}
+
+/** PiP インスペクター */
+function initPipControls() {
+  const applyPip = (partial) => {
+    const info = getSelectedClipInfo();
+    if (!info || info.track.id !== "v2" || !state.timeline) return;
+    setClipEffects(state.timeline, info.clip.id, { pip: partial });
+    syncPipSliders();
+    previewEngine?.seekToTimelineTime(state.timelinePlayhead).catch(() => {});
+    refreshReencodeUi();
+  };
+
+  pipXInput?.addEventListener("input", () => {
+    if (pipXValue) pipXValue.textContent = pipXInput.value;
+    applyPip({ x: Number(pipXInput.value) / 100 });
+  });
+  pipYInput?.addEventListener("input", () => {
+    if (pipYValue) pipYValue.textContent = pipYInput.value;
+    applyPip({ y: Number(pipYInput.value) / 100 });
+  });
+  pipScaleInput?.addEventListener("input", () => {
+    if (pipScaleValue) pipScaleValue.textContent = pipScaleInput.value;
+    applyPip({ scale: Number(pipScaleInput.value) / 100 });
+  });
+  pipOpacityInput?.addEventListener("input", () => {
+    if (pipOpacityValue) pipOpacityValue.textContent = pipOpacityInput.value;
+    applyPip({ opacity: Number(pipOpacityInput.value) / 100 });
+  });
+}
+
+/** タイムラインズーム */
+function initTimelineZoom() {
+  document.getElementById("timeline-zoom-in")?.addEventListener("click", () => zoomTimelineAt(0.5, 0.75));
+  document.getElementById("timeline-zoom-out")?.addEventListener("click", () => zoomTimelineAt(0.5, 1.35));
+  document.getElementById("timeline-zoom-fit")?.addEventListener("click", () => {
+    resetTimelineZoom();
+    timelineView?.render();
+  });
+  multiTrackEl?.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const rect = multiTrackEl.getBoundingClientRect();
+      const focusRatio = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+      zoomTimelineAt(focusRatio, event.deltaY > 0 ? 1.2 : 0.833);
+    },
+    { passive: false }
+  );
 }
 
 /** D&D ヘルパー */
@@ -1464,6 +1684,10 @@ function bindEvents() {
     playBtn?.classList.remove("is-playing");
     playBtn?.querySelector(".ve-play-icon")?.removeAttribute("hidden");
     playBtn?.querySelector(".ve-pause-icon")?.setAttribute("hidden", "");
+  });
+
+  window.addEventListener("resize", () => {
+    previewEngine?.resize();
   });
 
   document.querySelectorAll(".ve-rotate-btn").forEach((btn) => {
@@ -1691,6 +1915,9 @@ initDualTimeline();
 initPreviewEngine();
 initTimelineView();
 initNleButtons();
+initColorControls();
+initPipControls();
+initTimelineZoom();
 bindEvents();
 initCloudModals();
 

@@ -133,9 +133,16 @@ test.describe("Clipchamp-style operations", () => {
     expect(text).toMatch(/\//);
   });
 
-  test("clip click shows trim properties in inspector", async ({ page }) => {
-    await page.locator(".ve-track-clip").click();
-    await expect(page.locator("#tools-center")).toBeVisible();
-    await expect(page.locator("#inspector-title")).toHaveText("トリム");
+  test("left rail switches inspector for color", async ({ page }) => {
+    await page.locator('.cc-rail-btn[data-tool="color"]').click();
+    await expect(page.locator("#tool-popover")).toBeVisible();
+    await expect(page.locator("#color-brightness")).toBeVisible();
+    await expect(page.locator("#inspector-title")).toHaveText("カラー");
+  });
+
+  test("timeline zoom controls are visible", async ({ page }) => {
+    await expect(page.locator("#timeline-zoom-in")).toBeVisible();
+    await expect(page.locator("#timeline-zoom-out")).toBeVisible();
+    await expect(page.locator("#timeline-zoom-fit")).toBeVisible();
   });
 });

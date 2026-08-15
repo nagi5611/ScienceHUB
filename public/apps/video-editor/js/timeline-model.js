@@ -108,6 +108,94 @@ function overlapsOther(track, clipId, newStart, newEnd) {
   return false;
 }
 
+/** @typedef {{
+ *   brightness?: number,
+ *   contrast?: number,
+ *   saturation?: number,
+ *   pip?: { x: number, y: number, scale: number, opacity?: number },
+ * }} ClipEffects */
+
+export const DEFAULT_PIP = { x: 0.62, y: 0.05, scale: 0.35, opacity: 1 };
+
+/** @param {TimelineClip} clip */
+export function getClipColorEffects(clip) {
+  const fx = /** @type {ClipEffects | undefined} */ (clip.effects);
+  return {
+    brightness: fx?.brightness ?? 0,
+    contrast: fx?.contrast ?? 0,
+    saturation: fx?.saturation ?? 0,
+  };
+}
+
+/** @param {TimelineClip} clip */
+export function getClipPipEffects(clip) {
+  const fx = /** @type {ClipEffects | undefined} */ (clip.effects);
+  return { ...DEFAULT_PIP, ...fx?.pip };
+}
+
+/** @param {TimelineModel} timeline @param {string} clipId @param {Partial<ClipEffects>} partial */
+export function setClipEffects(timeline, clipId, partial) {
+  for (const track of timeline.tracks) {
+    const clip = track.clips.find((c) => c.id === clipId);
+    if (!clip) continue;
+    const prev = /** @type {ClipEffects} */ (clip.effects ?? {});
+    clip.effects = { ...prev, ...partial };
+    if (partial.pip) {
+      clip.effects.pip = { ...DEFAULT_PIP, ...prev.pip, ...partial.pip };
+    }
+    return true;
+  }
+  return false;
+}
+
+/** @param {TimelineModel} timeline */
+export function hasV2Clips(timeline) {
+  const v2 = timeline.tracks.find((t) => t.id === "v2");
+  return (v2?.clips.length ?? 0) > 0;
+}
+
+/** @param {TimelineModel} timeline */
+export function hasColorEffects(timeline) {
+  for (const track of timeline.tracks) {
+    for (const clip of track.clips) {
+      const fx = getClipColorEffects(clip);
+      if (fx.brightness !== 0 || fx.contrast !== 0 || fx.saturation !== 0) return true;
+    }
+  }
+  return false;
+}
+
+/** @param {TimelineTrack} vTrack @param {number} time */
+export function getTransitionState(vTrack, time) {
+  for (const clip of vTrack.clips) {
+    const trans = clip.transitionOut ?? 0;
+    if (trans <= 0) continue;
+    const clipEnd = clipTimelineEnd(clip);
+    const next = getNextClip(vTrack, clip.id);
+    if (!next || Math.abs(next.timelineStart - clipEnd) > 0.05) continue;
+    const transStart = clipEnd - trans;
+    if (time >= transStart - 0.001 && time <= clipEnd + 0.001) {
+      const progress = clamp01((time - transStart) / trans);
+      return { from: clip, to: next, progress, transStart, clipEnd };
+    }
+  }
+  return null;
+}
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+/** @param {TimelineModel} timeline */
+export function ensureV2Track(timeline) {
+  let v2 = timeline.tracks.find((t) => t.id === "v2");
+  if (!v2) {
+    v2 = { id: "v2", type: "video", clips: [] };
+    timeline.tracks.unshift(v2);
+  }
+  return v2;
+}
+
 /** @param {TimelineModel} timeline */
 export function ensureA2Track(timeline) {
   let a2 = timeline.tracks.find((t) => t.id === "a2");
@@ -123,6 +211,7 @@ export function createEmptyTimeline() {
   return {
     mediaBin: [],
     tracks: [
+      { id: "v2", type: "video", clips: [] },
       { id: "v1", type: "video", clips: [] },
       { id: "a1", type: "audio", clips: [] },
       { id: "a2", type: "audio", clips: [] },
@@ -149,6 +238,7 @@ export function createTimelineFromFile(file, duration, objectUrl) {
   return {
     mediaBin: [{ id: mediaId, name: file.name, file, duration, objectUrl, kind: "video" }],
     tracks: [
+      { id: "v2", type: "video", clips: [] },
       {
         id: "v1",
         type: "video",
@@ -375,22 +465,21 @@ export function trimClipEnd(timeline, trackId, clipId, deltaSource) {
 
 /** @param {TimelineModel} timeline @param {string} mediaId @param {number} timelineStart @param {number} sourceIn @param {number} sourceOut */
 export function placeOnTop(timeline, mediaId, timelineStart, sourceIn, sourceOut) {
-  let v2 = timeline.tracks.find((t) => t.id === "v2");
-  if (!v2) {
-    v2 = { id: "v2", type: "video", clips: [] };
-    timeline.tracks.unshift(v2);
-  }
-
+  const v2 = ensureV2Track(timeline);
+  const start = Math.max(0, timelineStart);
+  const clipId = createClipId();
   v2.clips.push({
-    id: createClipId(),
+    id: clipId,
     mediaId,
     sourceIn,
     sourceOut,
-    timelineStart,
+    timelineStart: start,
     transitionOut: 0,
+    effects: { pip: { ...DEFAULT_PIP } },
   });
   v2.clips.sort((a, b) => a.timelineStart - b.timelineStart);
   recomputeTimelineDuration(timeline);
+  return clipId;
 }
 
 /** @param {TimelineModel} timeline @param {File} file @param {number} duration @param {string} objectUrl @param {"video"|"audio"} [kind] */

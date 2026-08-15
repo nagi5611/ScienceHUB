@@ -3,7 +3,7 @@
  */
 
 import { resolveFfmpegWasmUrl } from "../../../js/ffmpeg-wasm-url.js";
-import { clipDuration, clipTimelineEnd, hasTransitions } from "./timeline-model.js";
+import { clipDuration, clipTimelineEnd, getClipColorEffects, getClipPipEffects, hasColorEffects, hasTransitions, hasV2Clips } from "./timeline-model.js";
 
 const FFMPEG_CORE_JS_BASE = "/apps/image-converter/vendor/ffmpeg";
 const MOUNT_POINT = "/ve-input";
@@ -109,13 +109,30 @@ function hasBgmClips(timeline) {
   return (a2?.clips.length ?? 0) > 0;
 }
 
+/** @param {{ brightness?: number, contrast?: number, saturation?: number } | null | undefined} effects */
+export function buildEqFilter(effects) {
+  if (!effects) return null;
+  const b = effects.brightness ?? 0;
+  const c = effects.contrast ?? 0;
+  const s = effects.saturation ?? 0;
+  if (b === 0 && c === 0 && s === 0) return null;
+  return `eq=brightness=${(b / 100).toFixed(3)}:contrast=${(1 + c / 100).toFixed(3)}:saturation=${(1 + s / 100).toFixed(3)}`;
+}
+
 /** タイムライン合成が必要か */
 export function needsTimelineCompose(settings) {
   if (!settings.timeline) return false;
   const vTrack = settings.timeline.tracks.find((t) => t.id === "v1");
   const multiClip = (vTrack?.clips.length ?? 0) > 1;
   const multiMedia = new Set(vTrack?.clips.map((c) => c.mediaId) ?? []).size > 1;
-  return multiClip || multiMedia || hasBgmClips(settings.timeline) || hasTransitions(settings.timeline);
+  return (
+    multiClip ||
+    multiMedia ||
+    hasBgmClips(settings.timeline) ||
+    hasTransitions(settings.timeline) ||
+    hasV2Clips(settings.timeline) ||
+    hasColorEffects(settings.timeline)
+  );
 }
 
 /** 再エンコードが必要か */
@@ -132,6 +149,10 @@ export function needsReencode(settings) {
     settings.speed !== 100 ||
     settings.fadeIn > 0 ||
     settings.fadeOut > 0 ||
+    (settings.colorEffects &&
+      ((settings.colorEffects.brightness ?? 0) !== 0 ||
+        (settings.colorEffects.contrast ?? 0) !== 0 ||
+        (settings.colorEffects.saturation ?? 0) !== 0)) ||
     settings.format === "webm" ||
     (settings.slipOffset ?? 0) !== 0 ||
     audioSplit ||
@@ -243,6 +264,9 @@ function buildVideoFilters(settings) {
     const fadeStart = Math.max(0, clipDuration - settings.fadeOut);
     filters.push(`fade=t=out:st=${fadeStart}:d=${settings.fadeOut}`);
   }
+
+  const eq = buildEqFilter(settings.colorEffects);
+  if (eq) filters.push(eq);
 
   return filters.length ? filters.join(",") : null;
 }
@@ -396,12 +420,18 @@ function buildTrimmedClips(track, mediaToInputIdx, streamKind, prefix, parts) {
   sorted.forEach((clip, i) => {
     const inputIdx = mediaToInputIdx.get(clip.mediaId);
     if (inputIdx === undefined) return;
-    const label = `${prefix}${i}`;
+    let label = `${prefix}${i}`;
     const dur = clipDuration(clip);
     if (streamKind === "video") {
       parts.push(
         `[${inputIdx}:v]trim=start=${clip.sourceIn}:end=${clip.sourceOut},setpts=PTS-STARTPTS[${label}]`
       );
+      const eq = buildEqFilter(getClipColorEffects(clip));
+      if (eq) {
+        const next = `${label}e`;
+        parts.push(`[${label}]${eq}[${next}]`);
+        label = next;
+      }
     } else {
       parts.push(
         `[${inputIdx}:a]atrim=start=${clip.sourceIn}:end=${clip.sourceOut},asetpts=PTS-STARTPTS[${label}]`
@@ -425,6 +455,7 @@ function buildTrimmedClips(track, mediaToInputIdx, streamKind, prefix, parts) {
  * @param {Map<string, string>} inputPaths mediaId -> path
  */
 export function buildTimelineGraph(timeline, inputPaths) {
+  const v2Track = timeline.tracks.find((t) => t.id === "v2");
   const vTrack = timeline.tracks.find((t) => t.id === "v1");
   const a1Track = timeline.tracks.find((t) => t.id === "a1");
   const a2Track = timeline.tracks.find((t) => t.id === "a2");
@@ -436,7 +467,7 @@ export function buildTimelineGraph(timeline, inputPaths) {
   const mediaToInputIdx = new Map();
 
   const allMediaIds = new Set();
-  for (const track of [vTrack, a1Track, a2Track]) {
+  for (const track of [v2Track, vTrack, a1Track, a2Track]) {
     if (!track) continue;
     for (const clip of track.clips) allMediaIds.add(clip.mediaId);
   }
@@ -459,6 +490,38 @@ export function buildTimelineGraph(timeline, inputPaths) {
     parts[parts.length - 1] = parts[parts.length - 1].replace(`[${vClips[0].label}]`, "[outv]");
   } else {
     chainClips(vClips, "video", "outv", parts);
+  }
+
+  if (v2Track && v2Track.clips.length > 0) {
+    let layerOut = "outv";
+    v2Track.clips.forEach((clip, i) => {
+      const inputIdx = mediaToInputIdx.get(clip.mediaId);
+      if (inputIdx === undefined) return;
+      const pip = getClipPipEffects(clip);
+      const trimLabel = `v2t${i}`;
+      let pipLabel = trimLabel;
+      parts.push(
+        `[${inputIdx}:v]trim=start=${clip.sourceIn}:end=${clip.sourceOut},setpts=PTS-STARTPTS[${trimLabel}]`
+      );
+      const eq = buildEqFilter(getClipColorEffects(clip));
+      if (eq) {
+        pipLabel = `${trimLabel}e`;
+        parts.push(`[${trimLabel}]${eq}[${pipLabel}]`);
+      }
+      const scale = Math.max(0.1, Math.min(1, pip.scale ?? 0.35));
+      const scaled = `${pipLabel}s`;
+      parts.push(`[${pipLabel}]scale=iw*${scale.toFixed(3)}:-1[${scaled}]`);
+      const nextOut = i === v2Track.clips.length - 1 ? "outv" : `ov${i}`;
+      const start = clip.timelineStart.toFixed(3);
+      const end = clipTimelineEnd(clip).toFixed(3);
+      const x = (pip.x ?? 0.62).toFixed(3);
+      const y = (pip.y ?? 0.05).toFixed(3);
+      parts.push(
+        `[${layerOut}][${scaled}]overlay=x=main_w*${x}:y=main_h*${y}:enable='between(t,${start},${end})'[${nextOut}]`
+      );
+      layerOut = nextOut;
+    });
+    videoOut = layerOut;
   }
 
   let audioOut = null;

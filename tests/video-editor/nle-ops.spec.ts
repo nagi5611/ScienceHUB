@@ -58,6 +58,22 @@ test.describe("NLE operations", () => {
     await expect(page.locator("#multi-track .ve-track-clip")).toHaveCount(2, { timeout: 15_000 });
     await expect(page.locator("#media-bin .ve-media-bin-item")).toHaveCount(2);
   });
+
+  test("shift click places overlay on v2 track", async ({ page }) => {
+    const fixturePath = path.join(path.dirname(new URL(import.meta.url).pathname), "fixtures/sample.mp4");
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#add-video-btn").click();
+    const chooser = await chooserPromise;
+    await chooser.setFiles(fixturePath);
+    await expect(page.locator("#media-bin .ve-media-bin-item")).toHaveCount(2, { timeout: 15_000 });
+
+    await page.keyboard.down("Shift");
+    await page.locator("#media-bin .ve-media-bin-item").nth(1).click();
+    await page.keyboard.up("Shift");
+
+    await expect(page.locator('[data-testid="track-v2"] .ve-track-clip')).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator("#pip-inspector")).toBeVisible();
+  });
 });
 
 test.describe("NLE media import", () => {

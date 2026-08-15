@@ -14,7 +14,9 @@ test.describe("timeline-model and export graph", () => {
 
       model.bladeSplit(timeline, "v1", 5);
       model.bladeSplit(timeline, "a1", 5);
-      const left = timeline.tracks[0].clips[0];
+      const vTrack = timeline.tracks.find((t) => t.id === "v1");
+      const left = vTrack?.clips[0];
+      if (!left) return { error: "no v1 clip" };
       model.setTransition(timeline, left.id, 0.5);
 
       const audioFile = new File(["a"], "bgm.mp3", { type: "audio/mpeg" });
@@ -25,7 +27,7 @@ test.describe("timeline-model and export graph", () => {
       const graph = exp.buildTimelineGraph(timeline, paths);
 
       return {
-        clipCount: timeline.tracks[0].clips.length,
+        clipCount: vTrack?.clips.length ?? 0,
         transition: left.transitionOut,
         hasBgm: timeline.tracks.some((t) => t.id === "a2" && t.clips.length > 0),
         filter: graph?.filter ?? "",
