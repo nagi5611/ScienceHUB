@@ -4,6 +4,7 @@
 
 import { clamp, formatBytes, formatTimePrecise, formatTimeShort, parseTimeInput } from "./js/time.js";
 import { buildDownloadName, exportVideo, getExportTrimRange, needsReencode } from "./js/export-video.js";
+import { describeAccelerationMode, getEncodeCapabilities } from "../../js/ffmpeg-capabilities.js";
 import {
   createDefaultText,
   FONT_FAMILIES,
@@ -124,6 +125,10 @@ const textPositionSelect = null;
 const noReencodeInput = /** @type {HTMLInputElement} */ (document.getElementById("no-reencode"));
 const noReencodeWrap = document.getElementById("no-reencode-wrap");
 const noReencodeHint = document.getElementById("no-reencode-hint");
+const accelerationModeSelect = /** @type {HTMLSelectElement | null} */ (
+  document.getElementById("acceleration-mode")
+);
+const accelerationHint = document.getElementById("acceleration-hint");
 const qualityField = document.getElementById("quality-field");
 const qualityInput = /** @type {HTMLInputElement} */ (document.getElementById("quality"));
 const qualityValue = document.getElementById("quality-value");
@@ -174,6 +179,8 @@ const pipOpacityValue = document.getElementById("pip-opacity-value");
  *   outputFormat: string,
  *   quality: number,
  *   noReencode: boolean,
+ *   accelerationMode: "auto" | "cpu-max" | "gpu",
+ *   encodeCapabilities: { ffmpegMultithread: boolean, hardwareVideoEncoder: boolean, cpuCores: number } | null,
  *   inverse: boolean,
  *   activeTool: string,
  *   videoWidth: number,
@@ -215,6 +222,8 @@ const state = {
   outputFormat: "mp4",
   quality: 23,
   noReencode: true,
+  accelerationMode: "auto",
+  encodeCapabilities: null,
   inverse: false,
   activeTool: "cut",
   videoWidth: 0,
@@ -523,6 +532,8 @@ function getExportSettings() {
     format: state.outputFormat,
     quality: state.quality,
     noReencode: state.noReencode,
+    accelerationMode: state.accelerationMode,
+    fps: state.fps,
     inverse: state.inverse,
     duration: state.duration,
     videoWidth: state.videoWidth,
@@ -536,6 +547,41 @@ function getExportSettings() {
       return { brightness: 0, contrast: 0, saturation: 0 };
     })(),
   };
+}
+
+/** 加速モード表示を更新 */
+function refreshAccelerationUi() {
+  if (!accelerationHint) return;
+  const mode = state.accelerationMode;
+  const caps = state.encodeCapabilities;
+  if (!caps) {
+    accelerationHint.textContent = "エンコード加速を確認中…";
+    return;
+  }
+  accelerationHint.textContent = describeAccelerationMode(mode, caps);
+  if (accelerationModeSelect) {
+    const gpuOption = accelerationModeSelect.querySelector('option[value="gpu"]');
+    if (gpuOption instanceof HTMLOptionElement) {
+      gpuOption.disabled = !caps.hardwareVideoEncoder;
+    }
+  }
+}
+
+/** エンコード能力をプローブ */
+async function probeEncodeCapabilities() {
+  try {
+    state.encodeCapabilities = await getEncodeCapabilities(state.videoWidth || 1920, state.videoHeight || 1080);
+    refreshAccelerationUi();
+  } catch {
+    state.encodeCapabilities = {
+      crossOriginIsolated: false,
+      ffmpegMultithread: false,
+      hardwareVideoEncoder: false,
+      hardwareEncoderConfig: null,
+      cpuCores: navigator.hardwareConcurrency ?? 4,
+    };
+    refreshAccelerationUi();
+  }
 }
 
 /** 再エンコードオプションの表示更新 */
@@ -554,6 +600,7 @@ function refreshReencodeUi() {
       : "トリムのみの場合は再エンコードなしで高速に書き出せます。";
   }
   if (qualityField) qualityField.hidden = state.noReencode && !reencodeRequired;
+  refreshAccelerationUi();
 }
 
 /** インスペクタ見出し */
@@ -934,6 +981,7 @@ async function bootstrapProjectWithVideo(file, duration, objectUrl, meta) {
   updateCropOverlay();
   updateFileMeta();
   refreshReencodeUi();
+  probeEncodeCapabilities().catch(() => {});
 
   generateWaveformPeaks(file)
     .then(({ peaks }) => {
@@ -1790,6 +1838,13 @@ function bindEvents() {
     refreshReencodeUi();
   });
 
+  accelerationModeSelect?.addEventListener("change", () => {
+    const value = accelerationModeSelect.value;
+    state.accelerationMode =
+      value === "cpu-max" || value === "gpu" ? value : "auto";
+    refreshAccelerationUi();
+  });
+
   exportBtn?.addEventListener("click", () => {
     handleExport().catch((err) => alert(err instanceof Error ? err.message : "書き出し失敗"));
   });
@@ -1950,6 +2005,7 @@ if (previewWrap instanceof HTMLElement) {
 }
 qualityValue.textContent = qualityInput.value;
 setActiveTool("cut");
+probeEncodeCapabilities().catch(() => {});
 
 const allowed =
   /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true ||

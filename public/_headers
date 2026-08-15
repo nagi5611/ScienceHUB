@@ -4,3 +4,11 @@
 /manifest.webmanifest
   Content-Type: application/manifest+json
   Cache-Control: public, max-age=3600
+
+/apps/video-editor/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+
+/video-editor-e2e.html
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
