@@ -43,7 +43,9 @@ test.describe("video-editor Resolve-style trim", () => {
   test("media bin and multi-track render after load", async ({ page }) => {
     await loadSampleVideo(page);
     await expect(page.locator("#media-bin .ve-media-bin-item")).toHaveCount(1);
-    await expect(page.locator("#multi-track .ve-track-row")).toHaveCount(1);
+    await expect(page.locator("#multi-track .ve-track-row")).toHaveCount(2);
+    await expect(page.locator('[data-testid="track-v2"]')).toBeVisible();
+    await expect(page.locator('[data-testid="track-v1"]')).toBeVisible();
   });
 
   test("trim mode button activates slip UI hint", async ({ page }) => {

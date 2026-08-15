@@ -113,10 +113,11 @@ test.describe("Clipchamp-style operations", () => {
     await expect(page.locator("#format-picker-label")).toHaveText("WebM");
   });
 
-  test("exit returns to landing", async ({ page }) => {
+  test("exit resets to empty editor project", async ({ page }) => {
     await page.locator("#exit-btn").click();
-    await expect(page.locator("#landing-view")).toBeVisible();
-    await expect(page.locator("#editor-view")).toBeHidden();
+    await expect(page.locator("#editor-view")).toBeVisible();
+    await expect(page.locator("#landing-view")).toBeHidden();
+    await expect(page.locator("#file-name")).toHaveText("新規プロジェクト");
   });
 
   test("timeline timecode updates on playhead move", async ({ page }) => {
@@ -132,9 +133,16 @@ test.describe("Clipchamp-style operations", () => {
     expect(text).toMatch(/\//);
   });
 
-  test("clip click shows trim properties in inspector", async ({ page }) => {
-    await page.locator(".ve-track-clip").click();
-    await expect(page.locator("#tools-center")).toBeVisible();
-    await expect(page.locator("#inspector-title")).toHaveText("トリム");
+  test("left rail switches inspector for color", async ({ page }) => {
+    await page.locator('.cc-rail-btn[data-tool="color"]').click();
+    await expect(page.locator("#tool-popover")).toBeVisible();
+    await expect(page.locator("#color-brightness")).toBeVisible();
+    await expect(page.locator("#inspector-title")).toHaveText("カラー");
+  });
+
+  test("timeline zoom controls are visible", async ({ page }) => {
+    await expect(page.locator("#timeline-zoom-in")).toBeVisible();
+    await expect(page.locator("#timeline-zoom-out")).toBeVisible();
+    await expect(page.locator("#timeline-zoom-fit")).toBeVisible();
   });
 });

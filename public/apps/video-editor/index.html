@@ -47,6 +47,12 @@
     accept="video/*,.mp4,.webm,.avi,.mov,.mkv,.wmv,.mpeg,.mpg,.3gp,.m4v"
     hidden
   >
+  <input
+    type="file"
+    id="audio-file-input"
+    accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+    hidden
+  >
 
   <!-- Clipchamp 風ランディング -->
   <section class="cc-landing ve-landing" id="landing-view" hidden>
@@ -90,6 +96,8 @@
         </div>
       </div>
       <div class="cc-topbar-end">
+        <button type="button" class="cc-topbar-btn" id="undo-btn" title="元に戻す (Ctrl+Z)" disabled aria-label="元に戻す">↶</button>
+        <button type="button" class="cc-topbar-btn" id="redo-btn" title="やり直す (Ctrl+Shift+Z)" disabled aria-label="やり直す">↷</button>
         <button type="button" class="cc-topbar-btn cc-topbar-btn--text" id="reset-edits-btn">リセット</button>
         <button type="button" class="cc-topbar-btn" id="cloud-load-btn" title="クラウドから読み込み" aria-label="クラウドから読み込み">☁</button>
         <button type="button" class="cc-topbar-btn" id="cloud-save-btn" disabled title="クラウドに保存" aria-label="クラウドに保存">↑</button>
@@ -148,6 +156,10 @@
             <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v2H4V5Zm0 6h10v2H4v-2Zm0 6h16v2H4v-2Zm14-8 3 3-3 3V9Z"/></svg>
             <span>反転</span>
           </button>
+          <button type="button" class="cc-rail-btn ve-tool-btn" data-tool="color" title="カラー調整">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 0 0-9 9c0 4.97 4.03 9 9 9 1.66 0 3-1.34 3-3 0-.74-.4-1.39-1-1.73v-2.27c.6-.34 1-1 1-1.73 0-1.1-.9-2-2-2H9.5c-.83 0-1.5-.67-1.5-1.5S8.67 9 9.5 9H11V7.5C11 6.67 11.67 6 12.5 6S14 6.67 14 7.5V9h1.5c1.38 0 2.5 1.12 2.5 2.5 0 .96-.55 1.79-1.35 2.2L16.2 16.8A6 6 0 0 1 12 18a6 6 0 0 1-6-6c0-3.31 2.69-6 6-6Z"/></svg>
+            <span>カラー</span>
+          </button>
         </nav>
 
         <div class="cc-panel">
@@ -155,7 +167,9 @@
             <h2 class="cc-panel-title">メディア</h2>
             <div class="ve-media-bin">
               <div class="ve-media-bin-list" id="media-bin"></div>
-              <p class="ve-sidebar-hint cc-panel-hint">クリック: 末尾に追加 / ダブルクリック: 上に配置</p>
+              <button type="button" class="cc-btn cc-btn--primary cc-btn--block ve-add-video-btn" id="add-video-btn">動画を追加</button>
+              <button type="button" class="cc-btn cc-btn--secondary cc-btn--block ve-add-audio-btn" id="add-audio-btn">音楽を追加</button>
+              <p class="ve-sidebar-hint cc-panel-hint">クリック: V1に配置 · Shift+クリック: オーバーレイ</p>
             </div>
             <div class="ve-nle-tools cc-nle-row">
               <button type="button" class="ve-nle-btn" id="blade-btn" title="Blade (B)">分割</button>
@@ -222,6 +236,9 @@
         </div>
         <div class="ve-work-area cc-stage-canvas" id="preview-wrap">
           <video id="preview" class="ve-preview" playsinline muted preload="auto"></video>
+          <video id="preview-b" class="ve-preview ve-preview--hidden" playsinline muted preload="auto" hidden></video>
+          <canvas id="preview-canvas" class="ve-preview-canvas" hidden aria-hidden="true"></canvas>
+          <audio id="bgm-preview" hidden preload="auto"></audio>
           <div class="ve-texts-container" id="texts-container" hidden></div>
           <div class="ve-trim-editor cc-trim-preview" id="trim-editor" hidden>
             <p class="ve-trim-editor-label">編集点プレビュー</p>
@@ -281,6 +298,7 @@
           </div>
           <div class="ve-pop-inner" data-pop="volume" hidden>
             <label class="ve-pop-field">音量 <output id="volume-value">100</output>%<input type="range" id="volume" class="ve-pop-range" min="0" max="200" value="100"></label>
+            <label class="ve-pop-field">BGM <output id="bgm-volume-value">80</output>%<input type="range" id="bgm-volume" class="ve-pop-range" min="0" max="100" value="80"></label>
             <div class="ve-pop-row">
               <label class="ve-pop-field ve-pop-field--half">フェードイン<input type="number" id="fade-in" class="ve-pop-input" min="0" max="10" step="0.1" value="0"></label>
               <label class="ve-pop-field ve-pop-field--half">フェードアウト<input type="number" id="fade-out" class="ve-pop-input" min="0" max="10" step="0.1" value="0"></label>
@@ -293,6 +311,25 @@
             <label class="ve-pop-check"><input type="checkbox" id="flip-h"> 左右反転</label>
             <label class="ve-pop-check"><input type="checkbox" id="flip-v"> 上下反転</label>
           </div>
+          <div class="ve-pop-inner" data-pop="color" hidden>
+            <p class="ve-pop-hint" id="color-clip-hint">クリップを選択して調整</p>
+            <label class="ve-pop-field">明るさ <output id="color-brightness-value">0</output><input type="range" id="color-brightness" class="ve-pop-range" min="-100" max="100" value="0" step="1"></label>
+            <label class="ve-pop-field">コントラスト <output id="color-contrast-value">0</output><input type="range" id="color-contrast" class="ve-pop-range" min="-100" max="100" value="0" step="1"></label>
+            <label class="ve-pop-field">彩度 <output id="color-saturation-value">0</output><input type="range" id="color-saturation" class="ve-pop-range" min="-100" max="100" value="0" step="1"></label>
+            <div class="ve-pop-btns ve-color-presets" role="group" aria-label="プリセット">
+              <button type="button" class="ve-pop-btn" id="color-preset-reset">リセット</button>
+              <button type="button" class="ve-pop-btn" id="color-preset-cinema">シネマ</button>
+              <button type="button" class="ve-pop-btn" id="color-preset-mono">モノクロ</button>
+              <button type="button" class="ve-pop-btn" id="color-preset-vivid">鮮やか</button>
+            </div>
+          </div>
+        </div>
+        <div class="cc-inspector-pip ve-pip-inspector" id="pip-inspector" hidden>
+          <h3 class="ve-pip-title">オーバーレイ (PiP)</h3>
+          <label class="ve-pop-field">X <output id="pip-x-value">62</output>%<input type="range" id="pip-x" class="ve-pop-range" min="0" max="100" value="62" step="1"></label>
+          <label class="ve-pop-field">Y <output id="pip-y-value">5</output>%<input type="range" id="pip-y" class="ve-pop-range" min="0" max="100" value="5" step="1"></label>
+          <label class="ve-pop-field">サイズ <output id="pip-scale-value">35</output>%<input type="range" id="pip-scale" class="ve-pop-range" min="10" max="80" value="35" step="1"></label>
+          <label class="ve-pop-field">不透明度 <output id="pip-opacity-value">100</output>%<input type="range" id="pip-opacity" class="ve-pop-range" min="0" max="100" value="100" step="1"></label>
         </div>
         <div class="cc-inspector-nle ve-nle-tools">
           <button type="button" class="ve-nle-btn" id="roll-left-btn" title="Roll -">Roll ◀</button>
@@ -314,6 +351,11 @@
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
         </button>
         <span class="cc-timecode" id="timeline-timecode" aria-live="polite">0:00 / 0:00</span>
+        <div class="cc-timeline-zoom" aria-label="タイムラインズーム">
+          <button type="button" class="cc-timeline-btn" id="timeline-zoom-out" title="ズームアウト">−</button>
+          <button type="button" class="cc-timeline-btn" id="timeline-zoom-fit" title="全体表示">⤢</button>
+          <button type="button" class="cc-timeline-btn" id="timeline-zoom-in" title="ズームイン">+</button>
+        </div>
       </div>
       <p class="ve-trim-mode-hint cc-trim-hint" id="trim-mode-hint" hidden></p>
       <div class="ve-navigation cc-timeline-body" aria-label="タイムライン">

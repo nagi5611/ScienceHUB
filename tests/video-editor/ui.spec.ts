@@ -6,19 +6,16 @@ test.describe("video-editor UI — Clipchamp", () => {
     await openVideoEditor(page);
   });
 
-  test("landing uses Clipchamp-style hero and purple CTA", async ({ page }) => {
-    await expect(page.locator(".cc-landing-title")).toHaveText("動画をブラウザで編集");
-    await expect(page.locator("#select-file-btn")).toHaveText("ファイルを参照");
-
-    const accent = await page.locator("#select-file-btn").evaluate((el) =>
-      getComputedStyle(el).backgroundColor
-    );
-    expect(accent).toMatch(/rgb\(144,\s*49,\s*99\)|rgb\(144, 49, 99\)/);
+  test("opens directly in editor with empty project", async ({ page }) => {
+    await expect(page.locator("#editor-view")).toBeVisible();
+    await expect(page.locator("#landing-view")).toBeHidden();
+    await expect(page.locator("#file-name")).toHaveText("新規プロジェクト");
+    await expect(page.locator("#add-video-btn")).toHaveText("動画を追加");
   });
 
-  test("drop zone is visible on landing", async ({ page }) => {
-    await expect(page.locator(".cc-drop-zone")).toBeVisible();
-    await expect(page.locator(".cc-drop-title")).toHaveText("動画をインポート");
+  test("add video button is visible in media panel", async ({ page }) => {
+    await expect(page.locator("#add-video-btn")).toBeVisible();
+    await expect(page.locator("#add-audio-btn")).toHaveText("音楽を追加");
   });
 
   test("editor uses Clipchamp layout regions", async ({ page }) => {

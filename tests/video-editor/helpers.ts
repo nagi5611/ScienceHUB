@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const FIXTURES_DIR = path.join(__dirname, "fixtures");
 
-/** E2E ハーネスを開く */
+/** E2E ハーネスを開く（編集画面が初期表示） */
 export async function openVideoEditor(page: Page) {
   page.on("pageerror", (error) => {
     console.error("pageerror:", error.message);
@@ -14,12 +14,13 @@ export async function openVideoEditor(page: Page) {
   await page.goto("/video-editor-e2e.html", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(
     () => {
-      const landing = document.getElementById("landing-view");
+      const editor = document.getElementById("editor-view");
       return (
         typeof /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ ===
           "boolean" &&
-        landing instanceof HTMLElement &&
-        !landing.hidden
+        editor instanceof HTMLElement &&
+        !editor.hidden &&
+        document.body.classList.contains("ve-app--editing")
       );
     },
     undefined,
@@ -42,20 +43,17 @@ export async function loadSampleVideo(page: Page, filename = "sample.mp4") {
   const fixturePath = await resolveFixturePath(filename);
 
   const chooserPromise = page.waitForEvent("filechooser");
-  await page.locator("#select-file-btn").click();
+  await page.locator("#add-video-btn").click();
   const chooser = await chooserPromise;
   await chooser.setFiles(fixturePath);
 
   await page.waitForFunction(
     () => {
-      const editor = document.getElementById("editor-view");
       const name = document.getElementById("file-name");
       return (
-        editor instanceof HTMLElement &&
-        !editor.hidden &&
-        document.body.classList.contains("ve-app--editing") &&
         name instanceof HTMLElement &&
         name.textContent !== "—" &&
+        name.textContent !== "新規プロジェクト" &&
         name.textContent.trim().length > 0
       );
     },

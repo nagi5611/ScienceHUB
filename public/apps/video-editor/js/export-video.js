@@ -3,6 +3,7 @@
  */
 
 import { resolveFfmpegWasmUrl } from "../../../js/ffmpeg-wasm-url.js";
+import { clipDuration, clipTimelineEnd, getClipColorEffects, getClipPipEffects, hasColorEffects, hasTransitions, hasV2Clips } from "./timeline-model.js";
 
 const FFMPEG_CORE_JS_BASE = "/apps/image-converter/vendor/ffmpeg";
 const MOUNT_POINT = "/ve-input";
@@ -102,12 +103,41 @@ export function getExportTrimRange(settings) {
   return { effectiveStart, effectiveEnd, clipLen, audioStart, audioEnd, audioSplit };
 }
 
+/** BGM トラックにクリップがあるか */
+function hasBgmClips(timeline) {
+  const a2 = timeline.tracks.find((t) => t.id === "a2");
+  return (a2?.clips.length ?? 0) > 0;
+}
+
+/** @param {{ brightness?: number, contrast?: number, saturation?: number } | null | undefined} effects */
+export function buildEqFilter(effects) {
+  if (!effects) return null;
+  const b = effects.brightness ?? 0;
+  const c = effects.contrast ?? 0;
+  const s = effects.saturation ?? 0;
+  if (b === 0 && c === 0 && s === 0) return null;
+  return `eq=brightness=${(b / 100).toFixed(3)}:contrast=${(1 + c / 100).toFixed(3)}:saturation=${(1 + s / 100).toFixed(3)}`;
+}
+
+/** タイムライン合成が必要か */
+export function needsTimelineCompose(settings) {
+  if (!settings.timeline) return false;
+  const vTrack = settings.timeline.tracks.find((t) => t.id === "v1");
+  const multiClip = (vTrack?.clips.length ?? 0) > 1;
+  const multiMedia = new Set(vTrack?.clips.map((c) => c.mediaId) ?? []).size > 1;
+  return (
+    multiClip ||
+    multiMedia ||
+    hasBgmClips(settings.timeline) ||
+    hasTransitions(settings.timeline) ||
+    hasV2Clips(settings.timeline) ||
+    hasColorEffects(settings.timeline)
+  );
+}
+
 /** 再エンコードが必要か */
 export function needsReencode(settings) {
   const { audioSplit } = getExportTrimRange(settings);
-  const hasMultiTimeline =
-    settings.timeline &&
-    settings.timeline.tracks.some((t) => t.type === "video" && t.clips.length > 1);
   return (
     settings.inverse ||
     settings.rotation !== 0 ||
@@ -119,10 +149,14 @@ export function needsReencode(settings) {
     settings.speed !== 100 ||
     settings.fadeIn > 0 ||
     settings.fadeOut > 0 ||
+    (settings.colorEffects &&
+      ((settings.colorEffects.brightness ?? 0) !== 0 ||
+        (settings.colorEffects.contrast ?? 0) !== 0 ||
+        (settings.colorEffects.saturation ?? 0) !== 0)) ||
     settings.format === "webm" ||
     (settings.slipOffset ?? 0) !== 0 ||
     audioSplit ||
-    !!hasMultiTimeline
+    needsTimelineCompose(settings)
   );
 }
 
@@ -231,6 +265,9 @@ function buildVideoFilters(settings) {
     filters.push(`fade=t=out:st=${fadeStart}:d=${settings.fadeOut}`);
   }
 
+  const eq = buildEqFilter(settings.colorEffects);
+  if (eq) filters.push(eq);
+
   return filters.length ? filters.join(",") : null;
 }
 
@@ -322,12 +359,106 @@ function outputMime(format) {
  * @param {{ onProgress?: (ratio: number, message?: string) => void }} [callbacks]
  */
 /**
- * タイムライン filter_complex を組み立て（Phase 2）
+ * クリップ列を xfade / acrossfade または concat でチェーン
+ * @param {import("./timeline-model.js").TimelineClip[]} clips
+ * @param {"video"|"audio"} kind
+ * @param {string} outLabel
+ * @param {string[]} parts
+ */
+function chainClips(clips, kind, outLabel, parts) {
+  if (clips.length === 0) return null;
+  if (clips.length === 1) return clips[0].label;
+
+  let current = clips[0].label;
+  let accDur = clips[0].dur;
+
+  for (let i = 1; i < clips.length; i += 1) {
+    const prev = clips[i - 1];
+    const cur = clips[i];
+    const nextLabel = i === clips.length - 1 ? outLabel : `xf${kind}${i}`;
+    const adjacent = Math.abs(cur.timelineStart - prev.timelineEnd) < 0.05;
+    const trans = adjacent && prev.transitionOut > 0 ? prev.transitionOut : 0;
+
+    if (trans > 0) {
+      const offset = Math.max(0, accDur - trans);
+      if (kind === "video") {
+        parts.push(
+          `[${current}][${cur.label}]xfade=transition=fade:duration=${trans.toFixed(3)}:offset=${offset.toFixed(3)}[${nextLabel}]`
+        );
+      } else {
+        parts.push(
+          `[${current}][${cur.label}]acrossfade=d=${trans.toFixed(3)}[${nextLabel}]`
+        );
+      }
+      accDur = accDur + cur.dur - trans;
+    } else {
+      if (kind === "video") {
+        parts.push(`[${current}][${cur.label}]concat=n=2:v=1:a=0[${nextLabel}]`);
+      } else {
+        parts.push(`[${current}][${cur.label}]concat=n=2:v=0:a=1[${nextLabel}]`);
+      }
+      accDur += cur.dur;
+    }
+    current = nextLabel;
+  }
+  return current;
+}
+
+/**
+ * トラックのクリップを trim ラベル付きで生成
+ * @param {import("./timeline-model.js").TimelineTrack} track
+ * @param {Map<string, number>} mediaToInputIdx
+ * @param {"video"|"audio"} streamKind
+ * @param {string} prefix
+ * @param {string[]} parts
+ */
+function buildTrimmedClips(track, mediaToInputIdx, streamKind, prefix, parts) {
+  const sorted = [...track.clips].sort((a, b) => a.timelineStart - b.timelineStart);
+  /** @type {{ label: string, dur: number, timelineStart: number, timelineEnd: number, transitionOut: number }[]} */
+  const built = [];
+
+  sorted.forEach((clip, i) => {
+    const inputIdx = mediaToInputIdx.get(clip.mediaId);
+    if (inputIdx === undefined) return;
+    let label = `${prefix}${i}`;
+    const dur = clipDuration(clip);
+    if (streamKind === "video") {
+      parts.push(
+        `[${inputIdx}:v]trim=start=${clip.sourceIn}:end=${clip.sourceOut},setpts=PTS-STARTPTS[${label}]`
+      );
+      const eq = buildEqFilter(getClipColorEffects(clip));
+      if (eq) {
+        const next = `${label}e`;
+        parts.push(`[${label}]${eq}[${next}]`);
+        label = next;
+      }
+    } else {
+      parts.push(
+        `[${inputIdx}:a]atrim=start=${clip.sourceIn}:end=${clip.sourceOut},asetpts=PTS-STARTPTS[${label}]`
+      );
+    }
+    built.push({
+      label,
+      dur,
+      timelineStart: clip.timelineStart,
+      timelineEnd: clipTimelineEnd(clip),
+      transitionOut: clip.transitionOut ?? 0,
+    });
+  });
+
+  return built;
+}
+
+/**
+ * タイムライン filter_complex を組み立て（Phase 3: xfade + BGM amix）
  * @param {import("./timeline-model.js").TimelineModel} timeline
  * @param {Map<string, string>} inputPaths mediaId -> path
  */
 export function buildTimelineGraph(timeline, inputPaths) {
+  const v2Track = timeline.tracks.find((t) => t.id === "v2");
   const vTrack = timeline.tracks.find((t) => t.id === "v1");
+  const a1Track = timeline.tracks.find((t) => t.id === "a1");
+  const a2Track = timeline.tracks.find((t) => t.id === "a2");
   if (!vTrack || vTrack.clips.length === 0) return null;
 
   /** @type {string[]} */
@@ -335,48 +466,98 @@ export function buildTimelineGraph(timeline, inputPaths) {
   /** @type {Map<string, number>} */
   const mediaToInputIdx = new Map();
 
-  for (const clip of vTrack.clips) {
-    if (mediaToInputIdx.has(clip.mediaId)) continue;
-    const path = inputPaths.get(clip.mediaId);
+  const allMediaIds = new Set();
+  for (const track of [v2Track, vTrack, a1Track, a2Track]) {
+    if (!track) continue;
+    for (const clip of track.clips) allMediaIds.add(clip.mediaId);
+  }
+
+  for (const mediaId of allMediaIds) {
+    const path = inputPaths.get(mediaId);
     if (!path) continue;
-    mediaToInputIdx.set(clip.mediaId, inputFiles.length);
+    mediaToInputIdx.set(mediaId, inputFiles.length);
     inputFiles.push(path);
   }
 
   /** @type {string[]} */
   const parts = [];
-  /** @type {string[]} */
-  const vLabels = [];
-  /** @type {string[]} */
-  const aLabels = [];
 
-  vTrack.clips.forEach((clip, i) => {
-    const inputIdx = mediaToInputIdx.get(clip.mediaId);
-    if (inputIdx === undefined) return;
-    const vLabel = `vc${i}`;
-    const aLabel = `ac${i}`;
-    parts.push(
-      `[${inputIdx}:v]trim=start=${clip.sourceIn}:end=${clip.sourceOut},setpts=PTS-STARTPTS[${vLabel}]`
-    );
-    parts.push(
-      `[${inputIdx}:a]atrim=start=${clip.sourceIn}:end=${clip.sourceOut},asetpts=PTS-STARTPTS[${aLabel}]`
-    );
-    vLabels.push(`[${vLabel}]`);
-    aLabels.push(`[${aLabel}]`);
-  });
+  const vClips = buildTrimmedClips(vTrack, mediaToInputIdx, "video", "vc", parts);
+  if (vClips.length === 0) return null;
 
-  if (vLabels.length === 0) return null;
-
-  if (vLabels.length === 1) {
-    return {
-      filter: parts.join(";").replace("[vc0]", "[outv]").replace("[ac0]", "[outa]"),
-      inputFiles,
-    };
+  let videoOut = "outv";
+  if (vClips.length === 1) {
+    parts[parts.length - 1] = parts[parts.length - 1].replace(`[${vClips[0].label}]`, "[outv]");
+  } else {
+    chainClips(vClips, "video", "outv", parts);
   }
 
-  parts.push(`${vLabels.join("")}concat=n=${vLabels.length}:v=1:a=0[outv]`);
-  parts.push(`${aLabels.join("")}concat=n=${aLabels.length}:v=0:a=1[outa]`);
-  return { filter: parts.join(";"), inputFiles };
+  if (v2Track && v2Track.clips.length > 0) {
+    let layerOut = "outv";
+    v2Track.clips.forEach((clip, i) => {
+      const inputIdx = mediaToInputIdx.get(clip.mediaId);
+      if (inputIdx === undefined) return;
+      const pip = getClipPipEffects(clip);
+      const trimLabel = `v2t${i}`;
+      let pipLabel = trimLabel;
+      parts.push(
+        `[${inputIdx}:v]trim=start=${clip.sourceIn}:end=${clip.sourceOut},setpts=PTS-STARTPTS[${trimLabel}]`
+      );
+      const eq = buildEqFilter(getClipColorEffects(clip));
+      if (eq) {
+        pipLabel = `${trimLabel}e`;
+        parts.push(`[${trimLabel}]${eq}[${pipLabel}]`);
+      }
+      const scale = Math.max(0.1, Math.min(1, pip.scale ?? 0.35));
+      const scaled = `${pipLabel}s`;
+      parts.push(`[${pipLabel}]scale=iw*${scale.toFixed(3)}:-1[${scaled}]`);
+      const nextOut = i === v2Track.clips.length - 1 ? "outv" : `ov${i}`;
+      const start = clip.timelineStart.toFixed(3);
+      const end = clipTimelineEnd(clip).toFixed(3);
+      const x = (pip.x ?? 0.62).toFixed(3);
+      const y = (pip.y ?? 0.05).toFixed(3);
+      parts.push(
+        `[${layerOut}][${scaled}]overlay=x=main_w*${x}:y=main_h*${y}:enable='between(t,${start},${end})'[${nextOut}]`
+      );
+      layerOut = nextOut;
+    });
+    videoOut = layerOut;
+  }
+
+  let audioOut = null;
+  if (a1Track && a1Track.clips.length > 0) {
+    const a1Clips = buildTrimmedClips(a1Track, mediaToInputIdx, "audio", "ac", parts);
+    if (a1Clips.length === 1) {
+      parts[parts.length - 1] = parts[parts.length - 1].replace(`[${a1Clips[0].label}]`, "[va1]");
+      audioOut = "va1";
+    } else if (a1Clips.length > 1) {
+      chainClips(a1Clips, "audio", "va1", parts);
+      audioOut = "va1";
+    }
+  }
+
+  let bgmOut = null;
+  if (a2Track && a2Track.clips.length > 0) {
+    const a2Clips = buildTrimmedClips(a2Track, mediaToInputIdx, "audio", "bg", parts);
+    if (a2Clips.length === 1) {
+      parts[parts.length - 1] = parts[parts.length - 1].replace(`[${a2Clips[0].label}]`, "[va2]");
+      bgmOut = "va2";
+    } else if (a2Clips.length > 1) {
+      chainClips(a2Clips, "audio", "va2", parts);
+      bgmOut = "va2";
+    }
+  }
+
+  if (audioOut && bgmOut) {
+    parts.push(`[${audioOut}][${bgmOut}]amix=inputs=2:duration=first:dropout_transition=0[outa]`);
+  } else if (audioOut) {
+    parts.push(`[${audioOut}]anull[outa]`);
+  } else if (bgmOut) {
+    parts.push(`[${bgmOut}]anull[outa]`);
+  }
+
+  const hasAudio = !!(audioOut || bgmOut);
+  return { filter: parts.join(";"), inputFiles, hasAudio };
 }
 
 export async function exportVideo(file, settings, callbacks = {}) {
@@ -420,10 +601,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
       }
       args.push("-movflags", "+faststart", "-y", outName);
       await ffmpeg.exec(args);
-    } else if (
-      settings.timeline &&
-      settings.timeline.tracks.some((t) => t.type === "video" && t.clips.length > 1)
-    ) {
+    } else if (settings.timeline && needsTimelineCompose(settings)) {
       callbacks.onProgress?.(0.15, "タイムライン合成中…");
       /** @type {Map<string, string>} */
       const inputPaths = new Map();
@@ -438,7 +616,8 @@ export async function exportVideo(file, settings, callbacks = {}) {
       for (const path of graph.inputFiles) {
         args.push("-i", path);
       }
-      args.push("-filter_complex", graph.filter, "-map", "[outv]", "-map", "[outa]");
+      args.push("-filter_complex", graph.filter, "-map", "[outv]");
+      if (graph.hasAudio) args.push("-map", "[outa]");
 
       if (settings.format === "webm") {
         args.push("-c:v", "libvpx-vp9", "-crf", String(settings.quality + 7), "-b:v", "0", "-c:a", "libopus", "-b:a", "128k");

@@ -56,6 +56,7 @@ export function getAudioRange(state) {
 
 /**
  * @param {Object} deps
+ * @param {() => number} [deps.getTrimZoomHalf] 拡大トリムの半幅（秒）。未指定時は 4 秒。
  */
 export function createDualTimeline(deps) {
   const {
@@ -81,6 +82,7 @@ export function createDualTimeline(deps) {
     getState,
     patchState,
     onSync,
+    getTrimZoomHalf,
   } = deps;
 
   /** @type {"start" | "end" | "seek" | "slip" | "audioStart" | "audioEnd" | null} */
@@ -106,12 +108,21 @@ export function createDualTimeline(deps) {
     return trimZoomWindow.start + ratio * span;
   }
 
+  function resolveTrimZoomHalf() {
+    if (typeof getTrimZoomHalf === "function") {
+      const half = getTrimZoomHalf();
+      if (Number.isFinite(half) && half > 0) return half;
+    }
+    return TRIM_ZOOM_HALF;
+  }
+
   function computeTrimZoomWindow(currentTime) {
     const state = getState();
     if (state.duration <= 0) return { start: 0, end: 1 };
+    const half = resolveTrimZoomHalf();
     const center = clamp(currentTime, 0, state.duration);
-    let start = center - TRIM_ZOOM_HALF;
-    let end = center + TRIM_ZOOM_HALF;
+    let start = center - half;
+    let end = center + half;
     if (start < 0) {
       end -= start;
       start = 0;
