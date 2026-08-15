@@ -73,6 +73,93 @@ export async function prepareFfmpegInput(
 }
 
 /**
+ * 複数ファイルを ffmpeg に載せる（MEMFS 優先、WORKERFS は大容量のみ）
+ * @param {import('@ffmpeg/ffmpeg').FFmpeg} ffmpeg
+ * @param {File[]} files
+ * @param {string} mountPoint WORKERFS 用マウントポイント
+ * @param {number} [maxMemfsBytes]
+ * @returns {Promise<{ pathByFile: Map<File, string>, cleanup: () => Promise<void> }>}
+ */
+export async function prepareFfmpegInputs(
+  ffmpeg,
+  files,
+  mountPoint,
+  maxMemfsBytes = DEFAULT_MEMFS_MAX_BYTES,
+) {
+  /** @type {Map<File, string>} */
+  const pathByFile = new Map();
+  /** @type {string[]} */
+  const memfsPaths = [];
+  /** @type {Set<string>} */
+  const usedNames = new Set();
+  /** @type {File[]} */
+  const workerfsFiles = [];
+
+  for (const file of files) {
+    if (file.size <= maxMemfsBytes) {
+      let name = sanitizeFfmpegFileName(file.name);
+      let suffix = 1;
+      while (usedNames.has(name)) {
+        const dot = name.lastIndexOf(".");
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        const ext = dot > 0 ? name.slice(dot) : "";
+        name = `${stem}_${suffix}${ext}`;
+        suffix += 1;
+      }
+      usedNames.add(name);
+      const data = new Uint8Array(await file.arrayBuffer());
+      await ffmpeg.writeFile(name, data);
+      memfsPaths.push(name);
+      pathByFile.set(file, name);
+      continue;
+    }
+    workerfsFiles.push(file);
+  }
+
+  if (workerfsFiles.length > 0) {
+    try {
+      try {
+        await ffmpeg.unmount(mountPoint);
+      } catch {
+        /* not mounted */
+      }
+      await ffmpeg.mount("WORKERFS", { files: workerfsFiles }, mountPoint);
+      for (const file of workerfsFiles) {
+        pathByFile.set(file, `${mountPoint}/${file.name}`);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const mib = (workerfsFiles[0].size / (1024 * 1024)).toFixed(0);
+      throw new Error(
+        `大きな動画の読み込みに失敗しました（${detail}）。${mib}MB 超のファイルは Chrome / Edge でお試しください。`,
+      );
+    }
+  }
+
+  const mountedWorkerfs = workerfsFiles.length > 0;
+
+  return {
+    pathByFile,
+    cleanup: async () => {
+      for (const path of memfsPaths) {
+        try {
+          await ffmpeg.deleteFile(path);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (mountedWorkerfs) {
+        try {
+          await ffmpeg.unmount(mountPoint);
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+  };
+}
+
+/**
  * ffmpeg exec — 非ゼロ終了時は例外
  * @param {import('@ffmpeg/ffmpeg').FFmpeg} ffmpeg
  * @param {string[]} args

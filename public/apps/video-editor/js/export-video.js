@@ -3,7 +3,7 @@
  */
 
 import { getFfmpeg } from "../../../js/ffmpeg-loader.js";
-import { execFfmpegOrThrow } from "../../../js/ffmpeg-input.js";
+import { execFfmpegOrThrow, prepareFfmpegInputs } from "../../../js/ffmpeg-input.js";
 import { clipDuration, clipTimelineEnd, getClipColorEffects, getClipPipEffects, hasColorEffects, hasTransitions, hasV2Clips } from "./timeline-model.js";
 
 const MOUNT_POINT = "/ve-input";
@@ -545,13 +545,22 @@ export async function exportVideo(file, settings, callbacks = {}) {
     }
   }
 
+  callbacks.onProgress?.(0.08, "動画ファイルを読み込み中…");
+  let cleanupInputs = async () => {};
+  let pathByFile;
   try {
-    await ffmpeg.mount("WORKERFS", { files: filesToMount }, MOUNT_POINT);
+    const prepared = await prepareFfmpegInputs(ffmpeg, filesToMount, MOUNT_POINT);
+    pathByFile = prepared.pathByFile;
+    cleanupInputs = prepared.cleanup;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`動画ファイルの読み込みに失敗しました（${detail}）。Chrome / Edge をお試しください。`);
+    throw new Error(`動画ファイルの読み込みに失敗しました（${detail}）`);
   }
-  const inputPath = `${MOUNT_POINT}/${file.name}`;
+
+  const inputPath = pathByFile.get(file);
+  if (!inputPath) {
+    throw new Error("動画ファイルの入力パスを解決できませんでした。");
+  }
   const outName = outputFilename(settings.format);
   const streamCopy = settings.noReencode && !needsReencode(settings);
   const trimRange = getExportTrimRange(settings);
@@ -583,7 +592,11 @@ export async function exportVideo(file, settings, callbacks = {}) {
       /** @type {Map<string, string>} */
       const inputPaths = new Map();
       for (const media of settings.timeline.mediaBin) {
-        inputPaths.set(media.id, `${MOUNT_POINT}/${media.file.name}`);
+        const mediaPath = pathByFile.get(media.file);
+        if (!mediaPath) {
+          throw new Error(`メディア「${media.name ?? media.file.name}」の入力パスを解決できませんでした。`);
+        }
+        inputPaths.set(media.id, mediaPath);
       }
       const graph = buildTimelineGraph(settings.timeline, inputPaths);
       if (!graph) throw new Error("タイムラインが空です");
@@ -689,11 +702,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
     return new Blob([data], { type: outputMime(settings.format) });
   } finally {
     ffmpeg.off("progress");
-    try {
-      await ffmpeg.unmount(MOUNT_POINT);
-    } catch {
-      // ignore
-    }
+    await cleanupInputs();
   }
 }
 
