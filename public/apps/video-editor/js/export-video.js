@@ -2,39 +2,11 @@
  * ffmpeg.wasm による動画書き出し（トリム・クロップ・回転・テキスト等）
  */
 
-import { resolveFfmpegWasmUrl } from "../../../js/ffmpeg-wasm-url.js";
+import { getFfmpeg } from "../../../js/ffmpeg-loader.js";
+import { execFfmpegOrThrow } from "../../../js/ffmpeg-input.js";
 import { clipDuration, clipTimelineEnd, getClipColorEffects, getClipPipEffects, hasColorEffects, hasTransitions, hasV2Clips } from "./timeline-model.js";
 
-const FFMPEG_CORE_JS_BASE = "/apps/image-converter/vendor/ffmpeg";
 const MOUNT_POINT = "/ve-input";
-
-/** @type {import('@ffmpeg/ffmpeg').FFmpeg | null} */
-let ffmpegInstance = null;
-/** @type {Promise<import('@ffmpeg/ffmpeg').FFmpeg> | null} */
-let ffmpegLoadPromise = null;
-
-/** ffmpeg をシングルトンでロード */
-async function getFfmpeg() {
-  if (ffmpegInstance?.loaded) return ffmpegInstance;
-  if (ffmpegLoadPromise) return ffmpegLoadPromise;
-
-  ffmpegLoadPromise = (async () => {
-    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-    const { toBlobURL } = await import("@ffmpeg/util");
-    const ffmpeg = new FFmpeg();
-    const workerBase = "/apps/image-converter/vendor/ffmpeg-js";
-    const wasmUrl = await resolveFfmpegWasmUrl();
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${FFMPEG_CORE_JS_BASE}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(wasmUrl, "application/wasm"),
-      workerURL: await toBlobURL(`${workerBase}/worker.js`, "text/javascript"),
-    });
-    ffmpegInstance = ffmpeg;
-    return ffmpeg;
-  })();
-
-  return ffmpegLoadPromise;
-}
 
 /**
  * @typedef {Object} CropRect
@@ -517,7 +489,7 @@ export function buildTimelineGraph(timeline, inputPaths) {
       const x = (pip.x ?? 0.62).toFixed(3);
       const y = (pip.y ?? 0.05).toFixed(3);
       parts.push(
-        `[${layerOut}][${scaled}]overlay=x=main_w*${x}:y=main_h*${y}:enable='between(t,${start},${end})'[${nextOut}]`
+        `[${layerOut}][${scaled}]overlay=x=main_w*${x}:y=main_h*${y}:enable=between(t\\,${start}\\,${end})[${nextOut}]`
       );
       layerOut = nextOut;
     });
@@ -573,7 +545,12 @@ export async function exportVideo(file, settings, callbacks = {}) {
     }
   }
 
-  await ffmpeg.mount("WORKERFS", { files: filesToMount }, MOUNT_POINT);
+  try {
+    await ffmpeg.mount("WORKERFS", { files: filesToMount }, MOUNT_POINT);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`動画ファイルの読み込みに失敗しました（${detail}）。Chrome / Edge をお試しください。`);
+  }
   const inputPath = `${MOUNT_POINT}/${file.name}`;
   const outName = outputFilename(settings.format);
   const streamCopy = settings.noReencode && !needsReencode(settings);
@@ -600,7 +577,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
         args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
       }
       args.push("-movflags", "+faststart", "-y", outName);
-      await ffmpeg.exec(args);
+      await execFfmpegOrThrow(ffmpeg, args);
     } else if (settings.timeline && needsTimelineCompose(settings)) {
       callbacks.onProgress?.(0.15, "タイムライン合成中…");
       /** @type {Map<string, string>} */
@@ -625,10 +602,10 @@ export async function exportVideo(file, settings, callbacks = {}) {
         args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
       }
       args.push("-movflags", "+faststart", "-y", outName);
-      await ffmpeg.exec(args);
+      await execFfmpegOrThrow(ffmpeg, args);
     } else if (streamCopy) {
       callbacks.onProgress?.(0.15, "トリミング中（再エンコードなし）…");
-      await ffmpeg.exec([
+      await execFfmpegOrThrow(ffmpeg, [
         "-hide_banner",
         "-ss",
         String(trimRange.effectiveStart),
@@ -674,7 +651,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
         args.push("-c:v", "libx264", "-crf", String(settings.quality), "-preset", "fast", "-c:a", "aac", "-b:a", "128k");
       }
       args.push("-movflags", "+faststart", "-y", outName);
-      await ffmpeg.exec(args);
+      await execFfmpegOrThrow(ffmpeg, args);
     } else {
       callbacks.onProgress?.(0.15, "エンコード中…");
       /** @type {string[]} */
@@ -702,7 +679,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
       }
 
       args.push("-movflags", "+faststart", "-y", outName);
-      await ffmpeg.exec(args);
+      await execFfmpegOrThrow(ffmpeg, args);
     }
 
     callbacks.onProgress?.(0.96, "ファイルを読み込み中…");

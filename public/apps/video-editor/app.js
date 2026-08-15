@@ -1176,7 +1176,13 @@ async function handleExport() {
     link.click();
     URL.revokeObjectURL(link.href);
   } catch (error) {
-    alert(error instanceof Error ? error.message : "書き出しに失敗しました");
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "書き出しに失敗しました";
+    alert(message || "書き出しに失敗しました");
   } finally {
     state.exporting = false;
     exportOverlay.hidden = true;
