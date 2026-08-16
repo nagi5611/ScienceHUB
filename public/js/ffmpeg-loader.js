@@ -1,12 +1,15 @@
 /**
  * ffmpeg.wasm シングルトンローダー（動画/音声エディタ共通）
  * crossOriginIsolated 時は @ffmpeg/core-mt で CPU 全コアを使用
+ *
+ * 注意: classWorkerURL に blob URL を渡すと Worker が起動せず load が永遠に待つ。
+ * importmap 上の ./worker.js をデフォルト利用する（classWorkerURL は指定しない）。
  */
 
 import { canUseFfmpegMultithread, setFfmpegMultithreadLoaded } from "./ffmpeg-capabilities.js";
 import { getFfmpegCoreUrls } from "./ffmpeg-wasm-url.js";
 
-const WORKER_BASE = "/apps/image-converter/vendor/ffmpeg-js";
+const LOAD_TIMEOUT_MS = 120_000;
 
 /** @type {import('@ffmpeg/ffmpeg').FFmpeg | null} */
 let ffmpegInstance = null;
@@ -14,6 +17,26 @@ let ffmpegInstance = null;
 let ffmpegLoadPromise = null;
 /** @type {boolean | null} */
 let loadedMultithread = null;
+
+/** @param {import('@ffmpeg/ffmpeg').FFmpeg} ffmpeg
+ * @param {Record<string, string>} loadConfig
+ */
+async function loadFfmpegWithTimeout(ffmpeg, loadConfig) {
+  let timer;
+  try {
+    await Promise.race([
+      ffmpeg.load(loadConfig),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("ffmpeg の初期化がタイムアウトしました")),
+          LOAD_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** ffmpeg をロード（1回のみ） */
 export async function getFfmpeg() {
@@ -45,18 +68,17 @@ export async function getFfmpeg() {
     }
     setFfmpegMultithreadLoaded(loadedMultithread === true);
 
-    try {
-      /** @type {Record<string, string>} */
-      const loadConfig = {
-        classWorkerURL: await toBlobURL(`${WORKER_BASE}/worker.js`, "text/javascript"),
-        coreURL: await toBlobURL(urls.coreJs, "text/javascript"),
-        wasmURL: await toBlobURL(urls.wasm, "application/wasm"),
-      };
-      if (urls.coreWorkerJs) {
-        loadConfig.workerURL = await toBlobURL(urls.coreWorkerJs, "text/javascript");
-      }
+    /** @type {Record<string, string>} */
+    const loadConfig = {
+      coreURL: await toBlobURL(urls.coreJs, "text/javascript"),
+      wasmURL: await toBlobURL(urls.wasm, "application/wasm"),
+    };
+    if (urls.coreWorkerJs) {
+      loadConfig.workerURL = await toBlobURL(urls.coreWorkerJs, "text/javascript");
+    }
 
-      await ffmpeg.load(loadConfig);
+    try {
+      await loadFfmpegWithTimeout(ffmpeg, loadConfig);
     } catch (error) {
       ffmpegLoadPromise = null;
       loadedMultithread = null;
@@ -65,8 +87,7 @@ export async function getFfmpeg() {
       if (useMt) {
         try {
           const stUrls = await getFfmpegCoreUrls({ multithread: false });
-          await ffmpeg.load({
-            classWorkerURL: await toBlobURL(`${WORKER_BASE}/worker.js`, "text/javascript"),
+          await loadFfmpegWithTimeout(ffmpeg, {
             coreURL: await toBlobURL(stUrls.coreJs, "text/javascript"),
             wasmURL: await toBlobURL(stUrls.wasm, "application/wasm"),
           });

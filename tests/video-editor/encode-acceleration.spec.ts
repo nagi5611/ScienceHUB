@@ -22,6 +22,62 @@ test.describe("encode acceleration", () => {
     expect(result.auto).toContain("libx264");
   });
 
+  test("normalizeEncodeDimensions falls back when width/height are zero", async ({ page }) => {
+    await page.goto("/video-editor-e2e.html");
+    await page.waitForFunction(() => typeof window.__VE_E2E__ === "boolean");
+
+    const dims = await page.evaluate(async () => {
+      const mod = await import("/js/ffmpeg-capabilities.js");
+      return mod.normalizeEncodeDimensions(0, 0);
+    });
+
+    expect(dims.width).toBe(1920);
+    expect(dims.height).toBe(1080);
+  });
+
+  test("shouldAttemptGpuExport skips auto mode after GPU marked unavailable", async ({ page }) => {
+    await page.goto("/video-editor-e2e.html");
+    await page.waitForFunction(() => typeof window.__VE_E2E__ === "boolean");
+
+    const result = await page.evaluate(async () => {
+      const caps = await import("/js/ffmpeg-capabilities.js");
+      const gpu = await import("/apps/video-editor/js/export-webcodecs-gpu.js");
+      caps.resetHardwareVideoEncoderCache();
+
+      const settings = {
+        format: "mp4",
+        inverse: false,
+        rotation: 0,
+        flipH: false,
+        flipV: false,
+        cropEnabled: false,
+        textEnabled: false,
+        volume: 100,
+        speed: 100,
+        fadeIn: 0,
+        fadeOut: 0,
+        slipOffset: 0,
+        timeline: null,
+        start: 0,
+        end: 10,
+        quality: 23,
+        accelerationMode: "auto",
+      };
+
+      const beforeFail = gpu.shouldAttemptGpuExport(settings);
+      caps.markHardwareVideoEncoderUnavailable("test unavailable");
+      const afterFail = gpu.shouldAttemptGpuExport(settings);
+      const gpuMode = gpu.shouldAttemptGpuExport({ ...settings, accelerationMode: "gpu" });
+
+      caps.resetHardwareVideoEncoderCache();
+      return { beforeFail, afterFail, gpuMode };
+    });
+
+    expect(result.beforeFail).toBe(true);
+    expect(result.afterFail).toBe(false);
+    expect(result.gpuMode).toBe(true);
+  });
+
   test("canUseWebCodecsGpuExport rejects complex timelines", async ({ page }) => {
     await page.goto("/video-editor-e2e.html");
     await page.waitForFunction(() => typeof window.__VE_E2E__ === "boolean");

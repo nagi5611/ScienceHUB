@@ -19,27 +19,19 @@ const MT_WASM_URL_CANDIDATES = [
 ];
 
 /**
- * レスポンス先頭が WASM マジックか確認
- * @param {Response} response
- */
-async function responseLooksLikeWasm(response) {
-  if (!response.ok) return false;
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength < 4) return false;
-  const bytes = new Uint8Array(buffer);
-  return WASM_MAGIC.every((value, index) => bytes[index] === value);
-}
-
-/**
  * @param {string} url
  */
 async function probeWasmUrl(url) {
   try {
     const ranged = await fetch(url, { headers: { Range: "bytes=0-3" } });
-    if (await responseLooksLikeWasm(ranged)) return true;
-
-    const full = await fetch(url);
-    return await responseLooksLikeWasm(full);
+    if (ranged.ok) {
+      const buffer = await ranged.arrayBuffer();
+      if (buffer.byteLength >= 4) {
+        const bytes = new Uint8Array(buffer);
+        if (WASM_MAGIC.every((value, index) => bytes[index] === value)) return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }

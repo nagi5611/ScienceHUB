@@ -590,18 +590,19 @@ export async function exportVideo(file, settings, callbacks = {}) {
   const accelerationMode = settings.accelerationMode ?? "auto";
 
   if (accelerationMode === "auto" || accelerationMode === "gpu") {
-    const { canUseWebCodecsGpuExport, exportVideoWebCodecsGpu } = await import(
+    const { shouldAttemptGpuExport, exportVideoWebCodecsGpu, notifyGpuExportFailure } = await import(
       "./export-webcodecs-gpu.js",
     );
-    if (canUseWebCodecsGpuExport(settings)) {
+    if (shouldAttemptGpuExport(settings)) {
       try {
         callbacks.onProgress?.(0.02, "GPU エンコードを試行中…");
         return await exportVideoWebCodecsGpu(file, settings, callbacks);
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notifyGpuExportFailure(message);
         if (accelerationMode === "gpu") {
-          throw error instanceof Error ? error : new Error(String(error));
+          throw error instanceof Error ? error : new Error(message);
         }
-        console.warn("GPU export failed, falling back to ffmpeg:", error);
       }
     } else if (accelerationMode === "gpu") {
       throw new Error(
@@ -610,6 +611,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
     }
   }
 
+  callbacks.onProgress?.(0.03, "ffmpeg wasm をダウンロード中…");
   const ffmpeg = await getFfmpeg();
   const mt = isFfmpegMultithreadLoaded();
   callbacks.onProgress?.(

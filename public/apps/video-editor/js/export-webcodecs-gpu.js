@@ -5,7 +5,12 @@
 
 import { getFfmpeg } from "../../../js/ffmpeg-loader.js";
 import { execFfmpegOrThrow } from "../../../js/ffmpeg-input.js";
-import { probeHardwareVideoEncoder } from "../../../js/ffmpeg-capabilities.js";
+import {
+  getCachedHardwareVideoEncoderStatus,
+  getHardwareVideoEncoderStatus,
+  markHardwareVideoEncoderUnavailable,
+  normalizeEncodeDimensions,
+} from "../../../js/ffmpeg-capabilities.js";
 import { getExportTrimRange } from "./export-video.js";
 
 const MOUNT_POINT = "/ve-gpu";
@@ -46,6 +51,29 @@ export function canUseWebCodecsGpuExport(settings) {
   return true;
 }
 
+/**
+ * エクスポート設定に基づき GPU 経路を試行すべきか判定する。
+ * @param {import("./export-video.js").ExportSettings} settings
+ * @returns {boolean}
+ */
+export function shouldAttemptGpuExport(settings) {
+  if (!canUseWebCodecsGpuExport(settings)) {
+    return false;
+  }
+  const mode = settings.accelerationMode ?? "auto";
+  if (mode === "cpu-max") {
+    return false;
+  }
+  if (mode === "gpu") {
+    return true;
+  }
+  const cached = getCachedHardwareVideoEncoderStatus();
+  if (cached && !cached.supported) {
+    return false;
+  }
+  return true;
+}
+
 /** CRF 相当の品質をビットレートに変換 */
 function qualityToBitrate(quality, width, height) {
   const pixels = width * height;
@@ -76,6 +104,14 @@ function waitSeek(video, time) {
 }
 
 /**
+ * GPU エンコード失敗を記録し、以降の自動モードで再試行しないようにする。
+ * @param {string} [reason]
+ */
+export function notifyGpuExportFailure(reason) {
+  markHardwareVideoEncoderUnavailable(reason);
+}
+
+/**
  * GPU で映像をエンコードし、ffmpeg で音声を合成
  * @param {File} file
  * @param {import("./export-video.js").ExportSettings} settings
@@ -84,13 +120,12 @@ function waitSeek(video, time) {
 export async function exportVideoWebCodecsGpu(file, settings, callbacks = {}) {
   const trim = getExportTrimRange(settings);
   const duration = Math.max(0.1, trim.effectiveEnd - trim.effectiveStart);
-  const width = Math.max(2, settings.videoWidth % 2 === 0 ? settings.videoWidth : settings.videoWidth - 1);
-  const height = Math.max(2, settings.videoHeight % 2 === 0 ? settings.videoHeight : settings.videoHeight - 1);
+  const { width, height } = normalizeEncodeDimensions(settings.videoWidth, settings.videoHeight);
   const fps = Math.max(1, Math.min(60, settings.fps ?? 30));
 
-  const encoderProbe = await probeHardwareVideoEncoder(width, height);
+  const encoderProbe = await getHardwareVideoEncoderStatus(width, height);
   if (!encoderProbe.supported || !encoderProbe.config) {
-    throw new Error("GPU エンコーダが利用できません");
+    throw new Error(encoderProbe.reason || "GPU エンコーダが利用できません");
   }
 
   callbacks.onProgress?.(0.08, "GPU エンコーダを準備中…");
