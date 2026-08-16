@@ -2060,10 +2060,17 @@ body.ve-trim-mode .ve-tool-btn[data-tool="trim"] {
 }
 
 .ve-overlay-text {
-  margin: 1rem 0 0.75rem;
+  margin: 1rem 0 0.35rem;
   font-weight: 600;
   font-size: 0.95rem;
   color: var(--cc-text);
+}
+
+.ve-overlay-meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--cc-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .ve-spinner {
