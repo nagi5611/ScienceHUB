@@ -2006,6 +2006,9 @@ if (previewWrap instanceof HTMLElement) {
 qualityValue.textContent = qualityInput.value;
 setActiveTool("cut");
 probeEncodeCapabilities().catch(() => {});
+window.addEventListener("ve:encode-capabilities-changed", () => {
+  probeEncodeCapabilities().catch(() => {});
+});
 
 const allowed =
   /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true ||
