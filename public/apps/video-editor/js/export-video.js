@@ -647,12 +647,17 @@ export async function exportVideo(file, settings, callbacks = {}) {
   const outName = outputFilename(settings.format);
   const streamCopy = settings.noReencode && !needsReencode(settings);
   const trimRange = getExportTrimRange(settings);
+  const exportDurationSec = Math.max(0.1, trimRange.effectiveEnd - trimRange.effectiveStart);
 
   ffmpeg.on("progress", ({ progress, time }) => {
+    let encodeRatio = null;
     if (Number.isFinite(progress) && progress > 0) {
-      callbacks.onProgress?.(Math.min(0.95, 0.1 + progress * 0.85), "エンコード中…");
+      encodeRatio = progress;
     } else if (time > 0) {
-      callbacks.onProgress?.(0.5, "処理中…");
+      encodeRatio = Math.min(1, time / 1_000_000 / exportDurationSec);
+    }
+    if (encodeRatio !== null && encodeRatio > 0) {
+      callbacks.onProgress?.(Math.min(0.95, 0.1 + encodeRatio * 0.85), "エンコード中…");
     }
   });
 

@@ -4,6 +4,7 @@
 
 import { clamp, formatBytes, formatTimePrecise, formatTimeShort, parseTimeInput } from "./js/time.js";
 import { buildDownloadName, exportVideo, getExportTrimRange, needsReencode } from "./js/export-video.js";
+import { createExportProgressTracker } from "./js/export-progress.js";
 import { describeAccelerationMode, getEncodeCapabilities } from "../../js/ffmpeg-capabilities.js";
 import {
   createDefaultText,
@@ -83,6 +84,7 @@ const exportBtn = document.getElementById("export-btn");
 const cloudSaveBtn = document.getElementById("cloud-save-btn");
 const exportOverlay = document.getElementById("export-overlay");
 const exportOverlayText = document.getElementById("export-overlay-text");
+const exportOverlayMeta = document.getElementById("export-overlay-meta");
 const exportProgressBar = document.getElementById("export-progress-bar");
 const startTimeInput = /** @type {HTMLInputElement} */ (document.getElementById("start-time"));
 const endTimeInput = /** @type {HTMLInputElement} */ (document.getElementById("end-time"));
@@ -1202,15 +1204,25 @@ async function handleExport() {
   state.exporting = true;
   exportBtn.disabled = true;
   exportOverlay.hidden = false;
-  exportOverlayText.textContent = "ffmpeg を読み込み中…";
+  exportOverlayText.textContent = "準備中…";
+  if (exportOverlayMeta instanceof HTMLElement) {
+    exportOverlayMeta.textContent = "0%";
+    exportOverlayMeta.hidden = false;
+  }
   exportProgressBar.style.width = "0%";
+
+  const progressTracker = createExportProgressTracker();
 
   try {
     const settings = getExportSettings();
     const blob = await exportVideo(exportFile, settings, {
       onProgress: (ratio, message) => {
-        exportProgressBar.style.width = `${Math.round(ratio * 100)}%`;
+        const { percentLabel, etaText } = progressTracker.report(ratio, message);
+        exportProgressBar.style.width = percentLabel;
         if (message) exportOverlayText.textContent = message;
+        if (exportOverlayMeta instanceof HTMLElement) {
+          exportOverlayMeta.textContent = etaText ? `${percentLabel} · ${etaText}` : percentLabel;
+        }
       },
     });
 

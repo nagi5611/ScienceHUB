@@ -225,7 +225,7 @@ export async function exportVideoWebCodecsGpu(file, settings, callbacks = {}) {
   }
 
   const videoOnlyBlob = new Blob([target.buffer], { type: "video/mp4" });
-  callbacks.onProgress?.(0.72, "音声を合成中…");
+  callbacks.onProgress?.(0.72, "音声を合成中（映像と音声を統合）…");
 
   const ffmpeg = await getFfmpeg();
   const gpuFile = new File([videoOnlyBlob], "gpu-video.mp4", { type: "video/mp4" });
