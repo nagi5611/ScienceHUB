@@ -610,6 +610,7 @@ export async function exportVideo(file, settings, callbacks = {}) {
     }
   }
 
+  callbacks.onProgress?.(0.03, "ffmpeg wasm をダウンロード中…");
   const ffmpeg = await getFfmpeg();
   const mt = isFfmpegMultithreadLoaded();
   callbacks.onProgress?.(
