@@ -33,10 +33,10 @@ test.describe("video-editor UI — Clipchamp", () => {
     await expect(page.locator(".ve-storyboard--trim-zoom .ve-timeline-label")).toHaveText("拡大トリム");
   });
 
-  test("export button uses Clipchamp purple", async ({ page }) => {
+  test("export button uses ScienceHUB orange", async ({ page }) => {
     await loadSampleVideo(page);
     const bg = await page.locator("#export-btn").evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(bg).toMatch(/rgb\(144,\s*49,\s*99\)|rgb\(144, 49, 99\)/);
+    expect(bg).toMatch(/rgb\(243,\s*128,\s*32\)|rgb\(243, 128, 32\)/);
     await expect(page.locator("#export-btn")).toHaveText("エクスポート");
   });
 
@@ -46,11 +46,11 @@ test.describe("video-editor UI — Clipchamp", () => {
     expect(bodyBg).toMatch(/rgb\(26,\s*26,\s*26\)|rgb\(26, 26, 26\)/);
   });
 
-  test("trim handles use purple accent", async ({ page }) => {
+  test("trim handles use orange accent", async ({ page }) => {
     await loadSampleVideo(page);
     const trimColor = await page.locator("#handle-start").evaluate((el) =>
       getComputedStyle(el).backgroundColor
     );
-    expect(trimColor).toMatch(/rgb\(144,\s*49,\s*99\)|rgb\(144, 49, 99\)/);
+    expect(trimColor).toMatch(/rgb\(243,\s*128,\s*32\)|rgb\(243, 128, 32\)/);
   });
 });
