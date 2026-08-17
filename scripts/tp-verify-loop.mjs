@@ -147,6 +147,10 @@ async function chat(projectId, body, label = "") {
 
   const done = events.find((e) => e.event === "done");
   const err = events.find((e) => e.event === "error");
+  if (err?.data?.message?.includes("AI 利用上限")) {
+    allIssues.push({ type: "daily_limit", detail: err.data.message });
+    return { done: null, err, dailyLimit: true };
+  }
   const jobId = done?.data?.active_job?.jobId || sseJobId;
 
   if (jobId || sseJobId) {
@@ -206,7 +210,8 @@ async function driveToDraft(projectId, initialPrompt) {
   let phase = detail.project?.workflow_phase;
 
   if (["discovery", "clarify"].includes(phase)) {
-    await chat(projectId, { message: initialPrompt }, "initial");
+    const r1 = await chat(projectId, { message: initialPrompt }, "initial");
+    if (r1.dailyLimit) return { phase, dailyLimit: true };
     detail = await getDetail(projectId);
     phase = detail.project?.workflow_phase;
   }
@@ -227,6 +232,16 @@ async function driveToDraft(projectId, initialPrompt) {
     await chat(projectId, { message: "実装開始" }, "implement-confirm");
     detail = await getDetail(projectId);
     phase = detail.project?.workflow_phase;
+  }
+
+  // 実装ジョブ失敗後の孤立フェーズを再試行
+  if (phase === "flash_implement_tasks" || phase === "flash_implement") {
+    const { data: jobData } = await fetchJson(`/api/third-party/projects/${projectId}/job`);
+    if (!jobData.job) {
+      await chat(projectId, { message: "実装開始" }, "implement-retry");
+      detail = await getDetail(projectId);
+      phase = detail.project?.workflow_phase;
+    }
   }
 
   // ジョブ実行中なら待機
@@ -271,7 +286,11 @@ async function runRound(roundIndex, spec) {
   const projectId = createData.project.id;
   console.log("  project:", projectId);
 
-  const { phase } = await driveToDraft(projectId, spec.prompt);
+  const drive = await driveToDraft(projectId, spec.prompt);
+  if (drive.dailyLimit) {
+    return { issues: [{ type: "daily_limit" }], dailyLimit: true };
+  }
+  const phase = drive.phase; 
   console.log("  final phase:", phase);
 
   const preview = await getPreview(projectId);
@@ -304,7 +323,7 @@ async function runRound(roundIndex, spec) {
     if (!done) issues.push({ type: "maintain_failed" });
   }
 
-  return { projectId, phase, previewLen: preview.length, issues };
+  return { projectId, phase, previewLen: preview.length, issues, dailyLimit };
 }
 
 async function main() {
@@ -317,6 +336,10 @@ async function main() {
       const r = await runRound(i, APP_SPECS[i]);
       results.push({ round: i + 1, ...r });
       allIssues.push(...(r.issues || []).map((iss) => ({ round: i + 1, ...iss })));
+      if (r.dailyLimit) {
+        console.log("  Daily limit reached — stopping further rounds.");
+        break;
+      }
     } catch (e) {
       console.error("  ROUND FAILED:", e.message);
       allIssues.push({ round: i + 1, type: "round_exception", detail: e.message });

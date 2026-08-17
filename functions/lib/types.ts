@@ -75,6 +75,8 @@ export interface Env {
   TP_PIPELINE_WORKER_URL?: string;
   /** サードパーティ実装/検証 Worker 内部認証 */
   TP_PIPELINE_WORKER_SECRET?: string;
+  /** サードパーティ AI 1日あたりのユーザーメッセージ上限（既定 30） */
+  TP_MAX_DAILY_TURNS?: string;
   /** ジョブ記録用 FDS バージョン表示 */
   FDS_SOLVER_VERSION?: string;
   /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */

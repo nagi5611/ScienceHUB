@@ -50,7 +50,7 @@ import {
 import { runImplementJob } from "./implement-runner";
 import { verifyProjectHtml } from "./browser-verify";
 
-const MAX_DAILY_TURNS = 30;
+const DEFAULT_MAX_DAILY_TURNS = 30;
 const MAX_REVIEW_LOOPS = 2;
 const MAX_IMPLEMENT_ATTEMPTS = 3;
 
@@ -189,7 +189,13 @@ async function listMessages(db: D1Database, projectId: string) {
 }
 
 /** 本日のユーザーメッセージ数でレート制限 */
-async function assertDailyTurnLimit(db: D1Database, userId: string): Promise<void> {
+async function assertDailyTurnLimit(
+  db: D1Database,
+  userId: string,
+  env?: Env
+): Promise<void> {
+  const maxTurns =
+    Number.parseInt(env?.TP_MAX_DAILY_TURNS ?? "", 10) || DEFAULT_MAX_DAILY_TURNS;
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
   const since = start.getTime();
@@ -201,7 +207,7 @@ async function assertDailyTurnLimit(db: D1Database, userId: string): Promise<voi
     )
     .bind(userId, since)
     .first<{ c: number }>();
-  if ((row?.c ?? 0) >= MAX_DAILY_TURNS) {
+  if ((row?.c ?? 0) >= maxTurns) {
     throw new Error("本日の AI 利用上限に達しました。明日またお試しください。");
   }
 }
@@ -669,7 +675,7 @@ export async function runTpGeminiChat(
   );
 
   if (userText && !implementStartTrigger) {
-    await assertDailyTurnLimit(db, userId);
+    await assertDailyTurnLimit(db, userId, env);
     await insertMessage(db, projectId, "user", userText);
   }
 

@@ -307,7 +307,7 @@ export async function runImplementJob(
   return { assistantMessage, htmlUpdated: true };
 }
 
-/** ジョブ失敗を記録 */
+/** 実装ジョブ失敗を記録し、ユーザーが再試行できるフェーズへ戻す */
 export async function failImplementJob(
   db: D1Database,
   jobId: string,
@@ -315,4 +315,23 @@ export async function failImplementJob(
   error: string
 ): Promise<void> {
   await markJobFailed(db, jobId, projectId, error);
+  await recoverPhaseAfterImplementFailure(db, projectId, error);
+}
+
+/** 実装失敗・タイムアウト後に再試行可能なフェーズへ */
+export async function recoverPhaseAfterImplementFailure(
+  db: D1Database,
+  projectId: string,
+  errorMessage: string
+): Promise<void> {
+  const trimmed = errorMessage.slice(0, 200);
+  await patchProjectPhase(db, projectId, {
+    workflow_phase: "await_implement_confirm",
+    awaiting_implement_confirm: 1,
+  });
+  await insertAssistantMessage(
+    db,
+    projectId,
+    `実装が完了できませんでした: ${trimmed}。「実装開始」と送ると再試行できます。`
+  );
 }

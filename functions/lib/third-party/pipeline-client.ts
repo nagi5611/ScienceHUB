@@ -59,7 +59,7 @@ export async function triggerImplementJobOnWorker(
     job_id: jobId,
     project_id: projectId,
   });
-  if (!result.ok && result.status !== 0) {
+  if (!result.ok && result.status !== 0 && result.status !== 202) {
     throw new Error(
       typeof result.body === "object" &&
         result.body !== null &&
