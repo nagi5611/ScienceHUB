@@ -28,6 +28,7 @@ import {
   isScienceHubPlaceholderHtml,
 } from "./implement-tasks";
 import { hasPendingTasks, nextParallelBatch } from "./implement-parallel";
+import { resolveMaxParallelBatch } from "./implement-edit-scope";
 import { writeProjectIndexHtml } from "./project-html";
 import { snapshotCurrentHtml } from "./revisions";
 import {
@@ -148,7 +149,10 @@ export async function runImplementJob(
   );
 
   while (hasPendingTasks(tasksFile)) {
-    const batch = nextParallelBatch(tasksFile);
+    const batch = nextParallelBatch(
+      tasksFile,
+      resolveMaxParallelBatch(env)
+    );
     if (!batch) break;
 
     const batchLabel = batch.map((t) => t.title).join(" + ");

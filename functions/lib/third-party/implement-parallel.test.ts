@@ -30,7 +30,7 @@ describe("implement-parallel", () => {
         },
       ],
     };
-    const batch = nextParallelBatch(file);
+    const batch = nextParallelBatch(file, 3);
     assert.ok(batch);
     assert.equal(batch.length, 1);
     assert.equal(batch[0].id, "t1");
@@ -59,7 +59,7 @@ describe("implement-parallel", () => {
         },
       ],
     };
-    const batch = nextParallelBatch(file);
+    const batch = nextParallelBatch(file, 3);
     assert.ok(batch);
     assert.equal(batch.length, 2);
   });

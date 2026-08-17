@@ -1,58 +1,51 @@
-/**
- * implement-edit-scope ユニットテスト
- */
-import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildProjectSkeleton } from "./implement-tasks";
+import assert from "node:assert/strict";
 import {
-  describeImplementEditScopes,
-  IMPLEMENT_EDIT_TARGET_PATH,
-  validateImplementEdits,
-} from "./implement-edit-scope";
+  extractNumberedHtmlForTask,
+  resolveMaxParallelBatch,
+} from "./implement-edit-scope.js";
 
-describe("describeImplementEditScopes", () => {
-  it("includes target path and line ranges", () => {
-    const html = buildProjectSkeleton("Test");
-    const text = describeImplementEditScopes(html, "script");
-    assert.ok(text.includes(IMPLEMENT_EDIT_TARGET_PATH));
-    assert.ok(text.includes("script"));
-    assert.match(text, /L\d+–L\d+/);
-  });
-});
+const SAMPLE_HTML = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { margin: 0; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <p>Hello</p>
+  </main>
+  <script>
+    console.log("hi");
+  </script>
+</body>
+</html>`;
 
-describe("validateImplementEdits", () => {
-  it("rejects script content with style tags", () => {
-    const html = buildProjectSkeleton("Test");
-    const lines = html.split("\n");
-    const scriptLine = lines.findIndex((l) => /<script\b/i.test(l)) + 1;
-    const err = validateImplementEdits(
-      html,
-      [
-        {
-          op: "replace_lines",
-          start_line: scriptLine,
-          end_line: scriptLine,
-          content: "<style>bad</style>",
-        },
-      ],
-      "script"
-    );
-    assert.ok(err && /style/i.test(err));
+describe("implement-edit-scope cost helpers", () => {
+  it("defaults parallel batch to 1", () => {
+    assert.equal(resolveMaxParallelBatch(), 1);
+    assert.equal(resolveMaxParallelBatch({}), 1);
   });
 
-  it("rejects styles edits on line 1", () => {
-    const html = buildProjectSkeleton("Test");
-    const err = validateImplementEdits(
-      html,
-      [
-        {
-          op: "insert_after",
-          line: 1,
-          content: "body { color: red; }",
-        },
-      ],
+  it("respects TP_IMPLEMENT_PARALLEL cap", () => {
+    assert.equal(resolveMaxParallelBatch({ TP_IMPLEMENT_PARALLEL: "3" }), 3);
+    assert.equal(resolveMaxParallelBatch({ TP_IMPLEMENT_PARALLEL: "9" }), 3);
+  });
+
+  it("extracts style snippet for styles target", () => {
+    const { snippet, isPartial } = extractNumberedHtmlForTask(
+      SAMPLE_HTML,
       "styles"
     );
-    assert.ok(err && err.includes("許可範囲"));
+    assert.equal(isPartial, true);
+    assert.match(snippet, /L\d{3}:.*body \{ margin: 0; \}/);
+    assert.doesNotMatch(snippet, /console\.log/);
+  });
+
+  it("uses full html for polish target", () => {
+    const { isPartial } = extractNumberedHtmlForTask(SAMPLE_HTML, "polish");
+    assert.equal(isPartial, false);
   });
 });

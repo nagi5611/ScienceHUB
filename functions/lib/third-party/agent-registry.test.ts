@@ -4,6 +4,7 @@ import type { Env } from "../types.js";
 import {
   getTpAgent,
   listTpAgents,
+  resolveEditPlanAgentId,
   resolveTpTierModel,
   tpAgentGeminiOptions,
   TP_AGENT_REGISTRY,
@@ -70,5 +71,10 @@ describe("agent-registry", () => {
     const agent = getTpAgent("code_editor_retry");
     assert.equal(agent.tier, "high");
     assert.equal(agent.profile, "flash_edit_plan_retry");
+  });
+
+  it("escalates to high only on final edit attempt", () => {
+    assert.equal(resolveEditPlanAgentId(0, 2), "code_editor");
+    assert.equal(resolveEditPlanAgentId(1, 2), "code_editor_retry");
   });
 });

@@ -164,3 +164,14 @@ export function tpAgentGeminiOptions(
 export function resolveTpImplementCacheModel(env: Env): string {
   return resolveTpFlashModel(env);
 }
+
+/** 行編集プラン: 最終試行のみ High、それ以前は Flash */
+export function resolveEditPlanAgentId(
+  attempt: number,
+  maxAttempts: number
+): TpAgentId {
+  if (attempt > 0 && attempt >= maxAttempts - 1) {
+    return "code_editor_retry";
+  }
+  return "code_editor";
+}

@@ -79,6 +79,10 @@ export interface Env {
   TP_PIPELINE_WORKER_SECRET?: string;
   /** サードパーティ AI 1日あたりのユーザーメッセージ上限（既定 30） */
   TP_MAX_DAILY_TURNS?: string;
+  /** 実装タスクの並列バッチ上限（1〜3、既定 1） */
+  TP_IMPLEMENT_PARALLEL?: string;
+  /** メンテエージェント 1 ターンあたりのツールラウンド上限（既定 6） */
+  TP_MAX_MAINTAIN_TOOL_ROUNDS?: string;
   /** ジョブ記録用 FDS バージョン表示 */
   FDS_SOLVER_VERSION?: string;
   /** 一次審査プロンプト用 FDS 構文リファレンス全文の上書き（未設定時は組み込み要約） */

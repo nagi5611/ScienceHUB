@@ -7,7 +7,7 @@ import type { Env } from "../types";
 import { getGeminiApiKey } from "./generate";
 
 /** 明示キャッシュ作成の目安（要件+計画がこれ未満なら作成しない） */
-const MIN_DOCS_CHARS_FOR_EXPLICIT_CACHE = 8_000;
+const MIN_DOCS_CHARS_FOR_EXPLICIT_CACHE = 3_000;
 
 const DEFAULT_CACHE_TTL_SECONDS = 3600;
 

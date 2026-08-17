@@ -192,8 +192,12 @@ await geminiGenerateJson(env, {
 - [x] 実装 Worker で Flex tier
 - [x] 意図分類のルール先行
 - [x] スケルトン HTML の決定的生成
-- [x] 要件・計画の Context cache（Flash モデル）
-- [ ] 検証スクリプトの日次上限・プロジェクト数制限（運用）
+- [x] 編集リトライの段階エスカレーション（最終試行のみ High）
+- [x] タスク別 HTML 抜粋送信（styles/script/markup）
+- [x] 並列バッチ既定 1（`TP_IMPLEMENT_PARALLEL`）
+- [x] メンテラウンド既定 6（`TP_MAX_MAINTAIN_TOOL_ROUNDS`）
+- [x] patch は Flex + 出力上限 24576
+- [x] 明示キャッシュ閾値 3000 文字
 - [ ] Spending cap / 予算アラート（Google Cloud コンソール）
 
 ### 6.1 デプロイ時
