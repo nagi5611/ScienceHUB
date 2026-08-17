@@ -50,6 +50,11 @@ import {
   snapshotCurrentHtml,
 } from "./third-party/revisions";
 import { ARTIFACT_INDEX } from "./third-party/artifacts";
+import {
+  getActiveJobForProject,
+  getTpJob,
+  jobProgress,
+} from "./third-party/jobs";
 
 export const THIRD_PARTY_APP_SLUG = "third-party";
 
@@ -585,6 +590,65 @@ export async function getOwnedProjectDetail(
     }
   }
   return { project: summary, pending_form };
+}
+
+/** アクティブジョブ（所有者のみ） */
+export async function getOwnedActiveJob(
+  db: D1Database,
+  userId: string,
+  projectId: string
+): Promise<{
+  job: {
+    id: string;
+    job_type: string;
+    status: string;
+    progress: ReturnType<typeof jobProgress>;
+    error_message: string | null;
+    created_at: number;
+    started_at: number | null;
+    finished_at: number | null;
+  } | null;
+}> {
+  const row = await getOwnedProject(db, userId, projectId);
+  if (!row) return { job: null };
+
+  const active = await getActiveJobForProject(db, projectId);
+  if (active) {
+    return {
+      job: {
+        id: active.id,
+        job_type: active.job_type,
+        status: active.status,
+        progress: jobProgress(active),
+        error_message: active.error_message,
+        created_at: active.created_at,
+        started_at: active.started_at,
+        finished_at: active.finished_at,
+      },
+    };
+  }
+
+  const proj = await db
+    .prepare("SELECT active_job_id FROM tp_projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ active_job_id: string | null }>();
+  if (!proj?.active_job_id) return { job: null };
+
+  const job = await getTpJob(db, proj.active_job_id);
+  if (!job) return { job: null };
+
+  return {
+    job: {
+      id: job.id,
+      job_type: job.job_type,
+      status: job.status,
+      progress: jobProgress(job),
+      error_message: job.error_message,
+      created_at: job.created_at,
+      started_at: job.started_at,
+      finished_at: job.finished_at,
+    },
+  };
 }
 
 /** Markdown アーティファクト取得（所有者のみ） */
