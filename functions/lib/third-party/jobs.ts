@@ -12,6 +12,9 @@ export type TpJobStatus =
   | "failed"
   | "cancelled";
 
+/** 実行中ジョブの打ち切り（ms） */
+export const TP_JOB_STALE_MS = 15 * 60 * 1000;
+
 export interface TpJobProgress {
   current?: number;
   total?: number;

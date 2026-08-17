@@ -8,7 +8,7 @@ const EMAIL = process.env.TP_EMAIL || "guest";
 const PASSWORD = process.env.TP_PASSWORD || "guest1234";
 const MAX_ROUNDS = Number(process.env.TP_ROUNDS || "10");
 const CHAT_TIMEOUT_MS = Number(process.env.TP_CHAT_TIMEOUT || "600000");
-const JOB_TIMEOUT_MS = Number(process.env.TP_JOB_TIMEOUT || "300000");
+const JOB_TIMEOUT_MS = Number(process.env.TP_JOB_TIMEOUT || "900000");
 
 let cookieHeader = "";
 
