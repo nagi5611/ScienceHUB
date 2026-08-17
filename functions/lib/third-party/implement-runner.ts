@@ -116,7 +116,8 @@ export async function runImplementJob(
       env,
       requirements,
       plan,
-      project.title
+      project.title,
+      { background: true }
     );
     await saveImplementationTasks(bucket, project.dir_name, tasksFile);
     callbacks?.onArtifact?.(ARTIFACT_TASKS);
@@ -187,7 +188,8 @@ export async function runImplementJob(
             requirements,
             plan,
             project.title,
-            implementGemini
+            implementGemini,
+            { background: true }
           ).then((planResult) => ({ skeleton: false as const, planResult, task }));
         })
       );
@@ -232,6 +234,7 @@ export async function runImplementJob(
             onActivity: (label) =>
               callbacks?.onActivity?.(label, "flash_implement_tasks"),
             gemini: implementGemini,
+            background: true,
           }
         );
         html = result.html;

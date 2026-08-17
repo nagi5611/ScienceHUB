@@ -19,12 +19,19 @@ ScienceHUB のサードパーティスタジオで、ユーザーと AI がや�
 
 ---
 
-## モデル分担
+## モデル分担（三層 + エージェントレジストリ）
 
-| 役割 | 環境変数（任意） | コード上の既定 |
-|------|------------------|----------------|
-| ヒアリング・フォーム・要件/計画 Markdown | `GEMINI_TP_LITE_MODEL` | `gemini-3.1-flash-lite` |
-| 計画レビュー・HTML 実装 | `GEMINI_TP_FLASH_MODEL` | `gemini-3.5-flash` |
+詳細設計・文献調査は `docs/third-party-agent-architecture.md` を参照。
+
+| ティア | 役割 | 環境変数（任意） | コード上の既定 |
+|--------|------|------------------|----------------|
+| Lite | ヒアリング・フォーム・要件/計画 Markdown・意図分類・Ask | `GEMINI_TP_LITE_MODEL` | `gemini-2.0-flash-lite` |
+| Flash | 計画レビュー・タスク分解・通常の行編集・メンテ 1 ステップ | `GEMINI_TP_FLASH_MODEL` | `gemini-2.5-flash` |
+| High | 編集リトライ・全文 HTML patch | `GEMINI_TP_HIGH_MODEL` | `gemini-3.5-flash` |
+
+エージェント定義の単一ソース: `functions/lib/third-party/agent-registry.ts`
+
+実装 Worker 内のバックグラウンド呼び出し（タスク分解・行編集）は **Flex tier**（約 50% 割引）を使用。ユーザー待ちの同期チャットは **Standard tier**。
 
 ---
 

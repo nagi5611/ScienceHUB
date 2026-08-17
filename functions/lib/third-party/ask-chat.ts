@@ -11,7 +11,7 @@ import {
   getArtifact,
 } from "./artifacts";
 import { TP_ASK_SYSTEM } from "./prompts";
-import { resolveTpFlashModel, tpGeminiProfileOptions } from "./tp-flash";
+import { tpAgentGeminiOptions } from "./agent-registry";
 import { formatNumberedLines } from "./workspace-edits";
 
 export interface AskTurnProjectContext {
@@ -99,11 +99,10 @@ ${recentChatBlock(messages)}
 ${userInput}`;
 
   const result = await geminiGenerateJson<{ assistant_message: string }>(env, {
-    model: resolveTpFlashModel(env),
     systemInstruction: TP_ASK_SYSTEM,
     prompt,
     maxOutputTokens: 4096,
-    ...tpGeminiProfileOptions("flash_ask"),
+    ...tpAgentGeminiOptions(env, "ask"),
     responseSchema: ASK_REPLY_SCHEMA as unknown as Record<string, unknown>,
   });
 

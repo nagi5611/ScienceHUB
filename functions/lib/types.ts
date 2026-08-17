@@ -67,10 +67,12 @@ export interface Env {
   /** Google Gemini API（FDS 一次審査） */
   GEMINI_API_KEY?: string;
   GEMINI_FDS_REVIEW_MODEL?: string;
-  /** サードパーティ対話・要件（既定 gemini-3.1-flash-lite 等） */
+  /** サードパーティ対話・要件（既定 gemini-2.0-flash-lite 等） */
   GEMINI_TP_LITE_MODEL?: string;
-  /** サードパーティレビュー・実装（既定 gemini-3.5-flash 等） */
+  /** サードパーティレビュー・計画・通常編集（既定 gemini-2.5-flash 等） */
   GEMINI_TP_FLASH_MODEL?: string;
+  /** サードパーティリトライ編集・全文 patch（既定 gemini-3.5-flash 等） */
+  GEMINI_TP_HIGH_MODEL?: string;
   /** サードパーティ実装/検証 Worker のベース URL */
   TP_PIPELINE_WORKER_URL?: string;
   /** サードパーティ実装/検証 Worker 内部認証 */

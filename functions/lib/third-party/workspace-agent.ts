@@ -20,7 +20,7 @@ import {
   summarizeEdits,
 } from "./workspace-edits";
 import { planMaintainEdits, isCompleteIndexHtml } from "./implement-tasks";
-import { resolveTpFlashModel, tpGeminiProfileOptions } from "./tp-flash";
+import { tpAgentGeminiOptions } from "./agent-registry";
 import {
   grepWorkspace,
   listWorkspaceFiles,
@@ -319,12 +319,11 @@ ${toolLog.length ? toolLog.join("\n\n") : "（なし）"}
 上記に基づき、修正後の完全な HTML ドキュメントのみを出力してください。`;
 
   let text = await geminiGenerateText(env, {
-    model: resolveTpFlashModel(env),
     systemInstruction: FLASH_MAINTAIN_PATCH_SYSTEM,
     prompt,
     maxOutputTokens: 65536,
     responseMimeType: "text/plain",
-    ...tpGeminiProfileOptions("flash_patch"),
+    ...tpAgentGeminiOptions(env, "code_patch"),
   });
   text = text.trim();
   if (text.startsWith("```")) {
@@ -374,11 +373,10 @@ ${toolLog.length ? toolLog.join("\n\n") : "（まだなし）"}
     let step: MaintainAgentStep;
     try {
       step = await geminiGenerateJson<MaintainAgentStep>(env, {
-        model: resolveTpFlashModel(env),
         systemInstruction: FLASH_MAINTAIN_SYSTEM,
         prompt,
         maxOutputTokens: 4096,
-        ...tpGeminiProfileOptions("flash_agent_step"),
+        ...tpAgentGeminiOptions(env, "maintain_step"),
         responseSchema: MAINTAIN_AGENT_STEP_SCHEMA as unknown as Record<
           string,
           unknown
