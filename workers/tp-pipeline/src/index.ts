@@ -167,9 +167,37 @@ async function handleVerify(
   });
 }
 
+async function runImplementInBackground(
+  env: WorkerEnv,
+  jobId: string,
+  projectId: string
+): Promise<void> {
+  const job = await getTpJob(env.DB, jobId);
+  if (!job || job.project_id !== projectId) {
+    await failImplementJob(env.DB, jobId, projectId, "ジョブが見つかりません");
+    return;
+  }
+
+  const project = await loadProjectForJob(env.DB, projectId);
+  if (!project) {
+    await failImplementJob(env.DB, jobId, projectId, "プロジェクトが見つかりません");
+    return;
+  }
+
+  try {
+    await markJobRunning(env.DB, jobId);
+    await runImplementJob(env, env.DB, env.FILES, project, jobId);
+  } catch (error) {
+    const msg =
+      error instanceof Error ? error.message : "実装ジョブに失敗しました";
+    await failImplementJob(env.DB, jobId, projectId, msg);
+  }
+}
+
 async function handleImplement(
   request: Request,
-  env: WorkerEnv
+  env: WorkerEnv,
+  ctx: ExecutionContext
 ): Promise<Response> {
   const body = (await request.json()) as {
     job_id?: string;
@@ -188,32 +216,19 @@ async function handleImplement(
     return Response.json({ error: "job not found" }, { status: 404 });
   }
 
-  const project = await loadProjectForJob(env.DB, projectId);
-  if (!project) {
-    await failImplementJob(env.DB, jobId, projectId, "プロジェクトが見つかりません");
-    return Response.json({ error: "project not found" }, { status: 404 });
-  }
+  ctx.waitUntil(runImplementInBackground(env, jobId, projectId));
 
-  try {
-    await markJobRunning(env.DB, jobId);
-    const result = await runImplementJob(
-      env,
-      env.DB,
-      env.FILES,
-      project,
-      jobId
-    );
-    return Response.json({ ok: true, ...result });
-  } catch (error) {
-    const msg =
-      error instanceof Error ? error.message : "実装ジョブに失敗しました";
-    await failImplementJob(env.DB, jobId, projectId, msg);
-    return Response.json({ error: msg }, { status: 500 });
-  }
+  return Response.json({ ok: true, accepted: true, job_id: jobId }, {
+    status: 202,
+  });
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: WorkerEnv,
+    ctx: ExecutionContext
+  ): Promise<Response> {
     if (!checkSecret(request, env)) return unauthorized();
 
     const url = new URL(request.url);
@@ -225,7 +240,7 @@ export default {
       return await handleVerify(request, env);
     }
     if (url.pathname === "/implement") {
-      return await handleImplement(request, env);
+      return await handleImplement(request, env, ctx);
     }
 
     return Response.json({ error: "not found" }, { status: 404 });

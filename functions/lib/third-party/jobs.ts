@@ -107,7 +107,7 @@ export async function getTpJob(
   return row ?? null;
 }
 
-/** プロジェクトのアクティブジョブ */
+/** プロジェクトのアクティブジョブ（スタール時は失敗扱い） */
 export async function getActiveJobForProject(
   db: D1Database,
   projectId: string
@@ -121,6 +121,24 @@ export async function getActiveJobForProject(
   if (!job || job.status === "succeeded" || job.status === "failed") {
     return null;
   }
+
+  const staleAnchor = job.started_at ?? job.created_at;
+  if (
+    (job.status === "pending" || job.status === "running") &&
+    now() - staleAnchor > TP_JOB_STALE_MS
+  ) {
+    const staleMsg =
+      "ジョブがタイムアウトしました。再度「実装開始」を試してください。";
+    await markJobFailed(db, job.id, projectId, staleMsg);
+    if (job.job_type === "implement") {
+      const { recoverPhaseAfterImplementFailure } = await import(
+        "./implement-runner"
+      );
+      await recoverPhaseAfterImplementFailure(db, projectId, staleMsg);
+    }
+    return null;
+  }
+
   return job;
 }
 

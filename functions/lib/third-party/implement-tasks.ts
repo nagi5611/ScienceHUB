@@ -48,7 +48,7 @@ const EMPTY_SKELETON = `<!DOCTYPE html>
 </body>
 </html>`;
 
-const MAX_TASKS = 8;
+const MAX_TASKS = 5;
 const MAX_TASK_EDIT_RETRIES = 3;
 const MAX_EDIT_PLAN_TOKENS = 16384;
 
