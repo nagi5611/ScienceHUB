@@ -7,7 +7,7 @@ const BASE = process.env.TP_BASE_URL || "https://s.mmh-virtual.jp";
 const EMAIL = process.env.TP_EMAIL || "guest";
 const PASSWORD = process.env.TP_PASSWORD || "guest1234";
 const MAX_ROUNDS = Number(process.env.TP_ROUNDS || "10");
-const CHAT_TIMEOUT_MS = Number(process.env.TP_CHAT_TIMEOUT || "120000");
+const CHAT_TIMEOUT_MS = Number(process.env.TP_CHAT_TIMEOUT || "600000");
 const JOB_TIMEOUT_MS = Number(process.env.TP_JOB_TIMEOUT || "300000");
 
 let cookieHeader = "";
@@ -138,6 +138,9 @@ async function chat(projectId, body, label = "") {
         }
       }
     }
+  } catch (e) {
+    if (e.name !== "AbortError") throw e;
+    console.log(`  [chat ${label}] aborted — checking job/phase fallback`);
   } finally {
     clearTimeout(timer);
   }
@@ -146,16 +149,28 @@ async function chat(projectId, body, label = "") {
   const err = events.find((e) => e.event === "error");
   const jobId = done?.data?.active_job?.jobId || sseJobId;
 
-  if (jobId) {
+  if (jobId || sseJobId) {
     await waitForJob(projectId);
     const detail = await getDetail(projectId);
     return {
-      done: {
-        data: {
-          phase: detail.project?.workflow_phase,
-          active_job: null,
-        },
-      },
+      done: { data: { phase: detail.project?.workflow_phase } },
+      err,
+      waitedJob: true,
+    };
+  }
+
+  // SSE 切断後も実装フェーズならフェーズポーリング
+  const midDetail = await getDetail(projectId);
+  const midPhase = midDetail.project?.workflow_phase;
+  if (
+    ["flash_implement", "flash_implement_tasks", "flash_review", "write_req_and_plan"].includes(
+      midPhase
+    )
+  ) {
+    await waitForJob(projectId);
+    const detail = await getDetail(projectId);
+    return {
+      done: { data: { phase: detail.project?.workflow_phase } },
       err,
       waitedJob: true,
     };
