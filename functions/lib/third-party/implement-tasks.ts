@@ -33,9 +33,10 @@ import {
 } from "./implement-edit-scope";
 
 import {
-  resolveTpFlashModel,
-  tpGeminiProfileOptions,
-} from "./tp-flash";
+  tpAgentGeminiOptions,
+  resolveTpImplementCacheModel,
+  type TpAgentId,
+} from "./agent-registry";
 
 const EMPTY_SKELETON = `<!DOCTYPE html>
 <html lang="ja">
@@ -191,7 +192,8 @@ export async function planImplementationTasks(
   env: Env,
   requirements: string,
   plan: string,
-  title: string
+  title: string,
+  options?: { background?: boolean }
 ): Promise<ImplementationTasksFile> {
   const prompt = `アプリ名: ${title}
 
@@ -205,14 +207,15 @@ ${plan}
 例: skeleton → レイアウト markup → UI → styles → script → polish`;
 
   const result = await geminiGenerateJson<ImplementationTasksPlanResult>(env, {
-    model: resolveTpFlashModel(env),
     systemInstruction: `ScienceHUB サードパーティの実装タスク分解担当。
 各タスクは index.html への局所 edits で完了できる粒度にする。
 target は skeleton | markup | styles | script | polish のいずれか。
 id は英小文字とハイフン（例: task-skeleton）。depends_on は先行タスク id の配列。`,
     prompt,
     maxOutputTokens: 4096,
-    ...tpGeminiProfileOptions("flash_task_plan"),
+    ...tpAgentGeminiOptions(env, "task_planner", {
+      background: options?.background,
+    }),
     responseSchema: IMPLEMENTATION_TASKS_PLAN_SCHEMA as unknown as Record<
       string,
       unknown
@@ -269,7 +272,7 @@ export async function prepareImplementGeminiContext(
   requirements: string,
   plan: string
 ): Promise<EditPlanGeminiContext> {
-  const model = resolveTpFlashModel(env);
+  const model = resolveTpImplementCacheModel(env);
   const name = await createTpImplementDocsCache(
     env,
     model,
@@ -289,24 +292,28 @@ export async function generateEditPlan(
     attempt?: number;
     docsCacheName?: string;
     planKind?: "maintain" | "implement";
+    background?: boolean;
+    agentId?: TpAgentId;
   }
 ): Promise<MaintainEditPlanResult> {
   const attempt = options?.attempt ?? 0;
-  const profile =
-    attempt > 0 ? "flash_edit_plan_retry" : "flash_edit_plan";
+  const agentId =
+    options?.agentId ??
+    (attempt > 0 ? "code_editor_retry" : "code_editor");
   const schema =
     options?.planKind === "implement"
       ? IMPLEMENT_EDIT_PLAN_SCHEMA
       : MAINTAIN_EDIT_PLAN_SCHEMA;
   return await geminiGenerateJson<MaintainEditPlanResult>(env, {
-    model: resolveTpFlashModel(env),
     systemInstruction: options?.docsCacheName
       ? undefined
       : systemInstruction,
     prompt,
     maxOutputTokens: MAX_EDIT_PLAN_TOKENS,
     cachedContent: options?.docsCacheName,
-    ...tpGeminiProfileOptions(profile),
+    ...tpAgentGeminiOptions(env, agentId, {
+      background: options?.background,
+    }),
     responseSchema: schema as unknown as Record<string, unknown>,
   });
 }
@@ -366,6 +373,8 @@ ${docsBlock}${retry}`;
 export interface TaskEditCallbacks {
   onActivity?: (label: string) => void;
   gemini?: EditPlanGeminiContext;
+  /** 実装 Worker 内（Flex tier） */
+  background?: boolean;
 }
 
 /** 1 タスク分の edits を生成して適用 */
@@ -430,6 +439,7 @@ target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L0
           attempt,
           docsCacheName: docsCache,
           planKind: "implement",
+          background: callbacks?.background,
         }
       );
     } catch (error) {
@@ -495,7 +505,8 @@ export async function planImplementationTaskEdits(
   requirements: string,
   plan: string,
   title: string,
-  gemini?: EditPlanGeminiContext
+  gemini?: EditPlanGeminiContext,
+  options?: { background?: boolean }
 ): Promise<MaintainEditPlanResult> {
   currentHtml = normalizeImplementBaseHtml(currentHtml, title);
   const prompt = buildImplementTaskEditPrompt(
@@ -513,6 +524,7 @@ export async function planImplementationTaskEdits(
     {
       docsCacheName: gemini?.docsCacheName,
       planKind: "implement",
+      background: options?.background,
     }
   );
 }

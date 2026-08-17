@@ -40,7 +40,7 @@ import {
   wantsMaintainUserReport,
   type MaintainProjectContext,
 } from "./workspace-agent";
-import { resolveTpFlashModel, resolveTpLiteModel, tpGeminiProfileOptions } from "./tp-flash";
+import { tpAgentGeminiOptions } from "./agent-registry";
 import { runTpIntentClassify, classifyIntentByRules } from "./intent-classify";
 import { createTpJob, jobProgress, getActiveJobForProject, type TpJobProgress } from "./jobs";
 import {
@@ -371,11 +371,10 @@ structured_form に進むときは pending_form に質問（2〜5問、選択肢
 gate_deepen_or_build では gate_choice_ids に deepen と implement_now を含める。`;
 
   return await geminiGenerateJson<LiteTurnResult>(env, {
-    model: resolveTpLiteModel(env),
     systemInstruction: LITE_SYSTEM,
     prompt,
     maxOutputTokens: 4096,
-    ...tpGeminiProfileOptions("lite_turn"),
+    ...tpAgentGeminiOptions(env, "discovery"),
     responseSchema: LITE_TURN_SCHEMA as unknown as Record<string, unknown>,
   });
 }
@@ -391,11 +390,10 @@ ${project.context_summary || ""}
 要件定義書と実装計画書を生成してください。`;
 
   return await geminiGenerateJson<LiteDocsResult>(env, {
-    model: resolveTpLiteModel(env),
     systemInstruction: LITE_DOCS_SYSTEM,
     prompt,
     maxOutputTokens: 8192,
-    ...tpGeminiProfileOptions("lite_docs"),
+    ...tpAgentGeminiOptions(env, "docs_writer"),
     responseSchema: LITE_DOCS_SCHEMA as unknown as Record<string, unknown>,
   });
 }
@@ -414,11 +412,10 @@ ${requirements}
 ${plan}`;
 
   return await geminiGenerateJson<PlanReviewResult>(env, {
-    model: resolveTpFlashModel(env),
     systemInstruction: FLASH_REVIEW_SYSTEM,
     prompt,
     maxOutputTokens: 8192,
-    ...tpGeminiProfileOptions("flash_review"),
+    ...tpAgentGeminiOptions(env, "plan_reviewer"),
     responseSchema: PLAN_REVIEW_SCHEMA as unknown as Record<string, unknown>,
   });
 }

@@ -26,7 +26,7 @@
     "design-collab:deploy": "wrangler deploy --config workers/design-collab/wrangler.jsonc",
     "tp-pipeline:deploy": "wrangler deploy --config workers/tp-pipeline/wrangler.jsonc",
     "image-converter:deploy": "wrangler deploy --config workers/image-converter/wrangler.jsonc",
-    "test:tp-pipeline": "npx tsx --test functions/lib/third-party/implement-parallel.test.ts functions/lib/third-party/intent-classify.test.ts functions/lib/third-party/workspace-edits.test.ts",
+    "test:tp-pipeline": "npx tsx --test functions/lib/third-party/agent-registry.test.ts functions/lib/third-party/implement-parallel.test.ts functions/lib/third-party/intent-classify.test.ts functions/lib/third-party/workspace-edits.test.ts",
     "pwa:icons": "node scripts/generate-pwa-icons.mjs",
     "test:image-converter": "playwright test tests/image-converter",
     "test:image-converter:ui": "playwright test tests/image-converter --ui",

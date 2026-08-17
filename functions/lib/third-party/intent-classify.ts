@@ -11,7 +11,7 @@ import {
   type TpChatMode,
   type TpUserIntent,
 } from "./schemas";
-import { resolveTpLiteModel, tpGeminiProfileOptions } from "./tp-flash";
+import { tpAgentGeminiOptions } from "./agent-registry";
 
 const VALID_INTENTS: TpUserIntent[] = [
   "maintain",
@@ -95,11 +95,10 @@ export async function runTpIntentClassify(
   const raw = await geminiGenerateJson<IntentClassifyResult>(
     env,
     {
-      model: resolveTpLiteModel(env),
       systemInstruction: LITE_INTENT_SYSTEM,
       prompt: userBlock,
       responseSchema: INTENT_CLASSIFY_SCHEMA,
-      ...tpGeminiProfileOptions("lite_turn"),
+      ...tpAgentGeminiOptions(env, "intent_classifier"),
     }
   );
 

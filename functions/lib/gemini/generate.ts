@@ -199,7 +199,7 @@ export async function geminiGenerateText(
     console.error("Gemini generate failed:", res.status, errText.slice(0, 800));
     if (res.status === 404) {
       throw new Error(
-        `AI モデル "${options.model}" が使えません。GEMINI_TP_LITE_MODEL / GEMINI_TP_FLASH_MODEL を確認してください`
+        `AI モデル "${options.model}" が使えません。GEMINI_TP_LITE_MODEL / GEMINI_TP_FLASH_MODEL / GEMINI_TP_HIGH_MODEL を確認してください`
       );
     }
     let detail = "";
