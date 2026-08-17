@@ -14,7 +14,7 @@
     "predeploy": "npm run build && npm run assets:upload-ffmpeg && npm run db:migrate:remote",
     "assets:upload-ffmpeg": "node scripts/upload-ffmpeg-core.mjs",
     "assets:upload-ffmpeg:local": "node scripts/upload-ffmpeg-core.mjs --local",
-    "deploy": "wrangler pages deploy public",
+    "deploy": "wrangler pages deploy public && npm run tp-pipeline:deploy",
     "db:create": "wrangler d1 create sciencehub-db",
     "db:migrate:local": "wrangler d1 migrations apply sciencehub-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply sciencehub-db --remote",

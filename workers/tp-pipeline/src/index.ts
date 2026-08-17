@@ -3,21 +3,21 @@
  */
 
 import puppeteer from "@cloudflare/puppeteer";
-import type { Env } from "../../functions/lib/types";
+import type { Env } from "../../../functions/lib/types";
 import {
   ARTIFACT_INDEX,
   ARTIFACT_VERIFY_JSON,
   ARTIFACT_VERIFY_PNG,
   getArtifact,
   putArtifact,
-} from "../../functions/lib/third-party/artifacts";
-import { verifyHtmlStatic } from "../../functions/lib/third-party/browser-verify";
+} from "../../../functions/lib/third-party/artifacts";
+import { verifyHtmlStatic } from "../../../functions/lib/third-party/browser-verify";
 import {
   failImplementJob,
   runImplementJob,
-} from "../../functions/lib/third-party/implement-runner";
-import { getTpJob, markJobRunning } from "../../functions/lib/third-party/jobs";
-import type { TpProjectPipelineRow } from "../../functions/lib/third-party/gemini-pipeline";
+} from "../../../functions/lib/third-party/implement-runner";
+import { getTpJob, markJobRunning } from "../../../functions/lib/third-party/jobs";
+import type { TpProjectPipelineRow } from "../../../functions/lib/third-party/gemini-pipeline";
 
 interface WorkerEnv extends Env {
   BROWSER: Fetcher;
