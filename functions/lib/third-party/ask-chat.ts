@@ -22,7 +22,7 @@ export interface AskTurnProjectContext {
 }
 
 
-const MAX_INDEX_LINES = 180;
+const MAX_INDEX_LINES = 80;
 const MAX_DOC_CHARS = 3500;
 
 const ASK_REPLY_SCHEMA = {

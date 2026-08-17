@@ -4,11 +4,29 @@
 
 import type { ImplementationTask } from "./schemas";
 import type { WorkspaceEditOp } from "./workspace-edits";
+import { formatNumberedLines } from "./workspace-edits";
 
 export const IMPLEMENT_EDIT_TARGET_PATH = "index.html";
 
 const PARALLEL_SAFE_TARGETS = new Set(["markup", "styles"]);
-const MAX_PARALLEL_BATCH = 3;
+const DEFAULT_MAX_PARALLEL_BATCH = 1;
+const MAX_PARALLEL_BATCH_CAP = 3;
+const HTML_SNIPPET_CONTEXT_PAD = 3;
+
+export function resolveMaxParallelBatch(env?: {
+  TP_IMPLEMENT_PARALLEL?: string;
+}): number {
+  const parsed = Number.parseInt(env?.TP_IMPLEMENT_PARALLEL ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_MAX_PARALLEL_BATCH;
+  }
+  return Math.min(MAX_PARALLEL_BATCH_CAP, parsed);
+}
+
+/** @deprecated 互換用 — env 未指定時は既定 1 */
+export function maxParallelBatchSize(): number {
+  return DEFAULT_MAX_PARALLEL_BATCH;
+}
 
 /** 2 タスクを同一バッチで並列実行可能か */
 export function canParallelizeTargets(
@@ -22,8 +40,43 @@ export function canParallelizeTargets(
   return PARALLEL_SAFE_TARGETS.has(a) && PARALLEL_SAFE_TARGETS.has(b);
 }
 
-export function maxParallelBatchSize(): number {
-  return MAX_PARALLEL_BATCH;
+/** タスク target に応じた HTML 抜粋（行番号は全文基準） */
+export function extractNumberedHtmlForTask(
+  html: string,
+  taskTarget: ImplementationTask["target"]
+): { snippet: string; isPartial: boolean } {
+  if (taskTarget === "skeleton" || taskTarget === "polish") {
+    return { snippet: formatNumberedLines(html), isPartial: false };
+  }
+
+  const lines = html.split("\n");
+  let block: LineBlock | null = null;
+  if (taskTarget === "styles") {
+    block = findStyleBlock(lines);
+  } else if (taskTarget === "script") {
+    block = findLastScriptBlock(lines);
+  } else if (taskTarget === "markup") {
+    block = findMainBlock(lines);
+  }
+
+  if (!block) {
+    return { snippet: formatNumberedLines(html), isPartial: false };
+  }
+
+  const startIdx = Math.max(0, block.open - HTML_SNIPPET_CONTEXT_PAD);
+  const endIdx = Math.min(lines.length - 1, block.close + HTML_SNIPPET_CONTEXT_PAD);
+  const slice = lines.slice(startIdx, endIdx + 1);
+  const numbered = slice
+    .map((line, i) => {
+      const lineNo = startIdx + i + 1;
+      return `L${String(lineNo).padStart(3, "0")}: ${line}`;
+    })
+    .join("\n");
+
+  return {
+    snippet: `${numbered}\n…（L${startIdx + 1}–L${endIdx + 1} 抜粋。行番号は全文 index.html 基準）`,
+    isPartial: true,
+  };
 }
 
 type LineBlock = { open: number; close: number };

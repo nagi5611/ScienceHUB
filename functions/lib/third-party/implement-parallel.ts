@@ -9,7 +9,7 @@ import type {
 } from "./schemas";
 import {
   canParallelizeTargets,
-  maxParallelBatchSize,
+  resolveMaxParallelBatch,
 } from "./implement-edit-scope";
 
 function isTaskReady(task: ImplementationTask, tasks: ImplementationTask[]): boolean {
@@ -38,7 +38,8 @@ export function hasPendingTasks(tasksFile: ImplementationTasksFile): boolean {
 
 /** 次に実行する並列バッチ（空なら null） */
 export function nextParallelBatch(
-  tasksFile: ImplementationTasksFile
+  tasksFile: ImplementationTasksFile,
+  parallelLimit?: number
 ): ImplementationTask[] | null {
   const ready = tasksFile.tasks.filter((t) =>
     isTaskReady(t, tasksFile.tasks)
@@ -46,7 +47,11 @@ export function nextParallelBatch(
   if (ready.length === 0) return null;
 
   const batch: ImplementationTask[] = [];
-  const limit = maxParallelBatchSize();
+  const limit =
+    parallelLimit !== undefined
+      ? Math.max(1, Math.min(3, parallelLimit))
+      : resolveMaxParallelBatch();
+
 
   for (const task of ready) {
     if (batch.length === 0) {

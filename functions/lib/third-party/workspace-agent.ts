@@ -29,8 +29,17 @@ import {
 } from "./workspace";
 import { recordHtmlRevision } from "./revisions";
 
-const MAX_MAINTAIN_TOOL_ROUNDS = 12;
+const DEFAULT_MAX_MAINTAIN_TOOL_ROUNDS = 6;
 const MAX_MAINTAIN_ATTEMPTS = 10;
+const MAX_PATCH_OUTPUT_TOKENS = 24576;
+
+function resolveMaxMaintainToolRounds(env: Env): number {
+  const parsed = Number.parseInt(env.TP_MAX_MAINTAIN_TOOL_ROUNDS ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_MAX_MAINTAIN_TOOL_ROUNDS;
+  }
+  return Math.min(12, parsed);
+}
 
 export interface MaintainProjectContext {
   id: string;
@@ -321,9 +330,9 @@ ${toolLog.length ? toolLog.join("\n\n") : "（なし）"}
   let text = await geminiGenerateText(env, {
     systemInstruction: FLASH_MAINTAIN_PATCH_SYSTEM,
     prompt,
-    maxOutputTokens: 65536,
+    maxOutputTokens: MAX_PATCH_OUTPUT_TOKENS,
     responseMimeType: "text/plain",
-    ...tpAgentGeminiOptions(env, "code_patch"),
+    ...tpAgentGeminiOptions(env, "code_patch", { background: true }),
   });
   text = text.trim();
   if (text.startsWith("```")) {
@@ -353,8 +362,9 @@ export async function runMaintainAgentTurn(
   let finalPhase: "draft_ready" | "app_maintain" = "app_maintain";
   let lastAssistant = "";
   let editFailures = 0;
+  const maxToolRounds = resolveMaxMaintainToolRounds(env);
 
-  for (let round = 0; round < MAX_MAINTAIN_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < maxToolRounds; round++) {
     const prompt = `アプリ名: ${project.title}
 ユーザー報告:
 ${userReport}
@@ -543,7 +553,7 @@ ${toolLog.length ? toolLog.join("\n\n") : "（まだなし）"}
     const exec = await executeMaintainAction(db, bucket, project, step);
     toolLog.push(`[${action}] ${exec.result}`);
 
-    if (round === MAX_MAINTAIN_TOOL_ROUNDS - 1) {
+    if (round === maxToolRounds - 1) {
       lastAssistant = sanitizeMaintainAssistantMessage(lastAssistant, htmlUpdated);
       lastAssistant = `${lastAssistant}\n\n（自動調査の上限に達しました。「バックスペースで一桁削除」「Cキーでクリア」のように、やりたいことを1文で送ると修正しやすいです。）`;
     }

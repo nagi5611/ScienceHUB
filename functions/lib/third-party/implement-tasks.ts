@@ -28,6 +28,7 @@ import {
 import { EMPTY_PLACEHOLDER_HTML } from "./stub-chat";
 import {
   describeImplementEditScopes,
+  extractNumberedHtmlForTask,
   IMPLEMENT_EDIT_TARGET_PATH,
   validateImplementEdits,
 } from "./implement-edit-scope";
@@ -35,7 +36,7 @@ import {
 import {
   tpAgentGeminiOptions,
   resolveTpImplementCacheModel,
-  type TpAgentId,
+  resolveEditPlanAgentId,
 } from "./agent-registry";
 
 const EMPTY_SKELETON = `<!DOCTYPE html>
@@ -50,8 +51,8 @@ const EMPTY_SKELETON = `<!DOCTYPE html>
 </html>`;
 
 const MAX_TASKS = 5;
-const MAX_TASK_EDIT_RETRIES = 3;
-const MAX_EDIT_PLAN_TOKENS = 16384;
+const MAX_TASK_EDIT_RETRIES = 2;
+const MAX_EDIT_PLAN_TOKENS = 8192;
 
 function escapeHtmlText(value: string): string {
   return value
@@ -293,13 +294,12 @@ export async function generateEditPlan(
     docsCacheName?: string;
     planKind?: "maintain" | "implement";
     background?: boolean;
-    agentId?: TpAgentId;
+    maxAttempts?: number;
   }
 ): Promise<MaintainEditPlanResult> {
   const attempt = options?.attempt ?? 0;
-  const agentId =
-    options?.agentId ??
-    (attempt > 0 ? "code_editor_retry" : "code_editor");
+  const maxAttempts = options?.maxAttempts ?? MAX_TASK_EDIT_RETRIES;
+  const agentId = resolveEditPlanAgentId(attempt, maxAttempts);
   const schema =
     options?.planKind === "implement"
       ? IMPLEMENT_EDIT_PLAN_SCHEMA
@@ -335,7 +335,10 @@ function buildImplementTaskEditPrompt(
   docsCache: boolean,
   retryNote?: string
 ): string {
-  const numbered = formatNumberedLines(currentHtml);
+  const { snippet, isPartial } = extractNumberedHtmlForTask(
+    currentHtml,
+    task.target
+  );
   const scope = describeImplementEditScopes(currentHtml, task.target);
   const taskBlock = `--- タスク ---
 アプリ名: ${title}
@@ -364,8 +367,8 @@ target_path は必ず "${IMPLEMENT_EDIT_TARGET_PATH}"。`;
   return `--- 編集対象と許可範囲 ---
 ${scope}
 
---- ${IMPLEMENT_EDIT_TARGET_PATH} 全文（行番号付き） ---
-${numbered}
+--- ${IMPLEMENT_EDIT_TARGET_PATH} ${isPartial ? "抜粋" : "全文"}（行番号付き） ---
+${snippet}
 
 ${docsBlock}${retry}`;
 }

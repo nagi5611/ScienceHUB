@@ -12,7 +12,7 @@ import type {
 } from "../gemini/generate";
 
 /** 未設定時の Lite モデル（GEMINI_TP_LITE_MODEL で上書き可） */
-export const DEFAULT_TP_LITE_MODEL = "gemini-2.0-flash-lite";
+export const DEFAULT_TP_LITE_MODEL = "gemini-2.5-flash-lite";
 
 /** 未設定時の Flash モデル（GEMINI_TP_FLASH_MODEL で上書き可） */
 export const DEFAULT_TP_FLASH_MODEL = "gemini-2.5-flash";
@@ -42,14 +42,14 @@ export const TP_LITE_THINKING: GeminiThinkingLevel = "MINIMAL";
 /** Flash 編集プラン初回: 3.5 の既定 medium / 2.x は API 側 temperature */
 export const TP_FLASH_THINKING_EDIT: GeminiThinkingLevel = "MEDIUM";
 
-/** 編集プラン再試行（High ティア） */
-export const TP_FLASH_THINKING_EDIT_RETRY: GeminiThinkingLevel = "HIGH";
+/** 編集プラン再試行（High ティア・最終試行） */
+export const TP_FLASH_THINKING_EDIT_RETRY: GeminiThinkingLevel = "MEDIUM";
 
 /** スニペット生成 */
 export const TP_FLASH_THINKING_SNIPPET: GeminiThinkingLevel = "MEDIUM";
 
 /** 全文 patch（High ティア） */
-export const TP_FLASH_THINKING_PATCH: GeminiThinkingLevel = "HIGH";
+export const TP_FLASH_THINKING_PATCH: GeminiThinkingLevel = "MEDIUM";
 
 /** メンテのツール 1 ステップ（ツール呼び出し抑制） */
 export const TP_FLASH_THINKING_AGENT_STEP: GeminiThinkingLevel = "LOW";
