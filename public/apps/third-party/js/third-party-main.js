@@ -290,6 +290,52 @@ async function loadImplementTasksFromWorkspace() {
 }
 
 /** チャット POST（SSE 優先、失敗時 JSON） */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** バックグラウンドジョブ完了までポーリング */
+async function waitForActiveJob(projectId, maxMs = 300000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const data = await tpApi(`projects/${projectId}/job`);
+    const job = data.job;
+    if (!job) return null;
+    if (chatPending && job.progress?.label) {
+      chatPending.activityLabel = job.progress.label;
+      renderMessagesFromState();
+    }
+    if (
+      job.status === "succeeded" ||
+      job.status === "failed" ||
+      job.status === "cancelled"
+    ) {
+      if (job.status === "failed") {
+        throw new Error(
+          job.error_message || "バックグラウンドジョブに失敗しました"
+        );
+      }
+      return job;
+    }
+    await sleep(1500);
+  }
+  throw new Error("ジョブの完了待ちがタイムアウトしました");
+}
+
+/** SSE 切断後にチャット結果を再構築 */
+async function rebuildChatResultFromProject(projectId) {
+  const detail = await tpApi(`projects/${projectId}`);
+  const { messages } = await tpApi(`projects/${projectId}/messages`);
+  return {
+    messages,
+    phase: detail.project.workflow_phase,
+    pending_form: detail.pending_form ?? null,
+    review_summary: null,
+    htmlUpdated: true,
+    dir_name: detail.project.dir_name,
+  };
+}
+
 async function postProjectChat(body) {
   const payload = { ...body, chat_mode: getChatMode() };
   const base = `/api/third-party/projects/${currentProjectId}/chat`;
@@ -316,6 +362,7 @@ async function postProjectChat(body) {
   const decoder = new TextDecoder();
   let buffer = "";
   let finalResult = null;
+  let sseActiveJobId = null;
 
   const handleEvent = (eventName, dataStr) => {
     if (!dataStr) return;
@@ -352,6 +399,7 @@ async function postProjectChat(body) {
         loadRevisions(currentProjectId).catch(() => {});
       }
     } else if (eventName === "job" && payload.jobId) {
+      sseActiveJobId = payload.jobId;
       const label = payload.progress?.label;
       if (label && chatPending) {
         chatPending.activityLabel = label;
@@ -396,6 +444,14 @@ async function postProjectChat(body) {
       else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
     }
     handleEvent(eventName, dataLines.join("\n"));
+  }
+
+  const pendingJobId =
+    finalResult?.active_job?.jobId || sseActiveJobId || null;
+
+  if (pendingJobId && currentProjectId) {
+    await waitForActiveJob(currentProjectId);
+    finalResult = await rebuildChatResultFromProject(currentProjectId);
   }
 
   if (!finalResult) {
@@ -1115,6 +1171,28 @@ async function openStudio(projectId) {
   await refreshWorkspaceTree().catch(() => {});
   await loadImplementTasksFromWorkspace().catch(() => {});
   await loadRevisions(projectId).catch(() => {});
+  try {
+    const { job } = await tpApi(`projects/${projectId}/job`);
+    if (
+      job &&
+      (job.status === "pending" || job.status === "running")
+    ) {
+      chatPending = {
+        userText: "",
+        assistantWaiting: true,
+        activityLabel: job.progress?.label || "実装ジョブを実行中…",
+      };
+      renderMessagesFromState();
+      setChatBusy(true);
+      await waitForActiveJob(projectId);
+      const result = await rebuildChatResultFromProject(projectId);
+      applyChatResult(result);
+      setChatBusy(false);
+    }
+  } catch (err) {
+    setChatBusy(false);
+    console.warn("active job recovery failed", err);
+  }
   setFileViewerState({ name: null, path: null, content: "" });
 }
 
@@ -1248,6 +1326,7 @@ function applyChatResult(result) {
   if (result.htmlUpdated) refreshPreview();
   refreshWorkspaceTree().catch(() => {});
   loadImplementTasksFromWorkspace().catch(() => {});
+  if (currentProjectId) loadRevisions(currentProjectId).catch(() => {});
   updatePhaseUI(result.phase, result.pending_form, result.review_summary);
 }
 

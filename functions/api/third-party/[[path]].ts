@@ -44,6 +44,7 @@ import {
   listOwnedRevisions,
   getOwnedRevisionDetail,
   restoreOwnedRevision,
+  getOwnedActiveJob,
 } from "../../lib/third-party";
 import { createChatSseResponse } from "../../lib/third-party/chat-sse";
 
@@ -148,6 +149,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         (await getProjectHtml(bucket, project.r2_prefix)) ??
         "<!DOCTYPE html><html><body>空</body></html>";
       return htmlResponse(html);
+    }
+
+    if (sub === "job") {
+      const jobInfo = await getOwnedActiveJob(db, auth.id, projectId);
+      if (!jobInfo.job && !(await getOwnedProject(db, auth.id, projectId))) {
+        return jsonError("プロジェクトが見つかりません", 404);
+      }
+      return Response.json(jobInfo);
     }
 
     if (sub === "workspace" && artifactKind === "tree") {

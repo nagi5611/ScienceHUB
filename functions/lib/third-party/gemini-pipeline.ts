@@ -42,7 +42,7 @@ import {
 } from "./workspace-agent";
 import { resolveTpFlashModel, resolveTpLiteModel, tpGeminiProfileOptions } from "./tp-flash";
 import { runTpIntentClassify, classifyIntentByRules } from "./intent-classify";
-import { createTpJob, pollJobUntilDone, jobProgress } from "./jobs";
+import { createTpJob, jobProgress, getActiveJobForProject, type TpJobProgress } from "./jobs";
 import {
   isTpPipelineWorkerConfigured,
   triggerImplementJobOnWorker,
@@ -84,6 +84,16 @@ export interface GeminiChatResult {
   review_summary: string | null;
   htmlUpdated: boolean;
   dir_name: string;
+  active_job?: {
+    jobId: string;
+    status: string;
+    progress?: {
+      current?: number;
+      total?: number;
+      label?: string;
+      phase?: string;
+    } | null;
+  } | null;
 }
 
 export interface TpChatCallbacks {
@@ -520,7 +530,15 @@ async function flashImplementPhase(
   bucket: R2Bucket,
   project: TpProjectPipelineRow,
   callbacks?: TpChatCallbacks
-): Promise<{ message: string; htmlUpdated: boolean }> {
+): Promise<{
+  message: string;
+  htmlUpdated: boolean;
+  backgroundJob?: {
+    jobId: string;
+    status: string;
+    progress?: TpJobProgress | null;
+  };
+}> {
   if (project.implement_attempts >= MAX_IMPLEMENT_ATTEMPTS) {
     throw new Error("実装の再試行上限に達しました");
   }
@@ -558,31 +576,18 @@ async function flashImplementPhase(
 
     await triggerImplementJobOnWorker(env, job.id, project.id);
 
-    const finalJob = await pollJobUntilDone(db, job.id, {
-      intervalMs: 1000,
-      timeoutMs: 300000,
-      onPoll: async (j) => {
-        callbacks?.onJob?.({
-          jobId: j.id,
-          status: j.status,
-          progress: jobProgress(j),
-        });
-        const progress = jobProgress(j);
-        if (progress?.label) {
-          emitActivity(callbacks, progress.label, progress.phase);
-        }
-      },
-    });
+    const bgMessage =
+      "実装ジョブをバックグラウンドで開始しました。完了までしばらくお待ちください。";
+    await insertMessage(db, project.id, "assistant", bgMessage);
 
-    if (finalJob.status === "failed") {
-      throw new Error(finalJob.error_message ?? "実装ジョブに失敗しました");
-    }
-
-    const messages = await listMessages(db, project.id);
-    const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
     return {
-      message: lastAssistant?.content ?? "実装が完了しました。",
-      htmlUpdated: true,
+      message: bgMessage,
+      htmlUpdated: false,
+      backgroundJob: {
+        jobId: job.id,
+        status: "running",
+        progress: jobProgress(job),
+      },
     };
   }
 
@@ -697,13 +702,27 @@ export async function runTpGeminiChat(
 
   let htmlUpdated = false;
   let reviewSummary: string | null = null;
+  let activeJob: GeminiChatResult["active_job"] = null;
+
+  const applyImplementResult = (impl: Awaited<ReturnType<typeof flashImplementPhase>>) => {
+    if (impl.backgroundJob) {
+      activeJob = {
+        jobId: impl.backgroundJob.jobId,
+        status: impl.backgroundJob.status,
+        progress: impl.backgroundJob.progress ?? null,
+      };
+      return;
+    }
+    if (impl.htmlUpdated) htmlUpdated = true;
+  };
 
   // 実装確認トリガー（ゲートの「実装に進む」とは別）
   if (implementStartTrigger) {
     await patchProject(db, projectId, { workflow_phase: "flash_implement" });
     current = (await loadPipelineProject(db, userId, projectId))!;
-    const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
-    htmlUpdated = impl.htmlUpdated;
+    applyImplementResult(
+      await flashImplementPhase(env, db, bucket, current, callbacks)
+    );
   }
 
   // ゲート: 深掘り / 実装
@@ -738,8 +757,9 @@ export async function runTpGeminiChat(
     reviewSummary = r.message;
     current = (await loadPipelineProject(db, userId, projectId))!;
     if (r.passed && current.workflow_phase === "flash_implement") {
-      const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
-      htmlUpdated = impl.htmlUpdated;
+      applyImplementResult(
+        await flashImplementPhase(env, db, bucket, current, callbacks)
+      );
     }
   }
 
@@ -759,11 +779,10 @@ export async function runTpGeminiChat(
     userText &&
     !implementStartTrigger
   ) {
-    const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
-    htmlUpdated = impl.htmlUpdated;
+    applyImplementResult(
+      await flashImplementPhase(env, db, bucket, current, callbacks)
+    );
   }
-
-  // 実装後フェーズ — LLM 意図分類
   current = (await loadPipelineProject(db, userId, projectId))!;
   const maintainPhases = ["draft_ready", "app_maintain", "app_maintain_done"];
   if (userText && maintainPhases.includes(current.workflow_phase)) {
@@ -816,8 +835,9 @@ export async function runTpGeminiChat(
     } else if (intent === "implement_start") {
       await patchProject(db, projectId, { workflow_phase: "flash_implement" });
       current = (await loadPipelineProject(db, userId, projectId))!;
-      const impl = await flashImplementPhase(env, db, bucket, current, callbacks);
-      htmlUpdated = impl.htmlUpdated;
+      applyImplementResult(
+        await flashImplementPhase(env, db, bucket, current, callbacks)
+      );
     } else if (
       intent === "maintain" ||
       wantsMaintainUserReport(userText, current.workflow_phase)
@@ -926,6 +946,17 @@ export async function runTpGeminiChat(
   const finalProject = await loadPipelineProject(db, userId, projectId);
   if (!finalProject) return null;
 
+  if (!activeJob) {
+    const runningJob = await getActiveJobForProject(db, projectId);
+    if (runningJob) {
+      activeJob = {
+        jobId: runningJob.id,
+        status: runningJob.status,
+        progress: jobProgress(runningJob),
+      };
+    }
+  }
+
   const messages = await listMessages(db, projectId);
   const phaseOut = isTpWorkflowPhase(finalProject.workflow_phase)
     ? finalProject.workflow_phase
@@ -938,6 +969,7 @@ export async function runTpGeminiChat(
     review_summary: reviewSummary,
     htmlUpdated,
     dir_name: finalProject.dir_name,
+    active_job: activeJob,
   };
 }
 
