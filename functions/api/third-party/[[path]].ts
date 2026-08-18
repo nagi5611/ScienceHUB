@@ -6,6 +6,7 @@
  * GET        /api/third-party/projects/:id/workspace/tree
  * GET        /api/third-party/projects/:id/workspace/file?path=
  * POST       /api/third-party/projects/:id/chat?stream=1  (SSE)
+ * GET        /api/third-party/projects/:id/usage
  * GET        /api/third-party/projects/:id/preview
  * POST       /api/third-party/projects/:id/publish
  * GET        /api/third-party/gallery
@@ -45,6 +46,7 @@ import {
   getOwnedRevisionDetail,
   restoreOwnedRevision,
   getOwnedActiveJob,
+  getOwnedProjectGeminiUsage,
 } from "../../lib/third-party";
 import { createChatSseResponse } from "../../lib/third-party/chat-sse";
 
@@ -157,6 +159,12 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         return jsonError("プロジェクトが見つかりません", 404);
       }
       return Response.json(jobInfo);
+    }
+
+    if (sub === "usage") {
+      const usage = await getOwnedProjectGeminiUsage(db, auth.id, projectId);
+      if (!usage) return jsonError("プロジェクトが見つかりません", 404);
+      return Response.json({ usage });
     }
 
     if (sub === "workspace" && artifactKind === "tree") {
