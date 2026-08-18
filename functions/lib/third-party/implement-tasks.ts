@@ -26,7 +26,6 @@ import {
 } from "./schemas";
 import {
   applyWorkspaceEdits,
-  formatNumberedLines,
   normalizeWorkspaceEdits,
   summarizeEdits,
 } from "./workspace-edits";

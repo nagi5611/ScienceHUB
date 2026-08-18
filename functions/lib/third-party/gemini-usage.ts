@@ -2,7 +2,6 @@
  * サードパーティ — Gemini 使用量 D1 記録・集計
  */
 
-import type { Env } from "../types";
 import { createId, now } from "../types";
 import type {
   GeminiGenerateOptions,
