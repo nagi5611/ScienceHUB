@@ -55,6 +55,10 @@ import {
   getTpJob,
   jobProgress,
 } from "./third-party/jobs";
+import {
+  getOwnedTpGeminiUsageSummary,
+  type TpGeminiUsageSummary,
+} from "./third-party/gemini-usage";
 
 export const THIRD_PARTY_APP_SLUG = "third-party";
 
@@ -649,6 +653,15 @@ export async function getOwnedActiveJob(
       finished_at: job.finished_at,
     },
   };
+}
+
+/** Gemini 使用量サマリ（所有者のみ） */
+export async function getOwnedProjectGeminiUsage(
+  db: D1Database,
+  userId: string,
+  projectId: string
+): Promise<TpGeminiUsageSummary | null> {
+  return await getOwnedTpGeminiUsageSummary(db, userId, projectId);
 }
 
 /** Markdown アーティファクト取得（所有者のみ） */

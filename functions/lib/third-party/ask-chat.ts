@@ -12,9 +12,12 @@ import {
 } from "./artifacts";
 import { TP_ASK_SYSTEM } from "./prompts";
 import { tpAgentGeminiOptions } from "./agent-registry";
+import { withTpUsageRecording } from "./gemini-usage";
 import { formatNumberedLines } from "./workspace-edits";
 
 export interface AskTurnProjectContext {
+  id: string;
+  owner_user_id: string;
   workflow_phase: string;
   title: string;
   dir_name: string;
@@ -53,6 +56,7 @@ function truncateDoc(text: string, label: string): string {
 /** Ask モード 1 ターン（ワークスペースは読取のみ・保存なし） */
 export async function runTpAskTurn(
   env: Env,
+  db: D1Database,
   bucket: R2Bucket,
   project: AskTurnProjectContext,
   userInput: string,
@@ -98,13 +102,19 @@ ${recentChatBlock(messages)}
 ユーザーの質問:
 ${userInput}`;
 
-  const result = await geminiGenerateJson<{ assistant_message: string }>(env, {
-    systemInstruction: TP_ASK_SYSTEM,
-    prompt,
-    maxOutputTokens: 4096,
-    ...tpAgentGeminiOptions(env, "ask"),
-    responseSchema: ASK_REPLY_SCHEMA as unknown as Record<string, unknown>,
-  });
+  const result = await geminiGenerateJson<{ assistant_message: string }>(
+    env,
+    withTpUsageRecording(db, {
+      projectId: project.id,
+      ownerUserId: project.owner_user_id,
+    }, {
+      systemInstruction: TP_ASK_SYSTEM,
+      prompt,
+      maxOutputTokens: 4096,
+      ...tpAgentGeminiOptions(env, "ask"),
+      responseSchema: ASK_REPLY_SCHEMA as unknown as Record<string, unknown>,
+    })
+  );
 
   const msg = result.assistant_message?.trim();
   if (!msg) {

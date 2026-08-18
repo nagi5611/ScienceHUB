@@ -21,6 +21,7 @@ import {
 } from "./workspace-edits";
 import { planMaintainEdits, isCompleteIndexHtml } from "./implement-tasks";
 import { tpAgentGeminiOptions } from "./agent-registry";
+import { withTpUsageRecording } from "./gemini-usage";
 import {
   grepWorkspace,
   listWorkspaceFiles,
@@ -43,6 +44,7 @@ function resolveMaxMaintainToolRounds(env: Env): number {
 
 export interface MaintainProjectContext {
   id: string;
+  owner_user_id: string;
   title: string;
   r2_prefix: string;
   dir_name: string;
@@ -305,6 +307,7 @@ function sanitizeMaintainAssistantMessage(
 /** patch_html 用: 巨大 HTML は JSON ではなくプレーンテキストで生成 */
 async function generatePatchedIndexHtml(
   env: Env,
+  db: D1Database,
   bucket: R2Bucket,
   project: MaintainProjectContext,
   userReport: string,
@@ -327,13 +330,19 @@ ${toolLog.length ? toolLog.join("\n\n") : "（なし）"}
 
 上記に基づき、修正後の完全な HTML ドキュメントのみを出力してください。`;
 
-  let text = await geminiGenerateText(env, {
-    systemInstruction: FLASH_MAINTAIN_PATCH_SYSTEM,
-    prompt,
-    maxOutputTokens: MAX_PATCH_OUTPUT_TOKENS,
-    responseMimeType: "text/plain",
-    ...tpAgentGeminiOptions(env, "code_patch", { background: true }),
-  });
+  let text = await geminiGenerateText(
+    env,
+    withTpUsageRecording(db, {
+      projectId: project.id,
+      ownerUserId: project.owner_user_id,
+    }, {
+      systemInstruction: FLASH_MAINTAIN_PATCH_SYSTEM,
+      prompt,
+      maxOutputTokens: MAX_PATCH_OUTPUT_TOKENS,
+      responseMimeType: "text/plain",
+      ...tpAgentGeminiOptions(env, "code_patch", { background: true }),
+    })
+  );
   text = text.trim();
   if (text.startsWith("```")) {
     text = text
@@ -382,16 +391,22 @@ ${toolLog.length ? toolLog.join("\n\n") : "（まだなし）"}
 
     let step: MaintainAgentStep;
     try {
-      step = await geminiGenerateJson<MaintainAgentStep>(env, {
-        systemInstruction: FLASH_MAINTAIN_SYSTEM,
-        prompt,
-        maxOutputTokens: 4096,
-        ...tpAgentGeminiOptions(env, "maintain_step"),
-        responseSchema: MAINTAIN_AGENT_STEP_SCHEMA as unknown as Record<
-          string,
-          unknown
-        >,
-      });
+      step = await geminiGenerateJson<MaintainAgentStep>(
+        env,
+        withTpUsageRecording(db, {
+          projectId: project.id,
+          ownerUserId: project.owner_user_id,
+        }, {
+          systemInstruction: FLASH_MAINTAIN_SYSTEM,
+          prompt,
+          maxOutputTokens: 4096,
+          ...tpAgentGeminiOptions(env, "maintain_step"),
+          responseSchema: MAINTAIN_AGENT_STEP_SCHEMA as unknown as Record<
+            string,
+            unknown
+          >,
+        })
+      );
     } catch (error) {
       const msg =
         error instanceof Error ? error.message : "AI の応答を解釈できませんでした";
@@ -426,6 +441,11 @@ ${toolLog.length ? toolLog.join("\n\n") : "（まだなし）"}
         try {
           const plan = await planMaintainEdits(
             env,
+            db,
+            {
+              projectId: project.id,
+              ownerUserId: project.owner_user_id,
+            },
             formatNumberedLines(current),
             userReport,
             toolLog,
@@ -509,6 +529,7 @@ ${toolLog.length ? toolLog.join("\n\n") : "（まだなし）"}
       try {
         const html = await generatePatchedIndexHtml(
           env,
+          db,
           bucket,
           project,
           userReport,

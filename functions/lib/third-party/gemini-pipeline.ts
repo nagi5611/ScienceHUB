@@ -41,6 +41,7 @@ import {
   type MaintainProjectContext,
 } from "./workspace-agent";
 import { tpAgentGeminiOptions } from "./agent-registry";
+import { withTpUsageRecording } from "./gemini-usage";
 import { runTpIntentClassify, classifyIntentByRules } from "./intent-classify";
 import { createTpJob, jobProgress, getActiveJobForProject, type TpJobProgress } from "./jobs";
 import {
@@ -53,6 +54,20 @@ import { verifyProjectHtml } from "./browser-verify";
 const DEFAULT_MAX_DAILY_TURNS = 30;
 const MAX_REVIEW_LOOPS = 2;
 const MAX_IMPLEMENT_ATTEMPTS = 3;
+
+function tpUsageContext(
+  project: Pick<TpProjectPipelineRow, "id" | "owner_user_id">
+) {
+  return { projectId: project.id, ownerUserId: project.owner_user_id };
+}
+
+function wrapTpGemini(
+  db: D1Database,
+  project: Pick<TpProjectPipelineRow, "id" | "owner_user_id">,
+  options: Parameters<typeof withTpUsageRecording>[2]
+) {
+  return withTpUsageRecording(db, tpUsageContext(project), options);
+}
 
 export interface TpProjectPipelineRow {
   id: string;
@@ -351,6 +366,7 @@ function wantsGateBuildDocs(text: string, phase: string): boolean {
 
 async function runLiteTurn(
   env: Env,
+  db: D1Database,
   project: TpProjectPipelineRow,
   userInput: string,
   messages: Array<{ role: string; content: string }>
@@ -370,17 +386,21 @@ next_phase は discovery, clarify, structured_form, gate_deepen_or_build, deepen
 structured_form に進むときは pending_form に質問（2〜5問、選択肢付き）を入れる。
 gate_deepen_or_build では gate_choice_ids に deepen と implement_now を含める。`;
 
-  return await geminiGenerateJson<LiteTurnResult>(env, {
-    systemInstruction: LITE_SYSTEM,
-    prompt,
-    maxOutputTokens: 4096,
-    ...tpAgentGeminiOptions(env, "discovery"),
-    responseSchema: LITE_TURN_SCHEMA as unknown as Record<string, unknown>,
-  });
+  return await geminiGenerateJson<LiteTurnResult>(
+    env,
+    wrapTpGemini(db, project, {
+      systemInstruction: LITE_SYSTEM,
+      prompt,
+      maxOutputTokens: 4096,
+      ...tpAgentGeminiOptions(env, "discovery"),
+      responseSchema: LITE_TURN_SCHEMA as unknown as Record<string, unknown>,
+    })
+  );
 }
 
 async function runLiteDocs(
   env: Env,
+  db: D1Database,
   project: TpProjectPipelineRow
 ): Promise<LiteDocsResult> {
   const prompt = `アプリ名: ${project.title}
@@ -389,17 +409,22 @@ ${project.context_summary || ""}
 
 要件定義書と実装計画書を生成してください。`;
 
-  return await geminiGenerateJson<LiteDocsResult>(env, {
-    systemInstruction: LITE_DOCS_SYSTEM,
-    prompt,
-    maxOutputTokens: 8192,
-    ...tpAgentGeminiOptions(env, "docs_writer"),
-    responseSchema: LITE_DOCS_SCHEMA as unknown as Record<string, unknown>,
-  });
+  return await geminiGenerateJson<LiteDocsResult>(
+    env,
+    wrapTpGemini(db, project, {
+      systemInstruction: LITE_DOCS_SYSTEM,
+      prompt,
+      maxOutputTokens: 8192,
+      ...tpAgentGeminiOptions(env, "docs_writer"),
+      responseSchema: LITE_DOCS_SCHEMA as unknown as Record<string, unknown>,
+    })
+  );
 }
 
 async function runFlashReview(
   env: Env,
+  db: D1Database,
+  project: TpProjectPipelineRow,
   requirements: string,
   plan: string
 ): Promise<PlanReviewResult> {
@@ -411,13 +436,16 @@ ${requirements}
 --- 実装計画書 ---
 ${plan}`;
 
-  return await geminiGenerateJson<PlanReviewResult>(env, {
-    systemInstruction: FLASH_REVIEW_SYSTEM,
-    prompt,
-    maxOutputTokens: 8192,
-    ...tpAgentGeminiOptions(env, "plan_reviewer"),
-    responseSchema: PLAN_REVIEW_SCHEMA as unknown as Record<string, unknown>,
-  });
+  return await geminiGenerateJson<PlanReviewResult>(
+    env,
+    wrapTpGemini(db, project, {
+      systemInstruction: FLASH_REVIEW_SYSTEM,
+      prompt,
+      maxOutputTokens: 8192,
+      ...tpAgentGeminiOptions(env, "plan_reviewer"),
+      responseSchema: PLAN_REVIEW_SCHEMA as unknown as Record<string, unknown>,
+    })
+  );
 }
 
 async function writeDocsPhase(
@@ -428,7 +456,7 @@ async function writeDocsPhase(
   callbacks?: TpChatCallbacks
 ): Promise<{ message: string }> {
   emitActivity(callbacks, "要件定義書を作成中…", "write_req_and_plan");
-  const docs = await runLiteDocs(env, project);
+  const docs = await runLiteDocs(env, db, project);
   await putArtifact(
     bucket,
     project.dir_name,
@@ -465,7 +493,7 @@ async function flashReviewPhase(
   const requirements =
     (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
   const plan = (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
-  const review = await runFlashReview(env, requirements, plan);
+  const review = await runFlashReview(env, db, project, requirements, plan);
   await putArtifact(
     bucket,
     project.dir_name,
@@ -681,6 +709,7 @@ export async function runTpGeminiChat(
     const messages = await listMessages(db, projectId);
     const reply = await runTpAskTurn(
       env,
+      db,
       bucket,
       current,
       userText,
@@ -791,11 +820,12 @@ export async function runTpGeminiChat(
   if (userText && maintainPhases.includes(current.workflow_phase)) {
     let intent: string | null = null;
     try {
-      const classified = await runTpIntentClassify(env, {
+      const classified = await runTpIntentClassify(env, db, {
         phase: current.workflow_phase,
         userText,
         chatMode,
         contextSummary: current.context_summary,
+        usage: tpUsageContext(current),
       });
       intent = classified.intent;
     } catch {
@@ -811,6 +841,7 @@ export async function runTpGeminiChat(
       const messages = await listMessages(db, projectId);
       const reply = await runTpAskTurn(
         env,
+        db,
         bucket,
         current,
         userText,
@@ -854,6 +885,7 @@ export async function runTpGeminiChat(
       const messages = await listMessages(db, projectId);
       const maintainCtx: MaintainProjectContext = {
         id: current.id,
+        owner_user_id: current.owner_user_id,
         title: current.title,
         r2_prefix: current.r2_prefix,
         dir_name: current.dir_name,
@@ -917,7 +949,7 @@ export async function runTpGeminiChat(
   ) {
     emitActivity(callbacks, "応答を作成中…", current.workflow_phase);
     const messages = await listMessages(db, projectId);
-    const turn = await runLiteTurn(env, current, userText, messages);
+    const turn = await runLiteTurn(env, db, current, userText, messages);
     await insertMessage(db, projectId, "assistant", turn.assistant_message);
 
     let nextPhase: TpWorkflowPhase = isTpWorkflowPhase(turn.next_phase)

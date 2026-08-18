@@ -111,6 +111,11 @@ export async function runImplementJob(
     (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
   const plan = (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
 
+  const usageCtx = {
+    projectId: project.id,
+    ownerUserId: project.owner_user_id,
+  };
+
   let tasksFile = await loadImplementationTasks(bucket, project.dir_name);
   if (!tasksFile) {
     tasksFile = await planImplementationTasks(
@@ -118,7 +123,7 @@ export async function runImplementJob(
       requirements,
       plan,
       project.title,
-      { background: true }
+      { background: true, db, usage: usageCtx }
     );
     await saveImplementationTasks(bucket, project.dir_name, tasksFile);
     callbacks?.onArtifact?.(ARTIFACT_TASKS);
@@ -193,7 +198,7 @@ export async function runImplementJob(
             plan,
             project.title,
             implementGemini,
-            { background: true }
+            { background: true, db, usage: usageCtx }
           ).then((planResult) => ({ skeleton: false as const, planResult, task }));
         })
       );
@@ -239,6 +244,8 @@ export async function runImplementJob(
               callbacks?.onActivity?.(label, "flash_implement_tasks"),
             gemini: implementGemini,
             background: true,
+            db,
+            usage: usageCtx,
           }
         );
         html = result.html;

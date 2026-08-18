@@ -12,6 +12,7 @@ import {
   type TpUserIntent,
 } from "./schemas";
 import { tpAgentGeminiOptions } from "./agent-registry";
+import { withTpUsageRecording, type TpGeminiUsageContext } from "./gemini-usage";
 
 const VALID_INTENTS: TpUserIntent[] = [
   "maintain",
@@ -69,11 +70,13 @@ export function classifyIntentByRules(
 /** Lite モデルで意図分類 */
 export async function runTpIntentClassify(
   env: Env,
+  db: D1Database | null,
   input: {
     phase: string;
     userText: string;
     chatMode: TpChatMode;
     contextSummary?: string | null;
+    usage?: TpGeminiUsageContext;
   }
 ): Promise<IntentClassifyResult> {
   const rule = classifyIntentByRules(input.userText, input.phase);
@@ -94,12 +97,12 @@ export async function runTpIntentClassify(
 
   const raw = await geminiGenerateJson<IntentClassifyResult>(
     env,
-    {
+    withTpUsageRecording(db, input.usage ?? {}, {
       systemInstruction: LITE_INTENT_SYSTEM,
       prompt: userBlock,
       responseSchema: INTENT_CLASSIFY_SCHEMA,
       ...tpAgentGeminiOptions(env, "intent_classifier"),
-    }
+    })
   );
 
   const intent = isValidIntent(raw.intent) ?? "general_chat";

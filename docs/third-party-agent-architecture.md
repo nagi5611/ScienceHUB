@@ -12,6 +12,7 @@ ScienceHUB サードパーティスタジオの Gemini 呼び出しを **三層�
 | 実装タスク・行編集 | `functions/lib/third-party/implement-tasks.ts` |
 | 実装ジョブランナー | `functions/lib/third-party/implement-runner.ts` |
 | メンテエージェント | `functions/lib/third-party/workspace-agent.ts` |
+| 使用量記録・集計 | `functions/lib/third-party/gemini-usage.ts` |
 
 ---
 
@@ -198,9 +199,51 @@ await geminiGenerateJson(env, {
 - [x] メンテラウンド既定 6（`TP_MAX_MAINTAIN_TOOL_ROUNDS`）
 - [x] patch は Flex + 出力上限 24576
 - [x] 明示キャッシュ閾値 3000 文字
-- [ ] Spending cap / 予算アラート（Google Cloud コンソール）
+- [x] Spending cap / 予算アラート（Google Cloud コンソール）— 運用側で設定
+- [x] D1 `tp_gemini_usage` 集計（P2）
 
-### 6.1 デプロイ時
+### 6.2 Gemini 使用量メトリクス（P2）
+
+各 `geminiGenerateText` 呼び出し成功後、`usageRecorder` 経由で D1 `tp_gemini_usage` に 1 行記録する。
+
+| 項目 | 内容 |
+|------|------|
+| マイグレーション | `migrations/0077_tp_gemini_usage.sql` |
+| 記録 API | `recordTpGeminiUsage`, `withTpUsageRecording` |
+| 集計 API | `getTpGeminiUsageSummary`, `getOwnedTpGeminiUsageSummary` |
+| REST | `GET /api/third-party/projects/:id/usage`（所有者のみ） |
+
+レスポンス例:
+
+```json
+{
+  "usage": {
+    "project_id": "tpproj_...",
+    "call_count": 12,
+    "prompt_tokens": 45000,
+    "output_tokens": 8000,
+    "cached_tokens": 12000,
+    "thoughts_tokens": 0,
+    "total_tokens": 53000,
+    "by_label": [
+      {
+        "usage_label": "lite_chat",
+        "model": "gemini-2.5-flash-lite",
+        "call_count": 5,
+        "prompt_tokens": 20000,
+        "output_tokens": 3000,
+        "cached_tokens": 0,
+        "thoughts_tokens": 0,
+        "total_tokens": 23000
+      }
+    ]
+  }
+}
+```
+
+記録失敗時は `console.warn` のみで本処理は継続（観測用のため）。
+
+### 6.3 デプロイ時
 
 Pages シークレットに 3 モデル変数を設定後:
 
@@ -214,7 +257,7 @@ npm run tp-pipeline:deploy
 ## 7. 今後の拡張
 
 1. **動的ルーティング** — ジョブ進捗・エラー率に応じて High 昇格閾値を調整。
-2. **エージェントメトリクス** — D1 に `tp_gemini_usage` 集計テーブル。
+2. ~~**エージェントメトリクス**~~ — D1 `tp_gemini_usage` 実装済み（§6.2）。
 3. **Batch API** — 夜間一括再検証など、24h SLA でよい処理への移行検討。
 
 ---

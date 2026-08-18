@@ -38,6 +38,10 @@ import {
   resolveTpImplementCacheModel,
   resolveEditPlanAgentId,
 } from "./agent-registry";
+import {
+  withTpUsageRecording,
+  type TpGeminiUsageContext,
+} from "./gemini-usage";
 
 const EMPTY_SKELETON = `<!DOCTYPE html>
 <html lang="ja">
@@ -194,7 +198,11 @@ export async function planImplementationTasks(
   requirements: string,
   plan: string,
   title: string,
-  options?: { background?: boolean }
+  options?: {
+    background?: boolean;
+    db?: D1Database | null;
+    usage?: TpGeminiUsageContext;
+  }
 ): Promise<ImplementationTasksFile> {
   const prompt = `アプリ名: ${title}
 
@@ -207,21 +215,24 @@ ${plan}
 実装順序に沿い、5〜${MAX_TASKS} 個のタスクに分割してください。
 例: skeleton → レイアウト markup → UI → styles → script → polish`;
 
-  const result = await geminiGenerateJson<ImplementationTasksPlanResult>(env, {
-    systemInstruction: `ScienceHUB サードパーティの実装タスク分解担当。
+  const result = await geminiGenerateJson<ImplementationTasksPlanResult>(
+    env,
+    withTpUsageRecording(options?.db, options?.usage ?? {}, {
+      systemInstruction: `ScienceHUB サードパーティの実装タスク分解担当。
 各タスクは index.html への局所 edits で完了できる粒度にする。
 target は skeleton | markup | styles | script | polish のいずれか。
 id は英小文字とハイフン（例: task-skeleton）。depends_on は先行タスク id の配列。`,
-    prompt,
-    maxOutputTokens: 4096,
-    ...tpAgentGeminiOptions(env, "task_planner", {
-      background: options?.background,
-    }),
-    responseSchema: IMPLEMENTATION_TASKS_PLAN_SCHEMA as unknown as Record<
-      string,
-      unknown
-    >,
-  });
+      prompt,
+      maxOutputTokens: 4096,
+      ...tpAgentGeminiOptions(env, "task_planner", {
+        background: options?.background,
+      }),
+      responseSchema: IMPLEMENTATION_TASKS_PLAN_SCHEMA as unknown as Record<
+        string,
+        unknown
+      >,
+    })
+  );
 
   const tasks: ImplementationTask[] = (result.tasks ?? [])
     .slice(0, MAX_TASKS)
@@ -295,6 +306,8 @@ export async function generateEditPlan(
     planKind?: "maintain" | "implement";
     background?: boolean;
     maxAttempts?: number;
+    db?: D1Database | null;
+    usage?: TpGeminiUsageContext;
   }
 ): Promise<MaintainEditPlanResult> {
   const attempt = options?.attempt ?? 0;
@@ -304,18 +317,21 @@ export async function generateEditPlan(
     options?.planKind === "implement"
       ? IMPLEMENT_EDIT_PLAN_SCHEMA
       : MAINTAIN_EDIT_PLAN_SCHEMA;
-  return await geminiGenerateJson<MaintainEditPlanResult>(env, {
-    systemInstruction: options?.docsCacheName
-      ? undefined
-      : systemInstruction,
-    prompt,
-    maxOutputTokens: MAX_EDIT_PLAN_TOKENS,
-    cachedContent: options?.docsCacheName,
-    ...tpAgentGeminiOptions(env, agentId, {
-      background: options?.background,
-    }),
-    responseSchema: schema as unknown as Record<string, unknown>,
-  });
+  return await geminiGenerateJson<MaintainEditPlanResult>(
+    env,
+    withTpUsageRecording(options?.db, options?.usage ?? {}, {
+      systemInstruction: options?.docsCacheName
+        ? undefined
+        : systemInstruction,
+      prompt,
+      maxOutputTokens: MAX_EDIT_PLAN_TOKENS,
+      cachedContent: options?.docsCacheName,
+      ...tpAgentGeminiOptions(env, agentId, {
+        background: options?.background,
+      }),
+      responseSchema: schema as unknown as Record<string, unknown>,
+    })
+  );
 }
 
 function isTokenLimitError(message: string): boolean {
@@ -378,6 +394,8 @@ export interface TaskEditCallbacks {
   gemini?: EditPlanGeminiContext;
   /** 実装 Worker 内（Flex tier） */
   background?: boolean;
+  db?: D1Database | null;
+  usage?: TpGeminiUsageContext;
 }
 
 /** 1 タスク分の edits を生成して適用 */
@@ -443,6 +461,8 @@ target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L0
           docsCacheName: docsCache,
           planKind: "implement",
           background: callbacks?.background,
+          db: callbacks?.db,
+          usage: callbacks?.usage,
         }
       );
     } catch (error) {
@@ -509,7 +529,11 @@ export async function planImplementationTaskEdits(
   plan: string,
   title: string,
   gemini?: EditPlanGeminiContext,
-  options?: { background?: boolean }
+  options?: {
+    background?: boolean;
+    db?: D1Database | null;
+    usage?: TpGeminiUsageContext;
+  }
 ): Promise<MaintainEditPlanResult> {
   currentHtml = normalizeImplementBaseHtml(currentHtml, title);
   const prompt = buildImplementTaskEditPrompt(
@@ -528,6 +552,8 @@ export async function planImplementationTaskEdits(
       docsCacheName: gemini?.docsCacheName,
       planKind: "implement",
       background: options?.background,
+      db: options?.db,
+      usage: options?.usage,
     }
   );
 }
@@ -562,6 +588,8 @@ export function applyPlannedTaskEdits(
 /** メンテ用: 番号付き全文から edits を生成 */
 export async function planMaintainEdits(
   env: Env,
+  db: D1Database | null,
+  usage: TpGeminiUsageContext,
   numberedHtml: string,
   userReport: string,
   toolLog: string[],
@@ -583,7 +611,10 @@ ${toolLog.length ? toolLog.join("\n\n") : "（なし）"}
 アプリ名: ${title}
 上記の index.html と要望に基づき、必要な edits を返してください。`;
 
-  return await generateEditPlan(env, FLASH_MAINTAIN_EDIT_SYSTEM, prompt);
+  return await generateEditPlan(env, FLASH_MAINTAIN_EDIT_SYSTEM, prompt, {
+    db,
+    usage,
+  });
 }
 
 export { EMPTY_SKELETON };

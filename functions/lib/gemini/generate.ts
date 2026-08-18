@@ -38,6 +38,13 @@ export interface GeminiGenerateOptions {
   serviceTier?: GeminiServiceTier;
   /** Cloudflare ログ用ラベル */
   usageLabel?: string;
+  /** 呼び出し成功後の使用量記録（サードパーティ D1 等） */
+  usageRecorder?: (record: {
+    model: string;
+    usageLabel?: string;
+    serviceTier?: GeminiServiceTier;
+    usage: GeminiUsageMetadata;
+  }) => void | Promise<void>;
 }
 
 function isGemini3Model(model: string): boolean {
@@ -219,6 +226,21 @@ export async function geminiGenerateText(
 
   const data = (await res.json()) as GeminiGenerateResponse;
   logGeminiUsage(options.usageLabel, options.model, data.usageMetadata);
+  if (options.usageRecorder && data.usageMetadata) {
+    try {
+      await options.usageRecorder({
+        model: options.model,
+        usageLabel: options.usageLabel,
+        serviceTier: options.serviceTier,
+        usage: data.usageMetadata,
+      });
+    } catch (error) {
+      console.warn(
+        "Gemini usageRecorder failed:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
   const blockReason = data.promptFeedback?.blockReason;
   if (blockReason) {
     throw new Error("AI が入力をブロックしました。内容を見直してください");
