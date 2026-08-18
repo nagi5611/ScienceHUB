@@ -321,6 +321,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             onActivity: (label: string, phase?: string) => {
               send("status", { label, phase: phase ?? null });
             },
+            onDelta: (text: string) => {
+              send("delta", { text });
+            },
             onArtifact: (path: string) => {
               send("artifact", { path, action: "written" });
             },

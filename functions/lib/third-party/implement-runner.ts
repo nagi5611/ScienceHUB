@@ -16,16 +16,10 @@ import {
   EMPTY_SKELETON,
   loadImplementationTasks,
   planImplementationTasks,
-  planImplementationTaskEdits,
-  applyPlannedTaskEdits,
   prepareImplementGeminiContext,
   saveImplementationTasks,
   normalizeImplementBaseHtml,
   stripScienceHubPlaceholderParagraph,
-  isSkeletonLikeTask,
-  buildProjectSkeleton,
-  isBareOrDefaultSkeleton,
-  isScienceHubPlaceholderHtml,
 } from "./implement-tasks";
 import { hasPendingTasks, nextParallelBatch } from "./implement-parallel";
 import { resolveMaxParallelBatch } from "./implement-edit-scope";
@@ -177,80 +171,25 @@ export async function runImplementJob(
       result: Awaited<ReturnType<typeof applyImplementationTask>>;
     }> = [];
 
-    if (batch.length > 1) {
-      const plans = await Promise.all(
-        batch.map((task) => {
-          if (
-            isSkeletonLikeTask(task) &&
-            (isBareOrDefaultSkeleton(html) || isScienceHubPlaceholderHtml(html))
-          ) {
-            return Promise.resolve({
-              skeleton: true as const,
-              html: buildProjectSkeleton(project.title),
-              assistantMessage: `${task.title} を反映しました。`,
-            });
-          }
-          return planImplementationTaskEdits(
-            env,
-            html,
-            task,
-            requirements,
-            plan,
-            project.title,
-            implementGemini,
-            { background: true, db, usage: usageCtx }
-          ).then((planResult) => ({ skeleton: false as const, planResult, task }));
-        })
-      );
-
-      for (let i = 0; i < batch.length; i++) {
-        const task = batch[i];
-        const planned = plans[i];
-        if (!planned) continue;
-
-        if ("skeleton" in planned && planned.skeleton) {
-          html = planned.html;
-          batchResults.push({
-            task,
-            result: {
-              html: planned.html,
-              assistantMessage: planned.assistantMessage,
-            },
-          });
-          continue;
+    for (const task of batch) {
+      const result = await applyImplementationTask(
+        env,
+        html,
+        task,
+        requirements,
+        plan,
+        project.title,
+        {
+          onActivity: (label) =>
+            callbacks?.onActivity?.(label, "flash_implement_tasks"),
+          gemini: implementGemini,
+          background: true,
+          db,
+          usage: usageCtx,
         }
-
-        if (!("planResult" in planned) || !planned.planResult) continue;
-        const result = applyPlannedTaskEdits(
-          html,
-          task,
-          planned.planResult,
-          project.title
-        );
-        html = result.html;
-        batchResults.push({ task, result });
-      }
-    } else {
-      for (const task of batch) {
-        const result = await applyImplementationTask(
-          env,
-          html,
-          task,
-          requirements,
-          plan,
-          project.title,
-          {
-            onActivity: (label) =>
-              callbacks?.onActivity?.(label, "flash_implement_tasks"),
-            gemini: implementGemini,
-            background: true,
-            db,
-            usage: usageCtx,
-          }
-        );
-        html = result.html;
-        batchResults.push({ task, result });
-      }
+      );
+      html = result.html;
+      batchResults.push({ task, result });
     }
 
     for (const { task, result } of batchResults) {

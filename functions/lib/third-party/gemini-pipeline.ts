@@ -4,7 +4,7 @@
 
 import type { Env } from "../types";
 import { createId, now } from "../types";
-import { geminiGenerateJson } from "../gemini/generate";
+import { geminiGenerateJson, geminiGenerateTextStream } from "../gemini/generate";
 import {
   ARTIFACT_INDEX,
   ARTIFACT_PLAN,
@@ -15,9 +15,10 @@ import {
 } from "./artifacts";
 import {
   LITE_DOCS_SCHEMA,
-  LITE_TURN_SCHEMA,
+  LITE_TURN_META_SCHEMA,
   PLAN_REVIEW_SCHEMA,
   type LiteDocsResult,
+  type LiteTurnMetaResult,
   type LiteTurnResult,
   type PlanReviewResult,
   type StructuredForm,
@@ -30,11 +31,12 @@ import {
 import {
   FLASH_REVIEW_SYSTEM,
   LITE_DOCS_SYSTEM,
-  LITE_SYSTEM,
+  LITE_CHAT_STREAM_SYSTEM,
+  LITE_TURN_META_SYSTEM,
   REVIEW_CHECKLIST_HINT,
 } from "./prompts";
 import { EMPTY_PLACEHOLDER_HTML } from "./stub-chat";
-import { runTpAskTurn } from "./ask-chat";
+import { runTpAskTurnStream } from "./ask-chat";
 import {
   runMaintainAgentTurn,
   wantsMaintainUserReport,
@@ -113,6 +115,7 @@ export interface GeminiChatResult {
 
 export interface TpChatCallbacks {
   onActivity?: (label: string, phase?: string) => void;
+  onDelta?: (text: string) => void;
   onArtifact?: (path: string) => void;
   onTasks?: (payload: {
     tasks: Array<{ id: string; title: string; status: string }>;
@@ -364,13 +367,52 @@ function wantsGateBuildDocs(text: string, phase: string): boolean {
   return false;
 }
 
-async function runLiteTurn(
+async function runLiteChatStream(
   env: Env,
   db: D1Database,
   project: TpProjectPipelineRow,
   userInput: string,
+  messages: Array<{ role: string; content: string }>,
+  onDelta?: (text: string) => void
+): Promise<string> {
+  const prompt = `現在フェーズ: ${project.workflow_phase}
+アプリ名: ${project.title}
+これまでの要点:
+${project.context_summary || "（未整理）"}
+
+直近の会話:
+${recentChatBlock(messages)}
+
+ユーザーの入力:
+${userInput}`;
+
+  const result = await geminiGenerateTextStream(
+    env,
+    wrapTpGemini(db, project, {
+      systemInstruction: LITE_CHAT_STREAM_SYSTEM,
+      prompt,
+      maxOutputTokens: 4096,
+      responseMimeType: "text/plain",
+      ...tpAgentGeminiOptions(env, "discovery"),
+    }),
+    (delta) => onDelta?.(delta)
+  );
+
+  const msg = result.text.trim();
+  if (!msg) {
+    return "もう少し詳しく教えてください。";
+  }
+  return msg;
+}
+
+async function runLiteTurnMeta(
+  env: Env,
+  db: D1Database,
+  project: TpProjectPipelineRow,
+  userInput: string,
+  assistantMessage: string,
   messages: Array<{ role: string; content: string }>
-): Promise<LiteTurnResult> {
+): Promise<LiteTurnMetaResult> {
   const prompt = `現在フェーズ: ${project.workflow_phase}
 アプリ名: ${project.title}
 これまでの要点:
@@ -382,20 +424,54 @@ ${recentChatBlock(messages)}
 ユーザーの入力:
 ${userInput}
 
-next_phase は discovery, clarify, structured_form, gate_deepen_or_build, deepen_requirements のいずれか。
-structured_form に進むときは pending_form に質問（2〜5問、選択肢付き）を入れる。
-gate_deepen_or_build では gate_choice_ids に deepen と implement_now を含める。`;
+今回のアシスタント応答（確定）:
+${assistantMessage}`;
 
-  return await geminiGenerateJson<LiteTurnResult>(
+  return await geminiGenerateJson<LiteTurnMetaResult>(
     env,
     wrapTpGemini(db, project, {
-      systemInstruction: LITE_SYSTEM,
+      systemInstruction: LITE_TURN_META_SYSTEM,
       prompt,
-      maxOutputTokens: 4096,
-      ...tpAgentGeminiOptions(env, "discovery"),
-      responseSchema: LITE_TURN_SCHEMA as unknown as Record<string, unknown>,
+      maxOutputTokens: 2048,
+      ...tpAgentGeminiOptions(env, "intent_classifier"),
+      responseSchema: LITE_TURN_META_SCHEMA as unknown as Record<string, unknown>,
     })
   );
+}
+
+async function runLiteTurn(
+  env: Env,
+  db: D1Database,
+  project: TpProjectPipelineRow,
+  userInput: string,
+  messages: Array<{ role: string; content: string }>,
+  onDelta?: (text: string) => void
+): Promise<LiteTurnResult> {
+  const assistant_message = await runLiteChatStream(
+    env,
+    db,
+    project,
+    userInput,
+    messages,
+    onDelta
+  );
+  const meta = await runLiteTurnMeta(
+    env,
+    db,
+    project,
+    userInput,
+    assistant_message,
+    messages
+  );
+  return {
+    assistant_message,
+    context_summary: meta.context_summary,
+    next_phase: isTpWorkflowPhase(meta.next_phase)
+      ? meta.next_phase
+      : (project.workflow_phase as TpWorkflowPhase),
+    pending_form: meta.pending_form,
+    gate_choice_ids: meta.gate_choice_ids,
+  };
 }
 
 async function runLiteDocs(
@@ -707,13 +783,14 @@ export async function runTpGeminiChat(
   if (chatMode === "ask" && userText) {
     emitActivity(callbacks, "質問に回答中…", current.workflow_phase);
     const messages = await listMessages(db, projectId);
-    const reply = await runTpAskTurn(
+    const reply = await runTpAskTurnStream(
       env,
       db,
       bucket,
       current,
       userText,
-      messages
+      messages,
+      (delta) => callbacks?.onDelta?.(delta)
     );
     await insertMessage(db, projectId, "assistant", reply);
     const finalProject = await loadPipelineProject(db, userId, projectId);
@@ -839,13 +916,14 @@ export async function runTpGeminiChat(
     if (intent === "ask" || intent === "general_chat") {
       emitActivity(callbacks, "質問に回答中…", current.workflow_phase);
       const messages = await listMessages(db, projectId);
-      const reply = await runTpAskTurn(
+      const reply = await runTpAskTurnStream(
         env,
         db,
         bucket,
         current,
         userText,
-        messages
+        messages,
+        (delta) => callbacks?.onDelta?.(delta)
       );
       await insertMessage(db, projectId, "assistant", reply);
     } else if (intent === "gate_build") {
@@ -949,7 +1027,14 @@ export async function runTpGeminiChat(
   ) {
     emitActivity(callbacks, "応答を作成中…", current.workflow_phase);
     const messages = await listMessages(db, projectId);
-    const turn = await runLiteTurn(env, db, current, userText, messages);
+    const turn = await runLiteTurn(
+      env,
+      db,
+      current,
+      userText,
+      messages,
+      (delta) => callbacks?.onDelta?.(delta)
+    );
     await insertMessage(db, projectId, "assistant", turn.assistant_message);
 
     let nextPhase: TpWorkflowPhase = isTpWorkflowPhase(turn.next_phase)
