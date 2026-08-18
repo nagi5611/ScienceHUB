@@ -85,6 +85,56 @@ export const LITE_TURN_SCHEMA = {
   required: ["assistant_message", "context_summary", "next_phase"],
 } as const;
 
+/** discovery ストリーム後のフェーズ・フォーム制御（assistant_message は別ストリーム） */
+export interface LiteTurnMetaResult {
+  context_summary: string;
+  next_phase: TpWorkflowPhase;
+  pending_form?: StructuredForm | null;
+  gate_choice_ids?: string[];
+}
+
+export const LITE_TURN_META_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    context_summary: { type: "STRING" },
+    next_phase: { type: "STRING" },
+    pending_form: {
+      type: "OBJECT",
+      nullable: true,
+      properties: {
+        title: { type: "STRING" },
+        questions: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              id: { type: "STRING" },
+              prompt: { type: "STRING" },
+              allow_multiple: { type: "BOOLEAN" },
+              options: { type: "ARRAY", items: { type: "STRING" } },
+              allow_free_text: { type: "BOOLEAN" },
+            },
+            required: [
+              "id",
+              "prompt",
+              "allow_multiple",
+              "options",
+              "allow_free_text",
+            ],
+          },
+        },
+      },
+      required: ["title", "questions"],
+    },
+    gate_choice_ids: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+      nullable: true,
+    },
+  },
+  required: ["context_summary", "next_phase"],
+} as const;
+
 export interface LiteDocsResult {
   requirements_markdown: string;
   plan_markdown: string;

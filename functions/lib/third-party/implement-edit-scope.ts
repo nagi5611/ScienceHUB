@@ -8,6 +8,36 @@ import { formatNumberedLines } from "./workspace-edits";
 
 export const IMPLEMENT_EDIT_TARGET_PATH = "index.html";
 
+export const MAX_EDIT_PLAN_TOKENS_DEFAULT = 8192;
+export const MAX_EDIT_PLAN_TOKENS_FULL_HTML = 24576;
+export const MAX_TASK_EDIT_RETRIES_DEFAULT = 2;
+export const MAX_TASK_EDIT_RETRIES_FULL_HTML = 3;
+
+/** 編集プラン出力トークン上限（skeleton / polish は全文向けに拡大） */
+export function resolveMaxEditPlanTokens(
+  target: ImplementationTask["target"]
+): number {
+  return target === "skeleton" || target === "polish"
+    ? MAX_EDIT_PLAN_TOKENS_FULL_HTML
+    : MAX_EDIT_PLAN_TOKENS_DEFAULT;
+}
+
+/** タスク編集リトライ回数（skeleton / polish は継続余地を多めに） */
+export function resolveMaxTaskEditRetries(
+  target: ImplementationTask["target"]
+): number {
+  return target === "skeleton" || target === "polish"
+    ? MAX_TASK_EDIT_RETRIES_FULL_HTML
+    : MAX_TASK_EDIT_RETRIES_DEFAULT;
+}
+
+/** 全文 HTML 編集タスク（patch フォールバック対象） */
+export function isFullHtmlEditTarget(
+  target: ImplementationTask["target"]
+): boolean {
+  return target === "skeleton" || target === "polish";
+}
+
 const PARALLEL_SAFE_TARGETS = new Set(["markup", "styles"]);
 const DEFAULT_MAX_PARALLEL_BATCH = 1;
 const MAX_PARALLEL_BATCH_CAP = 3;

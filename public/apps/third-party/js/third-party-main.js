@@ -116,7 +116,7 @@ let chatBusy = false;
 let editingMessageId = null;
 /** @type {Array<{ id: string, role: string, content: string }>} */
 let currentMessages = [];
-/** @type {{ userText?: string, assistantWaiting: boolean, activityLabel?: string } | null} */
+/** @type {{ userText?: string, assistantWaiting: boolean, activityLabel?: string, assistantPartial?: string } | null} */
 let chatPending = null;
 /** @type {{ tasks: Array<{ id: string, title: string, status: string }>, current: number } | null} */
 let implementTasksState = null;
@@ -375,6 +375,12 @@ async function postProjectChat(body) {
     if (eventName === "status" && payload.label) {
       if (chatPending) {
         chatPending.activityLabel = payload.label;
+        renderMessagesFromState();
+      }
+    } else if (eventName === "delta" && payload.text) {
+      if (chatPending) {
+        chatPending.assistantPartial =
+          (chatPending.assistantPartial ?? "") + payload.text;
         renderMessagesFromState();
       }
     } else if (eventName === "tasks" && Array.isArray(payload.tasks)) {
@@ -1108,11 +1114,13 @@ function getDisplayMessages() {
     list.push({
       id: PENDING_ASSISTANT_ID,
       role: "assistant",
-      content: "",
+      content: chatPending.assistantPartial ?? "",
       pending: true,
       activityLabel:
-        chatPending.activityLabel ||
-        inferFallbackActivityLabel(currentPhase),
+        chatPending.assistantPartial
+          ? undefined
+          : chatPending.activityLabel ||
+            inferFallbackActivityLabel(currentPhase),
     });
   }
   return list;
@@ -1255,11 +1263,20 @@ function renderMessages(messages) {
     if (msg.pending || msg.id === PENDING_ASSISTANT_ID) {
       div.className = "tp-msg tp-msg--assistant tp-msg--pending";
       div.setAttribute("aria-busy", "true");
-      const activity = document.createElement("p");
-      activity.className = "tp-activity";
-      activity.textContent =
-        msg.activityLabel || inferFallbackActivityLabel(currentPhase);
-      div.appendChild(activity);
+      if (msg.content?.trim()) {
+        div.textContent = msg.content;
+      } else if (msg.activityLabel) {
+        const activity = document.createElement("p");
+        activity.className = "tp-activity";
+        activity.textContent =
+          msg.activityLabel || inferFallbackActivityLabel(currentPhase);
+        div.appendChild(activity);
+      } else {
+        const activity = document.createElement("p");
+        activity.className = "tp-activity";
+        activity.textContent = inferFallbackActivityLabel(currentPhase);
+        div.appendChild(activity);
+      }
     } else {
       div.className = `tp-msg tp-msg--${msg.role}`;
       div.textContent = msg.content;

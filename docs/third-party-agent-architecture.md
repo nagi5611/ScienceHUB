@@ -243,7 +243,29 @@ await geminiGenerateJson(env, {
 
 記録失敗時は `console.warn` のみで本処理は継続（観測用のため）。
 
-### 6.3 デプロイ時
+### 6.3 実装 edits 段階上限と MAX_TOKENS 継続
+
+| `task.target` | `maxOutputTokens` | リトライ回数 |
+|---------------|-------------------|-------------|
+| markup / styles / script | 8192 | 2 |
+| skeleton / polish | 24576 | 3 |
+
+MAX_TOKENS 時のリカバリ（`implement-edit-recovery.ts`）:
+
+1. 切れた JSON から `edits` を salvage
+2. 続き 1 回の JSON 補完呼び出し
+3. `skeleton` / `polish` は `code_patch` 経路で全文 HTML 生成
+
+実装 runner は全バッチで `applyImplementationTask` を共有（継続ロジックの一元化）。
+
+### 6.4 discovery / Ask ストリーミング
+
+- Gemini `streamGenerateContent` → Workers SSE `delta` イベント → フロント `assistantPartial` 逐次表示
+- **Ask**: `text/plain` 単一ストリーム（`runTpAskTurnStream`）
+- **discovery**: 表示用 `LITE_CHAT_STREAM_SYSTEM` ストリーム + 制御用 `LITE_TURN_META_SCHEMA` JSON（2 コール）
+- 実装ジョブ内の edits JSON は非ストリーム（構造化出力）
+
+### 6.5 デプロイ時
 
 Pages シークレットに 3 モデル変数を設定後:
 

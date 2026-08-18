@@ -3,12 +3,17 @@
  */
 
 import type { Env } from "../types";
-import { geminiGenerateJson } from "../gemini/generate";
+import {
+  geminiGenerateJson,
+  geminiGenerateJsonAllowTruncated,
+  geminiGenerateText,
+} from "../gemini/generate";
 import { createTpImplementDocsCache } from "../gemini/context-cache";
 import { ARTIFACT_TASKS, getArtifact, putArtifact } from "./artifacts";
 import {
   FLASH_IMPLEMENT_TASK_EDIT_SYSTEM,
   FLASH_MAINTAIN_EDIT_SYSTEM,
+  FLASH_MAINTAIN_PATCH_SYSTEM,
 } from "./prompts";
 import {
   IMPLEMENTATION_TASKS_PLAN_SCHEMA,
@@ -30,8 +35,15 @@ import {
   describeImplementEditScopes,
   extractNumberedHtmlForTask,
   IMPLEMENT_EDIT_TARGET_PATH,
+  isFullHtmlEditTarget,
+  MAX_EDIT_PLAN_TOKENS_DEFAULT,
+  MAX_EDIT_PLAN_TOKENS_FULL_HTML,
+  MAX_TASK_EDIT_RETRIES_DEFAULT,
+  resolveMaxEditPlanTokens,
+  resolveMaxTaskEditRetries,
   validateImplementEdits,
 } from "./implement-edit-scope";
+import { salvageEditsFromTruncatedJson } from "./implement-edit-recovery";
 
 import {
   tpAgentGeminiOptions,
@@ -55,8 +67,6 @@ const EMPTY_SKELETON = `<!DOCTYPE html>
 </html>`;
 
 const MAX_TASKS = 5;
-const MAX_TASK_EDIT_RETRIES = 2;
-const MAX_EDIT_PLAN_TOKENS = 8192;
 
 function escapeHtmlText(value: string): string {
   return value
@@ -304,6 +314,7 @@ export async function generateEditPlan(
     attempt?: number;
     docsCacheName?: string;
     planKind?: "maintain" | "implement";
+    taskTarget?: ImplementationTask["target"];
     background?: boolean;
     maxAttempts?: number;
     db?: D1Database | null;
@@ -311,12 +322,38 @@ export async function generateEditPlan(
   }
 ): Promise<MaintainEditPlanResult> {
   const attempt = options?.attempt ?? 0;
-  const maxAttempts = options?.maxAttempts ?? MAX_TASK_EDIT_RETRIES;
+  const maxAttempts =
+    options?.maxAttempts ??
+    (options?.taskTarget
+      ? resolveMaxTaskEditRetries(options.taskTarget)
+      : MAX_TASK_EDIT_RETRIES_DEFAULT);
   const agentId = resolveEditPlanAgentId(attempt, maxAttempts);
   const schema =
     options?.planKind === "implement"
       ? IMPLEMENT_EDIT_PLAN_SCHEMA
       : MAINTAIN_EDIT_PLAN_SCHEMA;
+  const maxOutputTokens =
+    options?.planKind === "implement" && options?.taskTarget
+      ? resolveMaxEditPlanTokens(options.taskTarget)
+      : MAX_EDIT_PLAN_TOKENS_DEFAULT;
+
+  if (options?.planKind === "implement") {
+    return await fetchImplementEditPlan(
+      env,
+      systemInstruction,
+      prompt,
+      {
+        attempt,
+        docsCacheName: options?.docsCacheName,
+        taskTarget: options?.taskTarget ?? "markup",
+        background: options?.background,
+        maxAttempts,
+        db: options?.db,
+        usage: options?.usage,
+      }
+    );
+  }
+
   return await geminiGenerateJson<MaintainEditPlanResult>(
     env,
     withTpUsageRecording(options?.db, options?.usage ?? {}, {
@@ -324,7 +361,7 @@ export async function generateEditPlan(
         ? undefined
         : systemInstruction,
       prompt,
-      maxOutputTokens: MAX_EDIT_PLAN_TOKENS,
+      maxOutputTokens,
       cachedContent: options?.docsCacheName,
       ...tpAgentGeminiOptions(env, agentId, {
         background: options?.background,
@@ -332,6 +369,138 @@ export async function generateEditPlan(
       responseSchema: schema as unknown as Record<string, unknown>,
     })
   );
+}
+
+interface ImplementEditPlanFetchOptions {
+  attempt?: number;
+  docsCacheName?: string;
+  taskTarget: ImplementationTask["target"];
+  background?: boolean;
+  maxAttempts?: number;
+  db?: D1Database | null;
+  usage?: TpGeminiUsageContext;
+}
+
+/** 実装タスク用: salvage → 続き → patch フォールバック前のプラン取得 */
+async function fetchImplementEditPlan(
+  env: Env,
+  systemInstruction: string,
+  prompt: string,
+  options: ImplementEditPlanFetchOptions
+): Promise<MaintainEditPlanResult> {
+  const attempt = options.attempt ?? 0;
+  const maxAttempts =
+    options.maxAttempts ?? resolveMaxTaskEditRetries(options.taskTarget);
+  const agentId = resolveEditPlanAgentId(attempt, maxAttempts);
+  const maxOutputTokens = resolveMaxEditPlanTokens(options.taskTarget);
+
+  const geminiOpts = withTpUsageRecording(options.db, options.usage ?? {}, {
+    systemInstruction: options.docsCacheName ? undefined : systemInstruction,
+    prompt,
+    maxOutputTokens,
+    cachedContent: options.docsCacheName,
+    ...tpAgentGeminiOptions(env, agentId, {
+      background: options.background,
+    }),
+    responseSchema: IMPLEMENT_EDIT_PLAN_SCHEMA as unknown as Record<
+      string,
+      unknown
+    >,
+  });
+
+  const first = await geminiGenerateJsonAllowTruncated<MaintainEditPlanResult>(
+    env,
+    geminiOpts
+  );
+  if (first.parsed?.edits?.length) {
+    return first.parsed;
+  }
+
+  const salvaged = salvageEditsFromTruncatedJson(first.raw);
+  if (salvaged?.edits?.length) {
+    return salvaged;
+  }
+
+  if (first.raw.trim()) {
+    const continuePrompt = `前回の JSON 応答（途中まで）:
+${first.raw.slice(-6000)}
+
+上記の続きから完全な JSON を出力してください。
+edits 配列を必ず閉じ、target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。`;
+    const second = await geminiGenerateJsonAllowTruncated<MaintainEditPlanResult>(
+      env,
+      { ...geminiOpts, prompt: continuePrompt }
+    );
+    if (second.parsed?.edits?.length) {
+      return second.parsed;
+    }
+    const salvaged2 = salvageEditsFromTruncatedJson(second.raw || first.raw);
+    if (salvaged2?.edits?.length) {
+      return salvaged2;
+    }
+  }
+
+  if (first.truncated || isFullHtmlEditTarget(options.taskTarget)) {
+    throw new Error("EDIT_PLAN_TRUNCATED");
+  }
+
+  throw new Error("編集プランを生成できませんでした");
+}
+
+/** skeleton / polish 向け全文 HTML 生成（patch フォールバック） */
+export async function generateImplementPatchHtml(
+  env: Env,
+  currentHtml: string,
+  task: ImplementationTask,
+  title: string,
+  requirements: string,
+  plan: string,
+  options?: {
+    background?: boolean;
+    db?: D1Database | null;
+    usage?: TpGeminiUsageContext;
+  }
+): Promise<string> {
+  const prompt = `--- 現在の index.html ---
+${currentHtml}
+
+--- タスク ---
+アプリ名: ${title}
+target: ${task.target}
+タイトル: ${task.title}
+完了条件: ${task.acceptance_hint}
+
+--- 要件（抜粋） ---
+${requirements.slice(0, 3000)}
+
+--- 実装計画（抜粋） ---
+${plan.slice(0, 3000)}
+
+上記に基づき、このタスクを反映した完全な HTML ドキュメントのみを出力してください。`;
+
+  let text = await geminiGenerateText(
+    env,
+    withTpUsageRecording(options?.db, options?.usage ?? {}, {
+      systemInstruction: FLASH_MAINTAIN_PATCH_SYSTEM,
+      prompt,
+      maxOutputTokens: MAX_EDIT_PLAN_TOKENS_FULL_HTML,
+      responseMimeType: "text/plain",
+      ...tpAgentGeminiOptions(env, "code_patch", {
+        background: options?.background,
+      }),
+    })
+  );
+  text = text.trim();
+  if (text.startsWith("```")) {
+    text = text
+      .replace(/^```(?:html)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+  }
+  if (!isCompleteIndexHtml(text)) {
+    throw new Error("生成された index.html が不完全です");
+  }
+  return text;
 }
 
 function isTokenLimitError(message: string): boolean {
@@ -426,7 +595,8 @@ export async function applyImplementationTask(
   callbacks?.onActivity?.(`編集先: ${IMPLEMENT_EDIT_TARGET_PATH}`);
 
   let lastError = "編集に失敗しました";
-  for (let attempt = 0; attempt < MAX_TASK_EDIT_RETRIES; attempt++) {
+  const maxAttempts = resolveMaxTaskEditRetries(task.target);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     callbacks?.onActivity?.(
       attempt === 0
         ? `${task.title}…`
@@ -437,6 +607,7 @@ export async function applyImplementationTask(
       attempt === 0
         ? undefined
         : `前回のエラー: ${lastError}
+前回まで適用済みの HTML を基に、</html> まで edits で補完してください。
 edits は最大2件、各 content は短く分割。JSON は必ず閉じた完全なオブジェクトで返す。
 target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L001 と一致させる。`;
 
@@ -450,7 +621,7 @@ target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L0
       retryNote
     );
 
-    let planResult: MaintainEditPlanResult;
+    let planResult: MaintainEditPlanResult | null = null;
     try {
       planResult = await generateEditPlan(
         env,
@@ -460,7 +631,9 @@ target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L0
           attempt,
           docsCacheName: docsCache,
           planKind: "implement",
+          taskTarget: task.target,
           background: callbacks?.background,
+          maxAttempts,
           db: callbacks?.db,
           usage: callbacks?.usage,
         }
@@ -473,9 +646,43 @@ target_path は "${IMPLEMENT_EDIT_TARGET_PATH}"。行番号は上記全文の L0
           assistantMessage: `${task.title} を反映しました。`,
         };
       }
+      if (
+        msg === "EDIT_PLAN_TRUNCATED" ||
+        (isTokenLimitError(msg) && isFullHtmlEditTarget(task.target))
+      ) {
+        try {
+          callbacks?.onActivity?.(`${task.title}（全文再生成）…`);
+          const patched = await generateImplementPatchHtml(
+            env,
+            currentHtml,
+            task,
+            title,
+            requirements,
+            plan,
+            {
+              background: callbacks?.background,
+              db: callbacks?.db,
+              usage: callbacks?.usage,
+            }
+          );
+          return {
+            html: stripScienceHubPlaceholderParagraph(patched),
+            assistantMessage: `${task.title} を反映しました。`,
+          };
+        } catch (patchError) {
+          lastError =
+            patchError instanceof Error ? patchError.message : String(patchError);
+          continue;
+        }
+      }
       lastError = isTokenLimitError(msg)
         ? `${msg}（全文を見た上で edits のみ返し、スニペット単体出力はしない）`
         : msg;
+      continue;
+    }
+
+    if (!planResult) {
+      lastError = "編集プランを取得できませんでした";
       continue;
     }
 
@@ -551,6 +758,7 @@ export async function planImplementationTaskEdits(
     {
       docsCacheName: gemini?.docsCacheName,
       planKind: "implement",
+      taskTarget: task.target,
       background: options?.background,
       db: options?.db,
       usage: options?.usage,

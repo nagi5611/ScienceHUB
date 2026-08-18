@@ -3,7 +3,7 @@
  */
 
 import type { Env } from "../types";
-import { geminiGenerateJson } from "../gemini/generate";
+import { geminiGenerateTextStream } from "../gemini/generate";
 import {
   ARTIFACT_INDEX,
   ARTIFACT_PLAN,
@@ -24,17 +24,8 @@ export interface AskTurnProjectContext {
   context_summary: string | null;
 }
 
-
 const MAX_INDEX_LINES = 80;
 const MAX_DOC_CHARS = 3500;
-
-const ASK_REPLY_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    assistant_message: { type: "STRING" },
-  },
-  required: ["assistant_message"],
-} as const;
 
 function recentChatBlock(
   messages: Array<{ role: string; content: string }>,
@@ -53,35 +44,15 @@ function truncateDoc(text: string, label: string): string {
   return `${t.slice(0, MAX_DOC_CHARS)}…（${label} は省略）`;
 }
 
-/** Ask モード 1 ターン（ワークスペースは読取のみ・保存なし） */
-export async function runTpAskTurn(
-  env: Env,
-  db: D1Database,
-  bucket: R2Bucket,
+function buildAskPrompt(
   project: AskTurnProjectContext,
   userInput: string,
-  messages: Array<{ role: string; content: string }>
-): Promise<string> {
-  const requirements =
-    (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
-  const plan =
-    (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
-  const html =
-    (await getArtifact(bucket, project.dir_name, ARTIFACT_INDEX)) ?? "";
-
-  let indexContext = "（index.html 未作成）";
-  if (html.trim()) {
-    const lines = html.split("\n");
-    const head = lines.slice(0, MAX_INDEX_LINES).join("\n");
-    const numbered = formatNumberedLines(head);
-    const omitted =
-      lines.length > MAX_INDEX_LINES
-        ? `\n… 全 ${lines.length} 行（先頭 ${MAX_INDEX_LINES} 行のみ）`
-        : "";
-    indexContext = `${numbered}${omitted}`;
-  }
-
-  const prompt = `ワークフロー phase: ${project.workflow_phase}
+  messages: Array<{ role: string; content: string }>,
+  requirements: string,
+  plan: string,
+  indexContext: string
+): string {
+  return `ワークフロー phase: ${project.workflow_phase}
 アプリ名: ${project.title}
 
 これまでの要点:
@@ -101,8 +72,49 @@ ${recentChatBlock(messages)}
 
 ユーザーの質問:
 ${userInput}`;
+}
 
-  const result = await geminiGenerateJson<{ assistant_message: string }>(
+async function loadAskIndexContext(
+  bucket: R2Bucket,
+  dirName: string
+): Promise<string> {
+  const html = (await getArtifact(bucket, dirName, ARTIFACT_INDEX)) ?? "";
+  if (!html.trim()) return "（index.html 未作成）";
+  const lines = html.split("\n");
+  const head = lines.slice(0, MAX_INDEX_LINES).join("\n");
+  const numbered = formatNumberedLines(head);
+  const omitted =
+    lines.length > MAX_INDEX_LINES
+      ? `\n… 全 ${lines.length} 行（先頭 ${MAX_INDEX_LINES} 行のみ）`
+      : "";
+  return `${numbered}${omitted}`;
+}
+
+/** Ask モード 1 ターン（ストリーミング） */
+export async function runTpAskTurnStream(
+  env: Env,
+  db: D1Database,
+  bucket: R2Bucket,
+  project: AskTurnProjectContext,
+  userInput: string,
+  messages: Array<{ role: string; content: string }>,
+  onDelta?: (text: string) => void
+): Promise<string> {
+  const requirements =
+    (await getArtifact(bucket, project.dir_name, ARTIFACT_REQUIREMENTS)) ?? "";
+  const plan =
+    (await getArtifact(bucket, project.dir_name, ARTIFACT_PLAN)) ?? "";
+  const indexContext = await loadAskIndexContext(bucket, project.dir_name);
+  const prompt = buildAskPrompt(
+    project,
+    userInput,
+    messages,
+    requirements,
+    plan,
+    indexContext
+  );
+
+  const result = await geminiGenerateTextStream(
     env,
     withTpUsageRecording(db, {
       projectId: project.id,
@@ -111,14 +123,34 @@ ${userInput}`;
       systemInstruction: TP_ASK_SYSTEM,
       prompt,
       maxOutputTokens: 4096,
+      responseMimeType: "text/plain",
       ...tpAgentGeminiOptions(env, "ask"),
-      responseSchema: ASK_REPLY_SCHEMA as unknown as Record<string, unknown>,
-    })
+    }),
+    (delta) => onDelta?.(delta)
   );
 
-  const msg = result.assistant_message?.trim();
+  const msg = result.text.trim();
   if (!msg) {
     return "回答を生成できませんでした。もう一度質問を送ってください。";
   }
   return msg;
+}
+
+/** Ask モード 1 ターン（非ストリーム互換） */
+export async function runTpAskTurn(
+  env: Env,
+  db: D1Database,
+  bucket: R2Bucket,
+  project: AskTurnProjectContext,
+  userInput: string,
+  messages: Array<{ role: string; content: string }>
+): Promise<string> {
+  return await runTpAskTurnStream(
+    env,
+    db,
+    bucket,
+    project,
+    userInput,
+    messages
+  );
 }
