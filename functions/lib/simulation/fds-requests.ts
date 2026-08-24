@@ -18,6 +18,7 @@ import {
 export const FDS_PRIMARY_REVIEW_MAX_ATTEMPTS = 4;
 
 export type FdsRequestStatus =
+  | "format_failed"
   | "primary_reviewing"
   | "primary_failed"
   | "primary_error"
@@ -52,6 +53,8 @@ export interface FdsRequest {
   input_sha256: string | null;
   primary_review_model: string | null;
   primary_review_history: string | null;
+  t_end_seconds: number | null;
+  format_review_issues: string | null;
 }
 
 export interface FdsPrimaryReviewHistoryEntry {
@@ -107,9 +110,16 @@ export interface FdsRequestApiModel {
   output_sha256: string | null;
   job_launched_at: string | null;
   job_finished_at: string | null;
+  t_end_seconds: number | null;
+  format_review_issues: string[];
+  simulation_time_seconds: number | null;
+  progress_pct: number | null;
+  progress_phase: "computing" | "finalizing" | null;
+  progress_updated_at: string | null;
 }
 
 const REQUEST_STATUS_LABELS: Record<FdsRequestStatus, string> = {
+  format_failed: "形式審査で却下",
   primary_reviewing: "一次審査中",
   primary_failed: "一次審査で指摘あり",
   primary_error: "一次審査失敗",
@@ -169,11 +179,27 @@ function parsePrimaryReviewIssues(raw: string | null): string[] {
   }
 }
 
+/** Parses stored format review issues JSON. */
+function parseFormatReviewIssues(raw: string | null): string[] {
+  if (!raw?.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((s) => String(s).trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Whether the user may upload a revised .fds for another primary review. */
 export function canRetryPrimaryReview(row: FdsRequest): boolean {
   const count = row.primary_review_attempt_count ?? 0;
   if (count >= FDS_PRIMARY_REVIEW_MAX_ATTEMPTS) return false;
-  return row.status === "primary_failed" || row.status === "primary_error";
+  return (
+    row.status === "format_failed" ||
+    row.status === "primary_failed" ||
+    row.status === "primary_error"
+  );
 }
 
 const TERMINAL_FDS_JOB_STATUSES = new Set(["succeeded", "failed", "timed_out", "cancelled"]);
@@ -232,6 +258,12 @@ export function formatFdsRequestForApi(row: FdsRequest, job: FdsJob | null = nul
     output_sha256: job?.output_sha256 ?? null,
     job_launched_at: job?.launched_at ?? null,
     job_finished_at: job?.finished_at ?? null,
+    t_end_seconds: row.t_end_seconds ?? job?.t_end_seconds ?? null,
+    format_review_issues: parseFormatReviewIssues(row.format_review_issues),
+    simulation_time_seconds: job?.simulation_time_seconds ?? null,
+    progress_pct: job?.progress_pct ?? null,
+    progress_phase: (job?.progress_phase as "computing" | "finalizing" | null) ?? null,
+    progress_updated_at: job?.progress_updated_at ?? null,
   };
 }
 
@@ -364,11 +396,15 @@ export async function createFdsRequest(
     primaryReviewForced?: boolean;
     primaryReviewIssues?: string[];
     primaryReviewError?: string | null;
+    tEndSeconds?: number | null;
+    formatReviewIssues?: string[];
   }
 ): Promise<FdsRequest> {
   const sizing = pickEc2InstanceType(data.mpiProcesses);
   const issues = data.primaryReviewIssues ?? [];
   const issuesJson = issues.length > 0 ? JSON.stringify(issues) : null;
+  const formatIssues = data.formatReviewIssues ?? [];
+  const formatIssuesJson = formatIssues.length > 0 ? JSON.stringify(formatIssues) : null;
   const status = data.status ?? "primary_reviewing";
   const primaryReviewPassed = data.primaryReviewPassed ?? false;
   const primaryReviewForced = data.primaryReviewForced ?? false;
@@ -381,8 +417,9 @@ export async function createFdsRequest(
         ec2_instance_type, input_r2_key, input_filename, input_size_bytes,
         notes, status, created_at,
         primary_review_passed, primary_review_forced, primary_review_issues,
-        primary_review_error, primary_review_attempt_count, input_sha256
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
+        primary_review_error, primary_review_attempt_count, input_sha256,
+        t_end_seconds, format_review_issues
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -402,7 +439,9 @@ export async function createFdsRequest(
       primaryReviewForced ? 1 : 0,
       issuesJson,
       primaryReviewError,
-      data.inputSha256 ?? null
+      data.inputSha256 ?? null,
+      data.tEndSeconds ?? null,
+      formatIssuesJson
     )
     .run();
 
@@ -595,6 +634,8 @@ export async function retryFdsPrimaryReview(
     inputFilename: string;
     inputSizeBytes: number;
     inputSha256?: string | null;
+    tEndSeconds?: number | null;
+    formatReviewIssues?: string[] | null;
   }
 ): Promise<FdsRequest> {
   const row = await getFdsRequestById(db, requestId);
@@ -607,6 +648,11 @@ export async function retryFdsPrimaryReview(
     );
   }
 
+  const formatIssuesJson =
+    data.formatReviewIssues && data.formatReviewIssues.length > 0
+      ? JSON.stringify(data.formatReviewIssues)
+      : null;
+
   const result = await db
     .prepare(
       `UPDATE sim_fds_requests
@@ -615,12 +661,14 @@ export async function retryFdsPrimaryReview(
            input_filename = ?,
            input_size_bytes = ?,
            input_sha256 = ?,
+           t_end_seconds = ?,
+           format_review_issues = ?,
            primary_review_passed = 0,
            primary_review_forced = 0,
            primary_review_issues = NULL,
            primary_review_error = NULL
        WHERE id = ? AND user_id = ?
-         AND status IN ('primary_failed', 'primary_error')
+         AND status IN ('format_failed', 'primary_failed', 'primary_error')
          AND primary_review_attempt_count < ?`
     )
     .bind(
@@ -628,6 +676,8 @@ export async function retryFdsPrimaryReview(
       data.inputFilename,
       data.inputSizeBytes,
       data.inputSha256 ?? null,
+      data.tEndSeconds ?? null,
+      formatIssuesJson,
       requestId,
       userId,
       FDS_PRIMARY_REVIEW_MAX_ATTEMPTS
@@ -636,6 +686,63 @@ export async function retryFdsPrimaryReview(
 
   if (!result.meta.changes) {
     throw new Error("再審を開始できませんでした");
+  }
+
+  const updated = await getFdsRequestById(db, requestId);
+  if (!updated) throw new Error("依頼の更新に失敗しました");
+  return updated;
+}
+
+/** Updates request input after a failed format review on retry (stays format_failed). */
+export async function updateFdsRequestFormatFailedOnRetry(
+  db: D1Database,
+  requestId: string,
+  userId: string,
+  data: {
+    inputR2Key: string;
+    inputFilename: string;
+    inputSizeBytes: number;
+    inputSha256?: string | null;
+    formatReviewIssues: string[];
+  }
+): Promise<FdsRequest> {
+  const row = await getFdsRequestById(db, requestId);
+  if (!row || row.user_id !== userId) {
+    throw new Error("依頼が見つかりません");
+  }
+  if (!canRetryPrimaryReview(row)) {
+    throw new Error("この依頼は再提出できません");
+  }
+
+  const formatIssuesJson =
+    data.formatReviewIssues.length > 0 ? JSON.stringify(data.formatReviewIssues) : null;
+
+  const result = await db
+    .prepare(
+      `UPDATE sim_fds_requests
+       SET status = 'format_failed',
+           input_r2_key = ?,
+           input_filename = ?,
+           input_size_bytes = ?,
+           input_sha256 = ?,
+           t_end_seconds = NULL,
+           format_review_issues = ?
+       WHERE id = ? AND user_id = ?
+         AND status IN ('format_failed', 'primary_failed', 'primary_error')`
+    )
+    .bind(
+      data.inputR2Key,
+      data.inputFilename,
+      data.inputSizeBytes,
+      data.inputSha256 ?? null,
+      formatIssuesJson,
+      requestId,
+      userId
+    )
+    .run();
+
+  if (!result.meta.changes) {
+    throw new Error("再提出の保存に失敗しました");
   }
 
   const updated = await getFdsRequestById(db, requestId);
@@ -680,6 +787,7 @@ export async function markFdsRequestRejected(
 }
 
 const FDS_INPUT_REPLACEABLE_STATUSES: FdsRequestStatus[] = [
+  "format_failed",
   "primary_reviewing",
   "primary_failed",
   "primary_error",
@@ -701,6 +809,8 @@ export async function replaceFdsRequestInputByStaff(
     inputFilename: string;
     inputSizeBytes: number;
     inputSha256?: string | null;
+    tEndSeconds?: number | null;
+    formatReviewIssues?: string[] | null;
   }
 ): Promise<FdsRequest> {
   const row = await getFdsRequestById(db, requestId);
@@ -711,6 +821,11 @@ export async function replaceFdsRequestInputByStaff(
     throw new Error("この依頼の入力ファイルは置き換えできません");
   }
 
+  const formatIssuesJson =
+    data.formatReviewIssues && data.formatReviewIssues.length > 0
+      ? JSON.stringify(data.formatReviewIssues)
+      : null;
+
   const result = await db
     .prepare(
       `UPDATE sim_fds_requests
@@ -719,6 +834,8 @@ export async function replaceFdsRequestInputByStaff(
            input_filename = ?,
            input_size_bytes = ?,
            input_sha256 = ?,
+           t_end_seconds = ?,
+           format_review_issues = ?,
            primary_review_passed = 0,
            primary_review_forced = 0,
            primary_review_issues = NULL,
@@ -727,13 +844,77 @@ export async function replaceFdsRequestInputByStaff(
            reviewed_at = NULL,
            review_message = NULL
        WHERE id = ?
-         AND status IN ('primary_reviewing', 'primary_failed', 'primary_error', 'pending_approval', 'rejected')`
+         AND status IN ('format_failed', 'primary_reviewing', 'primary_failed', 'primary_error', 'pending_approval', 'rejected')`
     )
     .bind(
       data.inputR2Key,
       data.inputFilename,
       data.inputSizeBytes,
       data.inputSha256 ?? null,
+      data.tEndSeconds ?? null,
+      formatIssuesJson,
+      requestId
+    )
+    .run();
+
+  if (!result.meta.changes) {
+    throw new Error("入力ファイルの置き換えに失敗しました");
+  }
+
+  const updated = await getFdsRequestById(db, requestId);
+  if (!updated) throw new Error("依頼の更新に失敗しました");
+  return updated;
+}
+
+/** Replaces request input after staff upload failed format review. */
+export async function replaceFdsRequestInputFormatFailedByStaff(
+  db: D1Database,
+  requestId: string,
+  data: {
+    inputR2Key: string;
+    inputFilename: string;
+    inputSizeBytes: number;
+    inputSha256?: string | null;
+    formatReviewIssues: string[];
+  }
+): Promise<FdsRequest> {
+  const row = await getFdsRequestById(db, requestId);
+  if (!row) {
+    throw new Error("依頼が見つかりません");
+  }
+  if (!canStaffReplaceFdsRequestInput(row.status)) {
+    throw new Error("この依頼の入力ファイルは置き換えできません");
+  }
+
+  const formatIssuesJson =
+    data.formatReviewIssues.length > 0 ? JSON.stringify(data.formatReviewIssues) : null;
+
+  const result = await db
+    .prepare(
+      `UPDATE sim_fds_requests
+       SET status = 'format_failed',
+           input_r2_key = ?,
+           input_filename = ?,
+           input_size_bytes = ?,
+           input_sha256 = ?,
+           t_end_seconds = NULL,
+           format_review_issues = ?,
+           primary_review_passed = 0,
+           primary_review_forced = 0,
+           primary_review_issues = NULL,
+           primary_review_error = NULL,
+           reviewed_by_user_id = NULL,
+           reviewed_at = NULL,
+           review_message = NULL
+       WHERE id = ?
+         AND status IN ('format_failed', 'primary_reviewing', 'primary_failed', 'primary_error', 'pending_approval', 'rejected')`
+    )
+    .bind(
+      data.inputR2Key,
+      data.inputFilename,
+      data.inputSizeBytes,
+      data.inputSha256 ?? null,
+      formatIssuesJson,
       requestId
     )
     .run();

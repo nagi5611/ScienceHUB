@@ -166,10 +166,13 @@ export function mountFdsRequestChat(container, options) {
         const existingIds = new Set(
           [...messagesEl.querySelectorAll('[data-message-id]')].map((el) => el.getAttribute('data-message-id'))
         );
+        let appended = false;
         for (const message of incoming) {
           if (existingIds.has(message.id)) continue;
           messagesEl.insertAdjacentHTML('beforeend', renderMessage(message));
+          appended = true;
         }
+        if (!appended) return;
       }
 
       lastMessageId = incoming[incoming.length - 1]?.id ?? lastMessageId;
@@ -307,6 +310,7 @@ export function isFdsRequestChatAvailable(status) {
 /** Returns whether staff can replace input for a request status. */
 export function canStaffReplaceFdsInputStatus(status) {
   return (
+    status === 'format_failed' ||
     status === 'primary_reviewing' ||
     status === 'primary_failed' ||
     status === 'primary_error' ||

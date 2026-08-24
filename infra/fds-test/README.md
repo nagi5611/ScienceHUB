@@ -54,7 +54,7 @@ AWS_REGION=ap-northeast-1 ./setup-aws.sh
 2. `iam-policy.json` の内容でインラインポリシーをアタッチ
 3. アクセスキーを発行
 
-必要な権限: `RunInstances`, `TerminateInstances`, `DescribeInstances` のみ（最小構成）。
+必要な権限: `RunInstances`, `TerminateInstances`, `DescribeInstances`, `GetConsoleOutput` のみ（最小構成）。
 
 ### 1-3. FDS 入り AMI の作成（初回のみ）
 
@@ -135,7 +135,7 @@ npm run db:migrate:remote  # 本番
 | `wait image-available` が **failed** で終了 | AMI 作成自体が失敗。**EC2 → AMI** で状態と理由を確認。作り直し（下記） |
 | `AMI 'ami-…' is failed, and cannot be run` | その AMI は **作成失敗または無効**。FDS 入りインスタンスから **新しい AMI を作り直し**、`AWS_EC2_FDS_AMI_ID` を更新して再デプロイ |
 | EC2 起動エラー | AMI ID、サブネット、SG、IAM 権限 |
-| ずっと「実行中」 | EC2 のシステムログ（user-data）。FDS バイナリパス |
+| ずっと「実行中」 | EC2 のシステムログ（user-data）。FDS バイナリパス。管理画面の「EC2 コンソール出力」でも確認可能 |
 | コールバック失敗 | `FDS_JOB_CALLBACK_SECRET`、`OAUTH_REDIRECT_BASE`、SG の 443 アウトバウンド |
 | Smokeview で smoke が 0 KB | 実行データ ZIP に **`.s3d` / `.sf`** が無い（旧 runner は `.out/.smv/.csv` のみ）。再デプロイ後にジョブを再実行し、ZIP を**一つのフォルダに展開**してから `.smv` を開く |
 | 10時間で止まる | 仕様（`FDS_JOB_MAX_RUNTIME_HOURS = 10`） |

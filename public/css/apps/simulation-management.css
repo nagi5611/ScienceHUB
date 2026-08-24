@@ -3487,6 +3487,28 @@ tr:hover td {
   color: #86efac;
 }
 
+.fds-instance-console-wrap {
+  margin-top: 1rem;
+}
+
+.fds-job-detail-console {
+  margin-top: 1rem;
+}
+
+.fds-job-detail-console-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.fds-instance-console {
+  max-height: 20rem;
+}
+
+.fds-job-detail-console .fds-instance-console {
+  max-height: 28rem;
+}
+
 .section-heading-row {
   display: flex;
   align-items: center;

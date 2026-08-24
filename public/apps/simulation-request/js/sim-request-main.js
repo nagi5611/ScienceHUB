@@ -36,6 +36,7 @@ const SIM_TYPES = [
 ];
 
 const REQUEST_STATUS_LABELS = {
+  format_failed: '形式審査で却下',
   primary_reviewing: '一次審査中…',
   primary_failed: '一次審査で指摘あり',
   primary_error: '一次審査失敗',
@@ -65,6 +66,7 @@ function fdsRequestStatusUi(row) {
 /** Returns whether the request row has an expandable detail panel. */
 function requestHasDetailPanel(row) {
   return (
+    row.status === 'format_failed' ||
     row.status === 'primary_reviewing' ||
     row.status === 'primary_failed' ||
     row.status === 'primary_error' ||
@@ -80,9 +82,49 @@ function formatSha256Short(hex) {
   return `${hex.slice(0, 12)}…${hex.slice(-8)}`;
 }
 
+/** Builds HTML for simulation progress (T_END-based). */
+function renderFdsSimulationProgressHtml(row) {
+  const pct = row.progress_pct;
+  if (pct == null) return '';
+  const clamped = Math.min(100, Math.max(0, Number(pct)));
+  let label;
+  if (row.progress_phase === 'finalizing') {
+    label = '結果を保存中…（計算完了）';
+  } else if (row.t_end_seconds != null && row.simulation_time_seconds != null) {
+    label = `計算中 ${Math.round(clamped)}%（${row.simulation_time_seconds} / ${row.t_end_seconds} s）`;
+  } else {
+    label = `計算中 ${Math.round(clamped)}%`;
+  }
+  return `
+    <p class="hint fds-simulation-progress-label">${escapeHtml(label)}</p>
+    <div class="progress-bar" role="progressbar" aria-valuenow="${clamped}" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar-fill" style="width: ${clamped}%"></div>
+    </div>
+  `;
+}
+
+/** Returns whether the linked FDS job is still executing. */
+function isFdsJobExecutionActive(row) {
+  const jobStatus = row.fds_job_status;
+  return jobStatus === 'pending' || jobStatus === 'launching' || jobStatus === 'running';
+}
+
 /** Builds HTML for the expandable detail panel under a request row. */
 function renderRequestDetailPanel(row) {
   const parts = [];
+
+  if (row.status === 'format_failed') {
+    parts.push(
+      '<p class="fds-request-detail-label">形式審査</p><p class="hint">.fds に &TIME ブロックの T_END（シミュレーション終了時刻・秒）が必要です。</p>'
+    );
+    if (row.format_review_issues?.length) {
+      parts.push(
+        `<ul class="fds-primary-review-issues">${row.format_review_issues
+          .map((issue) => `<li>${escapeHtml(issue)}</li>`)
+          .join('')}</ul>`
+      );
+    }
+  }
 
   if (row.status === 'primary_reviewing') {
     parts.push('<p class="hint">AI が .fds 入力を確認しています。しばらくお待ちください。</p>');
@@ -121,6 +163,15 @@ function renderRequestDetailPanel(row) {
   }
 
   if (row.status === 'approved') {
+    if (isFdsJobExecutionActive(row)) {
+      const progressHtml = renderFdsSimulationProgressHtml(row);
+      if (progressHtml) {
+        parts.push(progressHtml);
+      } else {
+        parts.push('<p class="hint">シミュレーションを実行しています…</p>');
+      }
+    }
+
     const repro = [];
     if (row.input_sha256) {
       repro.push(`入力 SHA-256: <code>${escapeHtml(formatSha256Short(row.input_sha256))}</code>`);
@@ -191,6 +242,18 @@ function primaryReviewAttemptsRemaining(row) {
 
 /** Appends primary-review retry / limit hints and action buttons to a detail panel. */
 function appendPrimaryReviewActions(parts, row) {
+  if (row.status === 'format_failed') {
+    if (row.primary_review_can_retry) {
+      parts.push(
+        '<p class="hint">T_END を含む .fds に修正して再提出してください。</p>',
+        `<button type="button" class="btn btn-primary btn-sm fds-retry-primary-btn" data-request-id="${escapeHtml(row.id)}">修正ファイルで再提出</button>`
+      );
+    } else {
+      parts.push('<p class="hint">再提出の上限に達しました。新しい依頼を作成してください。</p>');
+    }
+    return;
+  }
+
   if (row.status !== 'primary_failed' && row.status !== 'primary_error') return;
 
   const max = row.primary_review_max_attempts ?? fdsConfig?.primary_review_max_attempts ?? 3;
@@ -253,14 +316,25 @@ function destroyAllFdsChats() {
 }
 
 /** Mounts chat panels for currently expanded request rows. */
-function mountExpandedFdsChats(rows) {
-  destroyAllFdsChats();
+function mountExpandedFdsChats(rows, { preserveExisting = false } = {}) {
+  const activeIds = new Set();
+
   for (const row of rows) {
     if (!expandedRequestIds.has(row.id) || !isFdsRequestChatAvailable(row.status)) continue;
+    activeIds.add(row.id);
+
     const mount = document.querySelector(
       `.fds-request-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
     );
     if (!mount) continue;
+
+    if (preserveExisting && fdsChatDestroyers.has(row.id) && mount.querySelector('.fds-chat-panel')) {
+      continue;
+    }
+
+    fdsChatDestroyers.get(row.id)?.();
+    fdsChatDestroyers.delete(row.id);
+
     const destroy = mountFdsRequestChat(mount, {
       requestId: row.id,
       apiPrefix: 'fds-requests',
@@ -270,6 +344,148 @@ function mountExpandedFdsChats(rows) {
     });
     fdsChatDestroyers.set(row.id, destroy);
   }
+
+  for (const [id, destroy] of fdsChatDestroyers.entries()) {
+    if (!activeIds.has(id)) {
+      destroy?.();
+      fdsChatDestroyers.delete(id);
+    }
+  }
+}
+
+/** Returns whether the request list DOM can be updated in place (same rows, same order). */
+function canUpdateRequestListInPlace(rows) {
+  const mount = document.getElementById('my-fds-requests');
+  const list = mount?.querySelector('.fds-request-list');
+  if (!list) return false;
+
+  const existingIds = [...list.querySelectorAll('.fds-request-list-item[data-request-id]')].map((el) =>
+    el.getAttribute('data-request-id')
+  );
+  const rowIds = rows.map((row) => row.id);
+  if (existingIds.length !== rowIds.length) return false;
+  return existingIds.every((id, index) => id === rowIds[index]);
+}
+
+/** Replaces a detail panel while keeping an already-mounted chat DOM node. */
+function replaceRequestDetailPanelPreservingChat(listItem, row) {
+  const expandable = requestHasDetailPanel(row);
+  const expanded = expandedRequestIds.has(row.id);
+  const panel = listItem.querySelector('.fds-request-detail-panel');
+  const existingChatMount = panel?.querySelector('.fds-request-chat-mount');
+  const chatPreserve =
+    existingChatMount && fdsChatDestroyers.has(row.id) ? existingChatMount : null;
+
+  if (!expanded || !expandable) {
+    panel?.remove();
+    if (!expanded && fdsChatDestroyers.has(row.id)) {
+      fdsChatDestroyers.get(row.id)?.();
+      fdsChatDestroyers.delete(row.id);
+    }
+    return;
+  }
+
+  const tmp = document.createElement('div');
+  tmp.innerHTML = renderRequestDetailPanel(row);
+  const newPanel = tmp.firstElementChild;
+  if (!newPanel) return;
+
+  if (chatPreserve) {
+    const newChatMount = newPanel.querySelector('.fds-request-chat-mount');
+    if (newChatMount) {
+      newChatMount.replaceWith(chatPreserve);
+    }
+  }
+
+  if (panel) {
+    panel.replaceWith(newPanel);
+    return;
+  }
+
+  listItem.querySelector('.fds-request-list-toggle')?.insertAdjacentElement('afterend', newPanel);
+}
+
+/** Binds interactive controls inside the request list. */
+function bindRequestListActions(mount) {
+  mount.querySelectorAll('.fds-request-list-toggle:not([disabled])').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('[data-request-id]')?.getAttribute('data-request-id');
+      if (id) toggleRequestExpanded(id);
+    });
+  });
+
+  mount.querySelectorAll('.fds-force-secondary-list-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-request-id');
+      if (id) forceSecondaryById(id);
+    });
+  });
+
+  mount.querySelectorAll('.fds-rerun-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-request-id');
+      if (id) rerunFdsRequest(id);
+    });
+  });
+
+  mount.querySelectorAll('.fds-retry-primary-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-request-id');
+      if (id) promptRetryPrimaryFile(id);
+    });
+  });
+}
+
+/** Updates visible request rows without tearing down mounted chat panels. */
+function updateRequestListInPlace(rows) {
+  const mount = document.getElementById('my-fds-requests');
+  if (!mount) return;
+
+  for (const row of rows) {
+    const listItem = mount.querySelector(
+      `.fds-request-list-item[data-request-id="${CSS.escape(row.id)}"]`
+    );
+    if (!listItem) return;
+
+    const statusUi = fdsRequestStatusUi(row);
+    const expanded = expandedRequestIds.has(row.id);
+
+    listItem.className = `fds-request-list-item fds-request-list-item--${row.status}${
+      expanded ? ' is-expanded' : ''
+    }`;
+
+    const statusEl = listItem.querySelector('.fds-request-status');
+    if (statusEl) {
+      statusEl.className = `fds-request-status fds-request-status--${statusUi.badge}`;
+      statusEl.textContent = statusUi.label;
+    }
+
+    const toggle = listItem.querySelector('.fds-request-list-toggle');
+    toggle?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+
+    replaceRequestDetailPanelPreservingChat(listItem, row);
+
+    const meta = listItem.querySelector('.fds-request-list-meta');
+    if (row.fds_job_id) {
+      const metaHtml = `ジョブ ID: <code>${escapeHtml(row.fds_job_id)}</code>`;
+      if (meta) {
+        meta.innerHTML = metaHtml;
+      } else {
+        listItem.insertAdjacentHTML(
+          'beforeend',
+          `<p class="hint fds-request-list-meta">${metaHtml}</p>`
+        );
+      }
+    } else {
+      meta?.remove();
+    }
+  }
+
+  bindRequestListActions(mount);
+  mountExpandedFdsChats(rows, { preserveExisting: true });
 }
 
 /** Toggles expanded detail for a request row. */
@@ -545,6 +761,10 @@ async function loadFdsConfigAndRequests() {
 /** Syncs form primary-review block when the latest submitted request fails primary review. */
 function syncFormPrimaryReviewFromRow(row) {
   if (!row || row.id !== lastSubmittedRequestId) return;
+  if (row.status === 'format_failed') {
+    expandedRequestIds.add(row.id);
+    return;
+  }
   if (row.status === 'primary_failed' || row.status === 'primary_error') {
     showPrimaryReviewBlock(row);
     pendingForceRequestId = row.id;
@@ -577,6 +797,13 @@ async function renderMyRequests() {
         : rows[0];
     syncFormPrimaryReviewFromRow(tracked);
 
+    if (canUpdateRequestListInPlace(rows)) {
+      updateRequestListInPlace(rows);
+      return;
+    }
+
+    destroyAllFdsChats();
+
     mount.innerHTML = `
       <ul class="fds-request-list">
         ${rows
@@ -608,37 +835,7 @@ async function renderMyRequests() {
       </ul>
     `;
 
-    mount.querySelectorAll('.fds-request-list-toggle:not([disabled])').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.closest('[data-request-id]')?.getAttribute('data-request-id');
-        if (id) toggleRequestExpanded(id);
-      });
-    });
-
-    mount.querySelectorAll('.fds-force-secondary-list-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-request-id');
-        if (id) forceSecondaryById(id);
-      });
-    });
-
-    mount.querySelectorAll('.fds-rerun-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-request-id');
-        if (id) rerunFdsRequest(id);
-      });
-    });
-
-    mount.querySelectorAll('.fds-retry-primary-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-request-id');
-        if (id) promptRetryPrimaryFile(id);
-      });
-    });
-
+    bindRequestListActions(mount);
     mountExpandedFdsChats(rows);
   } catch (err) {
     mount.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message ?? '一覧の取得に失敗しました')}</p>`;
@@ -758,7 +955,12 @@ async function submitFdsRequest(form, { forceSecondary = false } = {}) {
     if (fileInput) fileInput.value = '';
     updateFdsFileStatus(null);
     if (!forceSecondary) hidePrimaryReviewBlock();
-    showToast('依頼を受け付けました。一次審査の結果は「自分の依頼」に表示されます。');
+    const status = result.request?.status;
+    if (status === 'format_failed') {
+      showToast('形式審査で却下されました。「自分の依頼」の詳細を確認してください。');
+    } else {
+      showToast('依頼を受け付けました。一次審査の結果は「自分の依頼」に表示されます。');
+    }
     await renderMyRequests();
   } catch (err) {
     if (alertEl) {

@@ -148,7 +148,7 @@ import {
 } from "../../lib/simulation/result-video";
 import { parseLogicalPath } from "../../lib/storage/keys";
 import { streamStorageFile } from "../../lib/storage/operations";
-import { Ec2AmiNotReadyError } from "../../lib/aws/ec2";
+import { Ec2AmiNotReadyError, getEc2ConsoleOutput, describeEc2Instance, isAwsEc2Configured } from "../../lib/aws/ec2";
 import { listDirectory } from "../../lib/storage/list";
 import { authorizeStoragePath } from "../../lib/storage/permissions";
 import { handleFdsJobCallback } from "../../lib/simulation/fds-callback";
@@ -196,9 +196,11 @@ import {
   markFdsRequestApproved,
   markFdsRequestRejected,
   replaceFdsRequestInputByStaff,
+  replaceFdsRequestInputFormatFailedByStaff,
   retryFdsPrimaryReview,
   runFdsPrimaryReviewJob,
   sendFdsPendingApprovalDiscordNotification,
+  updateFdsRequestFormatFailedOnRetry,
   FDS_PRIMARY_REVIEW_MAX_ATTEMPTS,
   validateFdsRequestMaxRuntimeHours,
   canStaffReplaceFdsRequestInput,
@@ -214,6 +216,10 @@ import {
 import {
   extractFdsTextForReview,
 } from "../../lib/simulation/fds-primary-review";
+import {
+  resolveFdsFormatReviewSubmission,
+  runFdsFormatReview,
+} from "../../lib/simulation/fds-format-review";
 import { sha256HexFromBuffer } from "../../lib/simulation/fds-content-hash";
 import { estimateFdsRunCost, estimateFdsStorage } from "../../lib/simulation/fds-cost-estimate";
 import { createFdsRerunFromRequest } from "../../lib/simulation/fds-rerun";
@@ -1944,12 +1950,28 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         httpMetadata: { contentType: "text/plain; charset=utf-8" },
       });
 
+      const formatReview = runFdsFormatReview(fdsText);
+      const formatSubmission = resolveFdsFormatReviewSubmission(formatReview);
+
       try {
+        if (!formatSubmission.shouldRunPrimaryReview) {
+          const row = await updateFdsRequestFormatFailedOnRetry(db, requestId, userId, {
+            inputR2Key: r2Key,
+            inputFilename: filename,
+            inputSizeBytes: sizeBytes,
+            inputSha256,
+            formatReviewIssues: formatSubmission.formatReviewIssues,
+          });
+          return json({ request: await formatFdsRequestForApiEnriched(db, row) });
+        }
+
         const row = await retryFdsPrimaryReview(db, requestId, userId, {
           inputR2Key: r2Key,
           inputFilename: filename,
           inputSizeBytes: sizeBytes,
           inputSha256,
+          tEndSeconds: formatSubmission.tEndSeconds,
+          formatReviewIssues: formatSubmission.formatReviewIssues,
         });
 
         waitUntil(
@@ -2056,6 +2078,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         httpMetadata: { contentType: "text/plain; charset=utf-8" },
       });
 
+      const formatReview = runFdsFormatReview(fdsText);
+      const formatSubmission = resolveFdsFormatReviewSubmission(formatReview);
+
       const row = await createFdsRequest(db, {
         id: requestId,
         userId,
@@ -2069,19 +2094,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         inputSha256,
         notes: notesInput || null,
         createdAt,
-        status: "primary_reviewing",
+        status: formatSubmission.status,
+        tEndSeconds: formatSubmission.tEndSeconds,
+        formatReviewIssues: formatSubmission.formatReviewIssues,
       });
 
-      waitUntil(
-        runFdsPrimaryReviewJob(env, db, {
-          requestId,
-          fdsText,
-          filename,
-          mpiProcesses,
-          maxRuntimeHours: maxRuntimeRaw,
-          forceSecondary,
-        })
-      );
+      if (formatSubmission.shouldRunPrimaryReview) {
+        waitUntil(
+          runFdsPrimaryReviewJob(env, db, {
+            requestId,
+            fdsText,
+            filename,
+            mpiProcesses,
+            maxRuntimeHours: maxRuntimeRaw,
+            forceSecondary,
+          })
+        );
+      }
 
       return json({ request: await formatFdsRequestForApiEnriched(db, row) }, 201);
     }
@@ -3401,6 +3430,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         mpiProcesses: row.mpi_processes,
         createdByUserId: row.user_id,
         createdAt,
+        tEndSeconds: row.t_end_seconds,
       });
 
       const reviewedAt = new Date().toISOString();
@@ -3519,12 +3549,35 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         httpMetadata: { contentType: "text/plain; charset=utf-8" },
       });
 
+      const formatReview = runFdsFormatReview(fdsText);
+      const formatSubmission = resolveFdsFormatReviewSubmission(formatReview);
+
       try {
+        if (!formatSubmission.shouldRunPrimaryReview) {
+          const updated = await replaceFdsRequestInputFormatFailedByStaff(db, requestId, {
+            inputR2Key: r2Key,
+            inputFilename: filename,
+            inputSizeBytes: sizeBytes,
+            inputSha256,
+            formatReviewIssues: formatSubmission.formatReviewIssues,
+          });
+
+          await postFdsRequestSystemChatMessage(db, {
+            requestId,
+            senderUserId: userId,
+            body: `[システム] 入力 .fds の形式審査に失敗しました（${filename}）。T_END を確認してください。`,
+          });
+
+          return json({ request: await formatFdsRequestForApiEnriched(db, updated) });
+        }
+
         const updated = await replaceFdsRequestInputByStaff(db, requestId, {
           inputR2Key: r2Key,
           inputFilename: filename,
           inputSizeBytes: sizeBytes,
           inputSha256,
+          tEndSeconds: formatSubmission.tEndSeconds,
+          formatReviewIssues: formatSubmission.formatReviewIssues,
         });
 
         await postFdsRequestSystemChatMessage(db, {
@@ -3635,7 +3688,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const instanceType = env.AWS_EC2_INSTANCE_TYPE?.trim() || FDS_DEFAULT_INSTANCE_TYPE;
       const createdAt = new Date().toISOString();
 
-      await env.FILES.put(r2Key, await fileEntry.arrayBuffer(), {
+      const fileBuffer = await fileEntry.arrayBuffer();
+      const fdsText = extractFdsTextForReview(fileBuffer);
+      const formatReview = runFdsFormatReview(fdsText);
+      if (!formatReview.passed) {
+        return error(formatReview.issues[0] ?? "形式審査に失敗しました", 400);
+      }
+
+      await env.FILES.put(r2Key, fileBuffer, {
         httpMetadata: { contentType: "text/plain; charset=utf-8" },
       });
 
@@ -3648,6 +3708,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         instanceType,
         createdByUserId: userId,
         createdAt,
+        tEndSeconds: formatReview.tEndSeconds,
       });
 
       return json(
@@ -3763,6 +3824,43 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "Content-Disposition": attachmentFilename(filename),
         },
       });
+    }
+
+    // GET /api/simulation/admin/fds-jobs/:id/console
+    if (
+      method === "GET" &&
+      segments[1] === "fds-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "console"
+    ) {
+      const job = await getFdsJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      if (!job.ec2_instance_id) {
+        return json({
+          output: "",
+          timestamp: null,
+          instance_state: null,
+          message: "インスタンスがまだ割り当てられていません",
+        });
+      }
+      if (!isAwsEc2Configured(env)) {
+        return error("AWS EC2 が設定されていません", 503);
+      }
+      try {
+        const [consoleOut, snapshot] = await Promise.all([
+          getEc2ConsoleOutput(env, job.ec2_instance_id),
+          describeEc2Instance(env, job.ec2_instance_id),
+        ]);
+        return json({
+          output: consoleOut.output,
+          timestamp: consoleOut.timestamp,
+          instance_state: snapshot?.state ?? null,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "コンソール出力の取得に失敗しました";
+        return error(message, 502);
+      }
     }
 
     // GET /api/simulation/admin/fds-jobs/:id/log/download
@@ -4326,6 +4424,43 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "Content-Disposition": attachmentFilename(filename),
         },
       });
+    }
+
+    // GET /api/simulation/admin/openfoam-jobs/:id/console
+    if (
+      method === "GET" &&
+      segments[1] === "openfoam-jobs" &&
+      segments.length === 5 &&
+      segments[3] === "console"
+    ) {
+      const job = await getOpenfoamJobById(db, segments[2]);
+      if (!job) return error("ジョブが見つかりません", 404);
+      if (!job.ec2_instance_id) {
+        return json({
+          output: "",
+          timestamp: null,
+          instance_state: null,
+          message: "インスタンスがまだ割り当てられていません",
+        });
+      }
+      if (!isAwsEc2Configured(env)) {
+        return error("AWS EC2 が設定されていません", 503);
+      }
+      try {
+        const [consoleOut, snapshot] = await Promise.all([
+          getEc2ConsoleOutput(env, job.ec2_instance_id),
+          describeEc2Instance(env, job.ec2_instance_id),
+        ]);
+        return json({
+          output: consoleOut.output,
+          timestamp: consoleOut.timestamp,
+          instance_state: snapshot?.state ?? null,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "コンソール出力の取得に失敗しました";
+        return error(message, 502);
+      }
     }
 
     // GET /api/simulation/admin/openfoam-jobs/:id/log/download

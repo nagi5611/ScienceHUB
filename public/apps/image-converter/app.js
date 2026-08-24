@@ -9,6 +9,7 @@ import {
   createPdfPreviewBlob,
   detectInputKind,
   detectSupportedOutputFormats,
+  probeCanvasRasterFormats,
   downloadBlob,
   formatBytes,
   formatInputKindLabel,
@@ -94,6 +95,9 @@ const cloudOpenModal = cloudOpenDialog
       loginNext: `/apps/${APP_SLUG}/`,
     })
   : null;
+
+/** @type {import('./js/convert-core.js').CanvasRasterFormat[] | null} */
+let probedCanvasFormats = null;
 
 /** @type {import('./js/convert-core.js').OutputFormat[]} */
 let supportedFormats = ["png"];
@@ -214,6 +218,19 @@ function setOutputFormat(formatId) {
   refreshOptionVisibility();
 }
 
+/** Canvas 出力形式をブラウザ能力で絞り込む */
+function filterFormatsByBrowserSupport(formats) {
+  if (!probedCanvasFormats) return formats;
+
+  const specialRaster = new Set(["gif", "ico", "svg"]);
+  return formats.filter((format) => {
+    if (specialRaster.has(format) || format === "pdf") return true;
+    return probedCanvasFormats.includes(
+      /** @type {import('./js/convert-core.js').CanvasRasterFormat} */ (format),
+    );
+  });
+}
+
 /** 出力形式セレクトを初期化 */
 function refreshOutputFormats() {
   const allFormats = detectSupportedOutputFormats();
@@ -225,7 +242,8 @@ function refreshOutputFormats() {
       VIDEO_OUTPUT_FORMATS.has(format),
     );
   } else {
-    supportedFormats = hidePdf ? allFormats.filter((format) => format !== "pdf") : allFormats;
+    const baseFormats = hidePdf ? allFormats.filter((format) => format !== "pdf") : allFormats;
+    supportedFormats = filterFormatsByBrowserSupport(baseFormats);
   }
 
   const previous = selectedFormat;
@@ -1131,6 +1149,7 @@ const allowed =
   /** @type {Window & { __ICV_E2E__?: boolean }} */ (window).__ICV_E2E__ === true ||
   (await checkAccess());
 if (allowed) {
+  probedCanvasFormats = await probeCanvasRasterFormats();
   refreshOutputFormats();
   qualityValue.textContent = qualityInput.value;
   renderFileList();

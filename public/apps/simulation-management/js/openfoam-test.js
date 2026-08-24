@@ -1,6 +1,12 @@
 // public/apps/simulation-management/js/openfoam-test.js
 import { apiFormRequest, apiRequest } from '../../simulation-request/js/api.js';
 import { initOpenfoamRequestQueue, renderOpenfoamRequestQueue } from './openfoam-requests.js';
+import {
+  fetchEc2JobConsole,
+  ec2ConsolePollActive,
+  renderEc2ConsolePre,
+  setEc2ConsoleWrapVisible,
+} from './ec2-job-console.js';
 
 const OpenFOAM_STATUS_LABELS = {
   pending: '待機中',
@@ -106,6 +112,7 @@ function applyOpenfoamLaunchResult(launchData) {
   traceOpenfoamJobProgress(launchData.job);
   renderOpenfoamJobsList();
   renderOpenfoamJobDetail();
+  refreshOpenfoamJobConsole().catch(() => {});
 }
 
 /** Formats ISO time for log lines. */
@@ -143,12 +150,76 @@ function renderOpenfoamRunLog() {
   pre.scrollTop = pre.scrollHeight;
 }
 
+/** Renders EC2 console in the form trace panel and job detail panel. */
+function renderOpenfoamTraceConsole() {
+  const wrap = document.getElementById('openfoam-instance-console-wrap');
+  const pre = document.getElementById('openfoam-instance-console');
+  const showTrace =
+    Boolean(openfoamRunTraceJobId) &&
+    (openfoamSelectedJobDetail?.id === openfoamRunTraceJobId ||
+      openfoamSelectedJobDetail?.ec2_instance_id);
+  setEc2ConsoleWrapVisible(
+    wrap,
+    showTrace && Boolean(openfoamSelectedJobDetail?.ec2_instance_id || openfoamConsoleOutput)
+  );
+  if (showTrace) {
+    renderEc2ConsolePre(pre, openfoamConsoleOutput);
+  }
+}
+
+/** Renders EC2 console block HTML for the job detail sidebar. */
+function buildOpenfoamJobConsoleSection(job) {
+  if (!job?.ec2_instance_id) return '';
+  const updatedHint = openfoamConsoleUpdatedAt
+    ? `<p class="hint fds-job-detail-updated">コンソール更新: ${formatDateTime(new Date(openfoamConsoleUpdatedAt).toISOString())}</p>`
+    : '';
+  return `
+    <div class="fds-job-detail-console">
+      <h4 class="fds-job-detail-console-heading">EC2 コンソール出力</h4>
+      <pre class="fds-run-log fds-instance-console fds-job-detail-console-pre" aria-live="polite">${escapeHtml(
+        openfoamConsoleOutput.trim()
+          ? openfoamConsoleOutput
+          : '（まだコンソール出力がありません。起動直後は数分かかることがあります）'
+      )}</pre>
+      ${updatedHint}
+    </div>
+  `;
+}
+
+/** Fetches live EC2 console output for the selected job. */
+async function refreshOpenfoamJobConsole() {
+  const job = openfoamSelectedJobDetail;
+  if (!job?.ec2_instance_id) {
+    openfoamConsoleOutput = '';
+    openfoamConsoleUpdatedAt = null;
+    renderOpenfoamTraceConsole();
+    return;
+  }
+
+  try {
+    const data = await fetchEc2JobConsole(apiRequest, OPENFOAM_CONSOLE_API_PREFIX, job.id);
+    openfoamConsoleOutput = data.output;
+    openfoamConsoleUpdatedAt = Date.now();
+    renderOpenfoamTraceConsole();
+    const mount = document.getElementById('openfoam-job-detail-mount');
+    const detailPre = mount?.querySelector('.fds-job-detail-console-pre');
+    if (detailPre && job.id === openfoamSelectedJobId) {
+      renderEc2ConsolePre(detailPre, openfoamConsoleOutput);
+    }
+  } catch {
+    // Console fetch failures are non-fatal during polling.
+  }
+}
+
 /** Clears the run log and optional trace target. */
 function clearOpenfoamRunLog() {
   openfoamRunLogLines.length = 0;
   openfoamRunTraceJobId = null;
   openfoamLastTraceSnapshot = null;
+  openfoamConsoleOutput = '';
+  openfoamConsoleUpdatedAt = null;
   renderOpenfoamRunLog();
+  renderOpenfoamTraceConsole();
 }
 
 /** Merges server step objects into the run log. */
@@ -218,6 +289,9 @@ let openfoamListLoading = false;
 let openfoamRunTraceJobId = null;
 let openfoamLastTraceSnapshot = null;
 const openfoamRunLogLines = [];
+let openfoamConsoleOutput = '';
+let openfoamConsoleUpdatedAt = null;
+const OPENFOAM_CONSOLE_API_PREFIX = 'admin/openfoam-jobs';
 
 /** Escapes HTML special characters. */
 function escapeHtml(str) {
@@ -357,6 +431,10 @@ function upsertOpenfoamJobInList(job) {
 
 /** Selects a job and loads its live detail. */
 async function selectOpenfoamJob(jobId) {
+  if (openfoamSelectedJobId !== jobId) {
+    openfoamConsoleOutput = '';
+    openfoamConsoleUpdatedAt = null;
+  }
   openfoamSelectedJobId = jobId;
   renderOpenfoamJobsList();
   await refreshOpenfoamJobDetail();
@@ -483,6 +561,7 @@ function renderOpenfoamJobDetail() {
       <dd>${formatDateTime(job.created_at)}</dd>
     </dl>
     <div class="openfoam-job-detail-dl openfoam-job-actions">${buildOpenfoamJobActions(job)}</div>
+    ${buildOpenfoamJobConsoleSection(job)}
     ${
       openfoamDetailUpdatedAt
         ? `<p class="hint openfoam-job-detail-updated">最終更新: ${formatDateTime(new Date(openfoamDetailUpdatedAt).toISOString())}</p>`
@@ -502,6 +581,11 @@ function renderOpenfoamJobDetail() {
       handleOpenfoamRerun(btn.dataset.id);
     });
   });
+
+  const detailPre = mount.querySelector('.fds-job-detail-console-pre');
+  if (detailPre && openfoamConsoleOutput) {
+    renderEc2ConsolePre(detailPre, openfoamConsoleOutput);
+  }
 }
 
 /** Fetches all jobs and updates the list. */
@@ -551,6 +635,9 @@ async function refreshOpenfoamJobDetail() {
     }
     renderOpenfoamJobDetail();
     syncOpenfoamLivePolling();
+    if (openfoamSelectedJobDetail?.ec2_instance_id) {
+      await refreshOpenfoamJobConsole();
+    }
   } catch (err) {
     const mount = document.getElementById('openfoam-job-detail-mount');
     if (mount) {
@@ -571,6 +658,9 @@ async function tickOpenfoamLive() {
   const tasks = [refreshOpenfoamJobList({ silent: true })];
   if (openfoamSelectedJobId) {
     tasks.push(refreshOpenfoamJobDetail());
+    if (openfoamSelectedJobDetail && ec2ConsolePollActive(openfoamSelectedJobDetail)) {
+      tasks.push(refreshOpenfoamJobConsole());
+    }
   }
   await Promise.allSettled(tasks);
 }
@@ -584,8 +674,9 @@ function syncOpenfoamLivePolling() {
   }
 
   const detailActive = openfoamSelectedJobDetail && openfoamJobNeedsLiveUpdates(openfoamSelectedJobDetail);
+  const consoleActive = openfoamSelectedJobDetail && ec2ConsolePollActive(openfoamSelectedJobDetail);
   const anyActive = openfoamJobs.some(openfoamJobNeedsLiveUpdates);
-  if (!detailActive && !anyActive) {
+  if (!detailActive && !anyActive && !consoleActive) {
     stopOpenfoamLivePolling();
     return;
   }

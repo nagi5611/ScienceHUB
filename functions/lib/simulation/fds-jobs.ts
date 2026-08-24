@@ -60,7 +60,14 @@ export interface FdsJob {
   fds_ami_id: string | null;
   fds_solver_version: string | null;
   failure_category: string | null;
+  t_end_seconds: number | null;
+  simulation_time_seconds: number | null;
+  progress_pct: number | null;
+  progress_phase: string | null;
+  progress_updated_at: string | null;
 }
+
+export type FdsJobProgressPhase = "computing" | "finalizing";
 
 export interface FdsJobApiModel {
   id: string;
@@ -88,6 +95,11 @@ export interface FdsJobApiModel {
   fds_solver_version: string | null;
   failure_category: FdsFailureCategory | null;
   failure_message: string | null;
+  t_end_seconds: number | null;
+  simulation_time_seconds: number | null;
+  progress_pct: number | null;
+  progress_phase: FdsJobProgressPhase | null;
+  progress_updated_at: string | null;
 }
 
 export const FDS_JOB_MAX_RUNTIME_HOURS = 10;
@@ -176,6 +188,11 @@ export function formatFdsJobForApi(
     failure_message: job.failure_category
       ? fdsFailureCategoryUserMessage(job.failure_category as FdsFailureCategory)
       : null,
+    t_end_seconds: job.t_end_seconds ?? null,
+    simulation_time_seconds: job.simulation_time_seconds ?? null,
+    progress_pct: job.progress_pct ?? null,
+    progress_phase: (job.progress_phase as FdsJobProgressPhase | null) ?? null,
+    progress_updated_at: job.progress_updated_at ?? null,
   };
 }
 
@@ -206,6 +223,7 @@ export async function createFdsJob(
     maxRuntimeHours?: number;
     mpiProcesses?: number;
     inputSha256?: string | null;
+    tEndSeconds?: number | null;
     createdByUserId: string;
     createdAt: string;
   }
@@ -218,8 +236,8 @@ export async function createFdsJob(
       `INSERT INTO sim_fds_jobs (
         id, title, input_r2_key, input_filename, input_size_bytes,
         status, ec2_instance_type, max_runtime_hours, mpi_processes,
-        created_by_user_id, created_at, input_sha256
-      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
+        created_by_user_id, created_at, input_sha256, t_end_seconds
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -232,7 +250,8 @@ export async function createFdsJob(
       mpiProcesses,
       data.createdByUserId,
       data.createdAt,
-      data.inputSha256 ?? null
+      data.inputSha256 ?? null,
+      data.tEndSeconds ?? null
     )
     .run();
 
@@ -274,6 +293,10 @@ export async function updateFdsJobStatus(
     outputSha256?: string | null;
     fdsAmiId?: string | null;
     fdsSolverVersion?: string | null;
+    progressPct?: number | null;
+    progressPhase?: FdsJobProgressPhase | null;
+    simulationTimeSeconds?: number | null;
+    progressUpdatedAt?: string | null;
   } = {}
 ): Promise<void> {
   const fields: string[] = ["status = ?"];
@@ -319,6 +342,22 @@ export async function updateFdsJobStatus(
     fields.push("fds_solver_version = ?");
     values.push(options.fdsSolverVersion);
   }
+  if (options.progressPct !== undefined) {
+    fields.push("progress_pct = ?");
+    values.push(options.progressPct);
+  }
+  if (options.progressPhase !== undefined) {
+    fields.push("progress_phase = ?");
+    values.push(options.progressPhase);
+  }
+  if (options.simulationTimeSeconds !== undefined) {
+    fields.push("simulation_time_seconds = ?");
+    values.push(options.simulationTimeSeconds);
+  }
+  if (options.progressUpdatedAt !== undefined) {
+    fields.push("progress_updated_at = ?");
+    values.push(options.progressUpdatedAt);
+  }
 
   values.push(jobId);
   await db
@@ -337,6 +376,36 @@ export async function listActiveFdsJobs(db: D1Database): Promise<FdsJob[]> {
     )
     .all<FdsJob>();
   return result.results ?? [];
+}
+
+/** Updates simulation progress from EC2 runner callbacks. */
+export async function updateFdsJobProgress(
+  db: D1Database,
+  jobId: string,
+  data: {
+    simulationTimeSeconds: number;
+    progressPct: number;
+    progressPhase: FdsJobProgressPhase;
+    progressUpdatedAt: string;
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE sim_fds_jobs
+       SET simulation_time_seconds = ?,
+           progress_pct = ?,
+           progress_phase = ?,
+           progress_updated_at = ?
+       WHERE id = ?`
+    )
+    .bind(
+      data.simulationTimeSeconds,
+      data.progressPct,
+      data.progressPhase,
+      data.progressUpdatedAt,
+      jobId
+    )
+    .run();
 }
 
 /** Deletes an FDS job record. */

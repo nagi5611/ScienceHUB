@@ -279,3 +279,47 @@ export async function terminateEc2Instance(env: AwsEc2Env, instanceId: string): 
     "InstanceId.1": instanceId,
   });
 }
+
+export interface Ec2ConsoleOutput {
+  output: string;
+  timestamp: string | null;
+}
+
+/** Decodes base64 console output from the EC2 Query API. */
+function decodeEc2ConsoleOutputBase64(encoded: string): string {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+/** Returns instance console output (system log) via GetConsoleOutput. */
+export async function getEc2ConsoleOutput(
+  env: AwsEc2Env,
+  instanceId: string,
+  options: { latest?: boolean } = {}
+): Promise<Ec2ConsoleOutput> {
+  const params: Record<string, string> = {
+    Action: "GetConsoleOutput",
+    InstanceId: instanceId,
+  };
+  if (options.latest !== false) {
+    params.Latest = "true";
+  }
+
+  const xml = await ec2Request(env, params);
+  const encoded = readXmlTag(xml, "output");
+  const timestamp = readXmlTag(xml, "timestamp");
+
+  if (!encoded) {
+    return { output: "", timestamp };
+  }
+
+  try {
+    return { output: decodeEc2ConsoleOutputBase64(encoded), timestamp };
+  } catch {
+    return { output: "", timestamp };
+  }
+}

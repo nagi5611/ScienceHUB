@@ -1,6 +1,12 @@
 // public/apps/simulation-management/js/fds-test.js
 import { apiFormRequest, apiRequest } from '../../simulation-request/js/api.js';
 import { initFdsRequestQueue, renderFdsRequestQueue } from './fds-requests.js';
+import {
+  fetchEc2JobConsole,
+  ec2ConsolePollActive,
+  renderEc2ConsolePre,
+  setEc2ConsoleWrapVisible,
+} from './ec2-job-console.js';
 
 const FDS_STATUS_LABELS = {
   pending: '待機中',
@@ -106,6 +112,7 @@ function applyFdsLaunchResult(launchData) {
   traceFdsJobProgress(launchData.job);
   renderFdsJobsList();
   renderFdsJobDetail();
+  refreshFdsJobConsole().catch(() => {});
 }
 
 /** Formats ISO time for log lines. */
@@ -143,12 +150,72 @@ function renderFdsRunLog() {
   pre.scrollTop = pre.scrollHeight;
 }
 
+/** Renders EC2 console in the form trace panel and job detail panel. */
+function renderFdsTraceConsole() {
+  const wrap = document.getElementById('fds-instance-console-wrap');
+  const pre = document.getElementById('fds-instance-console');
+  const showTrace =
+    Boolean(fdsRunTraceJobId) &&
+    (fdsSelectedJobDetail?.id === fdsRunTraceJobId || fdsSelectedJobDetail?.ec2_instance_id);
+  setEc2ConsoleWrapVisible(wrap, showTrace && Boolean(fdsSelectedJobDetail?.ec2_instance_id || fdsConsoleOutput));
+  if (showTrace) {
+    renderEc2ConsolePre(pre, fdsConsoleOutput);
+  }
+}
+
+/** Renders EC2 console block HTML for the job detail sidebar. */
+function buildFdsJobConsoleSection(job) {
+  if (!job?.ec2_instance_id) return '';
+  const updatedHint = fdsConsoleUpdatedAt
+    ? `<p class="hint fds-job-detail-updated">コンソール更新: ${formatDateTime(new Date(fdsConsoleUpdatedAt).toISOString())}</p>`
+    : '';
+  return `
+    <div class="fds-job-detail-console">
+      <h4 class="fds-job-detail-console-heading">EC2 コンソール出力</h4>
+      <pre class="fds-run-log fds-instance-console fds-job-detail-console-pre" aria-live="polite">${escapeHtml(
+        fdsConsoleOutput.trim()
+          ? fdsConsoleOutput
+          : '（まだコンソール出力がありません。起動直後は数分かかることがあります）'
+      )}</pre>
+      ${updatedHint}
+    </div>
+  `;
+}
+
+/** Fetches live EC2 console output for the selected job. */
+async function refreshFdsJobConsole() {
+  const job = fdsSelectedJobDetail;
+  if (!job?.ec2_instance_id) {
+    fdsConsoleOutput = '';
+    fdsConsoleUpdatedAt = null;
+    renderFdsTraceConsole();
+    return;
+  }
+
+  try {
+    const data = await fetchEc2JobConsole(apiRequest, FDS_CONSOLE_API_PREFIX, job.id);
+    fdsConsoleOutput = data.output;
+    fdsConsoleUpdatedAt = Date.now();
+    renderFdsTraceConsole();
+    const mount = document.getElementById('fds-job-detail-mount');
+    const detailPre = mount?.querySelector('.fds-job-detail-console-pre');
+    if (detailPre && job.id === fdsSelectedJobId) {
+      renderEc2ConsolePre(detailPre, fdsConsoleOutput);
+    }
+  } catch {
+    // Console fetch failures are non-fatal during polling.
+  }
+}
+
 /** Clears the run log and optional trace target. */
 function clearFdsRunLog() {
   fdsRunLogLines.length = 0;
   fdsRunTraceJobId = null;
   fdsLastTraceSnapshot = null;
+  fdsConsoleOutput = '';
+  fdsConsoleUpdatedAt = null;
   renderFdsRunLog();
+  renderFdsTraceConsole();
 }
 
 /** Merges server step objects into the run log. */
@@ -218,6 +285,9 @@ let fdsListLoading = false;
 let fdsRunTraceJobId = null;
 let fdsLastTraceSnapshot = null;
 const fdsRunLogLines = [];
+let fdsConsoleOutput = '';
+let fdsConsoleUpdatedAt = null;
+const FDS_CONSOLE_API_PREFIX = 'admin/fds-jobs';
 
 /** Escapes HTML special characters. */
 function escapeHtml(str) {
@@ -357,6 +427,10 @@ function upsertFdsJobInList(job) {
 
 /** Selects a job and loads its live detail. */
 async function selectFdsJob(jobId) {
+  if (fdsSelectedJobId !== jobId) {
+    fdsConsoleOutput = '';
+    fdsConsoleUpdatedAt = null;
+  }
   fdsSelectedJobId = jobId;
   renderFdsJobsList();
   await refreshFdsJobDetail();
@@ -430,6 +504,29 @@ function renderFdsJobsList() {
   });
 }
 
+/** Builds simulation progress HTML for a job row. */
+function buildFdsJobProgressHtml(job) {
+  const pct = job.progress_pct;
+  if (pct == null) return '';
+  const clamped = Math.min(100, Math.max(0, Number(pct)));
+  let label;
+  if (job.progress_phase === 'finalizing') {
+    label = '結果を保存中…（計算完了）';
+  } else if (job.t_end_seconds != null && job.simulation_time_seconds != null) {
+    label = `計算中 ${Math.round(clamped)}%（${job.simulation_time_seconds} / ${job.t_end_seconds} s）`;
+  } else {
+    label = `計算中 ${Math.round(clamped)}%`;
+  }
+  return `
+    <div class="fds-job-progress">
+      <p class="hint">${escapeHtml(label)}</p>
+      <div class="progress-bar" role="progressbar" aria-valuenow="${clamped}" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar-fill" style="width: ${clamped}%"></div>
+      </div>
+    </div>
+  `;
+}
+
 /** Renders the selected job detail panel. */
 function renderFdsJobDetail() {
   const mount = document.getElementById('fds-job-detail-mount');
@@ -461,6 +558,7 @@ function renderFdsJobDetail() {
     <h3>${escapeHtml(job.title)}</h3>
     <p><span class="status-badge status-${job.status}">${FDS_STATUS_LABELS[job.status] ?? job.status}</span></p>
     ${job.status_message ? `<p class="hint">${escapeHtml(job.status_message)}</p>` : ''}
+    ${buildFdsJobProgressHtml(job)}
     <dl class="fds-job-detail-meta">
       <dt>ジョブ ID</dt>
       <dd><code>${escapeHtml(job.id)}</code></dd>
@@ -483,6 +581,7 @@ function renderFdsJobDetail() {
       <dd>${formatDateTime(job.created_at)}</dd>
     </dl>
     <div class="fds-job-detail-dl fds-job-actions">${buildFdsJobActions(job)}</div>
+    ${buildFdsJobConsoleSection(job)}
     ${
       fdsDetailUpdatedAt
         ? `<p class="hint fds-job-detail-updated">最終更新: ${formatDateTime(new Date(fdsDetailUpdatedAt).toISOString())}</p>`
@@ -502,6 +601,11 @@ function renderFdsJobDetail() {
       handleFdsRerun(btn.dataset.id);
     });
   });
+
+  const detailPre = mount.querySelector('.fds-job-detail-console-pre');
+  if (detailPre && fdsConsoleOutput) {
+    renderEc2ConsolePre(detailPre, fdsConsoleOutput);
+  }
 }
 
 /** Fetches all jobs and updates the list. */
@@ -551,6 +655,9 @@ async function refreshFdsJobDetail() {
     }
     renderFdsJobDetail();
     syncFdsLivePolling();
+    if (job.ec2_instance_id) {
+      await refreshFdsJobConsole();
+    }
   } catch (err) {
     const mount = document.getElementById('fds-job-detail-mount');
     if (mount) {
@@ -571,6 +678,9 @@ async function tickFdsLive() {
   const tasks = [refreshFdsJobList({ silent: true })];
   if (fdsSelectedJobId) {
     tasks.push(refreshFdsJobDetail());
+    if (fdsSelectedJobDetail && ec2ConsolePollActive(fdsSelectedJobDetail)) {
+      tasks.push(refreshFdsJobConsole());
+    }
   }
   await Promise.allSettled(tasks);
 }
@@ -584,8 +694,9 @@ function syncFdsLivePolling() {
   }
 
   const detailActive = fdsSelectedJobDetail && fdsJobNeedsLiveUpdates(fdsSelectedJobDetail);
+  const consoleActive = fdsSelectedJobDetail && ec2ConsolePollActive(fdsSelectedJobDetail);
   const anyActive = fdsJobs.some(fdsJobNeedsLiveUpdates);
-  if (!detailActive && !anyActive) {
+  if (!detailActive && !anyActive && !consoleActive) {
     stopFdsLivePolling();
     return;
   }

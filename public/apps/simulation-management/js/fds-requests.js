@@ -7,6 +7,7 @@ import {
 } from '../../simulation-request/js/fds-request-chat.js';
 
 const STATUS_LABELS = {
+  format_failed: '形式審査で却下',
   primary_reviewing: '一次審査中',
   primary_failed: '一次審査：指摘あり',
   primary_error: '一次審査エラー',
@@ -44,14 +45,25 @@ function destroyAllAdminChats() {
 }
 
 /** Mounts chat for expanded admin queue items. */
-function mountExpandedAdminChats(rows) {
-  destroyAllAdminChats();
+function mountExpandedAdminChats(rows, { preserveExisting = false } = {}) {
+  const activeIds = new Set();
+
   for (const row of rows) {
     if (!expandedAdminRequestIds.has(row.id) || !isFdsRequestChatAvailable(row.status)) continue;
+    activeIds.add(row.id);
+
     const mount = document.querySelector(
       `.fds-request-admin-chat-mount[data-request-id="${CSS.escape(row.id)}"]`
     );
     if (!mount) continue;
+
+    if (preserveExisting && adminChatDestroyers.has(row.id) && mount.querySelector('.fds-chat-panel')) {
+      continue;
+    }
+
+    adminChatDestroyers.get(row.id)?.();
+    adminChatDestroyers.delete(row.id);
+
     const destroy = mountFdsRequestChat(mount, {
       requestId: row.id,
       apiPrefix: 'admin/fds-requests',
@@ -61,6 +73,116 @@ function mountExpandedAdminChats(rows) {
     });
     adminChatDestroyers.set(row.id, destroy);
   }
+
+  for (const [id, destroy] of adminChatDestroyers.entries()) {
+    if (!activeIds.has(id)) {
+      destroy?.();
+      adminChatDestroyers.delete(id);
+    }
+  }
+}
+
+/** Returns whether the admin queue DOM can be updated in place. */
+function canUpdateAdminRequestQueueInPlace(rows) {
+  const mount = document.getElementById('fds-requests-queue-mount');
+  const list = mount?.querySelector('.fds-request-admin-list');
+  if (!list) return false;
+
+  const existingIds = [...list.querySelectorAll('.fds-request-admin-item[data-request-id]')].map((el) =>
+    el.getAttribute('data-request-id')
+  );
+  const rowIds = rows.map((row) => row.id);
+  if (existingIds.length !== rowIds.length) return false;
+  return existingIds.every((id, index) => id === rowIds[index]);
+}
+
+/** Replaces admin detail panel while preserving mounted chat DOM. */
+function replaceAdminRequestDetailPreservingChat(listItem, row) {
+  const expanded = expandedAdminRequestIds.has(row.id);
+  const detail = listItem.querySelector('.fds-request-admin-detail');
+  const existingChatMount = detail?.querySelector('.fds-request-admin-chat-mount');
+  const chatPreserve =
+    existingChatMount && adminChatDestroyers.has(row.id) ? existingChatMount : null;
+
+  if (!expanded) {
+    detail?.remove();
+    if (adminChatDestroyers.has(row.id)) {
+      adminChatDestroyers.get(row.id)?.();
+      adminChatDestroyers.delete(row.id);
+    }
+    return;
+  }
+
+  const tmp = document.createElement('div');
+  tmp.innerHTML = renderAdminRequestDetail(row);
+  const newDetail = tmp.firstElementChild;
+  if (!newDetail) return;
+
+  if (chatPreserve) {
+    const newChatMount = newDetail.querySelector('.fds-request-admin-chat-mount');
+    if (newChatMount) {
+      newChatMount.replaceWith(chatPreserve);
+    }
+  }
+
+  if (detail) {
+    detail.replaceWith(newDetail);
+    return;
+  }
+
+  listItem.querySelector('.fds-request-admin-toggle')?.insertAdjacentElement('afterend', newDetail);
+}
+
+/** Binds admin queue action buttons. */
+function bindAdminRequestQueueActions(mount) {
+  mount.querySelectorAll('.fds-request-admin-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('[data-request-id]')?.getAttribute('data-request-id');
+      if (id) toggleAdminRequestExpanded(id);
+    });
+  });
+
+  mount.querySelectorAll('[data-action="approve"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleApprove(btn);
+    });
+  });
+  mount.querySelectorAll('[data-action="reject"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleReject(btn);
+    });
+  });
+}
+
+/** Updates admin queue rows without remounting chat panels. */
+function updateAdminRequestQueueInPlace(rows) {
+  const mount = document.getElementById('fds-requests-queue-mount');
+  if (!mount) return;
+
+  for (const row of rows) {
+    const listItem = mount.querySelector(
+      `.fds-request-admin-item[data-request-id="${CSS.escape(row.id)}"]`
+    );
+    if (!listItem) return;
+
+    const expanded = expandedAdminRequestIds.has(row.id);
+    listItem.className = `fds-request-admin-item${expanded ? ' is-expanded' : ''}`;
+
+    const statusEl = listItem.querySelector('.fds-request-status');
+    if (statusEl) {
+      statusEl.textContent = STATUS_LABELS[row.status] ?? row.status;
+    }
+
+    const toggle = listItem.querySelector('.fds-request-admin-toggle');
+    toggle?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+
+    replaceAdminRequestDetailPreservingChat(listItem, row);
+  }
+
+  bindAdminRequestQueueActions(mount);
+  mountExpandedAdminChats(rows, { preserveExisting: true });
 }
 
 /** Toggles expanded detail for an admin queue item. */
@@ -124,6 +246,13 @@ export async function renderFdsRequestQueue() {
       return;
     }
 
+    if (canUpdateAdminRequestQueueInPlace(rows)) {
+      updateAdminRequestQueueInPlace(rows);
+      return;
+    }
+
+    destroyAllAdminChats();
+
     mount.innerHTML = `
       <ul class="fds-request-admin-list">
         ${rows
@@ -148,26 +277,7 @@ export async function renderFdsRequestQueue() {
       </ul>
     `;
 
-    mount.querySelectorAll('.fds-request-admin-toggle').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.closest('[data-request-id]')?.getAttribute('data-request-id');
-        if (id) toggleAdminRequestExpanded(id);
-      });
-    });
-
-    mount.querySelectorAll('[data-action="approve"]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleApprove(btn);
-      });
-    });
-    mount.querySelectorAll('[data-action="reject"]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleReject(btn);
-      });
-    });
-
+    bindAdminRequestQueueActions(mount);
     mountExpandedAdminChats(rows);
   } catch (err) {
     mount.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message ?? '読み込みに失敗しました')}</p>`;

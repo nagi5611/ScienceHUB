@@ -98,9 +98,11 @@ export function buildFdsUserDataScript(options: {
   inputFilename: string;
   maxRuntimeHours: number;
   mpiProcesses: number;
+  tEndSeconds?: number | null;
 }): string {
   const fdsBinary = "/opt/fds/bin/fds";
   const maxRuntimeSec = options.maxRuntimeHours * 3600;
+  const progressIntervalSec = 30;
 
   return `#!/bin/bash
 set -euo pipefail
@@ -113,6 +115,7 @@ CALLBACK_URL="${options.callbackUrl}"
 CALLBACK_SECRET="${options.callbackSecret}"
 MAX_RUNTIME_SEC=${maxRuntimeSec}
 MPI_PROCESSES=${Math.max(1, Math.floor(options.mpiProcesses))}
+PROGRESS_INTERVAL_SEC=${progressIntervalSec}
 FDS_BIN="${fdsBinary}"
 FDS_MPI_BIN="/opt/fds/lib/fds_ompi_gnu_linux"
 MPIEXEC="/usr/lib64/openmpi/bin/mpiexec"
@@ -127,6 +130,24 @@ notify() {
     || true
 }
 
+notify_progress() {
+  local sim_time="$1"
+  local phase="$2"
+  curl -fsS -X POST "$CALLBACK_URL" \\
+    -H "Content-Type: application/json" \\
+    -H "Authorization: Bearer $CALLBACK_SECRET" \\
+    -d "$(printf '{"job_id":"%s","status":"progress","simulation_time":%s,"phase":"%s"}' "$JOB_ID" "$sim_time" "$phase")" \\
+    || true
+}
+
+latest_simulation_time() {
+  if [ ! -f fds.stdout.log ]; then
+    echo ""
+    return
+  fi
+  grep -oE 'Simulation Time:[[:space:]]*[0-9.]+' fds.stdout.log 2>/dev/null | tail -1 | grep -oE '[0-9.]+$' || true
+}
+
 upload_log() {
   if [ -f /var/log/sciencehub-fds-runner.log ]; then
     curl -fsS -X PUT -T /var/log/sciencehub-fds-runner.log "${options.logUrl}" || true
@@ -135,13 +156,15 @@ upload_log() {
 
 build_results_zip() {
   rm -f results.zip
-  # Smokeview の smoke (.s3d)・スライス (.sf) などを漏らさないためワークディレクトリ一式を ZIP
   zip -qr results.zip . -x "results.zip"
   echo "results.zip contents:"
   unzip -l results.zip | tail -n +4 | head -n 40 || true
 }
 
 cleanup() {
+  if [ -n "\${PROGRESS_PID:-}" ]; then
+    kill "\$PROGRESS_PID" 2>/dev/null || true
+  fi
   upload_log
   shutdown -h now
 }
@@ -170,9 +193,26 @@ else
   FDS_CMD=( "\$FDS_BIN" "\$INPUT_FILE" )
 fi
 
-# timeout は PATH 上の実行ファイルしか起動できない（シェル関数は不可）
-timeout --signal=TERM "\$MAX_RUNTIME_SEC" "\${FDS_CMD[@]}" > fds.stdout.log 2> fds.stderr.log || {
+LAST_REPORTED_SIM_TIME=""
+(
+  while true; do
+    sim_time="$(latest_simulation_time)"
+    if [ -n "\$sim_time" ] && [ "\$sim_time" != "\$LAST_REPORTED_SIM_TIME" ]; then
+      notify_progress "\$sim_time" "computing"
+      LAST_REPORTED_SIM_TIME="\$sim_time"
+    fi
+    sleep "\$PROGRESS_INTERVAL_SEC"
+  done
+) &
+PROGRESS_PID=$!
+
+timeout --signal=TERM "\$MAX_RUNTIME_SEC" "\${FDS_CMD[@]}" > fds.stdout.log 2> fds.stderr.log &
+FDS_PID=$!
+wait "\$FDS_PID" || {
   code=$?
+  kill "\$PROGRESS_PID" 2>/dev/null || true
+  wait "\$PROGRESS_PID" 2>/dev/null || true
+  PROGRESS_PID=""
   if [ -f fds.stderr.log ]; then cat fds.stderr.log >&2 || true; fi
   build_results_zip
   if [ -f results.zip ]; then
@@ -185,6 +225,15 @@ timeout --signal=TERM "\$MAX_RUNTIME_SEC" "\${FDS_CMD[@]}" > fds.stdout.log 2> f
   notify "failed" "FDS の実行に失敗しました (exit $code)"
   exit "$code"
 }
+
+kill "\$PROGRESS_PID" 2>/dev/null || true
+wait "\$PROGRESS_PID" 2>/dev/null || true
+PROGRESS_PID=""
+
+final_sim_time="$(latest_simulation_time)"
+if [ -n "\$final_sim_time" ]; then
+  notify_progress "\$final_sim_time" "finalizing"
+fi
 
 build_results_zip
 curl -fsS -X PUT -T results.zip "${options.outputUrl}"
@@ -265,6 +314,7 @@ export async function launchFdsJobOnEc2(
     inputFilename: job.input_filename,
     maxRuntimeHours,
     mpiProcesses,
+    tEndSeconds: job.t_end_seconds,
   });
 
   const imageId = env.AWS_EC2_FDS_AMI_ID!.trim();

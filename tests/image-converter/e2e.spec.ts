@@ -27,8 +27,7 @@ test.beforeAll(async () => {
 test.describe("画像変換 E2E", () => {
   test("ループ1: 形式セレクト UI と WebP 変換", async ({ page }) => {
     await openImageConverter(page);
-    const optionCount = await page.locator("#format-select option").count();
-    expect(optionCount).toBeGreaterThanOrEqual(8);
+    await expect(page.locator("#format-select option[value='webp']")).toHaveCount(1);
     await expect(page.locator("#format-select")).toBeVisible();
     await expect(page.locator("#quality-field")).toBeHidden();
     await expect(page.locator("#ico-sizes-field")).toBeHidden();
@@ -56,6 +55,15 @@ test.describe("画像変換 E2E", () => {
     await page.locator("#drop-zone").dispatchEvent("drop", { dataTransfer });
     await page.waitForSelector(".icv-file");
     await expect(page.locator(".icv-file-name")).toHaveText("dropped.jpg");
+  });
+
+  test("ループ2: WebP 入力を PNG に変換", async ({ page }) => {
+    await openImageConverter(page);
+    await addFilesViaInput(page, ["sample.webp"]);
+    await selectOutputFormat(page, "png");
+    await page.locator("#convert-btn").click();
+    await waitForConversion(page);
+    await expect(page.locator(".icv-result-name")).toContainText(".png");
   });
 
   test("ループ2: BMP・GIF・SVG を PNG に変換", async ({ page }) => {

@@ -13,6 +13,7 @@
         "ec2:TerminateInstances",
         "ec2:DescribeInstances",
         "ec2:DescribeImages",
+        "ec2:GetConsoleOutput",
         "ec2:CreateTags"
       ],
       "Resource": "*"
