@@ -1,5 +1,5 @@
 /**
- * Luna — Cloudflare AI / OpenAI 互換クライアント
+ * Runa — Cloudflare AI / OpenAI 互換クライアント
  * - Workers AI 等: /chat/completions
  * - openai/gpt-5.6-luna 等: /responses（Chat Completions 非対応）
  */
@@ -52,26 +52,26 @@ function resolveAccountId(env: Env): string {
 }
 
 function resolveBaseUrl(env: Env): string {
-  const raw = env.LUNA_OPENAI_BASE_URL?.trim();
+  const raw = env.RUNA_OPENAI_BASE_URL?.trim();
   if (raw) return raw.replace(/\/+$/, "");
 
   const accountId = resolveAccountId(env);
   if (!accountId) {
     throw new Error(
-      "LUNA_OPENAI_BASE_URL または CLOUDFLARE_ACCOUNT_ID（または R2_ACCOUNT_ID）が未設定です"
+      "RUNA_OPENAI_BASE_URL または CLOUDFLARE_ACCOUNT_ID（または R2_ACCOUNT_ID）が未設定です"
     );
   }
   return `${CLOUDFLARE_AI_V1_PREFIX}${accountId}/ai/v1`;
 }
 
 function resolveGatewayId(env: Env): string | null {
-  const gateway = env.LUNA_AI_GATEWAY_ID?.trim();
+  const gateway = env.RUNA_AI_GATEWAY_ID?.trim();
   return gateway || null;
 }
 
 /** Cloudflare AI 向けにモデル ID を正規化 */
-export function resolveLunaModel(env: Env): string {
-  const model = env.LUNA_MODEL?.trim() || "openai/gpt-5.6-luna";
+export function resolveRunaModel(env: Env): string {
+  const model = env.RUNA_MODEL?.trim() || "openai/gpt-5.6-luna";
   if (model.includes("/")) return model;
   if (/^gpt-5\.6-/i.test(model)) return `openai/${model}`;
   if (model.startsWith("@cf/")) return model;
@@ -80,10 +80,10 @@ export function resolveLunaModel(env: Env): string {
 
 function resolveApiKey(env: Env): string {
   const key =
-    env.LUNA_OPENAI_API_KEY?.trim() || env.CLOUDFLARE_API_TOKEN?.trim();
+    env.RUNA_OPENAI_API_KEY?.trim() || env.CLOUDFLARE_API_TOKEN?.trim();
   if (!key) {
     throw new Error(
-      "LUNA_OPENAI_API_KEY または CLOUDFLARE_API_TOKEN が未設定です"
+      "RUNA_OPENAI_API_KEY または CLOUDFLARE_API_TOKEN が未設定です"
     );
   }
   return key;
@@ -116,7 +116,7 @@ function extractApiError(body: unknown, status: number): string {
         return (
           "openai/gpt-5.6-luna には AI Gateway の認証（Unified Billing）が必要です。" +
           "Cloudflare ダッシュボードで AI Gateway の認証を有効にするか、" +
-          "LUNA_MODEL=@cf/moonshotai/kimi-k2.6 など Chat Completions 対応モデルに変更してください。"
+          "RUNA_MODEL=@cf/moonshotai/kimi-k2.6 など Chat Completions 対応モデルに変更してください。"
         );
       }
       return message;
@@ -337,12 +337,12 @@ async function requestChatCompletionsApi(
 }
 
 /** 非ストリーミング completion（ツールループ用） */
-export async function lunaChatCompletion(
+export async function runaChatCompletion(
   env: Env,
   messages: ChatMessage[],
   tools: ToolDefinition[]
 ): Promise<CompletionResult> {
-  const model = resolveLunaModel(env);
+  const model = resolveRunaModel(env);
   if (usesResponsesApi(model)) {
     return await requestResponsesApi(env, model, messages, tools);
   }

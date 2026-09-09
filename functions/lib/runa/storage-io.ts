@@ -1,5 +1,5 @@
 /**
- * Luna — ストレージファイル読み書き（テキスト）
+ * Runa — ストレージファイル読み書き（テキスト）
  */
 
 import { getFiles } from "../r2";
@@ -31,9 +31,9 @@ import {
 } from "../storage/upload";
 
 /** エージェントが一度に読める最大バイト数 */
-export const LUNA_MAX_READ_BYTES = 512 * 1024;
+export const RUNA_MAX_READ_BYTES = 512 * 1024;
 /** エージェントが一度に書ける最大バイト数 */
-export const LUNA_MAX_WRITE_BYTES = 512 * 1024;
+export const RUNA_MAX_WRITE_BYTES = 512 * 1024;
 
 export interface ReadFileResult {
   path: string;
@@ -65,12 +65,12 @@ function parentDirFromFilePath(relativePath: string): {
 }
 
 /** テキストファイルを読み込む */
-export async function readStorageFileForLuna(
+export async function readStorageFileForRuna(
   env: Env,
   db: D1Database,
   user: SessionUser,
   logicalPath: string,
-  maxBytes = LUNA_MAX_READ_BYTES
+  maxBytes = RUNA_MAX_READ_BYTES
 ): Promise<ReadFileResult> {
   const parsed = parseLogicalPath(logicalPath);
   if (!parsed || !parsed.relativePath) {
@@ -140,7 +140,7 @@ export async function readStorageFileForLuna(
 }
 
 /** テキストをファイルに書き込む（新規作成または上書き） */
-export async function writeStorageFileForLuna(
+export async function writeStorageFileForRuna(
   env: Env,
   db: D1Database,
   user: SessionUser,
@@ -160,9 +160,9 @@ export async function writeStorageFileForLuna(
 
   const encoder = new TextEncoder();
   const bytes = encoder.encode(content);
-  if (bytes.byteLength > LUNA_MAX_WRITE_BYTES) {
+  if (bytes.byteLength > RUNA_MAX_WRITE_BYTES) {
     throw new Error(
-      `書き込み上限（${Math.round(LUNA_MAX_WRITE_BYTES / 1024)}KB）を超えています`
+      `書き込み上限（${Math.round(RUNA_MAX_WRITE_BYTES / 1024)}KB）を超えています`
     );
   }
   if (bytes.byteLength === 0) {
@@ -273,7 +273,7 @@ export async function writeStorageFileForLuna(
   );
 
   if (init.mode !== "simple") {
-    throw new Error("大きなファイルは Luna からは書き込めません");
+    throw new Error("大きなファイルは Runa からは書き込めません");
   }
 
   const arrayBuffer = bytes.buffer.slice(

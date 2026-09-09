@@ -1,5 +1,5 @@
 /**
- * Luna — 各アプリ連携ツール（ユーザー権限と同じ）
+ * Runa — 各アプリ連携ツール（ユーザー権限と同じ）
  */
 
 import type { Env, SessionUser } from "../types";
@@ -44,7 +44,7 @@ import {
   parseServerOutputFormat,
 } from "../image-converter/cloudflare-images";
 import type { ToolDefinition } from "./openai";
-import type { LunaFileItem, ToolRunResult } from "./tools";
+import type { RunaFileItem, ToolRunResult } from "./tools";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
 const SIM_APP_SLUG = "simulation-request";
@@ -343,7 +343,7 @@ async function runHubListApps(
     }
   }
   lines.push(
-    "\nブラウザ内処理のみのアプリ（Luna では実行不可、リンク案内）: image-editor, uvcreator, tennis-motion, video-editor, video-converter, audio-editor, audio-converter"
+    "\nブラウザ内処理のみのアプリ（Runa では実行不可、リンク案内）: image-editor, uvcreator, tennis-motion, video-editor, video-converter, audio-editor, audio-converter"
   );
   return { text: lines.join("\n"), files: [] };
 }
@@ -724,7 +724,7 @@ async function runImageConvert(
     destPath = uploaded.path;
   }
 
-  const item: LunaFileItem = {
+  const item: RunaFileItem = {
     name: destPath.split("/").pop() ?? destPath,
     path: destPath,
     type: "file",

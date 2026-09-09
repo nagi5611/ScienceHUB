@@ -1,42 +1,42 @@
 /**
- * Luna — エージェントループ（ツール呼び出し + SSE）
+ * Runa — エージェントループ（ツール呼び出し + SSE）
  */
 
 import type { Env, SessionUser } from "../types";
 import { buildVisibleRoots } from "../storage/list";
 import { searchStorageFiles } from "../storage/search";
-import { LUNA_SYSTEM_PROMPT } from "./prompts";
+import { RUNA_SYSTEM_PROMPT } from "./prompts";
 import {
-  lunaChatCompletion,
+  runaChatCompletion,
   type ChatMessage,
   type ToolCall,
 } from "./openai";
 import {
-  executeLunaTool,
-  LUNA_TOOL_DEFINITIONS,
-  type LunaFileItem,
+  executeRunaTool,
+  RUNA_TOOL_DEFINITIONS,
+  type RunaFileItem,
 } from "./tools";
 import { executeHubTool, HUB_TOOL_DEFINITIONS, isHubTool } from "./hub-tools";
 import {
-  assertLunaDailyTurnLimit,
-  buildLunaChatHistory,
-  incrementLunaDailyTurn,
-  insertLunaMessage,
+  assertRunaDailyTurnLimit,
+  buildRunaChatHistory,
+  incrementRunaDailyTurn,
+  insertRunaMessage,
 } from "./messages";
 
-const ALL_LUNA_TOOLS = [...LUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
+const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
 const DEFAULT_MAX_TOOL_ROUNDS = 12;
 
-export type LunaSseSend = (event: string, data: unknown) => void;
+export type RunaSseSend = (event: string, data: unknown) => void;
 
-export interface LunaChatResult {
+export interface RunaChatResult {
   message: string;
-  files: LunaFileItem[];
+  files: RunaFileItem[];
 }
 
 function resolveMaxToolRounds(env: Env): number {
-  const parsed = Number.parseInt(env.LUNA_MAX_TOOL_ROUNDS ?? "", 10);
+  const parsed = Number.parseInt(env.RUNA_MAX_TOOL_ROUNDS ?? "", 10);
   if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_TOOL_ROUNDS;
   return Math.min(16, parsed);
 }
@@ -70,7 +70,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   image_convert_storage: "画像を変換しています…",
 };
 
-function streamTextDeltas(send: LunaSseSend, text: string): void {
+function streamTextDeltas(send: RunaSseSend, text: string): void {
   const chunkSize = 24;
   for (let i = 0; i < text.length; i += chunkSize) {
     send("delta", { text: text.slice(i, i + chunkSize) });
@@ -78,23 +78,23 @@ function streamTextDeltas(send: LunaSseSend, text: string): void {
 }
 
 /** ユーザーメッセージを処理してアシスタント応答を返す */
-export async function runLunaChat(
+export async function runRunaChat(
   env: Env,
   db: D1Database,
   user: SessionUser,
   message: string,
-  send: LunaSseSend
-): Promise<LunaChatResult> {
+  send: RunaSseSend
+): Promise<RunaChatResult> {
   const trimmed = message.trim();
   if (!trimmed) {
     throw new Error("メッセージを入力してください");
   }
 
-  await assertLunaDailyTurnLimit(db, user.id, env);
-  await insertLunaMessage(db, user.id, "user", trimmed);
-  await incrementLunaDailyTurn(db, user.id);
+  await assertRunaDailyTurnLimit(db, user.id, env);
+  await insertRunaMessage(db, user.id, "user", trimmed);
+  await incrementRunaDailyTurn(db, user.id);
 
-  const history = await buildLunaChatHistory(db, user.id, 20);
+  const history = await buildRunaChatHistory(db, user.id, 20);
   let rootsHint = "（ストレージ未初期化の可能性があります）";
   try {
     const roots = await buildVisibleRoots(
@@ -113,7 +113,7 @@ export async function runLunaChat(
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${LUNA_SYSTEM_PROMPT}\n\n## このユーザーがアクセスできるルート\n${rootsHint}\n\n個人ルートは u/${user.username} です。`,
+      content: `${RUNA_SYSTEM_PROMPT}\n\n## このユーザーがアクセスできるルート\n${rootsHint}\n\n個人ルートは u/${user.username} です。`,
     },
     ...history.map((h) => ({
       role: h.role,
@@ -121,14 +121,14 @@ export async function runLunaChat(
     })),
   ];
 
-  const collectedFiles: LunaFileItem[] = [];
+  const collectedFiles: RunaFileItem[] = [];
   const maxRounds = resolveMaxToolRounds(env);
 
   for (let round = 0; round < maxRounds; round++) {
-    const completion = await lunaChatCompletion(
+    const completion = await runaChatCompletion(
       env,
       messages,
-      ALL_LUNA_TOOLS
+      ALL_RUNA_TOOLS
     );
 
     if (completion.toolCalls.length > 0) {
@@ -155,7 +155,7 @@ export async function runLunaChat(
       send("files", { items: uniqueFiles });
     }
 
-    await insertLunaMessage(db, user.id, "assistant", reply, uniqueFiles);
+    await insertRunaMessage(db, user.id, "assistant", reply, uniqueFiles);
 
     return { message: reply, files: uniqueFiles };
   }
@@ -163,7 +163,7 @@ export async function runLunaChat(
   const fallback =
     "ツール呼び出しの上限に達しました。もう少し具体的な指示をお試しください。";
   streamTextDeltas(send, fallback);
-  await insertLunaMessage(db, user.id, "assistant", fallback, collectedFiles);
+  await insertRunaMessage(db, user.id, "assistant", fallback, collectedFiles);
   return { message: fallback, files: collectedFiles };
 }
 
@@ -173,8 +173,8 @@ async function handleToolCall(
   user: SessionUser,
   call: ToolCall,
   messages: ChatMessage[],
-  collectedFiles: LunaFileItem[],
-  send: LunaSseSend
+  collectedFiles: RunaFileItem[],
+  send: RunaSseSend
 ): Promise<void> {
   const name = call.function.name;
   const label = TOOL_STATUS_LABELS[name] ?? `${name} を実行中…`;
@@ -182,7 +182,7 @@ async function handleToolCall(
 
   const result = isHubTool(name)
     ? await executeHubTool(env, db, user, name, call.function.arguments)
-    : await executeLunaTool(
+    : await executeRunaTool(
         env,
         db,
         user,
@@ -205,9 +205,9 @@ async function handleToolCall(
   });
 }
 
-function dedupeFiles(files: LunaFileItem[]): LunaFileItem[] {
+function dedupeFiles(files: RunaFileItem[]): RunaFileItem[] {
   const seen = new Set<string>();
-  const out: LunaFileItem[] = [];
+  const out: RunaFileItem[] = [];
   for (const f of files) {
     if (seen.has(f.path)) continue;
     seen.add(f.path);
@@ -222,7 +222,7 @@ export async function listRecentFilesForUser(
   db: D1Database,
   user: SessionUser,
   limit = 20
-): Promise<LunaFileItem[]> {
+): Promise<RunaFileItem[]> {
   const roots = await buildVisibleRoots(
     db,
     user.id,
@@ -231,7 +231,7 @@ export async function listRecentFilesForUser(
   );
   const capped = Math.min(50, Math.max(1, limit));
   const updatedFrom = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const all: LunaFileItem[] = [];
+  const all: RunaFileItem[] = [];
 
   for (const root of roots) {
     const rootType = root.type === "user" ? "user" : "group";

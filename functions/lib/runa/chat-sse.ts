@@ -1,14 +1,14 @@
 /**
- * Luna — チャット SSE ヘルパー
+ * Runa — チャット SSE ヘルパー
  */
 
-import type { LunaChatResult } from "./agent";
+import type { RunaChatResult } from "./agent";
 
-export type LunaSseSend = (event: string, data: unknown) => void;
+export type RunaSseSend = (event: string, data: unknown) => void;
 
 /** SSE レスポンス用ストリームを生成 */
-export function createLunaSseResponse(
-  run: (send: LunaSseSend) => Promise<LunaChatResult | null>
+export function createRunaSseResponse(
+  run: (send: RunaSseSend) => Promise<RunaChatResult | null>
 ): Response {
   const encoder = new TextEncoder();
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -19,7 +19,7 @@ export function createLunaSseResponse(
     },
   });
 
-  const send: LunaSseSend = (event, data) => {
+  const send: RunaSseSend = (event, data) => {
     if (!streamController) return;
     streamController.enqueue(
       encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)

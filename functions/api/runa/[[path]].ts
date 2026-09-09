@@ -1,17 +1,17 @@
 /**
- * Luna エージェント API
- * GET  /api/luna/messages
- * GET  /api/luna/recent-files
- * POST /api/luna/chat?stream=1
+ * Runa エージェント API
+ * GET  /api/runa/messages
+ * GET  /api/runa/recent-files
+ * POST /api/runa/chat?stream=1
  */
 
 import type { Env } from "../../lib/types";
 import { jsonError } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { requireUser } from "../../lib/auth";
-import { createLunaSseResponse } from "../../lib/luna/chat-sse";
-import { listLunaMessages } from "../../lib/luna/messages";
-import { runLunaChat, listRecentFilesForUser } from "../../lib/luna/agent";
+import { createRunaSseResponse } from "../../lib/runa/chat-sse";
+import { listRunaMessages } from "../../lib/runa/messages";
+import { runRunaChat, listRecentFilesForUser } from "../../lib/runa/agent";
 
 function parseRoute(path: string | string[] | undefined): string[] {
   if (Array.isArray(path)) return path.filter(Boolean);
@@ -35,7 +35,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         100,
         Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "50", 10) || 50)
       );
-      const messages = await listLunaMessages(db, auth.id, limit);
+      const messages = await listRunaMessages(db, auth.id, limit);
       return Response.json({ messages });
     }
 
@@ -76,13 +76,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const stream = url.searchParams.get("stream") === "1";
 
       if (stream) {
-        return createLunaSseResponse(async (send) => {
-          return await runLunaChat(env, db, auth, message, send);
+        return createRunaSseResponse(async (send) => {
+          return await runRunaChat(env, db, auth, message, send);
         });
       }
 
       const chunks: string[] = [];
-      const result = await runLunaChat(env, db, auth, message, (event, data) => {
+      const result = await runRunaChat(env, db, auth, message, (event, data) => {
         if (event === "delta" && data && typeof data === "object" && "text" in data) {
           chunks.push(String((data as { text: string }).text));
         }
