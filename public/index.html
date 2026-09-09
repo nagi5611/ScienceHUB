@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="/css/hub-icons.css">
   <link rel="stylesheet" href="/css/mobile-shell.css">
   <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/luna-panel.css">
 </head>
 
 <body class="hub-dashboard">
@@ -504,7 +505,48 @@
     </div>
   </div>
 
+  <!-- Luna ファイルエージェント -->
+  <button type="button" class="luna-fab" id="luna-fab" aria-expanded="false" aria-controls="luna-panel">
+    <span class="luna-fab-label">Luna</span>
+  </button>
+  <div class="luna-panel" id="luna-panel" aria-hidden="true" role="dialog" aria-labelledby="luna-panel-title">
+    <div class="luna-backdrop" id="luna-backdrop" aria-hidden="true"></div>
+    <div class="luna-dialog">
+      <header class="luna-header">
+        <div>
+          <p class="luna-kicker">ScienceHUB Agent</p>
+          <h2 class="luna-title" id="luna-panel-title">Luna</h2>
+        </div>
+        <button type="button" class="luna-close" id="luna-close" aria-label="閉じる">×</button>
+      </header>
+      <p class="luna-status" id="luna-status" hidden></p>
+      <div class="luna-tabs" role="tablist" aria-label="Luna パネル">
+        <button type="button" class="luna-tab is-active" data-luna-tab="chat" role="tab" aria-selected="true">チャット</button>
+        <button type="button" class="luna-tab" data-luna-tab="files" role="tab" aria-selected="false">ファイル</button>
+        <button type="button" class="luna-tab" data-luna-tab="preview" role="tab" aria-selected="false">プレビュー</button>
+      </div>
+      <div class="luna-body">
+        <section class="luna-tab-panel" data-luna-panel="chat" role="tabpanel">
+          <div class="luna-messages" id="luna-messages"></div>
+          <form class="luna-form" id="luna-form">
+            <textarea class="luna-input" id="luna-input" rows="2" placeholder="ファイルの検索や操作を依頼…" aria-label="メッセージ"></textarea>
+            <button type="submit" class="luna-send" id="luna-send">送信</button>
+          </form>
+        </section>
+        <section class="luna-tab-panel" data-luna-panel="files" role="tabpanel" hidden>
+          <div class="luna-files" id="luna-files"></div>
+        </section>
+        <section class="luna-tab-panel" data-luna-panel="preview" role="tabpanel" hidden>
+          <div class="luna-preview" id="luna-preview">
+            <p class="luna-empty">ファイルを選択するとプレビューが表示されます。</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <script src="/js/dashboard.js" type="module"></script>
+  <script src="/js/luna-panel.js" type="module"></script>
   <script src="/js/pwa-register.js" type="module"></script>
 </body>
 </html>

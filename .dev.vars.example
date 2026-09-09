@@ -1,5 +1,17 @@
 # Copy to .dev.vars for local wrangler pages dev (do not commit .dev.vars)
 
+# Luna ファイルエージェント（Cloudflare AI API）
+# LUNA_OPENAI_API_KEY に Cloudflare API トークン（Account > Workers AI > Read）を設定
+LUNA_OPENAI_API_KEY=
+# または CLOUDFLARE_API_TOKEN=
+CLOUDFLARE_ACCOUNT_ID=
+# openai/gpt-5.6-luna は Responses API 専用。AI Gateway 認証（Unified Billing）が必要
+# すぐ使う場合は LUNA_MODEL=@cf/moonshotai/kimi-k2.6 も可
+LUNA_MODEL=openai/gpt-5.6-luna
+# LUNA_AI_GATEWAY_ID=default
+LUNA_MAX_DAILY_TURNS=50
+LUNA_MAX_TOOL_ROUNDS=12
+
 FIREBASE_PROJECT_ID=
 FIREBASE_WEB_API_KEY=
 FIREBASE_APP_ID=

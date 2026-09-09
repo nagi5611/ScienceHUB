@@ -101,6 +101,18 @@ export interface Env {
   IMAGE_CONVERTER?: Fetcher;
   /** 画像変換 Worker 内部認証 */
   IMAGE_CONVERTER_WORKER_SECRET?: string;
+  /** Cloudflare アカウント ID（Luna / R2 等） */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  /** Cloudflare API トークン（Luna の代替キーとしても使用可） */
+  CLOUDFLARE_API_TOKEN?: string;
+  /** Luna エージェント（Cloudflare AI / OpenAI 互換 API） */
+  LUNA_OPENAI_API_KEY?: string;
+  LUNA_OPENAI_BASE_URL?: string;
+  LUNA_MODEL?: string;
+  /** AI Gateway ID（Workers AI や third-party モデル用。既定 default） */
+  LUNA_AI_GATEWAY_ID?: string;
+  LUNA_MAX_DAILY_TURNS?: string;
+  LUNA_MAX_TOOL_ROUNDS?: string;
 }
 
 export interface RoleRow {

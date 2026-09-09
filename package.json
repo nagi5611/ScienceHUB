@@ -43,7 +43,7 @@
     "wrangler": "^4.24.4"
   },
   "dependencies": {
-    "@cloudflare/puppeteer": "^1.0.4",
+    "@cloudflare/puppeteer": "^0.0.11",
     "@ffmpeg/core": "^0.12.6",
     "@ffmpeg/core-mt": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.10",
