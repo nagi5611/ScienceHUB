@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sciencehub-storage": {
+      "command": "node",
+      "args": ["packages/mcp-storage/dist/index.js"],
+      "env": {
+        "SCIENCEHUB_API_URL": "https://s.mmh-virtual.jp",
+        "SCIENCEHUB_TOKEN": "shat_YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}

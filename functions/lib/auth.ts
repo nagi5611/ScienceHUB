@@ -15,6 +15,18 @@ import type { PublicRole } from "./roles";
 import { resolveUserAvatarUrl } from "./user-icons";
 import { getUserGroupMemberships, type UserGroupMembership } from "./groups";
 import { getUserOAuthProviders } from "./oauth-users";
+import {
+  hasAgentTokenScope,
+  resolveUserFromAgentToken,
+  type AgentTokenScope,
+} from "./agent-tokens";
+
+/** 認証方式付きユーザー情報 */
+export interface AuthenticatedUser {
+  user: SessionUser;
+  /** null = Cookie セッション（ストレージの全操作可） */
+  agentTokenScopes: string[] | null;
+}
 
 /** ログインセッションを作成する */
 export async function createSession(
@@ -121,6 +133,58 @@ export async function requireUser(
     return Response.json({ error: "ログインが必要です" }, { status: 401 });
   }
   return user;
+}
+
+/** Authorization ヘッダーから Bearer トークンを取得 */
+export function getBearerToken(request: Request): string | null {
+  const auth = request.headers.get("Authorization") ?? "";
+  if (!auth.startsWith("Bearer ")) return null;
+  const token = auth.slice(7).trim();
+  return token || null;
+}
+
+/** Cookie または Bearer トークンでユーザーを解決 */
+export async function getAuthenticatedUser(
+  request: Request,
+  env: Env
+): Promise<AuthenticatedUser | null> {
+  const sessionUser = await getSessionUser(request, env);
+  if (sessionUser) {
+    return { user: sessionUser, agentTokenScopes: null };
+  }
+
+  const bearer = getBearerToken(request);
+  if (!bearer) return null;
+
+  const db = getDb(env);
+  const resolved = await resolveUserFromAgentToken(env, db, bearer);
+  if (!resolved) return null;
+
+  return {
+    user: resolved.user,
+    agentTokenScopes: resolved.scopes,
+  };
+}
+
+/** Cookie または Bearer でログイン済みユーザーを要求 */
+export async function requireAuthenticatedUser(
+  request: Request,
+  env: Env
+): Promise<AuthenticatedUser | Response> {
+  const auth = await getAuthenticatedUser(request, env);
+  if (!auth) {
+    return Response.json({ error: "ログインが必要です" }, { status: 401 });
+  }
+  return auth;
+}
+
+/** エージェントトークンのスコープを検証（セッションは常に true） */
+export function requireAgentTokenScope(
+  auth: AuthenticatedUser,
+  required: AgentTokenScope
+): boolean {
+  if (auth.agentTokenScopes === null) return true;
+  return hasAgentTokenScope(auth.agentTokenScopes, required);
 }
 
 /** 管理者権限を要求する */

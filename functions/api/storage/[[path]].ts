@@ -2,10 +2,11 @@
  * クラウドストレージ API ルーター
  */
 
-import type { Env } from "../../lib/types";
+import type { Env, SessionUser } from "../../lib/types";
 import { jsonError } from "../../lib/types";
 import { getDb } from "../../lib/db";
-import { requireUser } from "../../lib/auth";
+import { requireAuthenticatedUser, requireAgentTokenScope } from "../../lib/auth";
+import type { AuthenticatedUser } from "../../lib/auth";
 import { canUserAccessApp } from "../../lib/apps";
 import { STORAGE_APP_SLUG } from "../../lib/storage/constants";
 import { parseLogicalPath } from "../../lib/storage/keys";
@@ -69,18 +70,26 @@ function parseRoute(path: string | string[] | undefined): string[] {
 
 async function requireStorageAccess(
   request: Request,
-  env: Env
-): Promise<Awaited<ReturnType<typeof requireUser>> | Response> {
-  const auth = await requireUser(request, env);
-  if (auth instanceof Response) return auth;
+  env: Env,
+  scope: "read" | "write" = "read",
+  authCtx?: AuthenticatedUser | null
+): Promise<{ user: SessionUser; authCtx: AuthenticatedUser } | Response> {
+  const resolved =
+    authCtx ?? (await requireAuthenticatedUser(request, env));
+  if (resolved instanceof Response) return resolved;
+
+  const requiredScope = scope === "write" ? "storage:write" : "storage:read";
+  if (!requireAgentTokenScope(resolved, requiredScope)) {
+    return jsonError("トークンのスコープが不足しています", 403);
+  }
 
   const db = getDb(env);
-  const allowed = await canUserAccessApp(db, auth.id, STORAGE_APP_SLUG);
+  const allowed = await canUserAccessApp(db, resolved.user.id, STORAGE_APP_SLUG);
   if (!allowed) {
     return jsonError("このアプリへのアクセス権限がありません", 403);
   }
 
-  return auth;
+  return { user: resolved.user, authCtx: resolved };
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -125,13 +134,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "access" && method === "GET") {
-      const auth = await requireStorageAccess(request, env);
-      if (auth instanceof Response) return auth;
+      const access = await requireStorageAccess(request, env, "read");
+      if (access instanceof Response) return access;
       return Response.json({ allowed: true });
     }
 
-    const auth = await requireStorageAccess(request, env);
-    if (auth instanceof Response) return auth;
+    const storageAccess = await requireStorageAccess(request, env, "read");
+    if (storageAccess instanceof Response) return storageAccess;
+    const { user: auth, authCtx: storageAuthCtx } = storageAccess;
 
     if (route === "roots" && method === "GET") {
       await ensureUserStorageRoot(
@@ -325,6 +335,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "mkdir" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{ path?: string; name?: string }>();
       const path = body.path?.trim() ?? "";
       const name = body.name?.trim() ?? "";
@@ -340,6 +353,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/init" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{
         path?: string;
         filename?: string;
@@ -374,6 +390,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/simple" && method === "PUT") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const sessionId = new URL(request.url).searchParams.get("sessionId");
       if (!sessionId) return jsonError("sessionId が必要です", 400);
 
@@ -389,6 +408,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/url" && method === "GET") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const sessionId = new URL(request.url).searchParams.get("sessionId");
       if (!sessionId) return jsonError("sessionId が必要です", 400);
       if (!isR2PresignConfigured(env)) {
@@ -406,6 +428,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/part-url" && method === "GET") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const url = new URL(request.url);
       const sessionId = url.searchParams.get("sessionId");
       const partNumber = Number(url.searchParams.get("partNumber"));
@@ -433,6 +458,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/part" && method === "PUT") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const url = new URL(request.url);
       const sessionId = url.searchParams.get("sessionId");
       const partNumber = Number(url.searchParams.get("partNumber"));
@@ -459,6 +487,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/complete" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{
         sessionId?: string;
         parts?: UploadedPart[];
@@ -484,6 +515,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/abort" && method === "DELETE") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{ sessionId?: string }>();
       const sessionId = body.sessionId?.trim();
       if (!sessionId) return jsonError("sessionId が必要です", 400);
@@ -584,6 +618,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "delete" && method === "DELETE") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{ path?: string; type?: string }>();
       const path = body.path?.trim() ?? "";
       const isDirectory = body.type === "folder";
@@ -615,6 +652,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "trash/restore" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{ id?: string }>();
       const trashId = body.id?.trim() ?? "";
       if (!trashId) return jsonError("id が必要です", 400);
@@ -632,6 +672,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "trash/purge" && method === "DELETE") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{ id?: string }>();
       const trashId = body.id?.trim() ?? "";
       if (!trashId) return jsonError("id が必要です", 400);
@@ -649,6 +692,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "trash/empty" && method === "DELETE") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{ path?: string }>();
       const rootPath = body.path?.trim() ?? "";
       if (!rootPath) return jsonError("path が必要です", 400);
@@ -666,6 +712,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "rename" && method === "PATCH") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{
         path?: string;
         newName?: string;
@@ -686,6 +735,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "move" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{
         items?: Array<{ path?: string; type?: string }>;
         destPath?: string;
@@ -714,6 +766,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "share/create" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{
         paths?: string[];
         max_downloads?: number;
@@ -741,6 +796,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "shortcut/create" && method === "POST") {
+      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
+      if (writeAccess instanceof Response) return writeAccess;
+
       const body = await request.json<{
         storage_path?: string;
         label?: string;

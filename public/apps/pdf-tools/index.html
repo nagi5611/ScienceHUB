@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>PDF結合・分割 — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/mobile-shell.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/apps/pdf-tools.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "pdf-lib": "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm",
+        "pdfjs-dist": "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs",
+        "fflate": "https://esm.sh/fflate@0.8.2?target=es2022"
+      }
+    }
+  </script>
+</head>
+<body class="hub-dashboard pdf-app">
+  <header class="hub-header pdf-header">
+    <div class="hub-header-inner pdf-header-inner">
+      <div class="hub-header-start">
+        <a href="/" class="hub-brand" aria-label="ScienceHUB ホーム">
+          <span class="hub-logo" aria-hidden="true">
+            <img src="/icons/icon.svg" alt="" width="32" height="32">
+          </span>
+          <span class="hub-brand-text">ScienceHUB</span>
+        </a>
+        <span class="pdf-header-divider" aria-hidden="true"></span>
+        <h1 class="pdf-page-title">PDF結合・分割</h1>
+      </div>
+      <span class="pdf-badge">端末内処理</span>
+    </div>
+  </header>
+
+  <div class="pdf-tabs-wrap" id="app-main" hidden>
+    <div class="pdf-tabs" role="tablist" aria-label="PDF 操作">
+      <button type="button" class="pdf-tab" role="tab" id="tab-merge" aria-selected="true" aria-controls="panel-merge">
+        PDF 結合
+      </button>
+      <button type="button" class="pdf-tab" role="tab" id="tab-split" aria-selected="false" aria-controls="panel-split">
+        PDF 分割
+      </button>
+    </div>
+
+    <input type="file" id="merge-file-input" accept=".pdf,application/pdf" multiple hidden>
+    <input type="file" id="split-file-input" accept=".pdf,application/pdf" hidden>
+
+    <!-- 結合パネル -->
+    <div class="pdf-layout" id="panel-merge" role="tabpanel" aria-labelledby="tab-merge">
+      <aside class="pdf-sidebar" aria-label="結合オプション">
+        <div
+          class="pdf-drop-zone"
+          id="merge-drop-zone"
+          tabindex="0"
+          role="button"
+          aria-label="PDF をドロップまたはクリックして選択"
+        >
+          <span class="pdf-drop-icon" aria-hidden="true">↑</span>
+          <p class="pdf-drop-title">PDF をドロップ</p>
+          <p class="pdf-drop-sub">またはクリックして選択（複数可）</p>
+          <p class="pdf-drop-formats">PDF のみ · 結合順に並べ替え可能</p>
+        </div>
+
+        <div class="pdf-actions">
+          <button type="button" class="pdf-btn pdf-btn--primary" id="merge-btn" disabled>結合する</button>
+          <button type="button" class="pdf-btn" id="merge-clear-btn" disabled>一覧をクリア</button>
+        </div>
+
+        <p class="pdf-hint">
+          ブラウザ内で PDF を結合します。ファイルはサーバーへ送信されません。数百 MB 超のファイルは失敗する場合があります。
+        </p>
+      </aside>
+
+      <section class="pdf-panel" aria-label="結合ファイル一覧">
+        <div class="pdf-panel-head">
+          <div class="pdf-panel-head-start">
+            <h2 class="pdf-panel-title">ファイル一覧</h2>
+            <p class="pdf-status" id="merge-status" aria-live="polite">PDF を 2 件以上追加してください</p>
+          </div>
+          <div class="pdf-panel-head-actions">
+            <button type="button" class="pdf-btn pdf-btn--secondary" id="merge-download-btn" disabled>
+              結合結果をダウンロード
+            </button>
+          </div>
+        </div>
+
+        <p class="pdf-empty" id="merge-empty">まだファイルがありません</p>
+        <ul class="pdf-file-list" id="merge-file-list"></ul>
+      </section>
+    </div>
+
+    <!-- 分割パネル -->
+    <div class="pdf-layout" id="panel-split" role="tabpanel" aria-labelledby="tab-split" hidden>
+      <aside class="pdf-sidebar" aria-label="分割オプション">
+        <div
+          class="pdf-drop-zone"
+          id="split-drop-zone"
+          tabindex="0"
+          role="button"
+          aria-label="PDF をドロップまたはクリックして選択"
+        >
+          <span class="pdf-drop-icon" aria-hidden="true">↑</span>
+          <p class="pdf-drop-title">PDF をドロップ</p>
+          <p class="pdf-drop-sub">またはクリックして選択（1 ファイル）</p>
+          <p class="pdf-drop-formats">PDF のみ</p>
+        </div>
+
+        <section class="pdf-card">
+          <h2 class="pdf-card-title">分割モード</h2>
+          <label class="pdf-field pdf-field--compact">
+            <span class="pdf-field-label">モード</span>
+            <select id="split-mode" class="pdf-select" aria-label="分割モード">
+              <option value="all-pages">全ページを個別PDF</option>
+              <option value="ranges">ページ範囲で分割</option>
+              <option value="fixed">N ページごと</option>
+            </select>
+          </label>
+
+          <label class="pdf-field pdf-field--compact" id="split-ranges-field" hidden>
+            <span class="pdf-field-label">ページ範囲</span>
+            <input
+              type="text"
+              id="split-ranges"
+              class="pdf-input"
+              placeholder="例: 1-3, 5, 7-9"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <p class="pdf-field-hint">カンマ区切り。範囲は 1-3 のように指定</p>
+          </label>
+
+          <label class="pdf-field pdf-field--compact" id="split-fixed-field" hidden>
+            <span class="pdf-field-label">N ページごと</span>
+            <input type="number" id="split-fixed-size" class="pdf-input" min="1" step="1" value="5">
+          </label>
+        </section>
+
+        <div class="pdf-actions">
+          <button type="button" class="pdf-btn pdf-btn--primary" id="split-btn" disabled>分割する</button>
+          <button type="button" class="pdf-btn" id="split-clear-btn" disabled>ファイルをクリア</button>
+        </div>
+
+        <p class="pdf-hint">
+          分割結果が 2 件以上の場合は ZIP でダウンロードします。パスワード付き PDF は開けない場合があります。
+        </p>
+      </aside>
+
+      <section class="pdf-panel" aria-label="分割プレビュー">
+        <div class="pdf-panel-head">
+          <div class="pdf-panel-head-start">
+            <h2 class="pdf-panel-title">プレビュー</h2>
+            <p class="pdf-status" id="split-status" aria-live="polite">PDF を 1 件選択してください</p>
+          </div>
+          <div class="pdf-panel-head-actions">
+            <button type="button" class="pdf-btn pdf-btn--secondary" id="split-download-btn" disabled>
+              分割結果をダウンロード
+            </button>
+          </div>
+        </div>
+
+        <p class="pdf-empty" id="split-empty">PDF を選択するとページプレビューが表示されます</p>
+        <div class="pdf-preview-meta" id="split-preview-meta" hidden></div>
+        <div class="pdf-thumb-grid" id="split-thumb-grid"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="pdf-overlay" id="processing-overlay" hidden aria-live="polite">
+    <div class="pdf-overlay-card">
+      <div class="pdf-spinner" aria-hidden="true"></div>
+      <p class="pdf-overlay-title" id="processing-title">処理中…</p>
+      <p class="pdf-overlay-sub" id="processing-sub"></p>
+    </div>
+  </div>
+
+  <div class="pdf-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="pdf-btn pdf-btn--primary">ダッシュボードへ戻る</a>
+  </div>
+
+  <script src="/apps/pdf-tools/app.js" type="module"></script>
+  <script src="/js/pwa-register.js" type="module"></script>
+</body>
+</html>

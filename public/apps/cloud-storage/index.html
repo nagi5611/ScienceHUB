@@ -83,6 +83,7 @@
             <div class="cs-toolbar-menu app-overflow-menu" id="cs-toolbar-menu" role="menu" hidden>
               <button type="button" class="cs-btn" id="cs-upload-folder-btn">フォルダをアップロード</button>
               <button type="button" class="cs-btn" id="cs-shortcut-btn">ショートカットリンク</button>
+              <button type="button" class="cs-btn" id="cs-agent-btn">AI エージェント連携</button>
               <button type="button" class="cs-btn" id="cs-rename-btn">リネーム</button>
               <div class="cs-sort-controls">
                 <label class="cs-sort-label" for="cs-sort-field">並び替え</label>
@@ -234,6 +235,25 @@
     <footer class="cs-upload-dialog-footer" id="cs-shortcut-dialog-footer">
       <button type="button" class="cs-btn" id="cs-shortcut-dialog-cancel">キャンセル</button>
       <button type="button" class="cs-btn cs-btn-primary" id="cs-shortcut-dialog-create">リンクを作成</button>
+    </footer>
+  </dialog>
+
+  <dialog class="cs-upload-dialog" id="cs-agent-dialog">
+    <header class="cs-upload-dialog-header">
+      <h2 class="cs-upload-dialog-title">AI エージェント連携</h2>
+      <button type="button" class="cs-preview-close" id="cs-agent-dialog-close" aria-label="閉じる">✕</button>
+    </header>
+    <div class="cs-upload-dialog-body cs-agent-dialog-body">
+      <p class="cs-agent-token-lead">Cursor などの AI エージェントがクラウドストレージを操作するためのトークンを発行します。MCP サーバー <code>packages/mcp-storage</code> と組み合わせて使います。</p>
+      <div class="cs-agent-token-form">
+        <label class="cs-agent-token-label" for="cs-agent-token-name">トークン名</label>
+        <input type="text" id="cs-agent-token-name" class="cs-search-input" maxlength="64" placeholder="例: Cursor 開発用">
+        <button type="button" class="cs-btn cs-btn-primary" id="cs-agent-token-create">トークンを発行</button>
+      </div>
+      <div id="cs-agent-token-list" class="cs-agent-token-list"></div>
+    </div>
+    <footer class="cs-upload-dialog-footer">
+      <button type="button" class="cs-btn" id="cs-agent-dialog-close-btn">閉じる</button>
     </footer>
   </dialog>
 

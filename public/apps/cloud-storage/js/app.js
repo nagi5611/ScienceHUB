@@ -46,6 +46,7 @@ import {
   openOfficeInDesktopAppByPath,
   renderOfficePreview,
 } from "./preview-office.js";
+import { initAgentTokensDialog } from "./agent-tokens.js";
 
 let roots = [];
 let currentPath = "";
@@ -3002,6 +3003,7 @@ async function init() {
   if (!ok) return;
   loadSortPreference();
   bindEvents();
+  initAgentTokensDialog();
   updateSortUi();
   updateToolbarForView();
   updateViewModeUi();
