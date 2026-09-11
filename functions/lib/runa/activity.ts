@@ -75,6 +75,15 @@ export function summarizeToolArgs(
   if (typeof args.folder_name === "string") {
     parts.push(`folder: ${args.folder_name}`);
   }
+  if (typeof args.prompt === "string" && args.prompt) {
+    parts.push(`prompt: ${args.prompt.slice(0, 80)}`);
+  }
+  if (typeof args.mode === "string" && args.mode) {
+    parts.push(`mode: ${args.mode}`);
+  }
+  if (typeof args.dest_path === "string" && args.dest_path) {
+    parts.push(`dest: ${args.dest_path}`);
+  }
   if (!parts.length) {
     const compact = JSON.stringify(args);
     return compact === "{}" ? toolName : compact.slice(0, 240);

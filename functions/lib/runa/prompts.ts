@@ -34,6 +34,14 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - storage_read_file / storage_write_file
 - storage_mkdir / storage_move / storage_rename / storage_delete（ごみ箱）
 - image_convert_storage — HEIC/TIFF/RAW のサーバー変換
+- image_generate — Grok Imagine による画像生成（ストレージに保存）
+
+## 画像生成（image_generate）
+- draft（xai/grok-imagine-image）: 下書き・試行・複数案。「こんな感じ」「3案」など。count は最大 3。
+- final（xai/grok-imagine-image-quality）: 完成品・保存・提出・文字入り・高精細。
+- edit（grok-imagine-image-quality + source_path）: 既存画像の編集。mask_path で部分編集可。
+- 保存先未指定なら \`u/{username}/generated/\` に自動保存。
+- 1日の生成上限あり。上限超過時はユーザーに伝える。
 
 ## 方針
 - 何ができるか不明なときは hub_list_apps から始める。

@@ -43,6 +43,7 @@ import {
   isServerConvertFile,
   parseServerOutputFormat,
 } from "../image-converter/cloudflare-images";
+import { runImageGenerate } from "./image-generate";
 import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
 
@@ -200,6 +201,58 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "image_generate",
+      description:
+        "Grok Imagine で画像を生成しストレージに保存する。draft=下書き（速い）、final=完成品（高精細・文字向き）、edit=既存画像の編集（source_path 必須）",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "生成・編集の指示（日本語可）" },
+          mode: {
+            type: "string",
+            enum: ["draft", "final", "edit"],
+            description:
+              "draft=試行・複数案, final=保存・提出用, edit=参照画像の編集",
+          },
+          dest_path: {
+            type: "string",
+            description:
+              "保存先の論理パス（省略時は u/{username}/generated/ に自動保存）",
+          },
+          aspect_ratio: {
+            type: "string",
+            enum: [
+              "auto",
+              "1:1",
+              "3:4",
+              "4:3",
+              "9:16",
+              "16:9",
+              "2:3",
+              "3:2",
+            ],
+            description: "アスペクト比（既定 auto）",
+          },
+          source_path: {
+            type: "string",
+            description: "edit 時の編集元画像の論理パス",
+          },
+          mask_path: {
+            type: "string",
+            description: "編集マスク画像の論理パス（任意）",
+          },
+          count: {
+            type: "number",
+            description: "生成枚数（draft のみ最大 3、既定 1）",
+          },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "image_convert_storage",
       description:
         "ストレージ上の HEIC/TIFF/RAW を JPEG/PNG/WebP/AVIF に変換して保存する（サーバー変換対応形式のみ）",
@@ -317,6 +370,8 @@ export async function executeHubTool(
         return await runDesignList(db, user);
       case "image_convert_storage":
         return await runImageConvert(env, db, user, args);
+      case "image_generate":
+        return await runImageGenerate(env, db, user, args);
       default:
         return { text: `不明なツール: ${toolName}`, files: [] };
     }

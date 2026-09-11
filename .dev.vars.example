@@ -2,6 +2,7 @@
 
 # Runa ファイルエージェント（Cloudflare AI API）
 # RUNA_OPENAI_API_KEY に Cloudflare API トークン（Account > Workers AI > Read）を設定
+# 画像生成（image_generate）も同トークンで Workers AI（Grok Imagine）を呼び出します
 RUNA_OPENAI_API_KEY=
 # または CLOUDFLARE_API_TOKEN=
 CLOUDFLARE_ACCOUNT_ID=

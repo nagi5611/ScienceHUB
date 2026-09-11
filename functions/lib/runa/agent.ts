@@ -80,6 +80,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   excalidraw_list_notes: "ホワイトボードを取得しています…",
   design_list_projects: "設計プロジェクトを取得しています…",
   image_convert_storage: "画像を変換しています…",
+  image_generate: "画像を生成しています…",
 };
 
 function streamTextDeltas(send: RunaSseSend, text: string): void {
