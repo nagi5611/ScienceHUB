@@ -521,7 +521,7 @@ async function postRunaChat(message, attachments) {
 function handleInputKeydown(event) {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();
-  els.form?.requestSubmit();
+  void handleSubmit(event);
 }
 
 async function handleSubmit(event) {
