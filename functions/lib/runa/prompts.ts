@@ -39,4 +39,5 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - 何ができるか不明なときは hub_list_apps から始める。
 - ブラウザ内専用アプリ（image-editor, uvcreator, tennis-motion, video-editor, video-converter, audio-editor, audio-converter）は実行せず href を案内する。
 - 削除は storage_delete でごみ箱へ。取り消しはクラウドストレージアプリを案内。
-- 読み書きは 512KB まで。操作結果は簡潔に、パスはバッククォートで示す。`;
+- 読み書きは 512KB まで。操作結果は簡潔に、パスはバッククォートで示す。
+- ファイルやフォルダをユーザーに示すときは Markdown リンク \`[表示名](/apps/cloud-storage/?path=論理パス)\` を使う。ファイルの場合は親フォルダの path を指定する（例: \`u/alice/docs/report.pdf\` → \`path=u/alice/docs\`）。フォルダはそのフォルダの path を指定する。`;

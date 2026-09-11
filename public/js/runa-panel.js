@@ -2,8 +2,8 @@
  * Runa — ダッシュボード用パネル UI
  */
 
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
-const TEXT_EXT = /\.(txt|md|json|csv|log|xml|html?|css|js|ts|tsx|jsx|py|sh|yaml|yml)$/i;
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** HTML エスケープ */
 function escapeHtml(str) {
@@ -12,6 +12,20 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** 論理パスの親ディレクトリ */
+function parentStoragePath(logicalPath) {
+  const parts = String(logicalPath).split("/").filter(Boolean);
+  if (parts.length <= 2) return logicalPath;
+  return parts.slice(0, -1).join("/");
+}
+
+/** クラウドストレージで開く URL */
+function storageBrowserUrl(logicalPath, type = "file") {
+  const target =
+    type === "folder" ? logicalPath : parentStoragePath(logicalPath);
+  return `/apps/cloud-storage/?path=${encodeURIComponent(target)}`;
 }
 
 /** 軽量 Markdown（太字・斜体・コード・リンク） */
@@ -35,6 +49,10 @@ function renderMarkdown(text) {
   safe = safe.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   safe = safe.replace(/_([^_\n]+)_/g, "<em>$1</em>");
   safe = safe.replace(
+    /\[([^\]]+)\]\((\/apps\/cloud-storage\/\?[^)\s]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+  safe = safe.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
   );
@@ -46,12 +64,32 @@ function renderMarkdown(text) {
   return safe.replace(/\n/g, "<br>");
 }
 
+function renderFileRefsHtml(files) {
+  if (!files?.length) return "";
+  const items = files
+    .map((f) => {
+      const type = f.type === "folder" ? "folder" : "file";
+      const icon = type === "folder" ? "📁" : "📄";
+      const openUrl = storageBrowserUrl(f.path, type);
+      const openLabel = type === "folder" ? "フォルダを開く" : "フォルダで開く";
+      return `<li class="runa-file-ref">
+        <span class="runa-file-ref-icon" aria-hidden="true">${icon}</span>
+        <span class="runa-file-ref-name">${escapeHtml(f.name)}</span>
+        <a class="runa-file-ref-link" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a>
+      </li>`;
+    })
+    .join("");
+  return `<ul class="runa-file-refs">${items}</ul>`;
+}
+
 function renderMessageContent(msg) {
-  if (!msg.content) return "";
+  if (!msg.content && !msg.files?.length) return "";
+  const filesHtml = renderFileRefsHtml(msg.files);
+  if (!msg.content) return filesHtml;
   if (msg.role === "assistant") {
-    return `<div class="runa-msg-content runa-md">${renderMarkdown(msg.content)}</div>`;
+    return `<div class="runa-msg-content runa-md">${renderMarkdown(msg.content)}</div>${filesHtml}`;
   }
-  return `<div class="runa-msg-content">${escapeHtml(msg.content)}</div>`;
+  return `<div class="runa-msg-content">${escapeHtml(msg.content)}</div>${filesHtml}`;
 }
 
 /** 要素参照 */
@@ -59,34 +97,30 @@ const els = {
   fab: document.getElementById("runa-fab"),
   panel: document.getElementById("runa-panel"),
   close: document.getElementById("runa-close"),
+  newChat: document.getElementById("runa-new-chat"),
   backdrop: document.getElementById("runa-backdrop"),
   messages: document.getElementById("runa-messages"),
-  files: document.getElementById("runa-files"),
-  preview: document.getElementById("runa-preview"),
+  attachList: document.getElementById("runa-attach-list"),
   form: document.getElementById("runa-form"),
   input: document.getElementById("runa-input"),
   send: document.getElementById("runa-send"),
+  attachBtn: document.getElementById("runa-attach-btn"),
+  fileInput: document.getElementById("runa-file-input"),
   status: document.getElementById("runa-status"),
-  tabs: document.querySelectorAll("[data-runa-tab]"),
-  tabPanels: document.querySelectorAll("[data-runa-panel]"),
 };
 
-/** @type {Array<{ id?: string, role: string, content: string, files?: object[], pending?: boolean, statusLabel?: string }>} */
+/** @type {Array<{ id?: string, role: string, content: string, files?: object[], pending?: boolean, activities?: object[] }>} */
 let messageState = [];
-/** @type {object[]} */
-let fileItems = [];
 let chatBusy = false;
-/** @type {object | null} */
-let selectedFile = null;
-/** @type {string | null} */
-let previewObjectUrl = null;
 let runaDataLoaded = false;
 let runaDataLoadFailed = false;
 /** @type {HTMLElement | null} */
 let pendingAssistantRow = null;
-let recentFilesLoaded = false;
+/** @type {{ id: string, name: string, file?: File, path?: string, uploading?: boolean }[]} */
+let pendingAttachments = [];
+/** @type {string | null} */
+let currentUsername = null;
 
-/** タブ休止・ページ離脱で失敗しやすい fetch を安全に実行 */
 async function safeFetch(url, options) {
   try {
     return await fetch(url, options);
@@ -114,11 +148,6 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
-function formatUpdatedAt(ts) {
-  if (!ts) return "";
-  return new Date(ts).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
-
 function setPanelOpen(open) {
   if (!els.panel || !els.fab) return;
   els.panel.classList.toggle("is-open", open);
@@ -127,21 +156,6 @@ function setPanelOpen(open) {
   if (open) {
     void ensureRunaDataLoaded();
     if (els.input) els.input.focus();
-  }
-}
-
-function setActiveTab(tabId) {
-  for (const btn of els.tabs) {
-    const active = btn.getAttribute("data-runa-tab") === tabId;
-    btn.classList.toggle("is-active", active);
-    btn.setAttribute("aria-selected", active ? "true" : "false");
-  }
-  for (const panel of els.tabPanels) {
-    const show = panel.getAttribute("data-runa-panel") === tabId;
-    panel.hidden = !show;
-  }
-  if (tabId === "files" && !recentFilesLoaded) {
-    void loadRecentFiles();
   }
 }
 
@@ -193,7 +207,7 @@ function renderMessages() {
   pendingAssistantRow = null;
   if (!messageState.length) {
     els.messages.innerHTML =
-      '<p class="runa-empty">Runa にファイルの検索や操作を依頼できます。</p>';
+      '<p class="runa-empty">Runa にファイルの検索や操作を依頼できます。📎 でファイルを添付できます。</p>';
     return;
   }
 
@@ -212,7 +226,6 @@ function bindActivityToggleHandlers(root) {
   }
 }
 
-/** ストリーミング中のアシスタント吹き出しを差分更新 */
 function mountPendingAssistantBubble(pending) {
   if (!els.messages) return;
   const empty = els.messages.querySelector(".runa-empty");
@@ -272,123 +285,34 @@ function applyActivityEvent(pending, payload) {
   }
 }
 
-function renderFiles() {
-  if (!els.files) return;
-  if (!fileItems.length) {
-    els.files.innerHTML = '<p class="runa-empty">ファイルがありません</p>';
+function renderPendingAttachments() {
+  if (!els.attachList) return;
+  if (!pendingAttachments.length) {
+    els.attachList.hidden = true;
+    els.attachList.innerHTML = "";
     return;
   }
 
-  els.files.innerHTML = fileItems
+  els.attachList.hidden = false;
+  els.attachList.innerHTML = pendingAttachments
     .map((item) => {
-      const active = selectedFile?.path === item.path ? " is-active" : "";
-      const typeLabel = item.type === "folder" ? "📁" : "📄";
-      return `<button type="button" class="runa-file-item${active}" data-path="${escapeHtml(item.path)}">
-        <span class="runa-file-icon" aria-hidden="true">${typeLabel}</span>
-        <span class="runa-file-meta">
-          <span class="runa-file-name">${escapeHtml(item.name)}</span>
-          <span class="runa-file-path">${escapeHtml(item.path)}</span>
-          <span class="runa-file-sub">${escapeHtml(formatBytes(item.sizeBytes))}${item.updatedAt ? ` · ${formatUpdatedAt(item.updatedAt)}` : ""}</span>
-        </span>
-      </button>`;
+      const label = item.uploading
+        ? `${item.name}（アップロード中…）`
+        : item.name;
+      return `<span class="runa-attach-chip" data-id="${escapeHtml(item.id)}">
+        <span class="runa-attach-chip-name">${escapeHtml(label)}</span>
+        <button type="button" class="runa-attach-chip-remove" aria-label="添付を削除" data-id="${escapeHtml(item.id)}">×</button>
+      </span>`;
     })
     .join("");
 
-  for (const btn of els.files.querySelectorAll(".runa-file-item")) {
+  for (const btn of els.attachList.querySelectorAll(".runa-attach-chip-remove")) {
     btn.addEventListener("click", () => {
-      const path = btn.getAttribute("data-path");
-      const item = fileItems.find((f) => f.path === path);
-      if (item) selectFile(item);
+      const id = btn.getAttribute("data-id");
+      pendingAttachments = pendingAttachments.filter((a) => a.id !== id);
+      renderPendingAttachments();
     });
   }
-}
-
-function revokePreviewUrl() {
-  if (previewObjectUrl) {
-    URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = null;
-  }
-}
-
-async function fetchDownloadInfo(storagePath) {
-  const response = await fetch(
-    `/api/storage/download/url?path=${encodeURIComponent(storagePath)}`,
-    { credentials: "same-origin" }
-  );
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error ?? "ダウンロード URL の取得に失敗しました");
-  }
-  return data;
-}
-
-async function fetchDownloadBlob(storagePath) {
-  const info = await fetchDownloadInfo(storagePath);
-  if (info.mode === "direct" && info.url) {
-    const response = await fetch(info.url);
-    if (!response.ok) throw new Error("ダウンロードに失敗しました");
-    return response.blob();
-  }
-  const response = await fetch(
-    `/api/storage/download?path=${encodeURIComponent(storagePath)}`,
-    { credentials: "same-origin" }
-  );
-  if (!response.ok) throw new Error("ダウンロードに失敗しました");
-  return response.blob();
-}
-
-async function selectFile(item) {
-  selectedFile = item;
-  renderFiles();
-  setActiveTab("preview");
-  if (!els.preview) return;
-
-  if (item.type === "folder") {
-    els.preview.innerHTML = `<p class="runa-empty">フォルダ: ${escapeHtml(item.path)}</p>
-      <p class="runa-preview-hint">チャットで「${escapeHtml(item.path)} の一覧」と依頼できます。</p>`;
-    return;
-  }
-
-  els.preview.innerHTML = '<p class="runa-empty">読み込み中…</p>';
-  revokePreviewUrl();
-
-  const name = item.name || item.path;
-  try {
-    if (IMAGE_EXT.test(name)) {
-      const blob = await fetchDownloadBlob(item.path);
-      previewObjectUrl = URL.createObjectURL(blob);
-      els.preview.innerHTML = `<img class="runa-preview-img" src="${previewObjectUrl}" alt="${escapeHtml(name)}">`;
-      return;
-    }
-
-    if (TEXT_EXT.test(name)) {
-      const blob = await fetchDownloadBlob(item.path);
-      const text = await blob.text();
-      const capped = text.length > 50000 ? `${text.slice(0, 50000)}\n…（省略）` : text;
-      els.preview.innerHTML = `<pre class="runa-preview-text">${escapeHtml(capped)}</pre>`;
-      return;
-    }
-
-    const info = await fetchDownloadInfo(item.path);
-    const openUrl =
-      info.mode === "direct" && info.url
-        ? info.url
-        : `/api/storage/download?path=${encodeURIComponent(item.path)}`;
-    els.preview.innerHTML = `<p class="runa-preview-meta">${escapeHtml(item.path)}</p>
-      <p class="runa-preview-hint">${escapeHtml(formatBytes(item.sizeBytes))}</p>
-      <a class="runa-preview-link" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">ファイルを開く</a>`;
-  } catch (error) {
-    els.preview.innerHTML = `<p class="runa-empty">${escapeHtml(error.message || "プレビューに失敗しました")}</p>`;
-  }
-}
-
-function mergeFileItems(items) {
-  const map = new Map(fileItems.map((f) => [f.path, f]));
-  for (const item of items) {
-    map.set(item.path, item);
-  }
-  fileItems = Array.from(map.values());
-  renderFiles();
 }
 
 function setStatus(text) {
@@ -401,6 +325,57 @@ function setChatBusy(busy) {
   chatBusy = busy;
   if (els.send) els.send.disabled = busy;
   if (els.input) els.input.disabled = busy;
+  if (els.attachBtn) els.attachBtn.disabled = busy;
+}
+
+async function ensureUsername() {
+  if (currentUsername) return currentUsername;
+  const res = await safeFetch("/api/auth/me", { credentials: "same-origin" });
+  if (!res?.ok) throw new Error("ユーザー情報の取得に失敗しました");
+  const data = await res.json();
+  currentUsername = data.user?.username;
+  if (!currentUsername) throw new Error("ユーザー名を取得できません");
+  return currentUsername;
+}
+
+async function uploadAttachmentFile(file) {
+  const username = await ensureUsername();
+  const dirPath = `u/${username}/.runa-attachments`;
+  const initRes = await fetch("/api/storage/upload/init", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: dirPath,
+      filename: file.name,
+      size: file.size,
+    }),
+  });
+  const initData = await initRes.json().catch(() => ({}));
+  if (!initRes.ok) {
+    throw new Error(initData.error || "アップロードの開始に失敗しました");
+  }
+  if (initData.mode !== "simple") {
+    throw new Error("大きなファイルはチャットから添付できません");
+  }
+
+  const uploadRes = await fetch(
+    `/api/storage/upload/simple?sessionId=${encodeURIComponent(initData.sessionId)}`,
+    {
+      method: "PUT",
+      credentials: "same-origin",
+      body: file,
+    }
+  );
+  const uploadData = await uploadRes.json().catch(() => ({}));
+  if (!uploadRes.ok) {
+    throw new Error(uploadData.error || "アップロードに失敗しました");
+  }
+
+  return {
+    path: uploadData.path,
+    name: file.name,
+  };
 }
 
 async function loadMessages() {
@@ -415,26 +390,10 @@ async function loadMessages() {
     content: m.content,
     files: m.files,
   }));
-  for (const msg of messageState) {
-    if (msg.files?.length) mergeFileItems(msg.files);
-  }
   renderMessages();
   return true;
 }
 
-async function loadRecentFiles() {
-  if (recentFilesLoaded) return true;
-  const res = await safeFetch("/api/runa/recent-files?limit=20", {
-    credentials: "same-origin",
-  });
-  if (!res?.ok) return false;
-  const data = await res.json();
-  if (data.items?.length) mergeFileItems(data.items);
-  recentFilesLoaded = true;
-  return true;
-}
-
-/** 初回パネル開時（または再表示後）にチャット履歴を読み込む */
 async function ensureRunaDataLoaded() {
   if (runaDataLoaded) return;
   try {
@@ -449,12 +408,31 @@ async function ensureRunaDataLoaded() {
   }
 }
 
-async function postRunaChat(message) {
+async function startNewChat() {
+  if (chatBusy) return;
+  const res = await fetch("/api/runa/messages", {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    setStatus(data.error || "新規チャットの開始に失敗しました");
+    return;
+  }
+  messageState = [];
+  pendingAttachments = [];
+  renderPendingAttachments();
+  renderMessages();
+  setStatus("");
+  if (els.input) els.input.focus();
+}
+
+async function postRunaChat(message, attachments) {
   const res = await fetch("/api/runa/chat?stream=1", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, attachments }),
   });
 
   if (!res.ok) {
@@ -472,6 +450,7 @@ async function postRunaChat(message) {
     content: "",
     pending: true,
     activities: [],
+    files: [],
   };
   messageState.push(pending);
   mountPendingAssistantBubble(pending);
@@ -498,7 +477,8 @@ async function postRunaChat(message) {
       pending.content += payload.text;
       updatePendingAssistantBubble(pending);
     } else if (eventName === "files" && Array.isArray(payload.items)) {
-      mergeFileItems(payload.items);
+      pending.files = payload.items;
+      updatePendingAssistantBubble(pending);
     } else if (eventName === "done") {
       finalResult = payload;
     } else if (eventName === "error") {
@@ -529,7 +509,7 @@ async function postRunaChat(message) {
     pending.content = finalResult.message;
   }
   if (finalResult?.files?.length) {
-    mergeFileItems(finalResult.files);
+    pending.files = finalResult.files;
   }
   setStatus("");
   pendingAssistantRow = null;
@@ -541,15 +521,38 @@ async function handleSubmit(event) {
   event.preventDefault();
   if (!els.input || chatBusy) return;
   const text = els.input.value.trim();
-  if (!text) return;
+  const readyAttachments = pendingAttachments.filter((a) => a.path && !a.uploading);
+  if (!text && !readyAttachments.length) return;
 
-  messageState.push({ role: "user", content: text });
+  if (pendingAttachments.some((a) => a.uploading)) {
+    setStatus("アップロード完了をお待ちください");
+    return;
+  }
+
+  const attachments = readyAttachments.map((a) => ({
+    path: a.path,
+    name: a.name,
+  }));
+
+  messageState.push({
+    role: "user",
+    content: text,
+    files: attachments.map((a) => ({
+      name: a.name,
+      path: a.path,
+      type: "file",
+      sizeBytes: null,
+      updatedAt: null,
+    })),
+  });
   els.input.value = "";
+  pendingAttachments = [];
+  renderPendingAttachments();
   renderMessages();
   setChatBusy(true);
 
   try {
-    await postRunaChat(text);
+    await postRunaChat(text, attachments);
   } catch (error) {
     messageState.push({
       role: "assistant",
@@ -562,17 +565,53 @@ async function handleSubmit(event) {
   }
 }
 
+async function handleFileInputChange(event) {
+  const input = event.target;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+
+  for (const file of files) {
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+      setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
+      break;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setStatus(`${file.name} は ${formatBytes(MAX_ATTACHMENT_BYTES)} を超えています`);
+      continue;
+    }
+
+    const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    pendingAttachments.push({
+      id,
+      name: file.name,
+      file,
+      uploading: true,
+    });
+    renderPendingAttachments();
+
+    try {
+      const uploaded = await uploadAttachmentFile(file);
+      const item = pendingAttachments.find((a) => a.id === id);
+      if (item) {
+        item.path = uploaded.path;
+        item.uploading = false;
+      }
+    } catch (error) {
+      pendingAttachments = pendingAttachments.filter((a) => a.id !== id);
+      setStatus(error.message || "添付のアップロードに失敗しました");
+    }
+    renderPendingAttachments();
+  }
+}
+
 function bindEvents() {
   els.fab?.addEventListener("click", () => setPanelOpen(true));
   els.close?.addEventListener("click", () => setPanelOpen(false));
   els.backdrop?.addEventListener("click", () => setPanelOpen(false));
+  els.newChat?.addEventListener("click", () => void startNewChat());
   els.form?.addEventListener("submit", handleSubmit);
-
-  for (const btn of els.tabs) {
-    btn.addEventListener("click", () => {
-      setActiveTab(btn.getAttribute("data-runa-tab") || "chat");
-    });
-  }
+  els.attachBtn?.addEventListener("click", () => els.fileInput?.click());
+  els.fileInput?.addEventListener("change", handleFileInputChange);
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && els.panel?.classList.contains("is-open")) {
@@ -592,7 +631,6 @@ function bindEvents() {
 export function initRunaPanel() {
   if (!els.fab || !els.panel) return;
   bindEvents();
-  setActiveTab("chat");
 }
 
 initRunaPanel();
