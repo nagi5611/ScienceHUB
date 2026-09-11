@@ -238,7 +238,9 @@
 }
 
 .runa-activity-chevron {
+  display: inline-block;
   color: var(--cf-orange, #f38020);
+  transition: transform 0.15s ease;
 }
 
 .runa-activity.is-active summary {
@@ -246,7 +248,15 @@
 }
 
 .runa-activity.is-done {
-  opacity: 0.72;
+  opacity: 0.85;
+}
+
+.runa-activity.is-done .runa-activity-detail {
+  color: var(--cf-text, #1d2433);
+}
+
+.runa-activity[open] summary .runa-activity-chevron {
+  transform: rotate(90deg);
 }
 
 .runa-activity-detail {
@@ -257,6 +267,8 @@
   word-break: break-word;
   font-size: 0.78rem;
   line-height: 1.45;
+  max-height: 16rem;
+  overflow: auto;
 }
 
 .runa-msg-content {

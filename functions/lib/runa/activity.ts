@@ -11,7 +11,7 @@ export interface RunaActivityPayload {
   phase: RunaActivityPhase;
   label: string;
   detail?: string;
-  state: "start" | "done" | "error";
+  state: "start" | "done" | "error" | "update";
 }
 
 /** アクティビティイベントを送信するヘルパー */
@@ -34,9 +34,49 @@ export class RunaActivityLog {
     this.emit({ id, phase, label: "", detail, state: "done" });
   }
 
+  /** 進行中のアクティビティの詳細を更新（推論ストリーム等） */
+  update(id: string, phase: RunaActivityPhase, detail: string): void {
+    this.emit({ id, phase, label: "", detail, state: "update" });
+  }
+
   private emit(payload: RunaActivityPayload): void {
     this.send("activity", payload);
   }
+}
+
+export interface ThinkingSummaryInput {
+  round: number;
+  maxRounds: number;
+  reasoning?: string | null;
+  content?: string | null;
+  toolPlans: Array<{ name: string; label: string; argsSummary: string }>;
+}
+
+/** 思考フェーズ完了時に UI へ渡す要約テキスト */
+export function formatThinkingSummary(input: ThinkingSummaryInput): string {
+  const lines: string[] = [`ラウンド ${input.round}/${input.maxRounds}`];
+
+  const reasoning = input.reasoning?.trim();
+  if (reasoning) {
+    lines.push("", "【推論】", reasoning);
+  }
+
+  if (input.toolPlans.length > 0) {
+    lines.push("", "【次の操作】");
+    for (const plan of input.toolPlans) {
+      const args = plan.argsSummary ? `\n  ${plan.argsSummary}` : "";
+      lines.push(`• ${plan.label}（${plan.name}）${args}`);
+    }
+  } else if (input.content?.trim()) {
+    const preview = input.content.trim();
+    const clipped =
+      preview.length > 600 ? `${preview.slice(0, 600)}…` : preview;
+    lines.push("", "【回答】", clipped);
+  } else if (!reasoning) {
+    lines.push("", "（操作の決定に至りませんでした）");
+  }
+
+  return lines.join("\n");
 }
 
 /** 特定ユーザーに紐づくファイル質問か（高速パスを使わない） */

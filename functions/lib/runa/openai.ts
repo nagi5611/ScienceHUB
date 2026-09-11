@@ -40,12 +40,14 @@ export interface ToolDefinition {
 
 export interface CompletionResult {
   content: string | null;
+  reasoning: string | null;
   toolCalls: ToolCall[];
   finishReason: string | null;
 }
 
 export interface CompletionCallbacks {
   onTextDelta?: (text: string) => void;
+  onReasoningDelta?: (text: string) => void;
 }
 
 const CLOUDFLARE_AI_V1_PREFIX =
@@ -212,14 +214,48 @@ function buildResponsesInput(messages: ChatMessage[]): {
   };
 }
 
-function parseResponsesOutput(body: Record<string, unknown>): CompletionResult {
+function appendReasoningParts(
+  parts: unknown[],
+  reasoning: string,
+  onReasoningDelta?: (text: string) => void
+): string {
+  let out = reasoning;
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue;
+    const partRecord = part as Record<string, unknown>;
+    if (
+      partRecord.type === "reasoning_text" &&
+      typeof partRecord.text === "string" &&
+      partRecord.text
+    ) {
+      out += partRecord.text;
+      onReasoningDelta?.(partRecord.text);
+    }
+  }
+  return out;
+}
+
+function parseResponsesOutput(
+  body: Record<string, unknown>,
+  onReasoningDelta?: (text: string) => void
+): CompletionResult {
   const output = Array.isArray(body.output) ? body.output : [];
   let content = "";
+  let reasoning = "";
   const toolCalls: ToolCall[] = [];
 
   for (const item of output) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
+
+    if (record.type === "reasoning" && Array.isArray(record.content)) {
+      reasoning = appendReasoningParts(
+        record.content,
+        reasoning,
+        onReasoningDelta
+      );
+      continue;
+    }
 
     if (record.type === "message" && Array.isArray(record.content)) {
       for (const part of record.content) {
@@ -255,6 +291,7 @@ function parseResponsesOutput(body: Record<string, unknown>): CompletionResult {
 
   return {
     content: content || null,
+    reasoning: reasoning || null,
     toolCalls,
     finishReason,
   };
@@ -270,13 +307,14 @@ type ToolCallDraft = {
 function mergeChatCompletionChunk(
   chunk: Record<string, unknown>,
   content: string,
+  reasoning: string,
   toolDrafts: ToolCallDraft[],
-  onTextDelta?: (text: string) => void
-): { content: string; finishReason: string | null } {
+  callbacks?: CompletionCallbacks
+): { content: string; reasoning: string; finishReason: string | null } {
   const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
   const choice = choices[0];
   if (!choice || typeof choice !== "object") {
-    return { content, finishReason: null };
+    return { content, reasoning, finishReason: null };
   }
   const choiceRecord = choice as Record<string, unknown>;
   const delta =
@@ -286,7 +324,16 @@ function mergeChatCompletionChunk(
 
   if (delta?.content && typeof delta.content === "string" && delta.content) {
     content += delta.content;
-    onTextDelta?.(delta.content);
+    callbacks?.onTextDelta?.(delta.content);
+  }
+
+  const reasoningDelta =
+    (typeof delta?.reasoning_content === "string" && delta.reasoning_content) ||
+    (typeof delta?.reasoning === "string" && delta.reasoning) ||
+    "";
+  if (reasoningDelta) {
+    reasoning += reasoningDelta;
+    callbacks?.onReasoningDelta?.(reasoningDelta);
   }
 
   const deltaToolCalls = Array.isArray(delta?.tool_calls) ? delta.tool_calls : [];
@@ -320,7 +367,7 @@ function mergeChatCompletionChunk(
     typeof choiceRecord.finish_reason === "string"
       ? choiceRecord.finish_reason
       : null;
-  return { content, finishReason };
+  return { content, reasoning, finishReason };
 }
 
 /** SSE 行をパースして completion チャンクを処理 */
@@ -367,7 +414,7 @@ async function requestChatCompletionsApi(
     stream: Boolean(callbacks?.onTextDelta),
   };
   if (/gpt-5\.6/i.test(model)) {
-    body.reasoning_effort = "none";
+    body.reasoning_effort = "low";
   }
 
   const response = await fetch(`${resolveBaseUrl(env)}/chat/completions`, {
@@ -396,14 +443,23 @@ async function requestChatCompletionsApi(
     };
     const choice = responseBody.choices?.[0];
     const message = choice?.message;
+    const messageRecord = message as Record<string, unknown> | undefined;
+    const reasoningRaw =
+      messageRecord?.reasoning_content ?? messageRecord?.reasoning;
+    const reasoning =
+      typeof reasoningRaw === "string" && reasoningRaw.trim()
+        ? reasoningRaw.trim()
+        : null;
     return {
       content: message?.content ?? null,
+      reasoning,
       toolCalls: message?.tool_calls ?? [],
       finishReason: choice?.finish_reason ?? null,
     };
   }
 
   let content = "";
+  let reasoning = "";
   let finishReason: string | null = null;
   const toolDrafts: ToolCallDraft[] = [];
 
@@ -411,16 +467,19 @@ async function requestChatCompletionsApi(
     const merged = mergeChatCompletionChunk(
       chunk,
       content,
+      reasoning,
       toolDrafts,
-      callbacks.onTextDelta
+      callbacks
     );
     content = merged.content;
+    reasoning = merged.reasoning;
     if (merged.finishReason) finishReason = merged.finishReason;
   });
 
   const toolCalls = toolDrafts.filter((draft) => draft.function.name);
   return {
     content: content || null,
+    reasoning: reasoning || null,
     toolCalls,
     finishReason,
   };
@@ -452,11 +511,11 @@ async function requestResponsesApi(
     input,
     tools: convertToolsForResponses(tools),
     tool_choice: "auto",
-    reasoning: { effort: "none" },
+    reasoning: { effort: "low" },
     max_output_tokens: 4096,
     store: false,
     parallel_tool_calls: true,
-    stream: Boolean(callbacks?.onTextDelta),
+    stream: Boolean(callbacks?.onTextDelta || callbacks?.onReasoningDelta),
   };
   if (instructions) body.instructions = instructions;
 
@@ -474,20 +533,27 @@ async function requestResponsesApi(
     throw new Error(extractApiError(responseBody, response.status));
   }
 
-  if (!callbacks?.onTextDelta || !response.body) {
+  if (
+    (!callbacks?.onTextDelta && !callbacks?.onReasoningDelta) ||
+    !response.body
+  ) {
     const responseBody = (await response.json()) as Record<string, unknown>;
-    return parseResponsesOutput(responseBody);
+    return parseResponsesOutput(responseBody, callbacks?.onReasoningDelta);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {
     const responseBody = (await response.json()) as Record<string, unknown>;
-    const parsed = parseResponsesOutput(responseBody);
-    if (parsed.content) callbacks.onTextDelta(parsed.content);
+    const parsed = parseResponsesOutput(
+      responseBody,
+      callbacks.onReasoningDelta
+    );
+    if (parsed.content) callbacks.onTextDelta?.(parsed.content);
     return parsed;
   }
 
   let content = "";
+  let reasoning = "";
   const toolCalls: ToolCall[] = [];
   let finishReason: string | null = null;
 
@@ -498,9 +564,25 @@ async function requestResponsesApi(
       callbacks.onTextDelta?.(delta);
     }
 
+    if (event.type === "response.reasoning_text.delta") {
+      const reasoningDelta =
+        typeof event.delta === "string"
+          ? event.delta
+          : event.delta &&
+              typeof event.delta === "object" &&
+              typeof (event.delta as { text?: unknown }).text === "string"
+            ? String((event.delta as { text: string }).text)
+            : "";
+      if (reasoningDelta) {
+        reasoning += reasoningDelta;
+        callbacks.onReasoningDelta?.(reasoningDelta);
+      }
+    }
+
     if (event.type === "response.completed" && event.response) {
       const parsed = parseResponsesOutput(
-        event.response as Record<string, unknown>
+        event.response as Record<string, unknown>,
+        callbacks.onReasoningDelta
       );
       if (!content && parsed.content) {
         content = parsed.content;
@@ -508,6 +590,7 @@ async function requestResponsesApi(
       }
       toolCalls.push(...parsed.toolCalls);
       finishReason = parsed.finishReason;
+      if (!reasoning && parsed.reasoning) reasoning = parsed.reasoning;
     }
 
     if (event.type === "response.output_item.done") {
@@ -534,6 +617,7 @@ async function requestResponsesApi(
 
   return {
     content: content || null,
+    reasoning: reasoning || null,
     toolCalls,
     finishReason,
   };
