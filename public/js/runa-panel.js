@@ -2,6 +2,8 @@
  * Runa — ダッシュボード用パネル UI
  */
 
+import { prepareAttachmentFile } from "./runa-attachments/prepare.js";
+
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -117,7 +119,7 @@ let runaDataLoaded = false;
 let runaDataLoadFailed = false;
 /** @type {HTMLElement | null} */
 let pendingAssistantRow = null;
-/** @type {{ id: string, name: string, file?: File, path?: string, uploading?: boolean }[]} */
+/** @type {{ id: string, name: string, path?: string, uploading?: boolean, statusLabel?: string, extractedText?: string, imagePaths?: string[] }[]} */
 let pendingAttachments = [];
 let attachDragDepth = 0;
 /** @type {string | null} */
@@ -307,8 +309,10 @@ function renderPendingAttachments() {
   els.attachList.innerHTML = pendingAttachments
     .map((item) => {
       const label = item.uploading
-        ? `${item.name}（アップロード中…）`
-        : item.name;
+        ? `${item.name}（${item.statusLabel || "アップロード中…"}）`
+        : item.statusLabel
+          ? `${item.name}（${item.statusLabel}）`
+          : item.name;
       return `<span class="runa-attach-chip" data-id="${escapeHtml(item.id)}">
         <span class="runa-attach-chip-name">${escapeHtml(label)}</span>
         <button type="button" class="runa-attach-chip-remove" aria-label="添付を削除" data-id="${escapeHtml(item.id)}">×</button>
@@ -348,7 +352,7 @@ async function ensureUsername() {
   return currentUsername;
 }
 
-async function uploadAttachmentFile(file) {
+async function uploadAttachmentBlob(blob, filename) {
   const username = await ensureUsername();
   const dirPath = `u/${username}/.runa-attachments`;
   const initRes = await fetch("/api/storage/upload/init", {
@@ -357,8 +361,8 @@ async function uploadAttachmentFile(file) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       path: dirPath,
-      filename: file.name,
-      size: file.size,
+      filename,
+      size: blob.size,
     }),
   });
   const initData = await initRes.json().catch(() => ({}));
@@ -374,7 +378,7 @@ async function uploadAttachmentFile(file) {
     {
       method: "PUT",
       credentials: "same-origin",
-      body: file,
+      body: blob,
     }
   );
   const uploadData = await uploadRes.json().catch(() => ({}));
@@ -384,7 +388,7 @@ async function uploadAttachmentFile(file) {
 
   return {
     path: uploadData.path,
-    name: file.name,
+    name: filename,
   };
 }
 
@@ -549,6 +553,8 @@ async function handleSubmit(event) {
   const attachments = readyAttachments.map((a) => ({
     path: a.path,
     name: a.name,
+    extractedText: a.extractedText,
+    imagePaths: a.imagePaths,
   }));
 
   messageState.push({
@@ -598,17 +604,50 @@ async function addAttachmentFiles(files) {
     pendingAttachments.push({
       id,
       name: file.name,
-      file,
       uploading: true,
+      statusLabel: "準備中…",
     });
     renderPendingAttachments();
 
     try {
-      const uploaded = await uploadAttachmentFile(file);
+      const prepared = await prepareAttachmentFile(file, {
+        onProgress: (label) => {
+          const pending = pendingAttachments.find((a) => a.id === id);
+          if (pending) {
+            pending.statusLabel = label;
+            renderPendingAttachments();
+          }
+        },
+      });
+
+      if (prepared.status === "unsupported") {
+        throw new Error(prepared.error || "この形式は添付できません");
+      }
+      if (prepared.status === "error") {
+        throw new Error(prepared.error || "変換に失敗しました");
+      }
+
+      let originalPath;
+      /** @type {string[]} */
+      const imagePaths = [];
+
+      for (const entry of prepared.blobs) {
+        const uploaded = await uploadAttachmentBlob(entry.blob, entry.filename);
+        if (entry.role === "original") {
+          originalPath = uploaded.path;
+        } else if (entry.role === "derived-image") {
+          imagePaths.push(uploaded.path);
+        }
+      }
+
       const item = pendingAttachments.find((a) => a.id === id);
       if (item) {
-        item.path = uploaded.path;
+        item.path = originalPath ?? imagePaths[0];
+        item.name = file.name;
+        item.extractedText = prepared.extractedText;
+        item.imagePaths = imagePaths.length ? imagePaths : undefined;
         item.uploading = false;
+        item.statusLabel = prepared.label;
       }
     } catch (error) {
       pendingAttachments = pendingAttachments.filter((a) => a.id !== id);

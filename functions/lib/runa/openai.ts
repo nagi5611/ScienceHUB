@@ -15,6 +15,8 @@ import {
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | null;
+  /** vision 用 data URL（最後の user メッセージのみ） */
+  images?: string[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
@@ -174,10 +176,24 @@ function buildResponsesInput(messages: ChatMessage[]): {
     if (message.role === "system") continue;
 
     if (message.role === "user") {
-      input.push({
-        role: "user",
-        content: message.content ?? "",
-      });
+      if (message.images?.length) {
+        input.push({
+          role: "user",
+          content: [
+            { type: "input_text", text: message.content ?? "" },
+            ...message.images.map((imageUrl) => ({
+              type: "input_image",
+              image_url: imageUrl,
+              detail: "auto",
+            })),
+          ],
+        });
+      } else {
+        input.push({
+          role: "user",
+          content: message.content ?? "",
+        });
+      }
       continue;
     }
 
@@ -399,6 +415,34 @@ async function consumeOpenAiSseStream(
   }
 }
 
+function formatMessagesForChatCompletions(
+  messages: ChatMessage[]
+): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    if (message.role === "user" && message.images?.length) {
+      return {
+        role: "user",
+        content: [
+          { type: "text", text: message.content ?? "" },
+          ...message.images.map((imageUrl) => ({
+            type: "image_url",
+            image_url: { url: imageUrl },
+          })),
+        ],
+      };
+    }
+
+    const formatted: Record<string, unknown> = {
+      role: message.role,
+      content: message.content ?? "",
+    };
+    if (message.tool_calls) formatted.tool_calls = message.tool_calls;
+    if (message.tool_call_id) formatted.tool_call_id = message.tool_call_id;
+    if (message.name) formatted.name = message.name;
+    return formatted;
+  });
+}
+
 async function requestChatCompletionsApi(
   env: Env,
   model: string,
@@ -408,7 +452,7 @@ async function requestChatCompletionsApi(
 ): Promise<CompletionResult> {
   const body: Record<string, unknown> = {
     model,
-    messages,
+    messages: formatMessagesForChatCompletions(messages),
     tools,
     tool_choice: "auto",
     stream: Boolean(callbacks?.onTextDelta),

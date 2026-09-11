@@ -83,13 +83,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const message = body.message?.trim() ?? "";
+      const MAX_EXTRACTED = 24 * 1024;
       const attachments = (body.attachments ?? [])
         .filter(
           (a): a is RunaChatAttachment =>
             Boolean(a?.path?.trim() && a?.name?.trim())
         )
         .slice(0, 5)
-        .map((a) => ({ path: a.path.trim(), name: a.name.trim() }));
+        .map((a) => ({
+          path: a.path.trim(),
+          name: a.name.trim(),
+          extractedText: a.extractedText
+            ? a.extractedText.slice(0, MAX_EXTRACTED)
+            : undefined,
+          imagePaths: (a.imagePaths ?? [])
+            .filter((p): p is string => typeof p === "string" && Boolean(p.trim()))
+            .map((p) => p.trim())
+            .slice(0, 10),
+        }));
 
       if (!message && !attachments.length) {
         return jsonError("メッセージを入力してください", 400);

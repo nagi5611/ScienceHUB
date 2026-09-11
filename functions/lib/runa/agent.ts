@@ -37,6 +37,7 @@ import {
   summarizeToolArgs,
 } from "./activity";
 import { formatFileItemsMarkdown } from "./storage-links";
+import { loadAttachmentImageDataUrls } from "./attachment-images";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -105,15 +106,64 @@ function formatRecentFilesReply(files: RunaFileItem[]): string {
 export interface RunaChatAttachment {
   path: string;
   name: string;
+  extractedText?: string;
+  imagePaths?: string[];
+}
+
+const MAX_EXTRACTED_TEXT_CHARS = 24 * 1024;
+
+function truncateExtractedText(text: string): string {
+  if (text.length <= MAX_EXTRACTED_TEXT_CHARS) return text;
+  return `${text.slice(0, MAX_EXTRACTED_TEXT_CHARS)}\n\n…（${MAX_EXTRACTED_TEXT_CHARS} 文字で切り詰め）`;
 }
 
 function buildUserMessageText(
   trimmed: string,
   attachments: RunaChatAttachment[]
 ): string {
-  if (!attachments.length) return trimmed;
-  const lines = attachments.map((a) => `- \`${a.path}\`（${a.name}）`);
-  return `${trimmed}\n\n[添付ファイル]\n${lines.join("\n")}`;
+  const parts: string[] = [];
+  if (trimmed) parts.push(trimmed);
+
+  if (attachments.length) {
+    parts.push("", "[添付ファイル]");
+    for (const attachment of attachments) {
+      parts.push(`- \`${attachment.path}\`（${attachment.name}）`);
+      const extracted = attachment.extractedText?.trim();
+      if (extracted) {
+        parts.push(
+          "",
+          `[添付: ${attachment.name} の抽出内容]`,
+          "```",
+          truncateExtractedText(extracted),
+          "```"
+        );
+      }
+      if (attachment.imagePaths?.length) {
+        parts.push(
+          "",
+          `[添付: ${attachment.name} の画像]（${attachment.imagePaths.length} 枚。vision で渡されます）`
+        );
+        for (const imagePath of attachment.imagePaths) {
+          parts.push(`- \`${imagePath}\``);
+        }
+      }
+    }
+  }
+
+  return parts.join("\n").trim();
+}
+
+function attachVisionToLastUserMessage(
+  messages: ChatMessage[],
+  imageDataUrls: string[]
+): void {
+  if (!imageDataUrls.length) return;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "user") {
+      messages[index] = { ...messages[index], images: imageDataUrls };
+      return;
+    }
+  }
 }
 
 function attachmentsToFileItems(
@@ -211,6 +261,14 @@ export async function runRunaChat(
       content: h.content,
     })),
   ];
+
+  const imageDataUrls = await loadAttachmentImageDataUrls(
+    env,
+    db,
+    user,
+    attachments
+  );
+  attachVisionToLastUserMessage(messages, imageDataUrls);
 
   const collectedFiles: RunaFileItem[] = [];
   const maxRounds = resolveMaxToolRounds(env);
