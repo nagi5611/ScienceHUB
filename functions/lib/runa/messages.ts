@@ -123,6 +123,17 @@ export async function insertRunaMessage(
   return id;
 }
 
+/** ユーザーの Runa チャット履歴をすべて削除 */
+export async function clearRunaMessages(
+  db: D1Database,
+  userId: string
+): Promise<void> {
+  await db
+    .prepare(`DELETE FROM runa_messages WHERE user_id = ?`)
+    .bind(userId)
+    .run();
+}
+
 /** 会話履歴を OpenAI メッセージ形式に変換（直近 N 件） */
 export async function buildRunaChatHistory(
   db: D1Database,

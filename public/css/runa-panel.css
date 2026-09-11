@@ -88,6 +88,27 @@
   font-size: 1.25rem;
 }
 
+.runa-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.runa-new-chat {
+  border: 1px solid var(--cf-border, #e2e5e9);
+  background: var(--cf-bg, #fff);
+  border-radius: var(--cf-radius, 8px);
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--cf-text, #1d2433);
+  cursor: pointer;
+}
+
+.runa-new-chat:hover {
+  background: var(--cf-surface, #f6f6f7);
+}
+
 .runa-close {
   border: none;
   background: transparent;
@@ -105,46 +126,19 @@
   background: var(--cf-orange-soft, #fff4eb);
 }
 
-.runa-tabs {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.5rem 1rem 0;
-  border-bottom: 1px solid var(--cf-border, #e2e5e9);
-}
-
-.runa-tab {
-  border: none;
-  background: transparent;
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--cf-radius, 8px) var(--cf-radius, 8px) 0 0;
-  font: inherit;
-  color: var(--cf-muted, #6b7280);
-  cursor: pointer;
-}
-
-.runa-tab.is-active {
-  color: var(--cf-text, #1d2433);
-  background: var(--cf-surface, #f6f6f7);
-  font-weight: 600;
-}
-
 .runa-body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.runa-tab-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
 }
 
 .runa-messages {
   flex: 1;
   overflow: auto;
   padding: 1rem 1.25rem;
+  min-height: 0;
 }
 
 .runa-msg {
@@ -292,11 +286,102 @@
   text-decoration: underline;
 }
 
+.runa-file-refs {
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.runa-file-ref {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.runa-file-ref-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.runa-file-ref-link {
+  color: var(--cf-orange, #f38020);
+  text-decoration: underline;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.runa-msg--user .runa-file-ref-link {
+  color: #fff;
+}
+
+.runa-attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem 0;
+}
+
+.runa-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: var(--cf-surface, #f6f6f7);
+  border: 1px solid var(--cf-border, #e2e5e9);
+  font-size: 0.78rem;
+}
+
+.runa-attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+.runa-attach-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--cf-muted, #6b7280);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 0.1rem;
+}
+
 .runa-form {
   display: flex;
   gap: 0.5rem;
+  align-items: flex-end;
   padding: 0.75rem 1rem 1rem;
   border-top: 1px solid var(--cf-border, #e2e5e9);
+}
+
+.runa-attach-btn {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  border-radius: var(--cf-radius, 8px);
+  background: var(--cf-bg, #fff);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.runa-attach-btn:hover:not(:disabled) {
+  background: var(--cf-surface, #f6f6f7);
+}
+
+.runa-attach-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .runa-input {

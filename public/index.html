@@ -517,30 +517,21 @@
           <p class="runa-kicker">ScienceHUB Agent</p>
           <h2 class="runa-title" id="runa-panel-title">Runa</h2>
         </div>
-        <button type="button" class="runa-close" id="runa-close" aria-label="閉じる">×</button>
+        <div class="runa-header-actions">
+          <button type="button" class="runa-new-chat" id="runa-new-chat">新規チャット</button>
+          <button type="button" class="runa-close" id="runa-close" aria-label="閉じる">×</button>
+        </div>
       </header>
       <p class="runa-status" id="runa-status" hidden></p>
-      <div class="runa-tabs" role="tablist" aria-label="Runa パネル">
-        <button type="button" class="runa-tab is-active" data-runa-tab="chat" role="tab" aria-selected="true">チャット</button>
-        <button type="button" class="runa-tab" data-runa-tab="files" role="tab" aria-selected="false">ファイル</button>
-        <button type="button" class="runa-tab" data-runa-tab="preview" role="tab" aria-selected="false">プレビュー</button>
-      </div>
       <div class="runa-body">
-        <section class="runa-tab-panel" data-runa-panel="chat" role="tabpanel">
-          <div class="runa-messages" id="runa-messages"></div>
-          <form class="runa-form" id="runa-form">
-            <textarea class="runa-input" id="runa-input" rows="2" placeholder="ファイルの検索や操作を依頼…" aria-label="メッセージ"></textarea>
-            <button type="submit" class="runa-send" id="runa-send">送信</button>
-          </form>
-        </section>
-        <section class="runa-tab-panel" data-runa-panel="files" role="tabpanel" hidden>
-          <div class="runa-files" id="runa-files"></div>
-        </section>
-        <section class="runa-tab-panel" data-runa-panel="preview" role="tabpanel" hidden>
-          <div class="runa-preview" id="runa-preview">
-            <p class="runa-empty">ファイルを選択するとプレビューが表示されます。</p>
-          </div>
-        </section>
+        <div class="runa-messages" id="runa-messages"></div>
+        <div class="runa-attach-list" id="runa-attach-list" hidden></div>
+        <form class="runa-form" id="runa-form">
+          <button type="button" class="runa-attach-btn" id="runa-attach-btn" aria-label="ファイルを添付" title="ファイルを添付">📎</button>
+          <input type="file" id="runa-file-input" class="runa-file-input" hidden multiple>
+          <textarea class="runa-input" id="runa-input" rows="2" placeholder="ファイルの検索や操作を依頼…" aria-label="メッセージ"></textarea>
+          <button type="submit" class="runa-send" id="runa-send">送信</button>
+        </form>
       </div>
     </div>
   </div>
