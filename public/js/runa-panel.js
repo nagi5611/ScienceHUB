@@ -43,7 +43,8 @@ let previewObjectUrl = null;
 let runaDataLoaded = false;
 let runaDataLoadFailed = false;
 /** @type {HTMLElement | null} */
-let pendingAssistantBubble = null;
+let pendingAssistantRow = null;
+let recentFilesLoaded = false;
 
 /** タブ休止・ページ離脱で失敗しやすい fetch を安全に実行 */
 async function safeFetch(url, options) {
@@ -99,19 +100,49 @@ function setActiveTab(tabId) {
     const show = panel.getAttribute("data-runa-panel") === tabId;
     panel.hidden = !show;
   }
+  if (tabId === "files" && !recentFilesLoaded) {
+    void loadRecentFiles();
+  }
+}
+
+const ACTIVITY_PHASE_LABELS = {
+  thinking: "thinking",
+  working: "working",
+  writing: "writing",
+};
+
+function renderActivityHtml(activity) {
+  const phase = ACTIVITY_PHASE_LABELS[activity.phase] || activity.phase;
+  const done = activity.state === "done";
+  const open = activity.open ? " open" : "";
+  const doneClass = done ? " is-done" : " is-active";
+  const detail = activity.detail
+    ? `<div class="runa-activity-detail">${escapeHtml(activity.detail)}</div>`
+    : "";
+  return `<details class="runa-activity runa-activity--${activity.phase}${doneClass}"${open} data-activity-id="${escapeHtml(activity.id)}">
+    <summary><span class="runa-activity-phase">${phase}</span><span class="runa-activity-chevron">›</span> ${escapeHtml(activity.label || phase)}</summary>
+    ${detail}
+  </details>`;
+}
+
+function renderActivitiesHtml(activities) {
+  if (!activities?.length) return "";
+  return `<div class="runa-activities">${activities.map(renderActivityHtml).join("")}</div>`;
 }
 
 function renderMessageHtml(msg) {
   const roleClass =
     msg.role === "user" ? "runa-msg--user" : "runa-msg--assistant";
   const streamingClass =
-    msg.pending && msg.role === "assistant" ? " is-streaming" : "";
-  let inner = escapeHtml(msg.content || "");
-  if (msg.pending && msg.statusLabel) {
-    inner += `<p class="runa-msg-status">${escapeHtml(msg.statusLabel)}</p>`;
-  }
+    msg.pending && msg.role === "assistant" && msg.content
+      ? " is-streaming"
+      : "";
+  const activities = renderActivitiesHtml(msg.activities);
+  const content = msg.content
+    ? `<div class="runa-msg-content">${escapeHtml(msg.content)}</div>`
+    : "";
   return `<div class="runa-msg ${roleClass}">
-    <div class="runa-msg-bubble${streamingClass}">${inner}</div>
+    <div class="runa-msg-bubble${streamingClass}">${activities}${content}</div>
   </div>`;
 }
 
@@ -121,7 +152,7 @@ function scrollMessagesToBottom() {
 
 function renderMessages() {
   if (!els.messages) return;
-  pendingAssistantBubble = null;
+  pendingAssistantRow = null;
   if (!messageState.length) {
     els.messages.innerHTML =
       '<p class="runa-empty">Runa にファイルの検索や操作を依頼できます。</p>';
@@ -132,6 +163,17 @@ function renderMessages() {
   scrollMessagesToBottom();
 }
 
+function bindActivityToggleHandlers(root) {
+  for (const el of root.querySelectorAll(".runa-activity")) {
+    el.addEventListener("toggle", () => {
+      const id = el.getAttribute("data-activity-id");
+      const pending = messageState.find((m) => m.pending);
+      const item = pending?.activities?.find((a) => a.id === id);
+      if (item) item.open = el.open;
+    });
+  }
+}
+
 /** ストリーミング中のアシスタント吹き出しを差分更新 */
 function mountPendingAssistantBubble(pending) {
   if (!els.messages) return;
@@ -140,37 +182,60 @@ function mountPendingAssistantBubble(pending) {
 
   const wrapper = document.createElement("div");
   wrapper.innerHTML = renderMessageHtml(pending);
-  const bubble = wrapper.querySelector(".runa-msg-bubble");
   const row = wrapper.firstElementChild;
-  if (!bubble || !row) return;
+  if (!row) return;
 
   els.messages.appendChild(row);
-  pendingAssistantBubble = bubble;
+  pendingAssistantRow = row;
+  bindActivityToggleHandlers(row);
   scrollMessagesToBottom();
 }
 
 function updatePendingAssistantBubble(pending) {
-  if (!pendingAssistantBubble) {
+  if (!pendingAssistantRow) {
     mountPendingAssistantBubble(pending);
     return;
   }
-  pendingAssistantBubble.textContent = pending.content || "";
-  const status = pendingAssistantBubble.parentElement?.querySelector(
-    ".runa-msg-status"
-  );
-  if (pending.statusLabel) {
-    if (status) {
-      status.textContent = pending.statusLabel;
-    } else {
-      const statusEl = document.createElement("p");
-      statusEl.className = "runa-msg-status";
-      statusEl.textContent = pending.statusLabel;
-      pendingAssistantBubble.after(statusEl);
-    }
-  } else if (status) {
-    status.remove();
-  }
+  const bubble = pendingAssistantRow.querySelector(".runa-msg-bubble");
+  if (!bubble) return;
+
+  bubble.classList.toggle("is-streaming", Boolean(pending.content));
+  bubble.innerHTML = `${renderActivitiesHtml(pending.activities)}${
+    pending.content
+      ? `<div class="runa-msg-content">${escapeHtml(pending.content)}</div>`
+      : ""
+  }`;
+  bindActivityToggleHandlers(pendingAssistantRow);
+
+  const active = pending.activities?.find((a) => a.state !== "done");
+  setStatus(active?.label || "");
   scrollMessagesToBottom();
+}
+
+function applyActivityEvent(pending, payload) {
+  if (!payload?.id || !payload.phase) return;
+  if (!pending.activities) pending.activities = [];
+
+  const existing = pending.activities.find((a) => a.id === payload.id);
+  if (payload.state === "start") {
+    if (!existing) {
+      pending.activities.push({
+        id: payload.id,
+        phase: payload.phase,
+        label: payload.label,
+        detail: payload.detail || "",
+        state: "start",
+        open: false,
+      });
+    }
+    return;
+  }
+
+  if (existing) {
+    existing.state = payload.state || "done";
+    if (payload.detail) existing.detail = payload.detail;
+    if (!existing.label && payload.label) existing.label = payload.label;
+  }
 }
 
 function renderFiles() {
@@ -324,24 +389,23 @@ async function loadMessages() {
 }
 
 async function loadRecentFiles() {
+  if (recentFilesLoaded) return true;
   const res = await safeFetch("/api/runa/recent-files?limit=20", {
     credentials: "same-origin",
   });
   if (!res?.ok) return false;
   const data = await res.json();
   if (data.items?.length) mergeFileItems(data.items);
+  recentFilesLoaded = true;
   return true;
 }
 
-/** 初回パネル開時（または再表示後）に履歴・最近のファイルを読み込む */
+/** 初回パネル開時（または再表示後）にチャット履歴を読み込む */
 async function ensureRunaDataLoaded() {
   if (runaDataLoaded) return;
   try {
-    const [messagesOk, filesOk] = await Promise.all([
-      loadMessages(),
-      loadRecentFiles(),
-    ]);
-    runaDataLoaded = messagesOk && filesOk;
+    const messagesOk = await loadMessages();
+    runaDataLoaded = messagesOk;
     runaDataLoadFailed = !runaDataLoaded;
   } catch (error) {
     runaDataLoadFailed = true;
@@ -373,7 +437,7 @@ async function postRunaChat(message) {
     role: "assistant",
     content: "",
     pending: true,
-    statusLabel: "",
+    activities: [],
   };
   messageState.push(pending);
   mountPendingAssistantBubble(pending);
@@ -391,10 +455,11 @@ async function postRunaChat(message) {
     } catch {
       return;
     }
-    if (eventName === "status" && payload.label) {
-      pending.statusLabel = payload.label;
-      setStatus(payload.label);
+    if (eventName === "activity") {
+      applyActivityEvent(pending, payload);
       updatePendingAssistantBubble(pending);
+    } else if (eventName === "status" && payload.label) {
+      setStatus(payload.label);
     } else if (eventName === "delta" && payload.text) {
       pending.content += payload.text;
       updatePendingAssistantBubble(pending);
@@ -426,7 +491,6 @@ async function postRunaChat(message) {
   }
 
   pending.pending = false;
-  pending.statusLabel = "";
   if (finalResult?.message && !pending.content) {
     pending.content = finalResult.message;
   }
@@ -434,7 +498,7 @@ async function postRunaChat(message) {
     mergeFileItems(finalResult.files);
   }
   setStatus("");
-  pendingAssistantBubble = null;
+  pendingAssistantRow = null;
   renderMessages();
   return finalResult;
 }

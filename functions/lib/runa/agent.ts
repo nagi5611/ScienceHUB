@@ -24,6 +24,11 @@ import {
   incrementRunaDailyTurn,
   insertRunaMessage,
 } from "./messages";
+import {
+  isRecentFilesQuery,
+  RunaActivityLog,
+  summarizeToolArgs,
+} from "./activity";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -72,10 +77,55 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
 };
 
 function streamTextDeltas(send: RunaSseSend, text: string): void {
-  const chunkSize = 24;
+  const chunkSize = 8;
   for (let i = 0; i < text.length; i += chunkSize) {
     send("delta", { text: text.slice(i, i + chunkSize) });
   }
+}
+
+function formatUpdatedAtJa(ts: number | null | undefined): string {
+  if (!ts) return "不明";
+  return new Date(ts).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+}
+
+function formatRecentFilesReply(files: RunaFileItem[]): string {
+  if (!files.length) {
+    return "過去30日以内に更新されたファイルは見つかりませんでした。";
+  }
+  const lines = files.map(
+    (f) => `- \`${f.path}\`（${formatUpdatedAtJa(f.updatedAt)}）`
+  );
+  return `過去30日で更新されたファイル（${files.length}件）:\n\n${lines.join("\n")}`;
+}
+
+/** 最近更新ファイルの質問は AI を使わず即答する */
+async function tryRecentFilesFastPath(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  message: string,
+  send: RunaSseSend
+): Promise<RunaChatResult | null> {
+  if (!isRecentFilesQuery(message)) return null;
+
+  const activity = new RunaActivityLog(send);
+  const workId = activity.start(
+    "working",
+    "最近更新されたファイルを検索しています…",
+    "全ストレージルートを並列検索"
+  );
+
+  const files = await listRecentFilesForUser(env, db, user, 20);
+  activity.finish(workId, "working", `${files.length} 件ヒット`);
+
+  const reply = formatRecentFilesReply(files);
+  const writeId = activity.start("writing", "結果を表示しています…");
+  streamTextDeltas(send, reply);
+  activity.finish(writeId, "writing");
+
+  if (files.length) send("files", { items: files });
+  await insertRunaMessage(db, user.id, "assistant", reply, files);
+  return { message: reply, files };
 }
 
 /** ユーザーメッセージを処理してアシスタント応答を返す */
@@ -95,6 +145,10 @@ export async function runRunaChat(
   await insertRunaMessage(db, user.id, "user", trimmed);
   await incrementRunaDailyTurn(db, user.id);
 
+  const fast = await tryRecentFilesFastPath(env, db, user, trimmed, send);
+  if (fast) return fast;
+
+  const activity = new RunaActivityLog(send);
   const history = await buildRunaChatHistory(db, user.id, 20);
   let rootsHint = "（ストレージ未初期化の可能性があります）";
   try {
@@ -125,16 +179,33 @@ export async function runRunaChat(
   const collectedFiles: RunaFileItem[] = [];
   const maxRounds = resolveMaxToolRounds(env);
 
+  let writingActivityId: string | null = null;
+
   for (let round = 0; round < maxRounds; round++) {
     let streamedReply = false;
+    const thinkId = activity.start(
+      "thinking",
+      round === 0 ? "応答を考えています…" : "次の操作を考えています…",
+      `ラウンド ${round + 1}/${maxRounds}`
+    );
+
     const completion = await runaChatCompletion(env, messages, ALL_RUNA_TOOLS, {
       onTextDelta: (text) => {
+        if (!writingActivityId) {
+          activity.finish(thinkId, "thinking");
+          writingActivityId = activity.start("writing", "回答を書いています…");
+        }
         streamedReply = true;
         send("delta", { text });
       },
     });
 
+    if (!streamedReply) {
+      activity.finish(thinkId, "thinking");
+    }
+
     if (completion.toolCalls.length > 0) {
+      activity.finish(thinkId, "thinking");
       messages.push({
         role: "assistant",
         content: completion.content,
@@ -152,7 +223,14 @@ export async function runRunaChat(
       "申し訳ありません。応答を生成できませんでした。";
 
     if (!streamedReply) {
+      if (!writingActivityId) {
+        writingActivityId = activity.start("writing", "回答を書いています…");
+      }
       streamTextDeltas(send, reply);
+    }
+    if (writingActivityId) {
+      activity.finish(writingActivityId, "writing");
+      writingActivityId = null;
     }
 
     const uniqueFiles = dedupeFiles(collectedFiles);
@@ -167,7 +245,9 @@ export async function runRunaChat(
 
   const fallback =
     "ツール呼び出しの上限に達しました。もう少し具体的な指示をお試しください。";
+  const writeId = activity.start("writing", "回答を書いています…");
   streamTextDeltas(send, fallback);
+  activity.finish(writeId, "writing");
   await insertRunaMessage(db, user.id, "assistant", fallback, collectedFiles);
   return { message: fallback, files: collectedFiles };
 }
@@ -183,7 +263,10 @@ async function handleToolCall(
 ): Promise<void> {
   const name = call.function.name;
   const label = TOOL_STATUS_LABELS[name] ?? `${name} を実行中…`;
-  send("status", { label, tool: name });
+  const argDetail = summarizeToolArgs(name, call.function.arguments);
+  send("status", { label, tool: name, detail: argDetail });
+  const activity = new RunaActivityLog(send);
+  const workId = activity.start("working", label, argDetail);
 
   const result = isHubTool(name)
     ? await executeHubTool(env, db, user, name, call.function.arguments)
@@ -194,6 +277,12 @@ async function handleToolCall(
         name,
         call.function.arguments
       );
+
+  const resultDetail =
+    result.files.length > 0
+      ? `${result.files.length} 件 · ${result.text.slice(0, 120)}`
+      : result.text.slice(0, 200);
+  activity.finish(workId, "working", resultDetail);
 
   for (const file of result.files) {
     collectedFiles.push(file);
@@ -236,40 +325,40 @@ export async function listRecentFilesForUser(
   );
   const capped = Math.min(50, Math.max(1, limit));
   const updatedFrom = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const all: RunaFileItem[] = [];
 
-  for (const root of roots) {
-    const rootType = root.type === "user" ? "user" : "group";
-    try {
-      const result = await searchStorageFiles(
-        env,
-        rootType,
-        root.key,
-        "",
-        {
-          query: "",
-          scope: "root",
-          updatedFrom,
-          limit: capped,
-          sortField: "updatedAt",
-          sortOrder: "desc",
-        }
-      );
-      for (const item of result.items) {
-        all.push({
+  const perRoot = await Promise.all(
+    roots.map(async (root) => {
+      const rootType = root.type === "user" ? "user" : "group";
+      try {
+        const result = await searchStorageFiles(
+          env,
+          rootType,
+          root.key,
+          "",
+          {
+            query: "",
+            scope: "root",
+            updatedFrom,
+            limit: capped,
+            sortField: "updatedAt",
+            sortOrder: "desc",
+          }
+        );
+        return result.items.map((item) => ({
           name: item.name,
           path: item.path,
-          type: "file",
+          type: "file" as const,
           sizeBytes: item.sizeBytes,
           updatedAt: item.updatedAt,
           location: item.location,
-        });
+        }));
+      } catch {
+        return [];
       }
-    } catch {
-      /* ルート単位の失敗はスキップ */
-    }
-  }
+    })
+  );
 
+  const all = perRoot.flat();
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return dedupeFiles(all).slice(0, capped);
 }
