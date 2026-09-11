@@ -14,6 +14,7 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - hub_list_apps — 使えるアプリとグループ ID
 - hub_list_announcements — お知らせ
 - hub_list_schedule / hub_create_schedule — カレンダー
+- web_search — インターネット検索（Serper / Google）。社内ストレージで足りないとき、最新情報・一般知識の確認に使う
 
 ## プロジェクト管理
 - pm_list_tasks / pm_create_task / pm_complete_task
@@ -36,6 +37,8 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - image_convert_storage — HEIC/TIFF/RAW のサーバー変換
 
 ## 方針
+- 社内ファイルは storage_search 系、Web の一般情報は web_search を使い分ける。
+- web_search の結果は出典 URL を Markdown リンクで示す。
 - 何ができるか不明なときは hub_list_apps から始める。
 - ブラウザ内専用アプリ（image-editor, uvcreator, tennis-motion, video-editor, video-converter, audio-editor, audio-converter）は実行せず href を案内する。
 - 削除は storage_delete でごみ箱へ。取り消しはクラウドストレージアプリを案内。
