@@ -35,6 +35,7 @@ import {
   RunaActivityLog,
   summarizeToolArgs,
 } from "./activity";
+import { formatFileItemsMarkdown } from "./storage-links";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -68,6 +69,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   storage_delete: "ごみ箱へ移動しています…",
   hub_list_apps: "アプリ一覧を取得しています…",
   hub_list_announcements: "お知らせを取得しています…",
+  web_search: "Web を検索しています…",
   hub_list_schedule: "予定を取得しています…",
   hub_create_schedule: "予定を作成しています…",
   pm_list_tasks: "タスクを取得しています…",
@@ -90,19 +92,37 @@ function streamTextDeltas(send: RunaSseSend, text: string): void {
   }
 }
 
-function formatUpdatedAtJa(ts: number | null | undefined): string {
-  if (!ts) return "不明";
-  return new Date(ts).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
-
 function formatRecentFilesReply(files: RunaFileItem[]): string {
   if (!files.length) {
     return "過去30日以内に更新されたファイルは見つかりませんでした。";
   }
-  const lines = files.map(
-    (f) => `- \`${f.path}\`（${formatUpdatedAtJa(f.updatedAt)}）`
-  );
-  return `**過去30日で更新されたファイル**（${files.length}件）:\n\n${lines.join("\n")}`;
+  return formatFileItemsMarkdown("過去30日で更新されたファイル", files);
+}
+
+export interface RunaChatAttachment {
+  path: string;
+  name: string;
+}
+
+function buildUserMessageText(
+  trimmed: string,
+  attachments: RunaChatAttachment[]
+): string {
+  if (!attachments.length) return trimmed;
+  const lines = attachments.map((a) => `- \`${a.path}\`（${a.name}）`);
+  return `${trimmed}\n\n[添付ファイル]\n${lines.join("\n")}`;
+}
+
+function attachmentsToFileItems(
+  attachments: RunaChatAttachment[]
+): RunaFileItem[] {
+  return attachments.map((a) => ({
+    name: a.name,
+    path: a.path,
+    type: "file" as const,
+    sizeBytes: null,
+    updatedAt: null,
+  }));
 }
 
 /** 最近更新ファイルの質問は AI を使わず即答する */
@@ -141,18 +161,24 @@ export async function runRunaChat(
   db: D1Database,
   user: SessionUser,
   message: string,
-  send: RunaSseSend
+  send: RunaSseSend,
+  attachments: RunaChatAttachment[] = []
 ): Promise<RunaChatResult> {
   const trimmed = message.trim();
-  if (!trimmed) {
+  if (!trimmed && !attachments.length) {
     throw new Error("メッセージを入力してください");
   }
 
+  const userText = buildUserMessageText(trimmed, attachments);
+  const userFiles = attachments.length
+    ? attachmentsToFileItems(attachments)
+    : null;
+
   await assertRunaDailyTurnLimit(db, user.id, env);
-  await insertRunaMessage(db, user.id, "user", trimmed);
+  await insertRunaMessage(db, user.id, "user", userText, userFiles);
   await incrementRunaDailyTurn(db, user.id);
 
-  const fast = await tryRecentFilesFastPath(env, db, user, trimmed, send);
+  const fast = await tryRecentFilesFastPath(env, db, user, trimmed || userText, send);
   if (fast) return fast;
 
   const activity = new RunaActivityLog(send);

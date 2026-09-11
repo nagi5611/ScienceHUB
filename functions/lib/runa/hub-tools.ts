@@ -46,6 +46,11 @@ import {
 import { runImageGenerate } from "./image-generate";
 import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
+import {
+  formatSerperResultsForRuna,
+  isSerperConfigured,
+  searchWebWithSerper,
+} from "./serper";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
 const SIM_APP_SLUG = "simulation-request";
@@ -66,6 +71,30 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
       name: "hub_list_announcements",
       description: "ダッシュボードのお知らせ一覧",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "インターネット（Google）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜10、既定 8）",
+          },
+          tbs: {
+            type: "string",
+            enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
+            description: "期間絞り込み（任意）: 1時間/1日/1週/1月/1年",
+          },
+        },
+        required: ["query"],
+      },
     },
   },
   {
@@ -346,6 +375,8 @@ export async function executeHubTool(
         return await runHubListApps(db, user);
       case "hub_list_announcements":
         return await runHubAnnouncements(db, user);
+      case "web_search":
+        return await runWebSearch(env, args);
       case "hub_list_schedule":
         return await runHubListSchedule(env, db, user, args);
       case "hub_create_schedule":
@@ -401,6 +432,37 @@ async function runHubListApps(
     "\nブラウザ内処理のみのアプリ（Runa では実行不可、リンク案内）: image-editor, uvcreator, tennis-motion, video-editor, video-converter, audio-editor, audio-converter"
   );
   return { text: lines.join("\n"), files: [] };
+}
+
+async function runWebSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isSerperConfigured(env)) {
+    return {
+      text: "Web 検索は現在利用できません（SERPER_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+  const tbs = strArg(args, "tbs");
+
+  const payload = await searchWebWithSerper(env, {
+    query,
+    num,
+    tbs: tbs || undefined,
+  });
+
+  return {
+    text: formatSerperResultsForRuna(payload),
+    files: [],
+  };
 }
 
 async function runHubAnnouncements(
