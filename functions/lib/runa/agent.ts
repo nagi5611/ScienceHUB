@@ -31,6 +31,7 @@ import {
   insertRunaMessage,
 } from "./messages";
 import {
+  formatThinkingSummary,
   isRecentFilesQuery,
   RunaActivityLog,
   summarizeToolArgs,
@@ -218,16 +219,68 @@ export async function runRunaChat(
 
   for (let round = 0; round < maxRounds; round++) {
     let streamedReply = false;
-    const thinkId = activity.start(
+    let thinkId: string | null = activity.start(
       "thinking",
       round === 0 ? "応答を考えています…" : "次の操作を考えています…",
       `ラウンド ${round + 1}/${maxRounds}`
     );
+    let reasoningBuffer = "";
+
+    const finishThinking = (completion: Awaited<
+      ReturnType<typeof runaChatCompletion>
+    >) => {
+      if (!thinkId) return;
+      const summary = formatThinkingSummary({
+        round: round + 1,
+        maxRounds,
+        reasoning: reasoningBuffer || completion.reasoning,
+        content: completion.content,
+        toolPlans: completion.toolCalls.map((call) => ({
+          name: call.function.name,
+          label: TOOL_STATUS_LABELS[call.function.name] ?? call.function.name,
+          argsSummary: summarizeToolArgs(
+            call.function.name,
+            call.function.arguments
+          ),
+        })),
+      });
+      activity.finish(thinkId, "thinking", summary);
+      thinkId = null;
+    };
 
     const completion = await runaChatCompletion(env, messages, ALL_RUNA_TOOLS, {
+      onReasoningDelta: (text) => {
+        reasoningBuffer += text;
+        if (thinkId) {
+          activity.update(
+            thinkId,
+            "thinking",
+            formatThinkingSummary({
+              round: round + 1,
+              maxRounds,
+              reasoning: reasoningBuffer,
+              content: null,
+              toolPlans: [],
+            })
+          );
+        }
+      },
       onTextDelta: (text) => {
         if (!writingActivityId) {
-          activity.finish(thinkId, "thinking");
+          if (thinkId) {
+            activity.finish(
+              thinkId,
+              "thinking",
+              formatThinkingSummary({
+                round: round + 1,
+                maxRounds,
+                reasoning: reasoningBuffer || null,
+                content: "（回答をストリーミング中）",
+                toolPlans: [],
+              })
+            );
+            thinkId = null;
+          }
           writingActivityId = activity.start("writing", "回答を書いています…");
         }
         streamedReply = true;
@@ -235,12 +288,12 @@ export async function runRunaChat(
       },
     });
 
-    if (!streamedReply) {
-      activity.finish(thinkId, "thinking");
+    if (!streamedReply && thinkId) {
+      finishThinking(completion);
     }
 
     if (completion.toolCalls.length > 0) {
-      activity.finish(thinkId, "thinking");
+      if (thinkId) finishThinking(completion);
       messages.push({
         role: "assistant",
         content: completion.content,

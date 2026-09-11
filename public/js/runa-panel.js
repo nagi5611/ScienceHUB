@@ -165,9 +165,9 @@ function setPanelOpen(open) {
 }
 
 const ACTIVITY_PHASE_LABELS = {
-  thinking: "thinking",
-  working: "working",
-  writing: "writing",
+  thinking: "考え中",
+  working: "実行中",
+  writing: "作成中",
 };
 
 function renderActivityHtml(activity) {
@@ -175,9 +175,10 @@ function renderActivityHtml(activity) {
   const done = activity.state === "done";
   const open = activity.open ? " open" : "";
   const doneClass = done ? " is-done" : " is-active";
-  const detail = activity.detail
-    ? `<div class="runa-activity-detail">${escapeHtml(activity.detail)}</div>`
-    : "";
+  const detailText =
+    activity.detail ||
+    (done ? "（詳細は記録されませんでした）" : "処理中…");
+  const detail = `<div class="runa-activity-detail">${escapeHtml(detailText)}</div>`;
   return `<details class="runa-activity runa-activity--${activity.phase}${doneClass}"${open} data-activity-id="${escapeHtml(activity.id)}">
     <summary><span class="runa-activity-phase">${phase}</span><span class="runa-activity-chevron">›</span> ${escapeHtml(activity.label || phase)}</summary>
     ${detail}
@@ -284,6 +285,10 @@ function applyActivityEvent(pending, payload) {
   }
 
   if (existing) {
+    if (payload.state === "update") {
+      if (payload.detail) existing.detail = payload.detail;
+      return;
+    }
     existing.state = payload.state || "done";
     if (payload.detail) existing.detail = payload.detail;
     if (!existing.label && payload.label) existing.label = payload.label;
