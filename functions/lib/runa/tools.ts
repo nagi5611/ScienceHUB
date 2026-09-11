@@ -654,6 +654,7 @@ async function runStorageSearch(
 
   const result = await searchStorageFiles(
     env,
+    db,
     parsed.rootType,
     parsed.rootKey,
     parsed.relativePath,
@@ -697,7 +698,7 @@ async function runStorageRecent(
 
   const updatedFrom = Date.now() - days * 24 * 60 * 60 * 1000;
 
-  const entries = await listRecentFilesInRoot(env, parsed.rootType, parsed.rootKey, {
+  const entries = await listRecentFilesInRoot(env, db, parsed.rootType, parsed.rootKey, {
     updatedFrom,
     limit,
   });

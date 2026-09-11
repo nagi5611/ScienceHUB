@@ -44,7 +44,7 @@ export async function searchAllRootsForRuna(
     roots.map(async (root) => {
       const rootType = root.type === "user" ? "user" : "group";
       try {
-        const result = await searchStorageFiles(env, rootType, root.key, "", {
+        const result = await searchStorageFiles(env, db, rootType, root.key, "", {
           query,
           scope: "root",
           updatedFrom,

@@ -20,6 +20,10 @@ import {
 } from "../storage/meta";
 import { authorizeStoragePath } from "../storage/permissions";
 import {
+  buildFileIndexEntry,
+  upsertFileIndex,
+} from "../storage/file-index";
+import {
   addUsedBytes,
   canAllocateBytes,
   subtractUsedBytes,
@@ -240,6 +244,21 @@ export async function writeStorageFileForRuna(
       await addUsedBytes(db, root.id, delta);
     } else if (delta < 0) {
       await subtractUsedBytes(db, root.id, -delta);
+    }
+
+    try {
+      await upsertFileIndex(
+        db,
+        root.id,
+        buildFileIndexEntry(
+          parsed.rootType,
+          parsed.rootKey,
+          parsed.relativePath,
+          meta
+        )
+      );
+    } catch (err) {
+      console.error("storage file index upsert failed:", err);
     }
 
     return {

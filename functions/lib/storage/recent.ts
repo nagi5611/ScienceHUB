@@ -1,11 +1,16 @@
 /**
- * 最近更新ファイルの高速一覧（R2 list の uploaded を使用、.meta 読み込みなし）
+ * 最近更新ファイルの一覧（D1 インデックス優先、未インデックス時は R2 フォールバック）
  */
 
 import { getFiles } from "../r2";
 import type { Env } from "../types";
 import { FOLDER_META_NAME } from "./constants";
+import {
+  isRootIndexReady,
+  queryRecentFilesInRoot as queryIndexedRecentFilesInRoot,
+} from "./file-index";
 import { buildLogicalPath, rootPrefix, type StorageRootType } from "./keys";
+import { resolveRootForPath } from "./roots";
 
 export interface RecentFileEntry {
   name: string;
@@ -42,8 +47,7 @@ function uploadedMs(uploaded: Date | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-/** 1 ルート内の最近更新ファイル（R2 の uploaded ベース、上限付きスキャン） */
-export async function listRecentFilesInRoot(
+async function listRecentFilesInRootFromR2(
   env: Env,
   rootType: StorageRootType,
   rootKey: string,
@@ -91,4 +95,38 @@ export async function listRecentFilesInRoot(
 
   matches.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return matches.slice(0, options.limit);
+}
+
+/** 1 ルート内の最近更新ファイル */
+export async function listRecentFilesInRoot(
+  env: Env,
+  db: D1Database,
+  rootType: StorageRootType,
+  rootKey: string,
+  options: {
+    updatedFrom: number;
+    limit: number;
+    maxScanned?: number;
+  }
+): Promise<RecentFileEntry[]> {
+  const root = await resolveRootForPath(db, rootType, rootKey);
+  if (root && (await isRootIndexReady(db, root.id))) {
+    const indexed = await queryIndexedRecentFilesInRoot(
+      db,
+      root.id,
+      rootType,
+      rootKey,
+      options
+    );
+    return indexed.map((item) => ({
+      name: item.name,
+      path: item.path,
+      type: "file",
+      sizeBytes: item.sizeBytes,
+      updatedAt: item.updatedAt,
+      location: item.location,
+    }));
+  }
+
+  return listRecentFilesInRootFromR2(env, rootType, rootKey, options);
 }

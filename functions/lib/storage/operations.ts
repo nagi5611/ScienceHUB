@@ -17,6 +17,13 @@ import {
   type StorageRootType,
 } from "./keys";
 import {
+  buildFileIndexEntry,
+  deleteFileIndex,
+  deleteFileIndexByPrefix,
+  moveFileIndexPrefix,
+  upsertFileIndex,
+} from "./file-index";
+import {
   createFolderMeta,
   getFileMeta,
   writeMetaJson,
@@ -125,13 +132,25 @@ export async function deleteStoragePath(
     await subtractUsedBytes(db, root.id, freedBytes);
   }
 
+  if (root) {
+    try {
+      if (isDirectory) {
+        await deleteFileIndexByPrefix(db, root.id, parsed.relativePath);
+      } else {
+        await deleteFileIndex(db, root.id, parsed.relativePath);
+      }
+    } catch (err) {
+      console.error("storage file index delete failed:", err);
+    }
+  }
+
   return { freedBytes };
 }
 
 /** リネーム */
 export async function renameStoragePath(
   env: Env,
-  _db: D1Database,
+  db: D1Database,
   _user: SessionUser,
   parsed: ParsedStoragePath,
   newName: string,
@@ -163,6 +182,21 @@ export async function renameStoragePath(
       parsed.relativePath,
       newRelative
     );
+    const root = await resolveRootFromParsed(db, parsed);
+    if (root) {
+      try {
+        await moveFileIndexPrefix(
+          db,
+          root.id,
+          parsed.rootType,
+          parsed.rootKey,
+          parsed.relativePath,
+          newRelative
+        );
+      } catch (err) {
+        console.error("storage file index move failed:", err);
+      }
+    }
     return { path: buildLogicalPath(parsed.rootType, parsed.rootKey, newRelative) };
   }
 
@@ -181,6 +215,33 @@ export async function renameStoragePath(
   if (metaObj) {
     await bucket.put(newMetaKey, metaObj.body, { httpMetadata: metaObj.httpMetadata });
     await bucket.delete(oldMetaKey);
+  }
+
+  const root = await resolveRootFromParsed(db, parsed);
+  if (root) {
+    try {
+      await deleteFileIndex(db, root.id, parsed.relativePath);
+      const meta = await getFileMeta(
+        env,
+        parsed.rootType,
+        parsed.rootKey,
+        newRelative
+      );
+      if (meta) {
+        await upsertFileIndex(
+          db,
+          root.id,
+          buildFileIndexEntry(
+            parsed.rootType,
+            parsed.rootKey,
+            newRelative,
+            meta
+          )
+        );
+      }
+    } catch (err) {
+      console.error("storage file index rename failed:", err);
+    }
   }
 
   return { path: buildLogicalPath(parsed.rootType, parsed.rootKey, newRelative) };
@@ -224,7 +285,7 @@ function isDescendantOrEqual(ancestor: string, target: string): boolean {
 /** ファイルまたはフォルダを別ディレクトリへ移動 */
 export async function moveStoragePath(
   env: Env,
-  _db: D1Database,
+  db: D1Database,
   parsed: ParsedStoragePath,
   isDirectory: boolean,
   destDirRelative: string
@@ -268,6 +329,21 @@ export async function moveStoragePath(
       parsed.relativePath,
       newRelative
     );
+    const root = await resolveRootFromParsed(db, parsed);
+    if (root) {
+      try {
+        await moveFileIndexPrefix(
+          db,
+          root.id,
+          parsed.rootType,
+          parsed.rootKey,
+          parsed.relativePath,
+          newRelative
+        );
+      } catch (err) {
+        console.error("storage file index move failed:", err);
+      }
+    }
     return {
       path: buildLogicalPath(parsed.rootType, parsed.rootKey, newRelative),
       renamed,
@@ -290,6 +366,33 @@ export async function moveStoragePath(
   if (metaObj) {
     await bucket.put(newMetaKey, metaObj.body, { httpMetadata: metaObj.httpMetadata });
     await bucket.delete(oldMetaKey);
+  }
+
+  const root = await resolveRootFromParsed(db, parsed);
+  if (root) {
+    try {
+      await deleteFileIndex(db, root.id, parsed.relativePath);
+      const meta = await getFileMeta(
+        env,
+        parsed.rootType,
+        parsed.rootKey,
+        newRelative
+      );
+      if (meta) {
+        await upsertFileIndex(
+          db,
+          root.id,
+          buildFileIndexEntry(
+            parsed.rootType,
+            parsed.rootKey,
+            newRelative,
+            meta
+          )
+        );
+      }
+    } catch (err) {
+      console.error("storage file index move failed:", err);
+    }
   }
 
   return {

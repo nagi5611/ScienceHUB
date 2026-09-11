@@ -287,6 +287,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       try {
         const result = await searchStorageFiles(
           env,
+          db,
           parsed.rootType,
           parsed.rootKey,
           parsed.relativePath,
