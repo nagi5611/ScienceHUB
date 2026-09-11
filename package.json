@@ -18,6 +18,7 @@
     "db:create": "wrangler d1 create sciencehub-db",
     "db:migrate:local": "wrangler d1 migrations apply sciencehub-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply sciencehub-db --remote",
+    "storage:index:backfill:remote": "npx tsx scripts/backfill-storage-index-remote.ts",
     "r2:create": "wrangler r2 bucket create sciencehub-files",
     "types": "wrangler types",
     "admin:set-password": "node scripts/set-remote-admin-password.mjs admin",
