@@ -4,10 +4,7 @@
 
 import type { Env, SessionUser } from "../types";
 import { buildVisibleRoots } from "../storage/list";
-import {
-  listRecentFilesInRoot,
-  mapRootsWithConcurrency,
-} from "../storage/recent";
+import { listRecentFilesInRoot } from "../storage/recent";
 import { runaMaxToolRounds } from "./env";
 import { RUNA_SYSTEM_PROMPT } from "./prompts";
 import {
@@ -115,7 +112,7 @@ async function tryRecentFilesFastPath(
   const workId = activity.start(
     "working",
     "最近更新されたファイルを検索しています…",
-    "R2 ストレージをルートごとに検索（.meta 読み込みなし）"
+    "R2 ストレージを全ルート並列検索（.meta 読み込みなし）"
   );
 
   const files = await listRecentFilesForUser(env, db, user, 20);
@@ -329,17 +326,19 @@ export async function listRecentFilesForUser(
   const capped = Math.min(50, Math.max(1, limit));
   const updatedFrom = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
-  const perRoot = await mapRootsWithConcurrency(roots, 3, async (root) => {
-    const rootType = root.type === "user" ? "user" : "group";
-    try {
-      return await listRecentFilesInRoot(env, rootType, root.key, {
-        updatedFrom,
-        limit: capped,
-      });
-    } catch {
-      return [];
-    }
-  });
+  const perRoot = await Promise.all(
+    roots.map(async (root) => {
+      const rootType = root.type === "user" ? "user" : "group";
+      try {
+        return await listRecentFilesInRoot(env, rootType, root.key, {
+          updatedFrom,
+          limit: capped,
+        });
+      } catch {
+        return [];
+      }
+    })
+  );
 
   const all = perRoot.flat();
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));

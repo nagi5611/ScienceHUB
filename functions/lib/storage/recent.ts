@@ -92,18 +92,3 @@ export async function listRecentFilesInRoot(
   matches.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return matches.slice(0, options.limit);
 }
-
-/** ルート配列を並列度制限で処理（R2 レート制限対策） */
-export async function mapRootsWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = [];
-  const batchSize = Math.max(1, concurrency);
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    results.push(...(await Promise.all(batch.map(fn))));
-  }
-  return results;
-}

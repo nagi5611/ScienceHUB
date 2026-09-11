@@ -40,33 +40,33 @@ export async function searchAllRootsForRuna(
     user.is_admin
   );
 
-  const all: RunaFileItem[] = [];
-
-  for (const root of roots) {
-    const rootType = root.type === "user" ? "user" : "group";
-    try {
-      const result = await searchStorageFiles(env, rootType, root.key, "", {
-        query,
-        scope: "root",
-        updatedFrom,
-        limit: limitPerRoot,
-        sortField: "updatedAt",
-        sortOrder: "desc",
-      });
-      for (const item of result.items) {
-        all.push({
+  const perRoot = await Promise.all(
+    roots.map(async (root) => {
+      const rootType = root.type === "user" ? "user" : "group";
+      try {
+        const result = await searchStorageFiles(env, rootType, root.key, "", {
+          query,
+          scope: "root",
+          updatedFrom,
+          limit: limitPerRoot,
+          sortField: "updatedAt",
+          sortOrder: "desc",
+        });
+        return result.items.map((item) => ({
           name: item.name,
           path: item.path,
-          type: "file",
+          type: "file" as const,
           sizeBytes: item.sizeBytes,
           updatedAt: item.updatedAt,
           location: item.location,
-        });
+        }));
+      } catch {
+        return [];
       }
-    } catch {
-      /* skip */
-    }
-  }
+    })
+  );
+
+  const all: RunaFileItem[] = perRoot.flat();
 
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
