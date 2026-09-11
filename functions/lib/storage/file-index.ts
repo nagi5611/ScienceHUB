@@ -463,6 +463,8 @@ export async function querySearchFiles(
     scope: FileIndexSearchScope;
     updatedFrom: number | null;
     updatedTo: number | null;
+    updatedBy?: string | null;
+    createdBy?: string | null;
     sortField: StorageSortField;
     sortOrder: StorageSortOrder;
     offset: number;
@@ -496,6 +498,18 @@ export async function querySearchFiles(
     binds.push(options.updatedTo);
   }
 
+  const updatedBy = options.updatedBy?.trim();
+  if (updatedBy) {
+    conditions.push("updated_by = ?");
+    binds.push(updatedBy);
+  }
+
+  const createdBy = options.createdBy?.trim();
+  if (createdBy) {
+    conditions.push("created_by = ?");
+    binds.push(createdBy);
+  }
+
   const where = conditions.join(" AND ");
   const orderCol = sortSqlColumn(options.sortField);
   const orderDir = options.sortOrder === "desc" ? "DESC" : "ASC";
@@ -520,6 +534,60 @@ export async function querySearchFiles(
   );
 
   return { items, total };
+}
+
+/** 複数ルート横断で操作者（username）に一致するファイルを検索 */
+export async function queryFilesByOperatorAcrossRoots(
+  db: D1Database,
+  roots: Array<{ id: string; type: StorageRootType; key: string }>,
+  options: {
+    username: string;
+    field: "updated" | "created" | "either";
+    updatedFrom: number | null;
+    limit: number;
+  }
+): Promise<IndexedRecentFile[]> {
+  const username = options.username.trim();
+  if (!username || !roots.length) return [];
+
+  const placeholders = roots.map(() => "?").join(", ");
+  const conditions = [`root_id IN (${placeholders})`];
+  const binds: Array<string | number> = roots.map((r) => r.id);
+
+  if (options.field === "updated") {
+    conditions.push("updated_by = ?");
+    binds.push(username);
+  } else if (options.field === "created") {
+    conditions.push("created_by = ?");
+    binds.push(username);
+  } else {
+    conditions.push("(updated_by = ? OR created_by = ?)");
+    binds.push(username, username);
+  }
+
+  if (options.updatedFrom !== null) {
+    conditions.push("updated_at >= ?");
+    binds.push(options.updatedFrom);
+  }
+
+  const sql = `SELECT * FROM storage_file_index
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY updated_at DESC
+    LIMIT ?`;
+
+  binds.push(options.limit);
+
+  const rows = await db.prepare(sql).bind(...binds).all<FileIndexRow>();
+  const rootMap = new Map(roots.map((r) => [r.id, r]));
+
+  return (rows.results ?? []).map((row) => {
+    const root = rootMap.get(row.root_id);
+    return rowToRecentFile(
+      row,
+      root?.type ?? "user",
+      root?.key ?? ""
+    );
+  });
 }
 
 /** バックフィル行を upsert */

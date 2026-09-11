@@ -3,7 +3,7 @@
  */
 
 import type { Env, SessionUser } from "../types";
-import { parseLogicalPath } from "../storage/keys";
+import { parseLogicalPath, type StorageRootType } from "../storage/keys";
 import { authorizeStoragePath } from "../storage/permissions";
 import { buildVisibleRoots, listDirectory } from "../storage/list";
 import { searchStorageFiles, parseSearchDateFrom, parseSearchDateTo } from "../storage/search";
@@ -19,6 +19,12 @@ import {
   writeStorageFileForRuna,
 } from "./storage-io";
 import { listRecentFilesInRoot } from "../storage/recent";
+import {
+  isRootIndexReady,
+  queryFilesByOperatorAcrossRoots,
+  type IndexedRecentFile,
+} from "../storage/file-index";
+import { resolveRootForPath } from "../storage/roots";
 import { searchAllRootsForRuna } from "./search-all";
 import type { ToolDefinition } from "./openai";
 
@@ -28,6 +34,9 @@ export interface RunaFileItem {
   type: "file" | "folder";
   sizeBytes: number | null;
   updatedAt: number | null;
+  createdAt?: number | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
   location?: string;
 }
 
@@ -154,9 +163,45 @@ export const RUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
             type: "string",
             description: "更新日時の終了（YYYY-MM-DD または ISO）",
           },
+          updated_by: {
+            type: "string",
+            description: "最終更新者の username（インデックス上のメタデータ）",
+          },
+          created_by: {
+            type: "string",
+            description: "作成者の username",
+          },
           limit: { type: "number", description: "最大件数（既定 30）" },
         },
         required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_files_by_user",
+      description:
+        "指定ユーザー（username）が作成または更新したファイルを、アクセス可能な全ルートから検索する。操作履歴ログではなくファイルメタデータの created_by / updated_by に基づく",
+      parameters: {
+        type: "object",
+        properties: {
+          username: {
+            type: "string",
+            description: "対象ユーザーの username（hub_search_users で特定）",
+          },
+          field: {
+            type: "string",
+            enum: ["either", "updated", "created"],
+            description: "either=作成または更新, updated=最終更新者, created=作成者",
+          },
+          days: {
+            type: "number",
+            description: "過去 N 日以内に更新されたファイルに限定（任意）",
+          },
+          limit: { type: "number", description: "最大件数（既定 30）" },
+        },
+        required: ["username"],
       },
     },
   },
@@ -283,6 +328,20 @@ export const RUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
 ];
 
+function indexedToRunaItem(item: IndexedRecentFile): RunaFileItem {
+  return {
+    name: item.name,
+    path: item.path,
+    type: item.type,
+    sizeBytes: item.sizeBytes,
+    updatedAt: item.updatedAt,
+    createdAt: item.createdAt,
+    createdBy: item.createdBy,
+    updatedBy: item.updatedBy,
+    location: item.location,
+  };
+}
+
 function toFileItems(
   items: Array<{
     name: string;
@@ -290,6 +349,9 @@ function toFileItems(
     type: "file" | "folder";
     sizeBytes: number | null;
     updatedAt: number | null;
+    createdAt?: number | null;
+    createdBy?: string | null;
+    updatedBy?: string | null;
     location?: string;
   }>
 ): RunaFileItem[] {
@@ -299,8 +361,23 @@ function toFileItems(
     type: item.type,
     sizeBytes: item.sizeBytes,
     updatedAt: item.updatedAt,
+    createdAt: item.createdAt ?? null,
+    createdBy: item.createdBy ?? null,
+    updatedBy: item.updatedBy ?? null,
     location: item.location,
   }));
+}
+
+function formatFileOperatorSummary(file: RunaFileItem): string {
+  const updated =
+    file.updatedAt != null
+      ? new Date(file.updatedAt).toLocaleString("ja-JP", {
+          timeZone: "Asia/Tokyo",
+        })
+      : "不明";
+  const operator = file.updatedBy || file.createdBy;
+  const operatorPart = operator ? ` · 操作者: ${operator}` : "";
+  return `${file.path} (更新: ${updated}${operatorPart})`;
 }
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -370,6 +447,8 @@ export async function executeRunaTool(
         return await runStorageWriteFile(env, db, user, args);
       case "storage_search":
         return await runStorageSearch(env, db, user, args);
+      case "storage_files_by_user":
+        return await runStorageFilesByUser(env, db, user, args);
       case "storage_search_all":
         return await runStorageSearchAll(env, db, user, args);
       case "storage_recent":
@@ -530,9 +609,12 @@ async function runStorageStat(
     type: "file",
     sizeBytes: fileMeta?.sizeBytes ?? null,
     updatedAt: fileMeta?.updatedAt ?? null,
+    createdAt: fileMeta?.createdAt ?? null,
+    createdBy: fileMeta?.createdBy ?? null,
+    updatedBy: fileMeta?.updatedBy ?? null,
   };
   return {
-    text: `ファイル ${path}\nサイズ: ${item.sizeBytes ?? "不明"} bytes\n更新: ${item.updatedAt ?? "不明"}\n作成者: ${fileMeta?.createdBy ?? "不明"}`,
+    text: `ファイル ${path}\nサイズ: ${item.sizeBytes ?? "不明"} bytes\n更新: ${item.updatedAt ?? "不明"}\n作成者: ${fileMeta?.createdBy ?? "不明"}\n最終更新者: ${fileMeta?.updatedBy ?? "不明"}`,
     files: [item],
   };
 }
@@ -627,6 +709,77 @@ async function runStorageSearchAll(
   };
 }
 
+async function runStorageFilesByUser(
+  _env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  const username = strArg(args, "username");
+  const fieldRaw = strArg(args, "field") || "either";
+  const field =
+    fieldRaw === "updated" || fieldRaw === "created" ? fieldRaw : "either";
+  const days = numArg(args, "days", 0);
+  const limit = Math.min(80, numArg(args, "limit", 30));
+
+  if (!username) {
+    return { text: "username を指定してください", files: [] };
+  }
+
+  const roots = await buildVisibleRoots(
+    db,
+    user.id,
+    user.username,
+    user.is_admin
+  );
+  const resolvedRoots: Array<{
+    id: string;
+    type: StorageRootType;
+    key: string;
+  }> = [];
+  for (const root of roots) {
+    const rootType: StorageRootType =
+      root.type === "user" ? "user" : "group";
+    const row = await resolveRootForPath(db, rootType, root.key);
+    if (!row || !(await isRootIndexReady(db, row.id))) continue;
+    resolvedRoots.push({ id: row.id, type: rootType, key: root.key });
+  }
+
+  if (!resolvedRoots.length) {
+    return {
+      text: `ユーザー \`${username}\` のファイルを検索できません（ファイルインデックスが未整備です）`,
+      files: [],
+    };
+  }
+
+  const updatedFrom =
+    days > 0 ? Date.now() - days * 24 * 60 * 60 * 1000 : null;
+
+  const items = await queryFilesByOperatorAcrossRoots(db, resolvedRoots, {
+    username,
+    field,
+    updatedFrom,
+    limit,
+  });
+
+  const files = items.map(indexedToRunaItem);
+  const summary = files.length
+    ? files.map(formatFileOperatorSummary).join("\n")
+    : "（該当なし — メタデータに操作者情報がない古いファイルは含まれません）";
+
+  const fieldLabel =
+    field === "updated"
+      ? "最終更新者"
+      : field === "created"
+        ? "作成者"
+        : "作成または更新";
+
+  return {
+    text: `\`${username}\` が${fieldLabel}のファイル（${files.length} 件）:\n${summary}`,
+    files,
+  };
+}
+
 async function runStorageSearch(
   env: Env,
   db: D1Database,
@@ -641,9 +794,20 @@ async function runStorageSearch(
   const limit = Math.min(80, numArg(args, "limit", 30));
   const updatedFrom = parseSearchDateFrom(strArg(args, "updated_from") || null);
   const updatedTo = parseSearchDateTo(strArg(args, "updated_to") || null);
+  const updatedBy = strArg(args, "updated_by");
+  const createdBy = strArg(args, "created_by");
 
-  if (!query && updatedFrom === null && updatedTo === null) {
-    return { text: "検索語または updated_from/updated_to を指定してください", files: [] };
+  if (
+    !query &&
+    updatedFrom === null &&
+    updatedTo === null &&
+    !updatedBy &&
+    !createdBy
+  ) {
+    return {
+      text: "検索語、updated_from/updated_to、または updated_by/created_by を指定してください",
+      files: [],
+    };
   }
 
   const parsed = parseLogicalPath(path);
@@ -663,6 +827,8 @@ async function runStorageSearch(
       scope,
       updatedFrom,
       updatedTo,
+      updatedBy: updatedBy || null,
+      createdBy: createdBy || null,
       limit,
       sortField: "updatedAt",
       sortOrder: "desc",
@@ -671,11 +837,12 @@ async function runStorageSearch(
 
   const files = toFileItems(result.items);
   const summary = files.length
-    ? files.map((f) => `${f.path} (更新: ${f.updatedAt ?? "不明"})`).join("\n")
+    ? files.map(formatFileOperatorSummary).join("\n")
     : "（該当なし）";
 
+  const label = query || updatedBy || createdBy || "条件指定";
   return {
-    text: `検索「${query}」: ${result.total} 件ヒット、表示 ${files.length} 件\n${summary}`,
+    text: `検索「${label}」: ${result.total} 件ヒット、表示 ${files.length} 件\n${summary}`,
     files,
   };
 }
@@ -710,16 +877,9 @@ async function runStorageRecent(
           item.path.startsWith(`${logicalPrefix}/`)
       )
     : entries;
-  const files: RunaFileItem[] = scoped.map((item) => ({
-    name: item.name,
-    path: item.path,
-    type: "file",
-    sizeBytes: item.sizeBytes,
-    updatedAt: item.updatedAt,
-    location: item.location,
-  }));
+  const files = toFileItems(scoped);
   const summary = files.length
-    ? files.map((f) => `${f.path} (更新: ${f.updatedAt ?? "不明"})`).join("\n")
+    ? files.map(formatFileOperatorSummary).join("\n")
     : "（該当なし）";
 
   return {

@@ -39,7 +39,9 @@ export function formatFileItemsMarkdown(
             timeZone: "Asia/Tokyo",
           })
         : "不明";
-    return `- [${f.name}（${kind}）](${url}) — \`${f.path}\`（更新: ${updated}）`;
+    const operator = f.updatedBy || f.createdBy;
+    const operatorPart = operator ? ` · 操作者: ${operator}` : "";
+    return `- [${f.name}（${kind}）](${url}) — \`${f.path}\`（更新: ${updated}${operatorPart}）`;
   });
 
   const heading = title.includes("**")

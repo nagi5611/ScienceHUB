@@ -61,8 +61,10 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   storage_read_file: "ファイルを読み込んでいます…",
   storage_write_file: "ファイルを書き込んでいます…",
   storage_search: "ファイルを検索しています…",
+  storage_files_by_user: "ユーザーのファイルを検索しています…",
   storage_search_all: "全ストレージを検索しています…",
   storage_recent: "最近のファイルを取得しています…",
+  hub_search_users: "ユーザーを検索しています…",
   storage_mkdir: "フォルダを作成しています…",
   storage_move: "ファイルを移動しています…",
   storage_rename: "名前を変更しています…",
@@ -94,7 +96,7 @@ function formatRecentFilesReply(files: RunaFileItem[]): string {
   if (!files.length) {
     return "過去30日以内に更新されたファイルは見つかりませんでした。";
   }
-  return formatFileItemsMarkdown("過去30日で更新されたファイル", files);
+  return `${formatFileItemsMarkdown("過去30日で更新されたファイル（全ユーザー・操作者問わず）", files)}\n\n※ 特定ユーザーのファイルは storage_files_by_user を使います。`;
 }
 
 export interface RunaChatAttachment {
@@ -405,14 +407,27 @@ export async function listRecentFilesForUser(
     )
   ).flat();
 
-  const all: RunaFileItem[] = [...indexedItems, ...fallbackItems].map((item) => ({
-    name: item.name,
-    path: item.path,
-    type: "file",
-    sizeBytes: item.sizeBytes,
-    updatedAt: item.updatedAt,
-    location: item.location,
-  }));
+  const all: RunaFileItem[] = [
+    ...indexedItems.map((item) => ({
+      name: item.name,
+      path: item.path,
+      type: "file" as const,
+      sizeBytes: item.sizeBytes,
+      updatedAt: item.updatedAt,
+      location: item.location,
+      createdAt: item.createdAt,
+      createdBy: item.createdBy,
+      updatedBy: item.updatedBy,
+    })),
+    ...fallbackItems.map((item) => ({
+      name: item.name,
+      path: item.path,
+      type: "file" as const,
+      sizeBytes: item.sizeBytes,
+      updatedAt: item.updatedAt,
+      location: item.location,
+    })),
+  ];
 
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return dedupeFiles(all).slice(0, capped);

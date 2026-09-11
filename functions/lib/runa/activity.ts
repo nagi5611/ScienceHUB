@@ -39,10 +39,42 @@ export class RunaActivityLog {
   }
 }
 
+/** 特定ユーザーに紐づくファイル質問か（高速パスを使わない） */
+export function isUserScopedFilesQuery(message: string): boolean {
+  const text = message.trim();
+  if (!text) return false;
+
+  if (
+    /操作したユーザー|操作したユーザ|ファイル操作した|誰が操作|誰が触|誰が更新|誰が編集/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /(の|が)(直近|最近).*(操作|触|更新|編集|アップロード)/.test(text) ||
+    /(操作|触|更新|編集|アップロード)したファイル/.test(text)
+  ) {
+    return true;
+  }
+
+  if (
+    /[ぁ-んァ-ヶーa-zA-Z0-9]{2,}.*(の|が).*(操作|触った|更新|編集)/.test(text)
+  ) {
+    return true;
+  }
+
+  if (/ユーザー.*(検索|一覧|探)/.test(text)) return true;
+
+  return false;
+}
+
 /** 最近更新ファイルの質問かどうか（AI を迂回する高速パス用） */
 export function isRecentFilesQuery(message: string): boolean {
   const text = message.trim();
   if (!text) return false;
+  if (isUserScopedFilesQuery(text)) return false;
   const asksRecent =
     /最近|直近|新しい|更新された|更新されて|触った|変更された|編集された/.test(
       text
@@ -72,6 +104,9 @@ export function summarizeToolArgs(
   }
   if (typeof args.days === "number") parts.push(`days: ${args.days}`);
   if (typeof args.limit === "number") parts.push(`limit: ${args.limit}`);
+  if (typeof args.username === "string" && args.username) {
+    parts.push(`user: ${args.username}`);
+  }
   if (typeof args.folder_name === "string") {
     parts.push(`folder: ${args.folder_name}`);
   }
