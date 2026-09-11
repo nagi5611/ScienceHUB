@@ -23,6 +23,16 @@ import {
   trashR2Prefix,
   type ParsedStoragePath,
 } from "./keys";
+import {
+  buildFileIndexEntry,
+  deleteFileIndex,
+  deleteFileIndexByPrefix,
+  upsertFileIndex,
+} from "./file-index";
+import {
+  reindexFilesUnderPrefix,
+  resolveBackfillRootContext,
+} from "./file-index-backfill";
 import { getFileMeta } from "./meta";
 import { authorizeStoragePath } from "./permissions";
 import type { StorageAction } from "./meta";
@@ -284,6 +294,16 @@ export async function moveStoragePathToTrash(
 
   await enforceTrashLimits(env, db, root.id);
 
+  try {
+    if (isDirectory) {
+      await deleteFileIndexByPrefix(db, root.id, parsed.relativePath);
+    } else {
+      await deleteFileIndex(db, root.id, parsed.relativePath);
+    }
+  } catch (err) {
+    console.error("storage file index trash delete failed:", err);
+  }
+
   return { trashId, sizeBytes };
 }
 
@@ -496,6 +516,36 @@ export async function restoreTrashItem(
     .prepare("DELETE FROM storage_trash_items WHERE id = ?")
     .bind(trashId)
     .run();
+
+  try {
+    const ctx = await resolveBackfillRootContext(db, row.root_id);
+    if (ctx) {
+      if (row.item_type === "file") {
+        const meta = await getFileMeta(
+          env,
+          parsed.rootType,
+          parsed.rootKey,
+          targetRelative
+        );
+        if (meta) {
+          await upsertFileIndex(
+            db,
+            ctx.rootId,
+            buildFileIndexEntry(
+              parsed.rootType,
+              parsed.rootKey,
+              targetRelative,
+              meta
+            )
+          );
+        }
+      } else {
+        await reindexFilesUnderPrefix(env, db, ctx, targetRelative);
+      }
+    }
+  } catch (err) {
+    console.error("storage file index restore failed:", err);
+  }
 
   const restoredPath = buildLogicalPath(
     parsed.rootType,

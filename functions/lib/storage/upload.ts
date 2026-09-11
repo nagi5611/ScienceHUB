@@ -30,6 +30,10 @@ import {
   writeMetaJson,
 } from "./meta";
 import {
+  buildFileIndexEntry,
+  upsertFileIndex,
+} from "./file-index";
+import {
   addUsedBytes,
   canAllocateBytes,
   type StorageRootRow,
@@ -590,6 +594,16 @@ async function finalizeUpload(
     fileMetaKey(rootType, rootKey, relativeFilePath),
     meta
   );
+
+  try {
+    await upsertFileIndex(
+      db,
+      root.id,
+      buildFileIndexEntry(rootType, rootKey, relativeFilePath, meta)
+    );
+  } catch (err) {
+    console.error("storage file index upsert failed:", err);
+  }
 
   await addUsedBytes(db, root.id, size);
   const partsStored = partsJson

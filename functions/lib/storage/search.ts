@@ -6,6 +6,7 @@ import { getFiles } from "../r2";
 import type { Env } from "../types";
 import { FOLDER_META_NAME } from "./constants";
 import { buildLogicalPath, dirListPrefix, rootPrefix, type StorageRootType } from "./keys";
+import { isRootIndexReady, querySearchFiles } from "./file-index";
 import { getFileMeta } from "./meta";
 import {
   compareStorageItems,
@@ -14,6 +15,7 @@ import {
   type StorageSortField,
   type StorageSortOrder,
 } from "./list";
+import { resolveRootForPath } from "./roots";
 
 export type StorageSearchScope = "folder" | "subtree" | "root";
 
@@ -199,6 +201,7 @@ function sortSearchItems(
 /** ファイル名・更新日時で検索 */
 export async function searchStorageFiles(
   env: Env,
+  db: D1Database,
   rootType: StorageRootType,
   rootKey: string,
   relativeDir: string,
@@ -215,6 +218,55 @@ export async function searchStorageFiles(
 
   if (!query && updatedFrom === null && updatedTo === null) {
     throw new Error("検索語または更新日時の範囲を指定してください");
+  }
+
+  const root = await resolveRootForPath(db, rootType, rootKey);
+  if (root && (await isRootIndexReady(db, root.id))) {
+    const indexed = await querySearchFiles(
+      db,
+      root.id,
+      rootType,
+      rootKey,
+      relativeDir,
+      {
+        query,
+        scope,
+        updatedFrom,
+        updatedTo,
+        sortField,
+        sortOrder,
+        offset,
+        limit,
+      }
+    );
+
+    const items: StorageSearchItem[] = indexed.items.map((item) => ({
+      name: item.name,
+      path: item.path,
+      type: "file",
+      sizeBytes: item.sizeBytes,
+      createdAt: item.createdAt,
+      createdBy: item.createdBy,
+      updatedAt: item.updatedAt,
+      updatedBy: item.updatedBy,
+      location: item.location,
+    }));
+
+    const total = indexed.total;
+    const hasMore = limit === undefined ? false : offset + items.length < total;
+
+    return {
+      path: buildLogicalPath(rootType, rootKey, relativeDir),
+      items,
+      total,
+      hasMore,
+      search: {
+        query,
+        scope,
+        updatedFrom,
+        updatedTo,
+      },
+    };
   }
 
   const listPrefix =

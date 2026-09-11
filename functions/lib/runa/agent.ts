@@ -4,7 +4,13 @@
 
 import type { Env, SessionUser } from "../types";
 import { buildVisibleRoots } from "../storage/list";
+import type { StorageRootType } from "../storage/keys";
+import {
+  isRootIndexReady,
+  queryRecentFilesAcrossRoots,
+} from "../storage/file-index";
 import { listRecentFilesInRoot } from "../storage/recent";
+import { resolveRootForPath } from "../storage/roots";
 import { runaMaxToolRounds } from "./env";
 import { RUNA_SYSTEM_PROMPT } from "./prompts";
 import {
@@ -326,21 +332,63 @@ export async function listRecentFilesForUser(
   const capped = Math.min(50, Math.max(1, limit));
   const updatedFrom = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
-  const perRoot = await Promise.all(
+  const resolvedRoots = await Promise.all(
     roots.map(async (root) => {
-      const rootType = root.type === "user" ? "user" : "group";
-      try {
-        return await listRecentFilesInRoot(env, rootType, root.key, {
-          updatedFrom,
-          limit: capped,
-        });
-      } catch {
-        return [];
-      }
+      const rootType: StorageRootType = root.type === "user" ? "user" : "group";
+      const row = await resolveRootForPath(db, rootType, root.key);
+      if (!row) return null;
+      const indexed = await isRootIndexReady(db, row.id);
+      return { root, rootType, rootId: row.id, indexed };
     })
   );
 
-  const all = perRoot.flat();
+  const indexedRoots = resolvedRoots.filter(
+    (entry): entry is NonNullable<typeof entry> => Boolean(entry?.indexed)
+  );
+  const fallbackRoots = resolvedRoots.filter(
+    (entry): entry is NonNullable<typeof entry> => Boolean(entry && !entry.indexed)
+  );
+
+  const indexedItems =
+    indexedRoots.length > 0
+      ? await queryRecentFilesAcrossRoots(
+          db,
+          indexedRoots.map((entry) => ({
+            id: entry.rootId,
+            type: entry.rootType,
+            key: entry.root.key,
+          })),
+          { updatedFrom, limit: capped }
+        )
+      : [];
+
+  const fallbackItems = (
+    await Promise.all(
+      fallbackRoots.map(async (entry) => {
+        try {
+          return await listRecentFilesInRoot(
+            env,
+            db,
+            entry.rootType,
+            entry.root.key,
+            { updatedFrom, limit: capped }
+          );
+        } catch {
+          return [];
+        }
+      })
+    )
+  ).flat();
+
+  const all: RunaFileItem[] = [...indexedItems, ...fallbackItems].map((item) => ({
+    name: item.name,
+    path: item.path,
+    type: "file",
+    sizeBytes: item.sizeBytes,
+    updatedAt: item.updatedAt,
+    location: item.location,
+  }));
+
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return dedupeFiles(all).slice(0, capped);
 }
