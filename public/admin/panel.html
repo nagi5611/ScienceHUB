@@ -786,6 +786,23 @@
         <span class="cf-toggle-track" aria-hidden="true"></span>
         <span class="cf-toggle-label">Default App（ヘッダーメニューに表示）</span>
       </label>
+      <section class="cf-tutorial-videos" id="edit-app-tutorials">
+        <h3 class="cf-tutorial-videos-title">チュートリアル動画</h3>
+        <p class="cf-field-hint">アプリ右下のヒーローから再生されます。本体は R2 に保存します（最大 80MB / 本）。</p>
+        <ul class="cf-tutorial-videos-list" id="edit-app-tutorial-list"></ul>
+        <div class="cf-tutorial-videos-add">
+          <label class="cf-field">
+            <span>タイトル</span>
+            <input type="text" id="edit-app-tutorial-title" placeholder="使い方" maxlength="120">
+          </label>
+          <label class="cf-field">
+            <span>動画ファイル</span>
+            <input type="file" id="edit-app-tutorial-file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.mkv,.m4v">
+          </label>
+          <button type="button" class="cf-btn cf-btn-primary cf-btn-sm" id="edit-app-tutorial-upload">追加</button>
+        </div>
+        <p id="edit-app-tutorial-status" class="cf-field-hint" hidden></p>
+      </section>
       <p id="edit-app-error" class="cf-form-error" hidden></p>
       <footer class="cf-dialog-footer">
         <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost" id="delete-app-btn">アプリを削除</button>

@@ -1,0 +1,195 @@
+/* 各アプリ右下のチュートリアルヒーロー（ロイロノート授業一覧の tutorialDialog を参考） */
+
+.focusScope.tutorial-hero-scope {
+  position: fixed;
+  right: 1.1rem;
+  bottom: 1.1rem;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.7rem;
+  pointer-events: none;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+}
+
+.focusScope.tutorial-hero-scope .tutorialDialog,
+.focusScope.tutorial-hero-scope .tutorial-hero-mascot {
+  pointer-events: auto;
+}
+
+.tutorialDialog {
+  width: min(22.5rem, calc(100vw - 2.2rem));
+  background: #fff;
+  color: #2b2b2b;
+  border-radius: 1.15rem;
+  box-shadow:
+    0 10px 28px rgba(40, 32, 24, 0.18),
+    0 2px 6px rgba(40, 32, 24, 0.08);
+  overflow: hidden;
+  transform-origin: bottom right;
+}
+
+.tutorialDialog.fade-enter-done {
+  animation: tutorialDialogFade 180ms ease-out;
+}
+
+@keyframes tutorialDialogFade {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.tutorialDialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem 0.55rem;
+}
+
+.tutorialDialog-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tutorialDialog-close {
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 0;
+  border-radius: 999px;
+  background: #f2f2f2;
+  color: #555;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tutorialDialog-close:hover {
+  background: #e8e8e8;
+}
+
+.tutorialDialog-player {
+  margin: 0 0.85rem 0.65rem;
+  background: #111;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.tutorialDialog-player video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #111;
+}
+
+.tutorialDialog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.55rem 0.75rem;
+  max-height: 10.5rem;
+  overflow-y: auto;
+}
+
+.tutorialDialog-item {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 0.55rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0.45rem 0.4rem;
+  border-radius: 0.65rem;
+  cursor: pointer;
+  color: inherit;
+}
+
+.tutorialDialog-item:hover,
+.tutorialDialog-item.is-active {
+  background: #fff4e8;
+}
+
+.tutorialDialog-item-index {
+  flex: 0 0 1.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #f38020;
+  padding-top: 0.1rem;
+}
+
+.tutorialDialog-item-body {
+  min-width: 0;
+}
+
+.tutorialDialog-item-title {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tutorialDialog-item-meta {
+  display: block;
+  font-size: 0.72rem;
+  color: #888;
+}
+
+.tutorial-hero-mascot {
+  width: 4.6rem;
+  height: 4.6rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  filter: drop-shadow(0 8px 14px rgba(40, 32, 24, 0.22));
+}
+
+.tutorial-hero-mascot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.tutorial-hero-badge {
+  position: absolute;
+  right: -0.15rem;
+  top: -0.15rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: #f38020;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.tutorial-hero-mascot-wrap {
+  position: relative;
+}
+
+@media (max-width: 640px) {
+  .focusScope.tutorial-hero-scope {
+    right: 0.7rem;
+    bottom: 0.7rem;
+  }
+
+  .tutorial-hero-mascot {
+    width: 4rem;
+    height: 4rem;
+  }
+}

@@ -95,13 +95,21 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
 
     const editBtn = e.target.closest("[data-edit-app]");
     if (editBtn) {
-      openAppEditor(editBtn.dataset.editApp);
+      openAppEditor(editBtn.dataset.editApp, escapeHtml);
       return;
     }
     const accessBtn = e.target.closest("[data-edit-app-access]");
     if (accessBtn) {
       openAppAccessEditor(accessBtn.dataset.editAppAccess, getGroups(), escapeHtml, api);
     }
+  });
+
+  document.getElementById("edit-app-tutorial-upload")?.addEventListener("click", () => {
+    uploadTutorialVideo(api, escapeHtml);
+  });
+
+  document.getElementById("edit-app-tutorial-list")?.addEventListener("click", (e) => {
+    handleTutorialListClick(e, api, escapeHtml);
   });
 
   document.getElementById("create-app-form")?.addEventListener("submit", async (e) => {
@@ -224,7 +232,7 @@ export function bindAppEvents({ api, escapeHtml, getGroups }) {
   });
 }
 
-function openAppEditor(appId) {
+function openAppEditor(appId, escapeHtml) {
   const app = apps.find((a) => a.id === appId);
   if (!app) return;
 
@@ -238,7 +246,11 @@ function openAppEditor(appId) {
   const defaultInput = document.getElementById("edit-app-default");
   if (defaultInput) defaultInput.checked = Boolean(app.is_default);
   document.getElementById("edit-app-error").hidden = true;
+  document.getElementById("edit-app-tutorial-title").value = "";
+  document.getElementById("edit-app-tutorial-file").value = "";
+  setTutorialStatus("");
   document.getElementById("edit-app-dialog")?.showModal();
+  loadTutorialVideos(appId, escapeHtml);
 }
 
 /** グループのアクセスチップ表示を重み展開に同期 */
@@ -409,4 +421,137 @@ async function openAppAccessEditor(appId, groups, escapeHtml, api) {
   }
 
   document.getElementById("app-access-dialog")?.showModal();
+}
+
+/** チュートリアル一覧を読み込む */
+async function loadTutorialVideos(appId, escapeHtml) {
+  const list = document.getElementById("edit-app-tutorial-list");
+  if (!list || !appId) return;
+  list.innerHTML = `<li class="cf-field-hint">読み込み中…</li>`;
+  try {
+    const response = await fetch(`/api/admin/apps/${encodeURIComponent(appId)}/tutorials`, {
+      credentials: "same-origin",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error ?? "読み込みに失敗しました");
+    }
+    renderTutorialVideos(data.videos ?? [], escapeHtml);
+  } catch (err) {
+    list.innerHTML = `<li class="cf-form-error">${escapeHtml(err.message)}</li>`;
+  }
+}
+
+/** チュートリアル一覧を描画する */
+function renderTutorialVideos(videos, escapeHtml) {
+  const list = document.getElementById("edit-app-tutorial-list");
+  if (!list) return;
+  if (!videos.length) {
+    list.innerHTML = `<li class="cf-field-hint">まだ動画はありません</li>`;
+    return;
+  }
+
+  list.innerHTML = videos
+    .map(
+      (video, index) => `
+    <li class="cf-tutorial-videos-item" data-video-id="${escapeHtml(video.id)}">
+      <div class="cf-tutorial-videos-item-body">
+        <span class="cf-tutorial-videos-item-title">${escapeHtml(video.title)}</span>
+        <span class="cf-tutorial-videos-item-meta">${escapeHtml(video.filename)} · ${escapeHtml(formatTutorialSize(video.size_bytes))}</span>
+      </div>
+      <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-tutorial-move="up" ${index === 0 ? "disabled" : ""}>上へ</button>
+      <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-tutorial-move="down" ${index === videos.length - 1 ? "disabled" : ""}>下へ</button>
+      <button type="button" class="cf-btn cf-btn-danger cf-btn-ghost cf-btn-sm" data-tutorial-delete>削除</button>
+    </li>`
+    )
+    .join("");
+}
+
+/** バイト数を表示する */
+function formatTutorialSize(bytes) {
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** ステータス文言を出す */
+function setTutorialStatus(message) {
+  const el = document.getElementById("edit-app-tutorial-status");
+  if (!el) return;
+  if (!message) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = message;
+}
+
+/** 動画をアップロードする */
+async function uploadTutorialVideo(api, escapeHtml) {
+  const appId = document.getElementById("edit-app-id")?.value;
+  const fileInput = document.getElementById("edit-app-tutorial-file");
+  const titleInput = document.getElementById("edit-app-tutorial-title");
+  const file = fileInput?.files?.[0];
+  if (!appId) return;
+  if (!file) {
+    setTutorialStatus("動画ファイルを選択してください");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.set("file", file);
+  formData.set("title", titleInput?.value?.trim() || file.name.replace(/\.[^.]+$/, ""));
+
+  setTutorialStatus("アップロード中…");
+  try {
+    const response = await fetch(`/api/admin/apps/${encodeURIComponent(appId)}/tutorials`, {
+      method: "POST",
+      credentials: "same-origin",
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error ?? "アップロードに失敗しました");
+    }
+    fileInput.value = "";
+    titleInput.value = "";
+    setTutorialStatus("保存しました");
+    await loadTutorialVideos(appId, escapeHtml);
+  } catch (err) {
+    setTutorialStatus(err.message);
+  }
+}
+
+/** 一覧の並び替え・削除 */
+async function handleTutorialListClick(event, api, escapeHtml) {
+  const item = event.target.closest("[data-video-id]");
+  if (!item) return;
+  const videoId = item.dataset.videoId;
+  const appId = document.getElementById("edit-app-id")?.value;
+  if (!videoId || !appId) return;
+
+  const move = event.target.closest("[data-tutorial-move]")?.dataset.tutorialMove;
+  const del = event.target.closest("[data-tutorial-delete]");
+
+  try {
+    if (move === "up" || move === "down") {
+      await api(`/api/admin/apps/${encodeURIComponent(appId)}/tutorials/${encodeURIComponent(videoId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ move }),
+      });
+      await loadTutorialVideos(appId, escapeHtml);
+      return;
+    }
+    if (del) {
+      if (!confirm("このチュートリアル動画を削除しますか？")) return;
+      await api(`/api/admin/apps/${encodeURIComponent(appId)}/tutorials/${encodeURIComponent(videoId)}`, {
+        method: "DELETE",
+      });
+      await loadTutorialVideos(appId, escapeHtml);
+    }
+  } catch (err) {
+    setTutorialStatus(err.message);
+  }
 }
