@@ -326,22 +326,13 @@ export async function getIndexBackfillRow(
     .first<IndexBackfillRow>();
 }
 
-/** ルートのインデックスが読み取り可能か */
+/** ルートのインデックスが読み取り可能か（バックフィル完了時のみ D1 インデックスを使う） */
 export async function isRootIndexReady(
   db: D1Database,
   rootId: string
 ): Promise<boolean> {
   const backfill = await getIndexBackfillRow(db, rootId);
-  if (backfill?.status === "complete") return true;
-
-  const count = await db
-    .prepare(
-      `SELECT COUNT(*) AS c FROM storage_file_index WHERE root_id = ? LIMIT 1`
-    )
-    .bind(rootId)
-    .first<{ c: number }>();
-
-  return (count?.c ?? 0) > 0;
+  return backfill?.status === "complete";
 }
 
 export interface IndexedRecentFile {
