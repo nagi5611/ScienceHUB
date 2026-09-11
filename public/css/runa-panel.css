@@ -127,11 +127,29 @@
 }
 
 .runa-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.runa-body.is-drag-over::after {
+  content: "ファイルをドロップして添付";
+  position: absolute;
+  inset: 0.5rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--cf-orange, #f38020);
+  border-radius: var(--cf-radius-lg, 12px);
+  background: rgba(255, 244, 235, 0.92);
+  color: var(--cf-orange, #f38020);
+  font-size: 0.95rem;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .runa-messages {
