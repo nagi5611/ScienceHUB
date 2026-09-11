@@ -1,6 +1,6 @@
-/* Luna ファイルエージェント — ダッシュボード用パネル */
+/* Runa ファイルエージェント — ダッシュボード用パネル */
 
-.luna-fab {
+.runa-fab {
   position: fixed;
   right: 1.25rem;
   bottom: 1.25rem;
@@ -22,22 +22,22 @@
   cursor: pointer;
 }
 
-.luna-fab:hover {
+.runa-fab:hover {
   background: var(--cf-orange-hover, #e5700f);
 }
 
-.luna-panel {
+.runa-panel {
   position: fixed;
   inset: 0;
   z-index: 300;
   pointer-events: none;
 }
 
-.luna-panel.is-open {
+.runa-panel.is-open {
   pointer-events: auto;
 }
 
-.luna-backdrop {
+.runa-backdrop {
   position: absolute;
   inset: 0;
   background: rgb(15 23 42 / 0.35);
@@ -45,11 +45,11 @@
   transition: opacity 0.2s ease;
 }
 
-.luna-panel.is-open .luna-backdrop {
+.runa-panel.is-open .runa-backdrop {
   opacity: 1;
 }
 
-.luna-dialog {
+.runa-dialog {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -64,11 +64,11 @@
   transition: transform 0.25s ease;
 }
 
-.luna-panel.is-open .luna-dialog {
+.runa-panel.is-open .runa-dialog {
   transform: translateY(0);
 }
 
-.luna-header {
+.runa-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -77,18 +77,18 @@
   border-bottom: 1px solid var(--cf-border, #e2e5e9);
 }
 
-.luna-kicker {
+.runa-kicker {
   margin: 0;
   font-size: 0.75rem;
   color: var(--cf-muted, #6b7280);
 }
 
-.luna-title {
+.runa-title {
   margin: 0.15rem 0 0;
   font-size: 1.25rem;
 }
 
-.luna-close {
+.runa-close {
   border: none;
   background: transparent;
   font-size: 1.5rem;
@@ -97,7 +97,7 @@
   cursor: pointer;
 }
 
-.luna-status {
+.runa-status {
   margin: 0;
   padding: 0.5rem 1.25rem;
   font-size: 0.85rem;
@@ -105,14 +105,14 @@
   background: var(--cf-orange-soft, #fff4eb);
 }
 
-.luna-tabs {
+.runa-tabs {
   display: flex;
   gap: 0.25rem;
   padding: 0.5rem 1rem 0;
   border-bottom: 1px solid var(--cf-border, #e2e5e9);
 }
 
-.luna-tab {
+.runa-tab {
   border: none;
   background: transparent;
   padding: 0.5rem 0.75rem;
@@ -122,45 +122,45 @@
   cursor: pointer;
 }
 
-.luna-tab.is-active {
+.runa-tab.is-active {
   color: var(--cf-text, #1d2433);
   background: var(--cf-surface, #f6f6f7);
   font-weight: 600;
 }
 
-.luna-body {
+.runa-body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
-.luna-tab-panel {
+.runa-tab-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
 
-.luna-messages {
+.runa-messages {
   flex: 1;
   overflow: auto;
   padding: 1rem 1.25rem;
 }
 
-.luna-msg {
+.runa-msg {
   display: flex;
   margin-bottom: 0.75rem;
 }
 
-.luna-msg--user {
+.runa-msg--user {
   justify-content: flex-end;
 }
 
-.luna-msg--assistant {
+.runa-msg--assistant {
   justify-content: flex-start;
 }
 
-.luna-msg-bubble {
+.runa-msg-bubble {
   max-width: 92%;
   padding: 0.65rem 0.85rem;
   border-radius: var(--cf-radius-lg, 12px);
@@ -170,30 +170,30 @@
   line-height: 1.5;
 }
 
-.luna-msg--user .luna-msg-bubble {
+.runa-msg--user .runa-msg-bubble {
   background: var(--cf-orange, #f38020);
   color: #fff;
 }
 
-.luna-msg--assistant .luna-msg-bubble {
+.runa-msg--assistant .runa-msg-bubble {
   background: var(--cf-surface, #f6f6f7);
   color: var(--cf-text, #1d2433);
 }
 
-.luna-msg-status {
+.runa-msg-status {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
   color: var(--cf-muted, #6b7280);
 }
 
-.luna-form {
+.runa-form {
   display: flex;
   gap: 0.5rem;
   padding: 0.75rem 1rem 1rem;
   border-top: 1px solid var(--cf-border, #e2e5e9);
 }
 
-.luna-input {
+.runa-input {
   flex: 1;
   resize: vertical;
   min-height: 2.75rem;
@@ -204,7 +204,7 @@
   font: inherit;
 }
 
-.luna-send {
+.runa-send {
   align-self: flex-end;
   border: none;
   border-radius: var(--cf-radius, 8px);
@@ -216,19 +216,19 @@
   cursor: pointer;
 }
 
-.luna-send:disabled {
+.runa-send:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.luna-files,
-.luna-preview {
+.runa-files,
+.runa-preview {
   flex: 1;
   overflow: auto;
   padding: 0.75rem 1rem 1rem;
 }
 
-.luna-file-item {
+.runa-file-item {
   display: flex;
   gap: 0.65rem;
   width: 100%;
@@ -242,26 +242,26 @@
   font: inherit;
 }
 
-.luna-file-item.is-active {
+.runa-file-item.is-active {
   border-color: var(--cf-orange, #f38020);
   background: var(--cf-orange-soft, #fff4eb);
 }
 
-.luna-file-meta {
+.runa-file-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.luna-file-name {
+.runa-file-name {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.luna-file-path,
-.luna-file-sub {
+.runa-file-path,
+.runa-file-sub {
   font-size: 0.8rem;
   color: var(--cf-muted, #6b7280);
   overflow: hidden;
@@ -269,19 +269,19 @@
   white-space: nowrap;
 }
 
-.luna-empty {
+.runa-empty {
   margin: 0;
   color: var(--cf-muted, #6b7280);
   font-size: 0.9rem;
 }
 
-.luna-preview-img {
+.runa-preview-img {
   max-width: 100%;
   height: auto;
   border-radius: var(--cf-radius, 8px);
 }
 
-.luna-preview-text {
+.runa-preview-text {
   margin: 0;
   padding: 0.75rem;
   background: var(--cf-surface, #f6f6f7);
@@ -293,7 +293,7 @@
   word-break: break-word;
 }
 
-.luna-preview-link {
+.runa-preview-link {
   display: inline-block;
   margin-top: 0.75rem;
   color: var(--cf-orange, #f38020);
@@ -301,14 +301,14 @@
   text-decoration: none;
 }
 
-.luna-preview-hint {
+.runa-preview-hint {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--cf-muted, #6b7280);
 }
 
 @media (min-width: 900px) {
-  .luna-dialog {
+  .runa-dialog {
     width: min(96vw, 960px);
     height: min(88vh, 820px);
     right: 1rem;
@@ -316,7 +316,7 @@
     border-radius: var(--cf-radius-lg, 12px);
   }
 
-  .luna-panel.is-open .luna-dialog {
+  .runa-panel.is-open .runa-dialog {
     transform: translateY(0);
   }
 }

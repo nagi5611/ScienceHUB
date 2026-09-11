@@ -1,5 +1,5 @@
 /**
- * Luna — ストレージツール定義・実行
+ * Runa — ストレージツール定義・実行
  */
 
 import type { Env, SessionUser } from "../types";
@@ -15,13 +15,13 @@ import {
   renameWithAuth,
 } from "../storage/operations";
 import {
-  readStorageFileForLuna,
-  writeStorageFileForLuna,
+  readStorageFileForRuna,
+  writeStorageFileForRuna,
 } from "./storage-io";
-import { searchAllRootsForLuna } from "./search-all";
+import { searchAllRootsForRuna } from "./search-all";
 import type { ToolDefinition } from "./openai";
 
-export interface LunaFileItem {
+export interface RunaFileItem {
   name: string;
   path: string;
   type: "file" | "folder";
@@ -30,7 +30,7 @@ export interface LunaFileItem {
   location?: string;
 }
 
-export const LUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
+export const RUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
@@ -291,7 +291,7 @@ function toFileItems(
     updatedAt: number | null;
     location?: string;
   }>
-): LunaFileItem[] {
+): RunaFileItem[] {
   return items.map((item) => ({
     name: item.name,
     path: item.path,
@@ -342,11 +342,11 @@ function offsetArg(args: Record<string, unknown>, key: string): number {
 
 export interface ToolRunResult {
   text: string;
-  files: LunaFileItem[];
+  files: RunaFileItem[];
 }
 
 /** ツールを実行して結果テキストとファイル一覧を返す */
-export async function executeLunaTool(
+export async function executeRunaTool(
   env: Env,
   db: D1Database,
   user: SessionUser,
@@ -503,7 +503,7 @@ async function runStorageStat(
       parsed.rootKey,
       parsed.relativePath
     );
-    const item: LunaFileItem = {
+    const item: RunaFileItem = {
       name: parsed.relativePath.split("/").pop() || parsed.rootKey,
       path,
       type: "folder",
@@ -523,7 +523,7 @@ async function runStorageStat(
     parsed.relativePath
   );
   const name = parsed.relativePath.split("/").pop() ?? path;
-  const item: LunaFileItem = {
+  const item: RunaFileItem = {
     name,
     path,
     type: "file",
@@ -549,12 +549,12 @@ async function runStorageReadFile(
   );
   if (!path) return { text: "path が必要です", files: [] };
 
-  const result = await readStorageFileForLuna(env, db, user, path, maxBytes);
+  const result = await readStorageFileForRuna(env, db, user, path, maxBytes);
   const preview =
     result.encoding === "utf-8"
       ? result.content.slice(0, 8000)
       : `[base64 ${result.content.length} chars]`;
-  const item: LunaFileItem = {
+  const item: RunaFileItem = {
     name: path.split("/").pop() ?? path,
     path: result.path,
     type: "file",
@@ -578,7 +578,7 @@ async function runStorageWriteFile(
   const overwrite = boolArg(args, "overwrite", false);
   if (!path) return { text: "path が必要です", files: [] };
 
-  const result = await writeStorageFileForLuna(
+  const result = await writeStorageFileForRuna(
     env,
     db,
     user,
@@ -586,7 +586,7 @@ async function runStorageWriteFile(
     content,
     overwrite
   );
-  const item: LunaFileItem = {
+  const item: RunaFileItem = {
     name: result.path.split("/").pop() ?? result.path,
     path: result.path,
     type: "file",
@@ -610,7 +610,7 @@ async function runStorageSearchAll(
   const limit = Math.min(80, numArg(args, "limit", 40));
   if (!query) return { text: "検索語を指定してください", files: [] };
 
-  const { items } = await searchAllRootsForLuna(env, db, user, {
+  const { items } = await searchAllRootsForRuna(env, db, user, {
     query,
     days: days > 0 ? days : undefined,
     totalLimit: limit,
@@ -735,7 +735,7 @@ async function runStorageMkdir(
   }
 
   const result = await mkdirWithAuth(env, db, user, parentPath, folderName);
-  const item: LunaFileItem = {
+  const item: RunaFileItem = {
     name: folderName,
     path: result.path,
     type: "folder",
@@ -766,7 +766,7 @@ async function runStorageMove(
     { path: sourcePath, type: sourceType },
   ], destPath);
 
-  const files: LunaFileItem[] = result.moved.map((m) => ({
+  const files: RunaFileItem[] = result.moved.map((m) => ({
     name: m.to.split("/").pop() ?? m.to,
     path: m.to,
     type: sourceType,
@@ -796,7 +796,7 @@ async function runStorageRename(
   }
 
   const result = await renameWithAuth(env, db, user, path, newName, itemType === "folder");
-  const item: LunaFileItem = {
+  const item: RunaFileItem = {
     name: newName,
     path: result.path,
     type: itemType,

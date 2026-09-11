@@ -1,4 +1,4 @@
--- Luna エージェント: チャット履歴・日次ターン制限
+-- Runa エージェント: チャット履歴・日次ターン制限（0081 で runa_* にリネーム）
 
 CREATE TABLE IF NOT EXISTS luna_messages (
   id TEXT PRIMARY KEY NOT NULL,

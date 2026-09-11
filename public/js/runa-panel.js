@@ -1,5 +1,5 @@
 /**
- * Luna — ダッシュボード用パネル UI
+ * Runa — ダッシュボード用パネル UI
  */
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
@@ -16,19 +16,19 @@ function escapeHtml(str) {
 
 /** 要素参照 */
 const els = {
-  fab: document.getElementById("luna-fab"),
-  panel: document.getElementById("luna-panel"),
-  close: document.getElementById("luna-close"),
-  backdrop: document.getElementById("luna-backdrop"),
-  messages: document.getElementById("luna-messages"),
-  files: document.getElementById("luna-files"),
-  preview: document.getElementById("luna-preview"),
-  form: document.getElementById("luna-form"),
-  input: document.getElementById("luna-input"),
-  send: document.getElementById("luna-send"),
-  status: document.getElementById("luna-status"),
-  tabs: document.querySelectorAll("[data-luna-tab]"),
-  tabPanels: document.querySelectorAll("[data-luna-panel]"),
+  fab: document.getElementById("runa-fab"),
+  panel: document.getElementById("runa-panel"),
+  close: document.getElementById("runa-close"),
+  backdrop: document.getElementById("runa-backdrop"),
+  messages: document.getElementById("runa-messages"),
+  files: document.getElementById("runa-files"),
+  preview: document.getElementById("runa-preview"),
+  form: document.getElementById("runa-form"),
+  input: document.getElementById("runa-input"),
+  send: document.getElementById("runa-send"),
+  status: document.getElementById("runa-status"),
+  tabs: document.querySelectorAll("[data-runa-tab]"),
+  tabPanels: document.querySelectorAll("[data-runa-panel]"),
 };
 
 /** @type {Array<{ id?: string, role: string, content: string, files?: object[], pending?: boolean, statusLabel?: string }>} */
@@ -40,8 +40,8 @@ let chatBusy = false;
 let selectedFile = null;
 /** @type {string | null} */
 let previewObjectUrl = null;
-let lunaDataLoaded = false;
-let lunaDataLoadFailed = false;
+let runaDataLoaded = false;
+let runaDataLoadFailed = false;
 
 /** タブ休止・ページ離脱で失敗しやすい fetch を安全に実行 */
 async function safeFetch(url, options) {
@@ -82,19 +82,19 @@ function setPanelOpen(open) {
   els.panel.setAttribute("aria-hidden", open ? "false" : "true");
   els.fab.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
-    void ensureLunaDataLoaded();
+    void ensureRunaDataLoaded();
     if (els.input) els.input.focus();
   }
 }
 
 function setActiveTab(tabId) {
   for (const btn of els.tabs) {
-    const active = btn.getAttribute("data-luna-tab") === tabId;
+    const active = btn.getAttribute("data-runa-tab") === tabId;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
   }
   for (const panel of els.tabPanels) {
-    const show = panel.getAttribute("data-luna-panel") === tabId;
+    const show = panel.getAttribute("data-runa-panel") === tabId;
     panel.hidden = !show;
   }
 }
@@ -103,20 +103,20 @@ function renderMessages() {
   if (!els.messages) return;
   if (!messageState.length) {
     els.messages.innerHTML =
-      '<p class="luna-empty">Luna にファイルの検索や操作を依頼できます。</p>';
+      '<p class="runa-empty">Runa にファイルの検索や操作を依頼できます。</p>';
     return;
   }
 
   els.messages.innerHTML = messageState
     .map((msg) => {
       const roleClass =
-        msg.role === "user" ? "luna-msg--user" : "luna-msg--assistant";
+        msg.role === "user" ? "runa-msg--user" : "runa-msg--assistant";
       let inner = escapeHtml(msg.content || "");
       if (msg.pending && msg.statusLabel) {
-        inner += `<p class="luna-msg-status">${escapeHtml(msg.statusLabel)}</p>`;
+        inner += `<p class="runa-msg-status">${escapeHtml(msg.statusLabel)}</p>`;
       }
-      return `<div class="luna-msg ${roleClass}">
-        <div class="luna-msg-bubble">${inner}</div>
+      return `<div class="runa-msg ${roleClass}">
+        <div class="runa-msg-bubble">${inner}</div>
       </div>`;
     })
     .join("");
@@ -126,7 +126,7 @@ function renderMessages() {
 function renderFiles() {
   if (!els.files) return;
   if (!fileItems.length) {
-    els.files.innerHTML = '<p class="luna-empty">ファイルがありません</p>';
+    els.files.innerHTML = '<p class="runa-empty">ファイルがありません</p>';
     return;
   }
 
@@ -134,18 +134,18 @@ function renderFiles() {
     .map((item) => {
       const active = selectedFile?.path === item.path ? " is-active" : "";
       const typeLabel = item.type === "folder" ? "📁" : "📄";
-      return `<button type="button" class="luna-file-item${active}" data-path="${escapeHtml(item.path)}">
-        <span class="luna-file-icon" aria-hidden="true">${typeLabel}</span>
-        <span class="luna-file-meta">
-          <span class="luna-file-name">${escapeHtml(item.name)}</span>
-          <span class="luna-file-path">${escapeHtml(item.path)}</span>
-          <span class="luna-file-sub">${escapeHtml(formatBytes(item.sizeBytes))}${item.updatedAt ? ` · ${formatUpdatedAt(item.updatedAt)}` : ""}</span>
+      return `<button type="button" class="runa-file-item${active}" data-path="${escapeHtml(item.path)}">
+        <span class="runa-file-icon" aria-hidden="true">${typeLabel}</span>
+        <span class="runa-file-meta">
+          <span class="runa-file-name">${escapeHtml(item.name)}</span>
+          <span class="runa-file-path">${escapeHtml(item.path)}</span>
+          <span class="runa-file-sub">${escapeHtml(formatBytes(item.sizeBytes))}${item.updatedAt ? ` · ${formatUpdatedAt(item.updatedAt)}` : ""}</span>
         </span>
       </button>`;
     })
     .join("");
 
-  for (const btn of els.files.querySelectorAll(".luna-file-item")) {
+  for (const btn of els.files.querySelectorAll(".runa-file-item")) {
     btn.addEventListener("click", () => {
       const path = btn.getAttribute("data-path");
       const item = fileItems.find((f) => f.path === path);
@@ -195,12 +195,12 @@ async function selectFile(item) {
   if (!els.preview) return;
 
   if (item.type === "folder") {
-    els.preview.innerHTML = `<p class="luna-empty">フォルダ: ${escapeHtml(item.path)}</p>
-      <p class="luna-preview-hint">チャットで「${escapeHtml(item.path)} の一覧」と依頼できます。</p>`;
+    els.preview.innerHTML = `<p class="runa-empty">フォルダ: ${escapeHtml(item.path)}</p>
+      <p class="runa-preview-hint">チャットで「${escapeHtml(item.path)} の一覧」と依頼できます。</p>`;
     return;
   }
 
-  els.preview.innerHTML = '<p class="luna-empty">読み込み中…</p>';
+  els.preview.innerHTML = '<p class="runa-empty">読み込み中…</p>';
   revokePreviewUrl();
 
   const name = item.name || item.path;
@@ -208,7 +208,7 @@ async function selectFile(item) {
     if (IMAGE_EXT.test(name)) {
       const blob = await fetchDownloadBlob(item.path);
       previewObjectUrl = URL.createObjectURL(blob);
-      els.preview.innerHTML = `<img class="luna-preview-img" src="${previewObjectUrl}" alt="${escapeHtml(name)}">`;
+      els.preview.innerHTML = `<img class="runa-preview-img" src="${previewObjectUrl}" alt="${escapeHtml(name)}">`;
       return;
     }
 
@@ -216,7 +216,7 @@ async function selectFile(item) {
       const blob = await fetchDownloadBlob(item.path);
       const text = await blob.text();
       const capped = text.length > 50000 ? `${text.slice(0, 50000)}\n…（省略）` : text;
-      els.preview.innerHTML = `<pre class="luna-preview-text">${escapeHtml(capped)}</pre>`;
+      els.preview.innerHTML = `<pre class="runa-preview-text">${escapeHtml(capped)}</pre>`;
       return;
     }
 
@@ -225,11 +225,11 @@ async function selectFile(item) {
       info.mode === "direct" && info.url
         ? info.url
         : `/api/storage/download?path=${encodeURIComponent(item.path)}`;
-    els.preview.innerHTML = `<p class="luna-preview-meta">${escapeHtml(item.path)}</p>
-      <p class="luna-preview-hint">${escapeHtml(formatBytes(item.sizeBytes))}</p>
-      <a class="luna-preview-link" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">ファイルを開く</a>`;
+    els.preview.innerHTML = `<p class="runa-preview-meta">${escapeHtml(item.path)}</p>
+      <p class="runa-preview-hint">${escapeHtml(formatBytes(item.sizeBytes))}</p>
+      <a class="runa-preview-link" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">ファイルを開く</a>`;
   } catch (error) {
-    els.preview.innerHTML = `<p class="luna-empty">${escapeHtml(error.message || "プレビューに失敗しました")}</p>`;
+    els.preview.innerHTML = `<p class="runa-empty">${escapeHtml(error.message || "プレビューに失敗しました")}</p>`;
   }
 }
 
@@ -255,7 +255,7 @@ function setChatBusy(busy) {
 }
 
 async function loadMessages() {
-  const res = await safeFetch("/api/luna/messages?limit=50", {
+  const res = await safeFetch("/api/runa/messages?limit=50", {
     credentials: "same-origin",
   });
   if (!res?.ok) return false;
@@ -274,7 +274,7 @@ async function loadMessages() {
 }
 
 async function loadRecentFiles() {
-  const res = await safeFetch("/api/luna/recent-files?limit=20", {
+  const res = await safeFetch("/api/runa/recent-files?limit=20", {
     credentials: "same-origin",
   });
   if (!res?.ok) return false;
@@ -284,25 +284,25 @@ async function loadRecentFiles() {
 }
 
 /** 初回パネル開時（または再表示後）に履歴・最近のファイルを読み込む */
-async function ensureLunaDataLoaded() {
-  if (lunaDataLoaded) return;
+async function ensureRunaDataLoaded() {
+  if (runaDataLoaded) return;
   try {
     const [messagesOk, filesOk] = await Promise.all([
       loadMessages(),
       loadRecentFiles(),
     ]);
-    lunaDataLoaded = messagesOk && filesOk;
-    lunaDataLoadFailed = !lunaDataLoaded;
+    runaDataLoaded = messagesOk && filesOk;
+    runaDataLoadFailed = !runaDataLoaded;
   } catch (error) {
-    lunaDataLoadFailed = true;
+    runaDataLoadFailed = true;
     if (!isTransientNetworkError(error)) {
-      console.warn("Luna データの読み込みに失敗しました", error);
+      console.warn("Runa データの読み込みに失敗しました", error);
     }
   }
 }
 
-async function postLunaChat(message) {
-  const res = await fetch("/api/luna/chat?stream=1", {
+async function postRunaChat(message) {
+  const res = await fetch("/api/runa/chat?stream=1", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -399,7 +399,7 @@ async function handleSubmit(event) {
   setChatBusy(true);
 
   try {
-    await postLunaChat(text);
+    await postRunaChat(text);
   } catch (error) {
     messageState.push({
       role: "assistant",
@@ -420,7 +420,7 @@ function bindEvents() {
 
   for (const btn of els.tabs) {
     btn.addEventListener("click", () => {
-      setActiveTab(btn.getAttribute("data-luna-tab") || "chat");
+      setActiveTab(btn.getAttribute("data-runa-tab") || "chat");
     });
   }
 
@@ -431,18 +431,18 @@ function bindEvents() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || !lunaDataLoadFailed) return;
-    lunaDataLoaded = false;
+    if (document.visibilityState !== "visible" || !runaDataLoadFailed) return;
+    runaDataLoaded = false;
     if (els.panel?.classList.contains("is-open")) {
-      void ensureLunaDataLoaded();
+      void ensureRunaDataLoaded();
     }
   });
 }
 
-export function initLunaPanel() {
+export function initRunaPanel() {
   if (!els.fab || !els.panel) return;
   bindEvents();
   setActiveTab("chat");
 }
 
-initLunaPanel();
+initRunaPanel();

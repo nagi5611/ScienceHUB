@@ -1,11 +1,11 @@
 /**
- * Luna — 全ルート横断検索
+ * Runa — 全ルート横断検索
  */
 
 import type { Env, SessionUser } from "../types";
 import { buildVisibleRoots } from "../storage/list";
 import { searchStorageFiles } from "../storage/search";
-import type { LunaFileItem } from "./tools";
+import type { RunaFileItem } from "./tools";
 
 export interface SearchAllOptions {
   query: string;
@@ -15,12 +15,12 @@ export interface SearchAllOptions {
 }
 
 /** アクセス可能な全ルートを横断検索 */
-export async function searchAllRootsForLuna(
+export async function searchAllRootsForRuna(
   env: Env,
   db: D1Database,
   user: SessionUser,
   options: SearchAllOptions
-): Promise<{ items: LunaFileItem[]; total: number }> {
+): Promise<{ items: RunaFileItem[]; total: number }> {
   const query = options.query.trim();
   const days = Math.min(365, Math.max(1, options.days ?? 0));
   const limitPerRoot = Math.min(30, Math.max(1, options.limitPerRoot ?? 15));
@@ -40,7 +40,7 @@ export async function searchAllRootsForLuna(
     user.is_admin
   );
 
-  const all: LunaFileItem[] = [];
+  const all: RunaFileItem[] = [];
 
   for (const root of roots) {
     const rootType = root.type === "user" ? "user" : "group";
@@ -71,7 +71,7 @@ export async function searchAllRootsForLuna(
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
   const seen = new Set<string>();
-  const deduped: LunaFileItem[] = [];
+  const deduped: RunaFileItem[] = [];
   for (const item of all) {
     if (seen.has(item.path)) continue;
     seen.add(item.path);
