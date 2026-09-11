@@ -106,6 +106,7 @@ const els = {
   send: document.getElementById("runa-send"),
   attachBtn: document.getElementById("runa-attach-btn"),
   fileInput: document.getElementById("runa-file-input"),
+  body: document.querySelector(".runa-body"),
   status: document.getElementById("runa-status"),
 };
 
@@ -118,6 +119,7 @@ let runaDataLoadFailed = false;
 let pendingAssistantRow = null;
 /** @type {{ id: string, name: string, file?: File, path?: string, uploading?: boolean }[]} */
 let pendingAttachments = [];
+let attachDragDepth = 0;
 /** @type {string | null} */
 let currentUsername = null;
 
@@ -156,6 +158,9 @@ function setPanelOpen(open) {
   if (open) {
     void ensureRunaDataLoaded();
     if (els.input) els.input.focus();
+  } else {
+    attachDragDepth = 0;
+    setAttachDragOver(false);
   }
 }
 
@@ -572,11 +577,8 @@ async function handleSubmit(event) {
   }
 }
 
-async function handleFileInputChange(event) {
-  const input = event.target;
-  const files = Array.from(input.files ?? []);
-  input.value = "";
-
+/** ファイル添付（選択・ドロップ共通） */
+async function addAttachmentFiles(files) {
   for (const file of files) {
     if (pendingAttachments.length >= MAX_ATTACHMENTS) {
       setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
@@ -611,6 +613,53 @@ async function handleFileInputChange(event) {
   }
 }
 
+async function handleFileInputChange(event) {
+  const input = event.target;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  await addAttachmentFiles(files);
+}
+
+function isFileDragEvent(event) {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  return Array.from(types).includes("Files");
+}
+
+function setAttachDragOver(active) {
+  els.body?.classList.toggle("is-drag-over", active);
+}
+
+function handleAttachDragEnter(event) {
+  if (!els.body || chatBusy || !isFileDragEvent(event)) return;
+  event.preventDefault();
+  attachDragDepth += 1;
+  setAttachDragOver(true);
+}
+
+function handleAttachDragOver(event) {
+  if (!els.body || chatBusy || !isFileDragEvent(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+}
+
+function handleAttachDragLeave(event) {
+  if (!els.body?.classList.contains("is-drag-over")) return;
+  event.preventDefault();
+  attachDragDepth = Math.max(0, attachDragDepth - 1);
+  if (attachDragDepth === 0) setAttachDragOver(false);
+}
+
+function handleAttachDrop(event) {
+  if (!els.body || chatBusy) return;
+  event.preventDefault();
+  attachDragDepth = 0;
+  setAttachDragOver(false);
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (!files.length) return;
+  void addAttachmentFiles(files);
+}
+
 function bindEvents() {
   els.fab?.addEventListener("click", () => setPanelOpen(true));
   els.close?.addEventListener("click", () => setPanelOpen(false));
@@ -620,6 +669,10 @@ function bindEvents() {
   els.input?.addEventListener("keydown", handleInputKeydown);
   els.attachBtn?.addEventListener("click", () => els.fileInput?.click());
   els.fileInput?.addEventListener("change", handleFileInputChange);
+  els.body?.addEventListener("dragenter", handleAttachDragEnter);
+  els.body?.addEventListener("dragover", handleAttachDragOver);
+  els.body?.addEventListener("dragleave", handleAttachDragLeave);
+  els.body?.addEventListener("drop", handleAttachDrop);
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && els.panel?.classList.contains("is-open")) {
