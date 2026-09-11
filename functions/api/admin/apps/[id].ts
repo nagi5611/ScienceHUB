@@ -6,6 +6,7 @@ import type { Env } from "../../../lib/types";
 import { jsonError } from "../../../lib/types";
 import { getDb } from "../../../lib/db";
 import { deleteApp, getAppWithAccess, updateApp } from "../../../lib/apps";
+import { deleteTutorialObjectsForApp } from "../../../lib/app-tutorials";
 
 interface UpdateAppBody {
   display_name?: string;
@@ -54,6 +55,7 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
   const appId = context.params.id as string;
 
   try {
+    await deleteTutorialObjectsForApp(context.env, appId);
     await deleteApp(getDb(context.env), appId);
     return Response.json({ ok: true, deleted_id: appId });
   } catch (error) {

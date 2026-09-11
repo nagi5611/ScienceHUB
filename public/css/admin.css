@@ -2419,3 +2419,66 @@ body.cf-admin-login {
   background: #ef4444;
 }
 
+.cf-tutorial-videos {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 0.35rem;
+}
+
+.cf-tutorial-videos-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.cf-tutorial-videos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cf-tutorial-videos-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius);
+  background: var(--cf-sidebar);
+}
+
+.cf-tutorial-videos-item-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.cf-tutorial-videos-item-title {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.cf-tutorial-videos-item-meta {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.cf-tutorial-videos-add {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+@media (min-width: 640px) {
+  .cf-tutorial-videos-add {
+    grid-template-columns: 1fr 1fr auto;
+    align-items: end;
+  }
+}
+

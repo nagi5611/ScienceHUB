@@ -28,3 +28,7 @@ function registerServiceWorker() {
 }
 
 registerServiceWorker();
+
+if (window.location.pathname.startsWith("/apps/")) {
+  import("./app-tutorial-hero.js");
+}
