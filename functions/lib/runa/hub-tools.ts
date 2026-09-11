@@ -43,9 +43,15 @@ import {
   isServerConvertFile,
   parseServerOutputFormat,
 } from "../image-converter/cloudflare-images";
+import { runImageGenerate } from "./image-generate";
 import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
 import { searchUsersForRuna } from "./user-search";
+import {
+  formatSerperResultsForRuna,
+  isSerperConfigured,
+  searchWebWithSerper,
+} from "./serper";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
 const SIM_APP_SLUG = "simulation-request";
@@ -82,6 +88,30 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
             description: "検索語（表示名・username の部分一致）",
           },
           limit: { type: "number", description: "最大件数（既定 20）" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "インターネット（Google）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜10、既定 8）",
+          },
+          tbs: {
+            type: "string",
+            enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
+            description: "期間絞り込み（任意）: 1時間/1日/1週/1月/1年",
+          },
         },
         required: ["query"],
       },
@@ -220,6 +250,58 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "image_generate",
+      description:
+        "Grok Imagine で画像を生成しストレージに保存する。draft=下書き（速い）、final=完成品（高精細・文字向き）、edit=既存画像の編集（source_path 必須）",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "生成・編集の指示（日本語可）" },
+          mode: {
+            type: "string",
+            enum: ["draft", "final", "edit"],
+            description:
+              "draft=試行・複数案, final=保存・提出用, edit=参照画像の編集",
+          },
+          dest_path: {
+            type: "string",
+            description:
+              "保存先の論理パス（省略時は u/{username}/generated/ に自動保存）",
+          },
+          aspect_ratio: {
+            type: "string",
+            enum: [
+              "auto",
+              "1:1",
+              "3:4",
+              "4:3",
+              "9:16",
+              "16:9",
+              "2:3",
+              "3:2",
+            ],
+            description: "アスペクト比（既定 auto）",
+          },
+          source_path: {
+            type: "string",
+            description: "edit 時の編集元画像の論理パス",
+          },
+          mask_path: {
+            type: "string",
+            description: "編集マスク画像の論理パス（任意）",
+          },
+          count: {
+            type: "number",
+            description: "生成枚数（draft のみ最大 3、既定 1）",
+          },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "image_convert_storage",
       description:
         "ストレージ上の HEIC/TIFF/RAW を JPEG/PNG/WebP/AVIF に変換して保存する（サーバー変換対応形式のみ）",
@@ -315,6 +397,8 @@ export async function executeHubTool(
         return await runHubAnnouncements(db, user);
       case "hub_search_users":
         return await runHubSearchUsers(db, user, args);
+      case "web_search":
+        return await runWebSearch(env, args);
       case "hub_list_schedule":
         return await runHubListSchedule(env, db, user, args);
       case "hub_create_schedule":
@@ -339,6 +423,8 @@ export async function executeHubTool(
         return await runDesignList(db, user);
       case "image_convert_storage":
         return await runImageConvert(env, db, user, args);
+      case "image_generate":
+        return await runImageGenerate(env, db, user, args);
       default:
         return { text: `不明なツール: ${toolName}`, files: [] };
     }
@@ -368,6 +454,37 @@ async function runHubListApps(
     "\nブラウザ内処理のみのアプリ（Runa では実行不可、リンク案内）: image-editor, uvcreator, tennis-motion, video-editor, video-converter, audio-editor, audio-converter"
   );
   return { text: lines.join("\n"), files: [] };
+}
+
+async function runWebSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isSerperConfigured(env)) {
+    return {
+      text: "Web 検索は現在利用できません（SERPER_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+  const tbs = strArg(args, "tbs");
+
+  const payload = await searchWebWithSerper(env, {
+    query,
+    num,
+    tbs: tbs || undefined,
+  });
+
+  return {
+    text: formatSerperResultsForRuna(payload),
+    files: [],
+  };
 }
 
 async function runHubAnnouncements(

@@ -560,6 +560,8 @@ function setupFormModal() {
     const alertBox = document.getElementById('form-alert');
     alertBox.innerHTML = '';
 
+    const formData = new FormData(form);
+
     if (!formData.get('printer_id')) {
       showFormAlert('印刷機種を選択してください', 'error');
       return;
@@ -574,8 +576,6 @@ function setupFormModal() {
       showFormAlert('ファイル情報が見つかりません。ファイルを再アップロードしてください', 'error');
       return;
     }
-
-    const formData = new FormData(form);
     const purpose = formData.get('purpose');
     const printScale = formData.get('print_scale');
     const desiredDate = formData.get('desired_date');

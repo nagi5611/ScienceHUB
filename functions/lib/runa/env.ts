@@ -46,3 +46,7 @@ export function runaMaxToolRounds(env: Env): string | undefined {
   const e = legacy(env);
   return e.RUNA_MAX_TOOL_ROUNDS?.trim() || e.LUNA_MAX_TOOL_ROUNDS?.trim();
 }
+
+export function runaMaxDailyImages(env: Env): string | undefined {
+  return env.RUNA_MAX_DAILY_IMAGES?.trim();
+}

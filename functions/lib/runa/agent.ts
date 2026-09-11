@@ -71,6 +71,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   storage_delete: "ごみ箱へ移動しています…",
   hub_list_apps: "アプリ一覧を取得しています…",
   hub_list_announcements: "お知らせを取得しています…",
+  web_search: "Web を検索しています…",
   hub_list_schedule: "予定を取得しています…",
   hub_create_schedule: "予定を作成しています…",
   pm_list_tasks: "タスクを取得しています…",
@@ -83,6 +84,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   excalidraw_list_notes: "ホワイトボードを取得しています…",
   design_list_projects: "設計プロジェクトを取得しています…",
   image_convert_storage: "画像を変換しています…",
+  image_generate: "画像を生成しています…",
 };
 
 function streamTextDeltas(send: RunaSseSend, text: string): void {
