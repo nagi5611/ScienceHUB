@@ -4,7 +4,10 @@
 
 import type { Env, SessionUser } from "../types";
 import { buildVisibleRoots } from "../storage/list";
-import { searchStorageFiles } from "../storage/search";
+import {
+  listRecentFilesInRoot,
+  mapRootsWithConcurrency,
+} from "../storage/recent";
 import { runaMaxToolRounds } from "./env";
 import { RUNA_SYSTEM_PROMPT } from "./prompts";
 import {
@@ -95,7 +98,7 @@ function formatRecentFilesReply(files: RunaFileItem[]): string {
   const lines = files.map(
     (f) => `- \`${f.path}\`（${formatUpdatedAtJa(f.updatedAt)}）`
   );
-  return `過去30日で更新されたファイル（${files.length}件）:\n\n${lines.join("\n")}`;
+  return `**過去30日で更新されたファイル**（${files.length}件）:\n\n${lines.join("\n")}`;
 }
 
 /** 最近更新ファイルの質問は AI を使わず即答する */
@@ -112,7 +115,7 @@ async function tryRecentFilesFastPath(
   const workId = activity.start(
     "working",
     "最近更新されたファイルを検索しています…",
-    "全ストレージルートを並列検索"
+    "R2 ストレージをルートごとに検索（.meta 読み込みなし）"
   );
 
   const files = await listRecentFilesForUser(env, db, user, 20);
@@ -326,37 +329,17 @@ export async function listRecentFilesForUser(
   const capped = Math.min(50, Math.max(1, limit));
   const updatedFrom = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
-  const perRoot = await Promise.all(
-    roots.map(async (root) => {
-      const rootType = root.type === "user" ? "user" : "group";
-      try {
-        const result = await searchStorageFiles(
-          env,
-          rootType,
-          root.key,
-          "",
-          {
-            query: "",
-            scope: "root",
-            updatedFrom,
-            limit: capped,
-            sortField: "updatedAt",
-            sortOrder: "desc",
-          }
-        );
-        return result.items.map((item) => ({
-          name: item.name,
-          path: item.path,
-          type: "file" as const,
-          sizeBytes: item.sizeBytes,
-          updatedAt: item.updatedAt,
-          location: item.location,
-        }));
-      } catch {
-        return [];
-      }
-    })
-  );
+  const perRoot = await mapRootsWithConcurrency(roots, 3, async (root) => {
+    const rootType = root.type === "user" ? "user" : "group";
+    try {
+      return await listRecentFilesInRoot(env, rootType, root.key, {
+        updatedFrom,
+        limit: capped,
+      });
+    } catch {
+      return [];
+    }
+  });
 
   const all = perRoot.flat();
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));

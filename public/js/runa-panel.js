@@ -14,6 +14,46 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/** 軽量 Markdown（太字・斜体・コード・リンク） */
+function renderMarkdown(text) {
+  if (!text) return "";
+
+  const placeholders = [];
+  let safe = escapeHtml(text);
+
+  safe = safe.replace(/```([\s\S]*?)```/g, (_, code) => {
+    const key = `@@CODEBLOCK${placeholders.length}@@`;
+    placeholders.push(
+      `<pre class="runa-md-pre"><code>${code}</code></pre>`
+    );
+    return key;
+  });
+
+  safe = safe.replace(/`([^`\n]+)`/g, '<code class="runa-md-code">$1</code>');
+  safe = safe.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  safe = safe.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+  safe = safe.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  safe = safe.replace(/_([^_\n]+)_/g, "<em>$1</em>");
+  safe = safe.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+
+  for (let i = 0; i < placeholders.length; i += 1) {
+    safe = safe.replace(`@@CODEBLOCK${i}@@`, placeholders[i]);
+  }
+
+  return safe.replace(/\n/g, "<br>");
+}
+
+function renderMessageContent(msg) {
+  if (!msg.content) return "";
+  if (msg.role === "assistant") {
+    return `<div class="runa-msg-content runa-md">${renderMarkdown(msg.content)}</div>`;
+  }
+  return `<div class="runa-msg-content">${escapeHtml(msg.content)}</div>`;
+}
+
 /** 要素参照 */
 const els = {
   fab: document.getElementById("runa-fab"),
@@ -138,9 +178,7 @@ function renderMessageHtml(msg) {
       ? " is-streaming"
       : "";
   const activities = renderActivitiesHtml(msg.activities);
-  const content = msg.content
-    ? `<div class="runa-msg-content">${escapeHtml(msg.content)}</div>`
-    : "";
+  const content = renderMessageContent(msg);
   return `<div class="runa-msg ${roleClass}">
     <div class="runa-msg-bubble${streamingClass}">${activities}${content}</div>
   </div>`;
@@ -200,11 +238,7 @@ function updatePendingAssistantBubble(pending) {
   if (!bubble) return;
 
   bubble.classList.toggle("is-streaming", Boolean(pending.content));
-  bubble.innerHTML = `${renderActivitiesHtml(pending.activities)}${
-    pending.content
-      ? `<div class="runa-msg-content">${escapeHtml(pending.content)}</div>`
-      : ""
-  }`;
+  bubble.innerHTML = `${renderActivitiesHtml(pending.activities)}${renderMessageContent(pending)}`;
   bindActivityToggleHandlers(pendingAssistantRow);
 
   const active = pending.activities?.find((a) => a.state !== "done");

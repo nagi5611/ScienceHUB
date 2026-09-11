@@ -252,6 +252,46 @@
   word-break: break-word;
 }
 
+.runa-md strong {
+  font-weight: 700;
+}
+
+.runa-md em {
+  font-style: italic;
+}
+
+.runa-md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.runa-msg--user .runa-md-code {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.runa-md-pre {
+  margin: 0.5rem 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.runa-md-pre code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}
+
+.runa-md a {
+  color: var(--cf-orange, #f38020);
+  text-decoration: underline;
+}
+
 .runa-form {
   display: flex;
   gap: 0.5rem;

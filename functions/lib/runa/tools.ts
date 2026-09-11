@@ -18,6 +18,7 @@ import {
   readStorageFileForRuna,
   writeStorageFileForRuna,
 } from "./storage-io";
+import { listRecentFilesInRoot } from "../storage/recent";
 import { searchAllRootsForRuna } from "./search-all";
 import type { ToolDefinition } from "./openai";
 
@@ -696,22 +697,26 @@ async function runStorageRecent(
 
   const updatedFrom = Date.now() - days * 24 * 60 * 60 * 1000;
 
-  const result = await searchStorageFiles(
-    env,
-    parsed.rootType,
-    parsed.rootKey,
-    parsed.relativePath,
-    {
-      query: "",
-      scope: "root",
-      updatedFrom,
-      limit,
-      sortField: "updatedAt",
-      sortOrder: "desc",
-    }
-  );
-
-  const files = toFileItems(result.items);
+  const entries = await listRecentFilesInRoot(env, parsed.rootType, parsed.rootKey, {
+    updatedFrom,
+    limit,
+  });
+  const logicalPrefix = path.replace(/\/$/, "");
+  const scoped = parsed.relativePath
+    ? entries.filter(
+        (item) =>
+          item.path === logicalPrefix ||
+          item.path.startsWith(`${logicalPrefix}/`)
+      )
+    : entries;
+  const files: RunaFileItem[] = scoped.map((item) => ({
+    name: item.name,
+    path: item.path,
+    type: "file",
+    sizeBytes: item.sizeBytes,
+    updatedAt: item.updatedAt,
+    location: item.location,
+  }));
   const summary = files.length
     ? files.map((f) => `${f.path} (更新: ${f.updatedAt ?? "不明"})`).join("\n")
     : "（該当なし）";
