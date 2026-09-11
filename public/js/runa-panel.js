@@ -630,8 +630,19 @@ async function addAttachmentFiles(files) {
       let originalPath;
       /** @type {string[]} */
       const imagePaths = [];
+      const totalUploads = prepared.blobs.length;
 
-      for (const entry of prepared.blobs) {
+      for (let uploadIndex = 0; uploadIndex < prepared.blobs.length; uploadIndex += 1) {
+        const entry = prepared.blobs[uploadIndex];
+        const pending = pendingAttachments.find((a) => a.id === id);
+        if (pending) {
+          pending.statusLabel =
+            totalUploads > 1
+              ? `アップロード中… ${uploadIndex + 1}/${totalUploads}`
+              : "アップロード中…";
+          renderPendingAttachments();
+        }
+
         const uploaded = await uploadAttachmentBlob(entry.blob, entry.filename);
         if (entry.role === "original") {
           originalPath = uploaded.path;
@@ -651,7 +662,11 @@ async function addAttachmentFiles(files) {
       }
     } catch (error) {
       pendingAttachments = pendingAttachments.filter((a) => a.id !== id);
-      setStatus(error.message || "添付のアップロードに失敗しました");
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "添付のアップロードに失敗しました";
+      setStatus(message);
     }
     renderPendingAttachments();
   }

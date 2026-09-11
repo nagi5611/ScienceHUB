@@ -62,17 +62,30 @@ import {
   createStorageShortcutLink,
   resolveStorageShortcutLink,
 } from "../../lib/storage/shortcut";
+import { isRunaAttachmentStoragePath } from "../../lib/runa/attachment-path";
+import type { StorageUploadSession } from "../../lib/storage/upload";
 
 function parseRoute(path: string | string[] | undefined): string[] {
   if (Array.isArray(path)) return path.filter(Boolean);
   return (path ?? "").split("/").filter(Boolean);
 }
 
+async function getUploadSessionForAccess(
+  db: D1Database,
+  sessionId: string
+): Promise<StorageUploadSession | null> {
+  return db
+    .prepare("SELECT * FROM storage_upload_sessions WHERE id = ?")
+    .bind(sessionId)
+    .first<StorageUploadSession>();
+}
+
 async function requireStorageAccess(
   request: Request,
   env: Env,
   scope: "read" | "write" = "read",
-  authCtx?: AuthenticatedUser | null
+  authCtx?: AuthenticatedUser | null,
+  options?: { runaAttachmentPath?: string; uploadSessionId?: string }
 ): Promise<{ user: SessionUser; authCtx: AuthenticatedUser } | Response> {
   const resolved =
     authCtx ?? (await requireAuthenticatedUser(request, env));
@@ -84,9 +97,43 @@ async function requireStorageAccess(
   }
 
   const db = getDb(env);
-  const allowed = await canUserAccessApp(db, resolved.user.id, STORAGE_APP_SLUG);
-  if (!allowed) {
-    return jsonError("このアプリへのアクセス権限がありません", 403);
+  let runaAttachmentWrite = false;
+  if (scope === "write") {
+    if (
+      options?.runaAttachmentPath &&
+      isRunaAttachmentStoragePath(
+        options.runaAttachmentPath,
+        resolved.user.username
+      )
+    ) {
+      runaAttachmentWrite = true;
+    } else if (options?.uploadSessionId) {
+      const session = await getUploadSessionForAccess(
+        db,
+        options.uploadSessionId
+      );
+      if (
+        session &&
+        session.user_id === resolved.user.id &&
+        isRunaAttachmentStoragePath(
+          `u/${resolved.user.username}/${session.logical_dir}`,
+          resolved.user.username
+        )
+      ) {
+        runaAttachmentWrite = true;
+      }
+    }
+  }
+
+  if (!runaAttachmentWrite) {
+    const allowed = await canUserAccessApp(
+      db,
+      resolved.user.id,
+      STORAGE_APP_SLUG
+    );
+    if (!allowed) {
+      return jsonError("このアプリへのアクセス権限がありません", 403);
+    }
   }
 
   return { user: resolved.user, authCtx: resolved };
@@ -139,9 +186,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return Response.json({ allowed: true });
     }
 
-    const storageAccess = await requireStorageAccess(request, env, "read");
-    if (storageAccess instanceof Response) return storageAccess;
-    const { user: auth, authCtx: storageAuthCtx } = storageAccess;
+    const isUploadRoute = route.startsWith("upload/");
+    let auth: SessionUser;
+    let storageAuthCtx: AuthenticatedUser;
+
+    if (isUploadRoute) {
+      const authenticated = await requireAuthenticatedUser(request, env);
+      if (authenticated instanceof Response) return authenticated;
+      auth = authenticated.user;
+      storageAuthCtx = authenticated;
+    } else {
+      const storageAccess = await requireStorageAccess(request, env, "read");
+      if (storageAccess instanceof Response) return storageAccess;
+      auth = storageAccess.user;
+      storageAuthCtx = storageAccess.authCtx;
+    }
 
     if (route === "roots" && method === "GET") {
       await ensureUserStorageRoot(
@@ -354,15 +413,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/init" && method === "POST") {
-      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
-      if (writeAccess instanceof Response) return writeAccess;
-
       const body = await request.json<{
         path?: string;
         filename?: string;
         size?: number;
       }>();
       const path = body.path?.trim() ?? "";
+      const writeAccess = await requireStorageAccess(
+        request,
+        env,
+        "write",
+        storageAuthCtx,
+        { runaAttachmentPath: path }
+      );
+      if (writeAccess instanceof Response) return writeAccess;
       const filename = body.filename?.trim() ?? "";
       const size = Number(body.size);
       if (!path || !filename || !Number.isFinite(size)) {
@@ -391,11 +455,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (route === "upload/simple" && method === "PUT") {
-      const writeAccess = await requireStorageAccess(request, env, "write", storageAuthCtx);
-      if (writeAccess instanceof Response) return writeAccess;
-
       const sessionId = new URL(request.url).searchParams.get("sessionId");
       if (!sessionId) return jsonError("sessionId が必要です", 400);
+
+      const writeAccess = await requireStorageAccess(
+        request,
+        env,
+        "write",
+        storageAuthCtx,
+        { uploadSessionId: sessionId }
+      );
+      if (writeAccess instanceof Response) return writeAccess;
 
       try {
         const body = request.body;
