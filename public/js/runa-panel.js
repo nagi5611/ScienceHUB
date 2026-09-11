@@ -517,6 +517,13 @@ async function postRunaChat(message, attachments) {
   return finalResult;
 }
 
+/** Enter / Ctrl+Enter で送信、Shift+Enter で改行 */
+function handleInputKeydown(event) {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  els.form?.requestSubmit();
+}
+
 async function handleSubmit(event) {
   event.preventDefault();
   if (!els.input || chatBusy) return;
@@ -610,6 +617,7 @@ function bindEvents() {
   els.backdrop?.addEventListener("click", () => setPanelOpen(false));
   els.newChat?.addEventListener("click", () => void startNewChat());
   els.form?.addEventListener("submit", handleSubmit);
+  els.input?.addEventListener("keydown", handleInputKeydown);
   els.attachBtn?.addEventListener("click", () => els.fileInput?.click());
   els.fileInput?.addEventListener("change", handleFileInputChange);
 
