@@ -3,6 +3,7 @@
  */
 
 import { createId, now, type Env } from "../types";
+import { runaMaxDailyTurns } from "./env";
 import type { RunaFileItem } from "./tools";
 
 const DEFAULT_MAX_DAILY_TURNS = 50;
@@ -20,7 +21,7 @@ function todayJstDateString(): string {
 }
 
 function resolveMaxDailyTurns(env: Env): number {
-  const parsed = Number.parseInt(env.RUNA_MAX_DAILY_TURNS ?? "", 10);
+  const parsed = Number.parseInt(runaMaxDailyTurns(env) ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_DAILY_TURNS;
 }
 

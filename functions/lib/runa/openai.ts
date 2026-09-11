@@ -5,6 +5,12 @@
  */
 
 import type { Env } from "../types";
+import {
+  runaAiGatewayId,
+  runaModel,
+  runaOpenAiApiKey,
+  runaOpenAiBaseUrl,
+} from "./env";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -52,7 +58,7 @@ function resolveAccountId(env: Env): string {
 }
 
 function resolveBaseUrl(env: Env): string {
-  const raw = env.RUNA_OPENAI_BASE_URL?.trim();
+  const raw = runaOpenAiBaseUrl(env);
   if (raw) return raw.replace(/\/+$/, "");
 
   const accountId = resolveAccountId(env);
@@ -65,13 +71,13 @@ function resolveBaseUrl(env: Env): string {
 }
 
 function resolveGatewayId(env: Env): string | null {
-  const gateway = env.RUNA_AI_GATEWAY_ID?.trim();
+  const gateway = runaAiGatewayId(env);
   return gateway || null;
 }
 
 /** Cloudflare AI 向けにモデル ID を正規化 */
 export function resolveRunaModel(env: Env): string {
-  const model = env.RUNA_MODEL?.trim() || "openai/gpt-5.6-luna";
+  const model = runaModel(env) || "openai/gpt-5.6-luna";
   if (model.includes("/")) return model;
   if (/^gpt-5\.6-/i.test(model)) return `openai/${model}`;
   if (model.startsWith("@cf/")) return model;
@@ -79,8 +85,7 @@ export function resolveRunaModel(env: Env): string {
 }
 
 function resolveApiKey(env: Env): string {
-  const key =
-    env.RUNA_OPENAI_API_KEY?.trim() || env.CLOUDFLARE_API_TOKEN?.trim();
+  const key = runaOpenAiApiKey(env) || env.CLOUDFLARE_API_TOKEN?.trim();
   if (!key) {
     throw new Error(
       "RUNA_OPENAI_API_KEY または CLOUDFLARE_API_TOKEN が未設定です"

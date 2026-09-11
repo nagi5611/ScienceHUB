@@ -5,6 +5,7 @@
 import type { Env, SessionUser } from "../types";
 import { buildVisibleRoots } from "../storage/list";
 import { searchStorageFiles } from "../storage/search";
+import { runaMaxToolRounds } from "./env";
 import { RUNA_SYSTEM_PROMPT } from "./prompts";
 import {
   runaChatCompletion,
@@ -36,7 +37,7 @@ export interface RunaChatResult {
 }
 
 function resolveMaxToolRounds(env: Env): number {
-  const parsed = Number.parseInt(env.RUNA_MAX_TOOL_ROUNDS ?? "", 10);
+  const parsed = Number.parseInt(runaMaxToolRounds(env) ?? "", 10);
   if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_TOOL_ROUNDS;
   return Math.min(16, parsed);
 }
