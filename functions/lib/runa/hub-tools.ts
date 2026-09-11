@@ -46,6 +46,7 @@ import {
 import { runImageGenerate } from "./image-generate";
 import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
+import { searchUsersForRuna } from "./user-search";
 import {
   formatSerperResultsForRuna,
   isSerperConfigured,
@@ -71,6 +72,25 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
       name: "hub_list_announcements",
       description: "ダッシュボードのお知らせ一覧",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hub_search_users",
+      description:
+        "表示名または username でユーザーを検索する（同一グループメンバー。管理者は全ユーザー）",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "検索語（表示名・username の部分一致）",
+          },
+          limit: { type: "number", description: "最大件数（既定 20）" },
+        },
+        required: ["query"],
+      },
     },
   },
   {
@@ -375,6 +395,8 @@ export async function executeHubTool(
         return await runHubListApps(db, user);
       case "hub_list_announcements":
         return await runHubAnnouncements(db, user);
+      case "hub_search_users":
+        return await runHubSearchUsers(db, user, args);
       case "web_search":
         return await runWebSearch(env, args);
       case "hub_list_schedule":
@@ -475,6 +497,35 @@ async function runHubAnnouncements(
     (a) => `- ${new Date(a.published_at).toLocaleString("ja-JP")}: ${a.body}`
   );
   return { text: `お知らせ（${items.length} 件）:\n${lines.join("\n")}`, files: [] };
+}
+
+async function runHubSearchUsers(
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  const query = strArg(args, "query");
+  const limit = Math.min(30, numArg(args, "limit", 20));
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const hits = await searchUsersForRuna(db, user, query, limit);
+  if (!hits.length) {
+    return {
+      text: `「${query}」に一致するユーザーは見つかりませんでした（同一グループ内で検索）`,
+      files: [],
+    };
+  }
+
+  const lines = hits.map(
+    (hit) =>
+      `- ${hit.displayName}（username: \`${hit.username}\`, id: ${hit.id}）`
+  );
+  return {
+    text: `ユーザー検索「${query}」（${hits.length} 件）:\n${lines.join("\n")}\n\nファイル検索には username を storage_files_by_user に渡してください。`,
+    files: [],
+  };
 }
 
 async function runHubListSchedule(

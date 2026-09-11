@@ -58,6 +58,9 @@ export async function searchAllRootsForRuna(
           type: "file" as const,
           sizeBytes: item.sizeBytes,
           updatedAt: item.updatedAt,
+          createdAt: item.createdAt,
+          createdBy: item.createdBy,
+          updatedBy: item.updatedBy,
           location: item.location,
         }));
       } catch {

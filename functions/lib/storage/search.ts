@@ -26,6 +26,8 @@ export interface StorageSearchOptions extends ListDirectoryOptions {
   scope: StorageSearchScope;
   updatedFrom?: number | null;
   updatedTo?: number | null;
+  updatedBy?: string | null;
+  createdBy?: string | null;
 }
 
 export interface StorageSearchItem extends StorageListItem {
@@ -216,8 +218,19 @@ export async function searchStorageFiles(
   const sortField = options.sortField ?? "name";
   const sortOrder = options.sortOrder ?? "asc";
 
-  if (!query && updatedFrom === null && updatedTo === null) {
-    throw new Error("検索語または更新日時の範囲を指定してください");
+  const updatedBy = options.updatedBy?.trim() || null;
+  const createdBy = options.createdBy?.trim() || null;
+
+  if (
+    !query &&
+    updatedFrom === null &&
+    updatedTo === null &&
+    !updatedBy &&
+    !createdBy
+  ) {
+    throw new Error(
+      "検索語、更新日時の範囲、または updated_by / created_by を指定してください"
+    );
   }
 
   const root = await resolveRootForPath(db, rootType, rootKey);
@@ -233,6 +246,8 @@ export async function searchStorageFiles(
         scope,
         updatedFrom,
         updatedTo,
+        updatedBy,
+        createdBy,
         sortField,
         sortOrder,
         offset,
