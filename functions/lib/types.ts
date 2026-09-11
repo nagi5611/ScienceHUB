@@ -113,6 +113,7 @@ export interface Env {
   RUNA_AI_GATEWAY_ID?: string;
   RUNA_MAX_DAILY_TURNS?: string;
   RUNA_MAX_TOOL_ROUNDS?: string;
+  RUNA_MAX_DAILY_IMAGES?: string;
   /** Serper Google 検索 API キー（Runa web_search） */
   SERPER_APIKEY?: string;
 }
