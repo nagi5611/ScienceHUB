@@ -10,6 +10,7 @@ import {
   writeMetaJson,
 } from "./meta";
 import { folderMetaKey } from "./keys";
+import { upsertIndexBackfillRow } from "./file-index";
 import {
   defaultUserQuota,
   getGroupStorageRoot,
@@ -50,6 +51,13 @@ export async function ensureUserStorageRoot(
     meta
   );
 
+  await upsertIndexBackfillRow(db, id, {
+    status: "complete",
+    r2_cursor: null,
+    files_indexed: 0,
+    last_error: null,
+  });
+
   const row = await getUserStorageRoot(db, userId);
   if (!row) throw new Error("ストレージルートの作成に失敗しました");
   return row;
@@ -84,6 +92,13 @@ export async function ensureGroupStorageRoot(
     folderMetaKey("group", groupSlug, ""),
     meta
   );
+
+  await upsertIndexBackfillRow(db, id, {
+    status: "complete",
+    r2_cursor: null,
+    files_indexed: 0,
+    last_error: null,
+  });
 
   const row = await getGroupStorageRoot(db, groupId);
   if (!row) throw new Error("グループストレージルートの作成に失敗しました");
