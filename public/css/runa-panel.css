@@ -180,6 +180,20 @@
   color: var(--cf-text, #1d2433);
 }
 
+.runa-msg-bubble.is-streaming::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 0.1em;
+  color: var(--cf-orange, #f38020);
+  animation: runa-cursor-blink 1s step-end infinite;
+}
+
+@keyframes runa-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .runa-msg-status {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;

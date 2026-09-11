@@ -126,11 +126,13 @@ export async function runRunaChat(
   const maxRounds = resolveMaxToolRounds(env);
 
   for (let round = 0; round < maxRounds; round++) {
-    const completion = await runaChatCompletion(
-      env,
-      messages,
-      ALL_RUNA_TOOLS
-    );
+    let streamedReply = false;
+    const completion = await runaChatCompletion(env, messages, ALL_RUNA_TOOLS, {
+      onTextDelta: (text) => {
+        streamedReply = true;
+        send("delta", { text });
+      },
+    });
 
     if (completion.toolCalls.length > 0) {
       messages.push({
@@ -149,7 +151,9 @@ export async function runRunaChat(
       completion.content?.trim() ||
       "申し訳ありません。応答を生成できませんでした。";
 
-    streamTextDeltas(send, reply);
+    if (!streamedReply) {
+      streamTextDeltas(send, reply);
+    }
 
     const uniqueFiles = dedupeFiles(collectedFiles);
     if (uniqueFiles.length) {

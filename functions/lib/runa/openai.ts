@@ -44,6 +44,10 @@ export interface CompletionResult {
   finishReason: string | null;
 }
 
+export interface CompletionCallbacks {
+  onTextDelta?: (text: string) => void;
+}
+
 const CLOUDFLARE_AI_V1_PREFIX =
   "https://api.cloudflare.com/client/v4/accounts/";
 
@@ -256,55 +260,111 @@ function parseResponsesOutput(body: Record<string, unknown>): CompletionResult {
   };
 }
 
-async function requestResponsesApi(
-  env: Env,
-  model: string,
-  messages: ChatMessage[],
-  tools: ToolDefinition[]
-): Promise<CompletionResult> {
-  const { instructions, input } = buildResponsesInput(messages);
-  const body: Record<string, unknown> = {
-    model,
-    input,
-    tools: convertToolsForResponses(tools),
-    tool_choice: "auto",
-    reasoning: { effort: "none" },
-    max_output_tokens: 4096,
-    store: false,
-    parallel_tool_calls: true,
-  };
-  if (instructions) body.instructions = instructions;
+type ToolCallDraft = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
 
-  const response = await fetch(`${resolveBaseUrl(env)}/responses`, {
-    method: "POST",
-    headers: buildRequestHeaders(env, model),
-    body: JSON.stringify(body),
-  });
+/** OpenAI Chat Completions の SSE チャンクを1件処理 */
+function mergeChatCompletionChunk(
+  chunk: Record<string, unknown>,
+  content: string,
+  toolDrafts: ToolCallDraft[],
+  onTextDelta?: (text: string) => void
+): { content: string; finishReason: string | null } {
+  const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+  const choice = choices[0];
+  if (!choice || typeof choice !== "object") {
+    return { content, finishReason: null };
+  }
+  const choiceRecord = choice as Record<string, unknown>;
+  const delta =
+    choiceRecord.delta && typeof choiceRecord.delta === "object"
+      ? (choiceRecord.delta as Record<string, unknown>)
+      : null;
 
-  const responseBody = (await response.json().catch(() => ({}))) as Record<
-    string,
-    unknown
-  >;
-
-  if (!response.ok) {
-    throw new Error(extractApiError(responseBody, response.status));
+  if (delta?.content && typeof delta.content === "string" && delta.content) {
+    content += delta.content;
+    onTextDelta?.(delta.content);
   }
 
-  return parseResponsesOutput(responseBody);
+  const deltaToolCalls = Array.isArray(delta?.tool_calls) ? delta.tool_calls : [];
+  for (const raw of deltaToolCalls) {
+    if (!raw || typeof raw !== "object") continue;
+    const tc = raw as Record<string, unknown>;
+    const index =
+      typeof tc.index === "number" ? tc.index : toolDrafts.length;
+    if (!toolDrafts[index]) {
+      toolDrafts[index] = {
+        id: "",
+        type: "function",
+        function: { name: "", arguments: "" },
+      };
+    }
+    const draft = toolDrafts[index];
+    if (typeof tc.id === "string" && tc.id) draft.id = tc.id;
+    const fn =
+      tc.function && typeof tc.function === "object"
+        ? (tc.function as Record<string, unknown>)
+        : null;
+    if (fn?.name && typeof fn.name === "string") {
+      draft.function.name += fn.name;
+    }
+    if (fn?.arguments && typeof fn.arguments === "string") {
+      draft.function.arguments += fn.arguments;
+    }
+  }
+
+  const finishReason =
+    typeof choiceRecord.finish_reason === "string"
+      ? choiceRecord.finish_reason
+      : null;
+  return { content, finishReason };
+}
+
+/** SSE 行をパースして completion チャンクを処理 */
+async function consumeOpenAiSseStream(
+  body: ReadableStream<Uint8Array>,
+  onChunk: (chunk: Record<string, unknown>) => void
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        onChunk(JSON.parse(data) as Record<string, unknown>);
+      } catch {
+        /* skip malformed chunk */
+      }
+    }
+  }
 }
 
 async function requestChatCompletionsApi(
   env: Env,
   model: string,
   messages: ChatMessage[],
-  tools: ToolDefinition[]
+  tools: ToolDefinition[],
+  callbacks?: CompletionCallbacks
 ): Promise<CompletionResult> {
   const body: Record<string, unknown> = {
     model,
     messages,
     tools,
     tool_choice: "auto",
-    stream: false,
+    stream: Boolean(callbacks?.onTextDelta),
   };
   if (/gpt-5\.6/i.test(model)) {
     body.reasoning_effort = "none";
@@ -316,40 +376,179 @@ async function requestChatCompletionsApi(
     body: JSON.stringify(body),
   });
 
-  const responseBody = (await response.json().catch(() => ({}))) as {
-    error?: { message?: string };
-    errors?: Array<{ message?: string }>;
-    choices?: Array<{
-      finish_reason?: string;
-      message?: {
-        content?: string | null;
-        tool_calls?: ToolCall[];
-      };
-    }>;
-  };
-
   if (!response.ok) {
+    const responseBody = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
     throw new Error(extractApiError(responseBody, response.status));
   }
 
-  const choice = responseBody.choices?.[0];
-  const message = choice?.message;
+  if (!callbacks?.onTextDelta || !response.body) {
+    const responseBody = (await response.json()) as {
+      choices?: Array<{
+        finish_reason?: string;
+        message?: {
+          content?: string | null;
+          tool_calls?: ToolCall[];
+        };
+      }>;
+    };
+    const choice = responseBody.choices?.[0];
+    const message = choice?.message;
+    return {
+      content: message?.content ?? null,
+      toolCalls: message?.tool_calls ?? [],
+      finishReason: choice?.finish_reason ?? null,
+    };
+  }
+
+  let content = "";
+  let finishReason: string | null = null;
+  const toolDrafts: ToolCallDraft[] = [];
+
+  await consumeOpenAiSseStream(response.body, (chunk) => {
+    const merged = mergeChatCompletionChunk(
+      chunk,
+      content,
+      toolDrafts,
+      callbacks.onTextDelta
+    );
+    content = merged.content;
+    if (merged.finishReason) finishReason = merged.finishReason;
+  });
+
+  const toolCalls = toolDrafts.filter((draft) => draft.function.name);
   return {
-    content: message?.content ?? null,
-    toolCalls: message?.tool_calls ?? [],
-    finishReason: choice?.finish_reason ?? null,
+    content: content || null,
+    toolCalls,
+    finishReason,
   };
 }
 
-/** 非ストリーミング completion（ツールループ用） */
+/** Responses API のストリームイベントからテキスト差分を抽出 */
+function extractResponsesStreamDelta(event: Record<string, unknown>): string {
+  if (event.type === "response.output_text.delta") {
+    const delta = event.delta;
+    if (typeof delta === "string") return delta;
+    if (delta && typeof delta === "object" && "text" in delta) {
+      const text = (delta as { text?: unknown }).text;
+      if (typeof text === "string") return text;
+    }
+  }
+  return "";
+}
+
+async function requestResponsesApi(
+  env: Env,
+  model: string,
+  messages: ChatMessage[],
+  tools: ToolDefinition[],
+  callbacks?: CompletionCallbacks
+): Promise<CompletionResult> {
+  const { instructions, input } = buildResponsesInput(messages);
+  const body: Record<string, unknown> = {
+    model,
+    input,
+    tools: convertToolsForResponses(tools),
+    tool_choice: "auto",
+    reasoning: { effort: "none" },
+    max_output_tokens: 4096,
+    store: false,
+    parallel_tool_calls: true,
+    stream: Boolean(callbacks?.onTextDelta),
+  };
+  if (instructions) body.instructions = instructions;
+
+  const response = await fetch(`${resolveBaseUrl(env)}/responses`, {
+    method: "POST",
+    headers: buildRequestHeaders(env, model),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const responseBody = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    throw new Error(extractApiError(responseBody, response.status));
+  }
+
+  if (!callbacks?.onTextDelta || !response.body) {
+    const responseBody = (await response.json()) as Record<string, unknown>;
+    return parseResponsesOutput(responseBody);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream")) {
+    const responseBody = (await response.json()) as Record<string, unknown>;
+    const parsed = parseResponsesOutput(responseBody);
+    if (parsed.content) callbacks.onTextDelta(parsed.content);
+    return parsed;
+  }
+
+  let content = "";
+  const toolCalls: ToolCall[] = [];
+  let finishReason: string | null = null;
+
+  await consumeOpenAiSseStream(response.body, (event) => {
+    const delta = extractResponsesStreamDelta(event);
+    if (delta) {
+      content += delta;
+      callbacks.onTextDelta?.(delta);
+    }
+
+    if (event.type === "response.completed" && event.response) {
+      const parsed = parseResponsesOutput(
+        event.response as Record<string, unknown>
+      );
+      if (!content && parsed.content) {
+        content = parsed.content;
+        callbacks.onTextDelta?.(parsed.content);
+      }
+      toolCalls.push(...parsed.toolCalls);
+      finishReason = parsed.finishReason;
+    }
+
+    if (event.type === "response.output_item.done") {
+      const item = event.item;
+      if (item && typeof item === "object") {
+        const record = item as Record<string, unknown>;
+        if (record.type === "function_call") {
+          toolCalls.push({
+            id: String(record.call_id ?? record.id ?? `call_${toolCalls.length}`),
+            type: "function",
+            function: {
+              name: String(record.name ?? ""),
+              arguments: String(record.arguments ?? "{}"),
+            },
+          });
+        }
+      }
+    }
+  });
+
+  if (!toolCalls.length && !content) {
+    return await requestResponsesApi(env, model, messages, tools);
+  }
+
+  return {
+    content: content || null,
+    toolCalls,
+    finishReason,
+  };
+}
+
+/** completion（ストリーミング時は onTextDelta でトークン単位に通知） */
 export async function runaChatCompletion(
   env: Env,
   messages: ChatMessage[],
-  tools: ToolDefinition[]
+  tools: ToolDefinition[],
+  callbacks?: CompletionCallbacks
 ): Promise<CompletionResult> {
   const model = resolveRunaModel(env);
   if (usesResponsesApi(model)) {
-    return await requestResponsesApi(env, model, messages, tools);
+    return await requestResponsesApi(env, model, messages, tools, callbacks);
   }
-  return await requestChatCompletionsApi(env, model, messages, tools);
+  return await requestChatCompletionsApi(env, model, messages, tools, callbacks);
 }

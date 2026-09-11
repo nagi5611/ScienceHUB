@@ -42,6 +42,8 @@ let selectedFile = null;
 let previewObjectUrl = null;
 let runaDataLoaded = false;
 let runaDataLoadFailed = false;
+/** @type {HTMLElement | null} */
+let pendingAssistantBubble = null;
 
 /** タブ休止・ページ離脱で失敗しやすい fetch を安全に実行 */
 async function safeFetch(url, options) {
@@ -99,28 +101,76 @@ function setActiveTab(tabId) {
   }
 }
 
+function renderMessageHtml(msg) {
+  const roleClass =
+    msg.role === "user" ? "runa-msg--user" : "runa-msg--assistant";
+  const streamingClass =
+    msg.pending && msg.role === "assistant" ? " is-streaming" : "";
+  let inner = escapeHtml(msg.content || "");
+  if (msg.pending && msg.statusLabel) {
+    inner += `<p class="runa-msg-status">${escapeHtml(msg.statusLabel)}</p>`;
+  }
+  return `<div class="runa-msg ${roleClass}">
+    <div class="runa-msg-bubble${streamingClass}">${inner}</div>
+  </div>`;
+}
+
+function scrollMessagesToBottom() {
+  if (els.messages) els.messages.scrollTop = els.messages.scrollHeight;
+}
+
 function renderMessages() {
   if (!els.messages) return;
+  pendingAssistantBubble = null;
   if (!messageState.length) {
     els.messages.innerHTML =
       '<p class="runa-empty">Runa にファイルの検索や操作を依頼できます。</p>';
     return;
   }
 
-  els.messages.innerHTML = messageState
-    .map((msg) => {
-      const roleClass =
-        msg.role === "user" ? "runa-msg--user" : "runa-msg--assistant";
-      let inner = escapeHtml(msg.content || "");
-      if (msg.pending && msg.statusLabel) {
-        inner += `<p class="runa-msg-status">${escapeHtml(msg.statusLabel)}</p>`;
-      }
-      return `<div class="runa-msg ${roleClass}">
-        <div class="runa-msg-bubble">${inner}</div>
-      </div>`;
-    })
-    .join("");
-  els.messages.scrollTop = els.messages.scrollHeight;
+  els.messages.innerHTML = messageState.map(renderMessageHtml).join("");
+  scrollMessagesToBottom();
+}
+
+/** ストリーミング中のアシスタント吹き出しを差分更新 */
+function mountPendingAssistantBubble(pending) {
+  if (!els.messages) return;
+  const empty = els.messages.querySelector(".runa-empty");
+  if (empty) empty.remove();
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = renderMessageHtml(pending);
+  const bubble = wrapper.querySelector(".runa-msg-bubble");
+  const row = wrapper.firstElementChild;
+  if (!bubble || !row) return;
+
+  els.messages.appendChild(row);
+  pendingAssistantBubble = bubble;
+  scrollMessagesToBottom();
+}
+
+function updatePendingAssistantBubble(pending) {
+  if (!pendingAssistantBubble) {
+    mountPendingAssistantBubble(pending);
+    return;
+  }
+  pendingAssistantBubble.textContent = pending.content || "";
+  const status = pendingAssistantBubble.parentElement?.querySelector(
+    ".runa-msg-status"
+  );
+  if (pending.statusLabel) {
+    if (status) {
+      status.textContent = pending.statusLabel;
+    } else {
+      const statusEl = document.createElement("p");
+      statusEl.className = "runa-msg-status";
+      statusEl.textContent = pending.statusLabel;
+      pendingAssistantBubble.after(statusEl);
+    }
+  } else if (status) {
+    status.remove();
+  }
+  scrollMessagesToBottom();
 }
 
 function renderFiles() {
@@ -326,6 +376,7 @@ async function postRunaChat(message) {
     statusLabel: "",
   };
   messageState.push(pending);
+  mountPendingAssistantBubble(pending);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -343,10 +394,10 @@ async function postRunaChat(message) {
     if (eventName === "status" && payload.label) {
       pending.statusLabel = payload.label;
       setStatus(payload.label);
-      renderMessages();
+      updatePendingAssistantBubble(pending);
     } else if (eventName === "delta" && payload.text) {
       pending.content += payload.text;
-      renderMessages();
+      updatePendingAssistantBubble(pending);
     } else if (eventName === "files" && Array.isArray(payload.items)) {
       mergeFileItems(payload.items);
     } else if (eventName === "done") {
@@ -383,6 +434,7 @@ async function postRunaChat(message) {
     mergeFileItems(finalResult.files);
   }
   setStatus("");
+  pendingAssistantBubble = null;
   renderMessages();
   return finalResult;
 }
