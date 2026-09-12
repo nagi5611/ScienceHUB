@@ -123,20 +123,28 @@
   display: grid;
   place-items: center;
   background: rgba(20, 16, 12, 0.28);
-  transition: opacity 160ms ease, visibility 160ms ease;
+  transition: opacity 1s ease, visibility 1s ease;
 }
 
-.tutorialDialog-stage.is-playing .tutorialDialog-overlay {
+.tutorialDialog-overlay.is-fading-out,
+.tutorialDialog-stage.is-overlay-hidden .tutorialDialog-overlay {
   opacity: 0;
-  visibility: hidden;
   pointer-events: none;
 }
 
-.tutorialDialog-stage.is-playing:hover .tutorialDialog-overlay,
-.tutorialDialog-stage.is-playing:focus-within .tutorialDialog-overlay {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
+.tutorialDialog-stage.is-overlay-hidden .tutorialDialog-overlay {
+  visibility: hidden;
+}
+
+.tutorialDialog-loading {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.85rem;
+  background: #1a1410;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .tutorialDialog-play {
