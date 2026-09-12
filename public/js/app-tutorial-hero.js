@@ -2,29 +2,13 @@
  * 各アプリ右下のチュートリアルヒーロー
  */
 
-const MASCOT_SVG = `<svg viewBox="0 0 96 96" aria-hidden="true">
-  <circle cx="48" cy="48" r="46" fill="#F38020"/>
-  <circle cx="48" cy="48" r="38" fill="#FFC14A"/>
-  <ellipse cx="48" cy="62" rx="18" ry="10" fill="#F38020"/>
-  <circle cx="35" cy="42" r="6.5" fill="#2B2118"/>
-  <circle cx="61" cy="42" r="6.5" fill="#2B2118"/>
-  <circle cx="37" cy="40.5" r="2" fill="#fff"/>
-  <circle cx="63" cy="40.5" r="2" fill="#fff"/>
-  <path d="M38 58c3.4 5 16.6 5 20 0" fill="none" stroke="#2B2118" stroke-width="3" stroke-linecap="round"/>
-</svg>`;
+const PLAY_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>`;
+const PAUSE_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 5h4v14H6V5zm8 0h4v14h-4V5z"/></svg>`;
 
 /** パスからアプリ slug を取り出す */
 function resolveAppSlug() {
   const match = window.location.pathname.match(/^\/apps\/([^/]+)/);
   return match?.[1] ?? "";
-}
-
-/** サイズ表示 */
-function formatSize(bytes) {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** HTML エスケープ */
@@ -34,6 +18,15 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/** 秒数を mm:ss にする */
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
 /** ヒーロー UI を初期化する */
@@ -55,6 +48,92 @@ export async function initAppTutorialHero() {
   mountHero(slug, appName, videos);
 }
 
+/** カスタム動画プレイヤーを初期化する */
+function setupVideoPlayer(root) {
+  const stage = root.querySelector(".tutorialDialog-stage");
+  const video = root.querySelector(".tutorialDialog-video");
+  if (!(stage instanceof HTMLElement) || !(video instanceof HTMLVideoElement)) return;
+
+  const overlayPlay = stage.querySelector(".tutorialDialog-play");
+  const togglePlay = stage.querySelector(".tutorialDialog-toggle-play");
+  const progressTrack = stage.querySelector(".tutorialDialog-progress-track");
+  const progressFill = stage.querySelector(".tutorialDialog-progress-fill");
+  const timeEl = stage.querySelector(".tutorialDialog-time");
+
+  /** 再生状態を UI に反映 */
+  function syncPlayingState() {
+    stage.classList.toggle("is-playing", !video.paused && !video.ended);
+    const icon = video.paused || video.ended ? PLAY_ICON : PAUSE_ICON;
+    if (overlayPlay instanceof HTMLButtonElement) overlayPlay.innerHTML = icon;
+    if (togglePlay instanceof HTMLButtonElement) togglePlay.innerHTML = icon;
+  }
+
+  /** 進捗バーと時間表示を更新 */
+  function syncProgress() {
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const ratio = duration > 0 ? (current / duration) * 100 : 0;
+    if (progressFill instanceof HTMLElement) {
+      progressFill.style.width = `${Math.min(100, Math.max(0, ratio))}%`;
+    }
+    if (timeEl instanceof HTMLElement) {
+      timeEl.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+    }
+  }
+
+  /** 再生/一時停止を切り替える */
+  async function togglePlayback() {
+    if (video.paused || video.ended) {
+      try {
+        await video.play();
+      } catch {
+        /* autoplay policy */
+      }
+    } else {
+      video.pause();
+    }
+    syncPlayingState();
+    syncProgress();
+  }
+
+  /** シーク位置を更新 */
+  function seekFromClientX(clientX) {
+    if (!(progressTrack instanceof HTMLElement)) return;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (duration <= 0) return;
+    const rect = progressTrack.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    video.currentTime = duration * ratio;
+    syncProgress();
+  }
+
+  overlayPlay?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    togglePlayback();
+  });
+  togglePlay?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    togglePlayback();
+  });
+  stage.addEventListener("click", (event) => {
+    if (event.target.closest(".tutorialDialog-controls, .tutorialDialog-play")) return;
+    togglePlayback();
+  });
+  progressTrack?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    seekFromClientX(event.clientX);
+  });
+
+  video.addEventListener("loadedmetadata", syncProgress);
+  video.addEventListener("timeupdate", syncProgress);
+  video.addEventListener("play", syncPlayingState);
+  video.addEventListener("pause", syncPlayingState);
+  video.addEventListener("ended", syncPlayingState);
+
+  syncPlayingState();
+  syncProgress();
+}
+
 /** DOM を組み立てる */
 function mountHero(slug, appName, videos) {
   const dismissedKey = `sciencehub-tutorial-dismissed:${slug}`;
@@ -73,6 +152,14 @@ function mountHero(slug, appName, videos) {
   root.setAttribute("data-focus-scope", "");
   document.body.appendChild(root);
 
+  /** 再生中の動画を止める */
+  function pauseCurrentVideo() {
+    const video = root.querySelector(".tutorialDialog-video");
+    if (video instanceof HTMLVideoElement) {
+      video.pause();
+    }
+  }
+
   /** 描画 */
   function render() {
     const active = videos.find((video) => video.id === activeId) ?? videos[0];
@@ -83,7 +170,21 @@ function mountHero(slug, appName, videos) {
             <button type="button" class="tutorialDialog-close" data-tutorial-close aria-label="閉じる">×</button>
           </div>
           <div class="tutorialDialog-player">
-            <video src="${escapeHtml(active.file_url)}" controls playsinline></video>
+            <div class="tutorialDialog-stage">
+              <video class="tutorialDialog-video" src="${escapeHtml(active.file_url)}" playsinline preload="metadata"></video>
+              <div class="tutorialDialog-overlay">
+                <button type="button" class="tutorialDialog-play" aria-label="再生">${PLAY_ICON}</button>
+              </div>
+              <div class="tutorialDialog-controls">
+                <button type="button" class="tutorialDialog-toggle-play" aria-label="再生/一時停止">${PLAY_ICON}</button>
+                <div class="tutorialDialog-progress">
+                  <div class="tutorialDialog-progress-track">
+                    <div class="tutorialDialog-progress-fill"></div>
+                  </div>
+                </div>
+                <span class="tutorialDialog-time">0:00 / 0:00</span>
+              </div>
+            </div>
           </div>
           <ul class="tutorialDialog-list">
             ${videos
@@ -94,7 +195,6 @@ function mountHero(slug, appName, videos) {
                   <span class="tutorialDialog-item-index">${index + 1}</span>
                   <span class="tutorialDialog-item-body">
                     <span class="tutorialDialog-item-title">${escapeHtml(video.title)}</span>
-                    <span class="tutorialDialog-item-meta">${escapeHtml(formatSize(video.size_bytes))}</span>
                   </span>
                 </button>
               </li>`
@@ -106,18 +206,23 @@ function mountHero(slug, appName, videos) {
 
     root.innerHTML = `
       ${dialog}
-      <div class="tutorial-hero-mascot-wrap">
+      <div class="tutorial-hero-trigger-wrap">
         <span class="tutorial-hero-badge">${videos.length}</span>
-        <button type="button" class="tutorial-hero-mascot" data-tutorial-toggle aria-label="チュートリアル" aria-expanded="${open ? "true" : "false"}">
-          ${MASCOT_SVG}
+        <button type="button" class="tutorial-hero-trigger" data-tutorial-toggle aria-label="チュートリアル" aria-expanded="${open ? "true" : "false"}">
+          <span class="tutorial-hero-trigger-icon">?</span>
         </button>
       </div>
     `;
+
+    if (open && active) {
+      setupVideoPlayer(root);
+    }
   }
 
   root.addEventListener("click", (event) => {
     const closeBtn = event.target.closest("[data-tutorial-close]");
     if (closeBtn) {
+      pauseCurrentVideo();
       open = false;
       sessionStorage.setItem(dismissedKey, "1");
       render();
@@ -126,6 +231,7 @@ function mountHero(slug, appName, videos) {
 
     const toggleBtn = event.target.closest("[data-tutorial-toggle]");
     if (toggleBtn) {
+      if (open) pauseCurrentVideo();
       open = !open;
       if (!open) sessionStorage.setItem(dismissedKey, "1");
       else sessionStorage.removeItem(dismissedKey);
@@ -135,6 +241,7 @@ function mountHero(slug, appName, videos) {
 
     const itemBtn = event.target.closest("[data-tutorial-id]");
     if (itemBtn) {
+      pauseCurrentVideo();
       activeId = itemBtn.dataset.tutorialId;
       open = true;
       render();

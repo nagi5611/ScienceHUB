@@ -2,7 +2,7 @@
  * ScienceHUB — Service Worker（シェルキャッシュ + 静的アセット）
  */
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const STATIC_CACHE = `sciencehub-static-${CACHE_VERSION}`;
 const SHELL_CACHE = `sciencehub-shell-${CACHE_VERSION}`;
 
