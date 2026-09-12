@@ -71,6 +71,35 @@
   border-bottom: 1px solid #f3e8dc;
 }
 
+.tutorialDialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tutorialDialog-maximize {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: 999px;
+  background: #f5f0ea;
+  color: #8a7568;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tutorialDialog-maximize svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.tutorialDialog-maximize:hover {
+  background: #ebe3da;
+  color: #5c4a3f;
+}
+
 .tutorialDialog-title {
   margin: 0;
   font-size: 0.92rem;
@@ -94,6 +123,42 @@
 .tutorialDialog-close:hover {
   background: #ebe3da;
   color: #5c4a3f;
+}
+
+.tutorialDialog.is-maximized {
+  position: fixed;
+  inset: 1rem;
+  width: auto;
+  max-width: none;
+  max-height: calc(100vh - 2rem);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  transform-origin: center center;
+  z-index: 2147483646;
+}
+
+.tutorialDialog.is-maximized::after {
+  display: none;
+}
+
+.tutorialDialog.is-maximized .tutorialDialog-player {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tutorialDialog.is-maximized .tutorialDialog-stage {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  aspect-ratio: auto;
+  height: 100%;
+}
+
+.tutorialDialog.is-maximized .tutorialDialog-list {
+  flex: 0 0 auto;
+  max-height: min(30vh, 14rem);
 }
 
 .tutorialDialog-player {

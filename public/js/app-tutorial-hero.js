@@ -4,6 +4,8 @@
 
 const PLAY_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>`;
 const PAUSE_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 5h4v14H6V5zm8 0h4v14h-4V5z"/></svg>`;
+const EXPAND_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 7h4V5H5v6h2V7zm10 0v4h2V5h-6v2h4zM7 17v-4H5v6h6v-2H7zm10 0h-4v2h6v-6h-2v4z"/></svg>`;
+const COLLAPSE_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 9H5v2h2v2h2V9zm10 0h-2v4h-2v2h4V9zM9 15H7v-2H5v4h4v-2zm10 0v2h-2v2h4v-4h-2z"/></svg>`;
 
 /** パスからアプリ slug を取り出す */
 function resolveAppSlug() {
@@ -138,6 +140,7 @@ function setupVideoPlayer(root) {
 function mountHero(slug, appName, videos) {
   const dismissedKey = `sciencehub-tutorial-dismissed:${slug}`;
   let open = sessionStorage.getItem(dismissedKey) !== "1";
+  let maximized = false;
   let activeId = videos[0]?.id ?? "";
 
   if (!document.querySelector('link[href="/css/app-tutorial-hero.css"]')) {
@@ -160,14 +163,36 @@ function mountHero(slug, appName, videos) {
     }
   }
 
+  /** 最大化ボタンの表示を更新 */
+  function syncMaximizeButton() {
+    const btn = root.querySelector("[data-tutorial-maximize]");
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.innerHTML = maximized ? COLLAPSE_ICON : EXPAND_ICON;
+    btn.setAttribute("aria-label", maximized ? "元のサイズに戻す" : "最大表示");
+    btn.setAttribute("aria-pressed", maximized ? "true" : "false");
+  }
+
+  /** 最大化状態を切り替える */
+  function toggleMaximize() {
+    maximized = !maximized;
+    const dialog = root.querySelector(".tutorialDialog");
+    if (dialog instanceof HTMLElement) {
+      dialog.classList.toggle("is-maximized", maximized);
+    }
+    syncMaximizeButton();
+  }
+
   /** 描画 */
   function render() {
     const active = videos.find((video) => video.id === activeId) ?? videos[0];
     const dialog = open && active
-      ? `<div class="tutorialDialog fade-enter-done" role="dialog" aria-label="${escapeHtml(appName)}のチュートリアル">
+      ? `<div class="tutorialDialog fade-enter-done${maximized ? " is-maximized" : ""}" role="dialog" aria-label="${escapeHtml(appName)}のチュートリアル">
           <div class="tutorialDialog-header">
             <h2 class="tutorialDialog-title">${escapeHtml(appName)}</h2>
-            <button type="button" class="tutorialDialog-close" data-tutorial-close aria-label="閉じる">×</button>
+            <div class="tutorialDialog-header-actions">
+              <button type="button" class="tutorialDialog-maximize" data-tutorial-maximize aria-label="最大表示" aria-pressed="${maximized ? "true" : "false"}">${maximized ? COLLAPSE_ICON : EXPAND_ICON}</button>
+              <button type="button" class="tutorialDialog-close" data-tutorial-close aria-label="閉じる">×</button>
+            </div>
           </div>
           <div class="tutorialDialog-player">
             <div class="tutorialDialog-stage">
@@ -223,15 +248,23 @@ function mountHero(slug, appName, videos) {
     const closeBtn = event.target.closest("[data-tutorial-close]");
     if (closeBtn) {
       pauseCurrentVideo();
+      maximized = false;
       open = false;
       sessionStorage.setItem(dismissedKey, "1");
       render();
       return;
     }
 
+    const maximizeBtn = event.target.closest("[data-tutorial-maximize]");
+    if (maximizeBtn) {
+      toggleMaximize();
+      return;
+    }
+
     const toggleBtn = event.target.closest("[data-tutorial-toggle]");
     if (toggleBtn) {
       if (open) pauseCurrentVideo();
+      maximized = false;
       open = !open;
       if (!open) sessionStorage.setItem(dismissedKey, "1");
       else sessionStorage.removeItem(dismissedKey);
@@ -246,6 +279,17 @@ function mountHero(slug, appName, videos) {
       open = true;
       render();
     }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !maximized) return;
+    if (!root.isConnected) return;
+    maximized = false;
+    const dialog = root.querySelector(".tutorialDialog");
+    if (dialog instanceof HTMLElement) {
+      dialog.classList.remove("is-maximized");
+    }
+    syncMaximizeButton();
   });
 
   render();
