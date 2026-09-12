@@ -1,4 +1,4 @@
-/* 各アプリ右下のチュートリアルヒーロー（ロイロノート授業一覧の tutorialDialog を参考） */
+/* 各アプリ右下のチュートリアルヒーロー */
 
 .focusScope.tutorial-hero-scope {
   position: fixed;
@@ -10,7 +10,7 @@
   align-items: flex-end;
   gap: 0.55rem;
   pointer-events: none;
-  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  font-family: var(--cf-font, "Inter", system-ui, -apple-system, sans-serif);
 }
 
 .focusScope.tutorial-hero-scope .tutorialDialog,
@@ -21,29 +21,12 @@
 .tutorialDialog {
   position: relative;
   width: min(23.5rem, calc(100vw - 2.2rem));
-  background: #fff;
-  color: #333;
-  border-radius: 1rem;
-  border: 1px solid rgba(243, 128, 32, 0.18);
-  box-shadow:
-    0 16px 40px rgba(40, 32, 24, 0.16),
-    0 4px 12px rgba(243, 128, 32, 0.08);
+  background: var(--cf-bg, #fff);
+  color: var(--cf-text, #1d2433);
+  border-radius: var(--cf-radius-lg, 12px);
+  border: 1px solid var(--cf-border, #e2e5e9);
+  box-shadow: var(--cf-shadow, 0 1px 3px rgb(0 0 0 / 0.06));
   overflow: hidden;
-  transform-origin: bottom right;
-}
-
-.tutorialDialog::after {
-  content: "";
-  position: absolute;
-  right: 1.35rem;
-  bottom: -0.55rem;
-  width: 1rem;
-  height: 1rem;
-  background: #fff;
-  border-right: 1px solid rgba(243, 128, 32, 0.18);
-  border-bottom: 1px solid rgba(243, 128, 32, 0.18);
-  transform: rotate(45deg);
-  box-shadow: 4px 4px 8px rgba(40, 32, 24, 0.06);
 }
 
 .tutorialDialog.fade-enter-done {
@@ -53,11 +36,9 @@
 @keyframes tutorialDialogFade {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -67,24 +48,24 @@
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.8rem 0.95rem 0.65rem;
-  background: linear-gradient(180deg, #fff8f1 0%, #fff 100%);
-  border-bottom: 1px solid #f3e8dc;
+  background: var(--cf-bg, #fff);
+  border-bottom: 1px solid var(--cf-border, #e2e5e9);
 }
 
 .tutorialDialog-title {
   margin: 0;
   font-size: 0.92rem;
   font-weight: 700;
-  color: #4a3428;
+  color: var(--cf-text, #1d2433);
 }
 
 .tutorialDialog-close {
   width: 1.75rem;
   height: 1.75rem;
   border: 0;
-  border-radius: 999px;
-  background: #f5f0ea;
-  color: #8a7568;
+  border-radius: var(--cf-radius, 8px);
+  background: var(--cf-surface, #f6f6f7);
+  color: var(--cf-muted, #6b7280);
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
@@ -92,8 +73,8 @@
 }
 
 .tutorialDialog-close:hover {
-  background: #ebe3da;
-  color: #5c4a3f;
+  background: var(--cf-border, #e2e5e9);
+  color: var(--cf-text, #1d2433);
 }
 
 .tutorialDialog-player {
@@ -102,7 +83,7 @@
 
 .tutorialDialog-stage {
   position: relative;
-  border-radius: 0.85rem;
+  border-radius: var(--cf-radius, 8px);
   overflow: hidden;
   background: #1a1410;
   aspect-ratio: 16 / 9;
@@ -151,19 +132,18 @@
   width: 3.4rem;
   height: 3.4rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--cf-radius, 8px);
   background: rgba(255, 255, 255, 0.96);
-  color: #f38020;
+  color: var(--cf-orange, #f38020);
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   display: grid;
   place-items: center;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease;
 }
 
 .tutorialDialog-play:hover {
-  transform: scale(1.04);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+  background: #fff;
 }
 
 .tutorialDialog-play svg {
@@ -189,7 +169,7 @@
   width: 1.75rem;
   height: 1.75rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--cf-radius, 8px);
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
   cursor: pointer;
@@ -210,7 +190,7 @@
 .tutorialDialog-progress-track {
   position: relative;
   height: 0.35rem;
-  border-radius: 999px;
+  border-radius: var(--cf-radius, 8px);
   background: rgba(255, 255, 255, 0.22);
   cursor: pointer;
   overflow: hidden;
@@ -223,7 +203,7 @@
   bottom: 0;
   width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, #ffb347 0%, #f38020 100%);
+  background: var(--cf-orange, #f38020);
   pointer-events: none;
 }
 
@@ -250,31 +230,31 @@
   width: 100%;
   align-items: center;
   gap: 0.65rem;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
   text-align: left;
   padding: 0.55rem 0.65rem;
-  border-radius: 0.75rem;
+  border-radius: var(--cf-radius, 8px);
   cursor: pointer;
   color: inherit;
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
 .tutorialDialog-item:hover {
-  background: #fff7ef;
+  background: var(--cf-orange-soft, #fff4eb);
 }
 
 .tutorialDialog-item.is-active {
-  background: #fff1e3;
-  box-shadow: inset 0 0 0 1px rgba(243, 128, 32, 0.22);
+  background: var(--cf-orange-soft, #fff4eb);
+  border-color: var(--cf-orange, #f38020);
 }
 
 .tutorialDialog-item-index {
   flex: 0 0 1.55rem;
   height: 1.55rem;
-  border-radius: 999px;
-  background: #f5ebe2;
-  color: #c86a18;
+  border-radius: var(--cf-radius, 8px);
+  background: var(--cf-surface, #f6f6f7);
+  color: var(--cf-orange, #f38020);
   font-size: 0.72rem;
   font-weight: 700;
   display: grid;
@@ -282,7 +262,7 @@
 }
 
 .tutorialDialog-item.is-active .tutorialDialog-item-index {
-  background: #f38020;
+  background: var(--cf-orange, #f38020);
   color: #fff;
 }
 
@@ -294,7 +274,7 @@
   display: block;
   font-size: 0.84rem;
   font-weight: 650;
-  color: #4a3428;
+  color: var(--cf-text, #1d2433);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -312,38 +292,30 @@
   width: 3.35rem;
   height: 3.35rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--cf-radius, 8px);
   padding: 0;
   cursor: pointer;
-  background: linear-gradient(145deg, #ff9a3c 0%, #f38020 55%, #e56f10 100%);
+  background: var(--cf-orange, #f38020);
   color: #fff;
-  box-shadow:
-    0 10px 24px rgba(243, 128, 32, 0.38),
-    0 0 0 3px rgba(255, 255, 255, 0.92);
+  box-shadow: var(--cf-shadow, 0 1px 3px rgb(0 0 0 / 0.06));
   display: grid;
   place-items: center;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease;
 }
 
 .tutorial-hero-trigger:hover {
-  transform: translateY(-1px) scale(1.03);
-  box-shadow:
-    0 12px 28px rgba(243, 128, 32, 0.42),
-    0 0 0 3px rgba(255, 255, 255, 0.96);
+  background: var(--cf-orange-hover, #e5700f);
 }
 
 .tutorial-hero-trigger[aria-expanded="true"] {
-  box-shadow:
-    0 8px 18px rgba(243, 128, 32, 0.32),
-    0 0 0 3px rgba(255, 255, 255, 0.96),
-    inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+  background: var(--cf-orange-hover, #e5700f);
 }
 
 .tutorial-hero-trigger-icon {
   font-size: 1.55rem;
   font-weight: 800;
   line-height: 1;
-  font-family: "Inter", "Hiragino Sans", sans-serif;
+  font-family: var(--cf-font, "Inter", system-ui, sans-serif);
 }
 
 .tutorial-hero-badge {
@@ -353,14 +325,14 @@
   min-width: 1.1rem;
   height: 1.1rem;
   padding: 0 0.22rem;
-  border-radius: 999px;
-  background: #2b2118;
+  border-radius: var(--cf-radius, 8px);
+  border: 1px solid var(--cf-border, #e2e5e9);
+  background: var(--cf-text, #1d2433);
   color: #fff;
   font-size: 0.62rem;
   font-weight: 700;
   display: grid;
   place-items: center;
-  box-shadow: 0 0 0 2px #fff;
 }
 
 @media (max-width: 640px) {
