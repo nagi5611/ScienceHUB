@@ -5,8 +5,8 @@
 
 import { getPlatformProxy } from "wrangler";
 import {
-  backfillStorageIndexChunk,
   listPendingBackfillRootIds,
+  processPendingStorageIndexBackfillChunks,
 } from "../functions/lib/storage/file-index-backfill";
 import type { Env } from "../functions/lib/types";
 
@@ -40,10 +40,14 @@ async function main(): Promise<void> {
       break;
     }
 
-    const rootId = pending[0];
-    const result = await backfillStorageIndexChunk(remoteEnv, db, rootId);
+    const batch = await processPendingStorageIndexBackfillChunks(remoteEnv, db, {
+      maxChunksPerRun: 1,
+    });
+    const result = batch.results[0];
+    if (!result) break;
+
     console.log(
-      `[backfill] #${iteration + 1} root=${rootId} status=${result.status} chunk=${result.processedThisChunk} total=${result.filesIndexed} complete=${result.complete}`
+      `[backfill] #${iteration + 1} root=${result.rootId} status=${result.status} chunk=${result.processedThisChunk} total=${result.filesIndexed} complete=${result.complete}`
     );
 
     if (result.error) {

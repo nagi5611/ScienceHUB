@@ -283,3 +283,49 @@ export async function listPendingBackfillRootIds(
   }
   return pending;
 }
+
+/** 1 回のスケジュール実行で処理するバックフィルチャンク数の上限 */
+export const DEFAULT_BACKFILL_CHUNKS_PER_RUN = 10;
+
+export interface ProcessPendingBackfillResult {
+  chunksProcessed: number;
+  results: BackfillChunkResult[];
+  pendingRemaining: number;
+  stoppedOnError: boolean;
+}
+
+/** 未完了ルートのバックフィルをチャンク単位で進める（cron / predeploy キック用） */
+export async function processPendingStorageIndexBackfillChunks(
+  env: Env,
+  db: D1Database,
+  options: { maxChunksPerRun?: number } = {}
+): Promise<ProcessPendingBackfillResult> {
+  const maxChunksPerRun = options.maxChunksPerRun ?? DEFAULT_BACKFILL_CHUNKS_PER_RUN;
+  const results: BackfillChunkResult[] = [];
+  let chunksProcessed = 0;
+  let stoppedOnError = false;
+
+  while (chunksProcessed < maxChunksPerRun) {
+    const pending = await listPendingBackfillRootIds(db);
+    if (!pending.length) break;
+
+    const rootId = pending[0];
+    const result = await backfillStorageIndexChunk(env, db, rootId);
+    results.push(result);
+    chunksProcessed += 1;
+
+    if (result.error) {
+      stoppedOnError = true;
+      break;
+    }
+  }
+
+  const pendingRemaining = (await listPendingBackfillRootIds(db)).length;
+
+  return {
+    chunksProcessed,
+    results,
+    pendingRemaining,
+    stoppedOnError,
+  };
+}
