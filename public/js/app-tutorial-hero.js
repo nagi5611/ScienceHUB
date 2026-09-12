@@ -6,11 +6,17 @@ const PLAY_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="curre
 const PAUSE_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 5h4v14H6V5zm8 0h4v14h-4V5z"/></svg>`;
 const EXPAND_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 7h4V5H5v6h2V7zm10 0v4h2V5h-6v2h4zM7 17v-4H5v6h6v-2H7zm10 0h-4v2h6v-6h-2v4z"/></svg>`;
 const COLLAPSE_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 9H5v2h2v2h2V9zm10 0h-2v4h-2v2h4V9zM9 15H7v-2H5v4h4v-2zm10 0v2h-2v2h4v-4h-2z"/></svg>`;
+const OVERLAY_FADE_MS = 1000;
 
 /** パスからアプリ slug を取り出す */
 function resolveAppSlug() {
   const match = window.location.pathname.match(/^\/apps\/([^/]+)/);
   return match?.[1] ?? "";
+}
+
+/** 一度でもチュートリアルを開いたかの localStorage キー */
+function dismissedKeyFor(slug) {
+  return `sciencehub-tutorial-dismissed:${slug}`;
 }
 
 /** HTML エスケープ */
@@ -31,27 +37,81 @@ function formatTime(seconds) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+/** チュートリアル CSS を読み込む */
+function ensureTutorialStyles() {
+  if (document.querySelector('link[href="/css/app-tutorial-hero.css"]')) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "/css/app-tutorial-hero.css";
+  document.head.appendChild(link);
+}
+
+/** チュートリアル API から動画一覧を取得 */
+async function fetchTutorialVideos(slug) {
+  const response = await fetch(`/api/apps/${encodeURIComponent(slug)}/tutorials`, {
+    credentials: "same-origin",
+  });
+  if (response.status === 401 || response.status === 403) return null;
+  if (!response.ok) return null;
+
+  const data = await response.json().catch(() => ({}));
+  const videos = Array.isArray(data.videos) ? data.videos : [];
+  if (videos.length === 0) return null;
+
+  return {
+    appName: data.app?.display_name ?? "チュートリアル",
+    videos,
+  };
+}
+
 /** ヒーロー UI を初期化する */
 export async function initAppTutorialHero() {
   const slug = resolveAppSlug();
   if (!slug) return;
 
-  const response = await fetch(`/api/apps/${encodeURIComponent(slug)}/tutorials`, {
-    credentials: "same-origin",
+  ensureTutorialStyles();
+
+  const dismissedKey = dismissedKeyFor(slug);
+  const hasOpenedBefore = localStorage.getItem(dismissedKey) === "1";
+
+  if (hasOpenedBefore) {
+    mountHero(slug, { open: false, autoplay: false });
+    return;
+  }
+
+  const payload = await fetchTutorialVideos(slug);
+  if (!payload) return;
+
+  mountHero(slug, {
+    appName: payload.appName,
+    videos: payload.videos,
+    open: true,
+    autoplay: true,
   });
-  if (response.status === 401 || response.status === 403) return;
-  if (!response.ok) return;
+}
 
-  const data = await response.json().catch(() => ({}));
-  const videos = Array.isArray(data.videos) ? data.videos : [];
-  if (videos.length === 0) return;
+/** 中央オーバーレイを 1 秒かけてフェードアウト */
+function fadeOutOverlay(stage) {
+  const overlay = stage.querySelector(".tutorialDialog-overlay");
+  if (!(overlay instanceof HTMLElement)) return;
+  if (stage.classList.contains("is-overlay-hidden")) return;
 
-  const appName = data.app?.display_name ?? "チュートリアル";
-  mountHero(slug, appName, videos);
+  overlay.classList.add("is-fading-out");
+  window.setTimeout(() => {
+    stage.classList.add("is-overlay-hidden");
+    overlay.classList.remove("is-fading-out");
+  }, OVERLAY_FADE_MS);
+}
+
+/** 中央オーバーレイを表示（一時停止時） */
+function showOverlay(stage) {
+  const overlay = stage.querySelector(".tutorialDialog-overlay");
+  stage.classList.remove("is-overlay-hidden");
+  overlay?.classList.remove("is-fading-out");
 }
 
 /** カスタム動画プレイヤーを初期化する */
-function setupVideoPlayer(root) {
+function setupVideoPlayer(root, { autoplay = false } = {}) {
   const stage = root.querySelector(".tutorialDialog-stage");
   const video = root.querySelector(".tutorialDialog-video");
   if (!(stage instanceof HTMLElement) || !(video instanceof HTMLVideoElement)) return;
@@ -128,27 +188,39 @@ function setupVideoPlayer(root) {
 
   video.addEventListener("loadedmetadata", syncProgress);
   video.addEventListener("timeupdate", syncProgress);
-  video.addEventListener("play", syncPlayingState);
-  video.addEventListener("pause", syncPlayingState);
-  video.addEventListener("ended", syncPlayingState);
+  video.addEventListener("play", () => {
+    syncPlayingState();
+    fadeOutOverlay(stage);
+  });
+  video.addEventListener("pause", () => {
+    syncPlayingState();
+    if (!video.ended) showOverlay(stage);
+  });
+  video.addEventListener("ended", () => {
+    syncPlayingState();
+    showOverlay(stage);
+  });
 
   syncPlayingState();
   syncProgress();
+
+  if (autoplay) {
+    video.play().catch(() => {
+      /* autoplay policy */
+    });
+  }
 }
 
 /** DOM を組み立てる */
-function mountHero(slug, appName, videos) {
-  const dismissedKey = `sciencehub-tutorial-dismissed:${slug}`;
-  let open = sessionStorage.getItem(dismissedKey) !== "1";
+function mountHero(slug, initialState) {
+  const dismissedKey = dismissedKeyFor(slug);
+  let open = initialState.open;
+  let autoplay = initialState.autoplay;
+  let appName = initialState.appName ?? "チュートリアル";
+  let videos = initialState.videos ?? null;
+  let activeId = videos?.[0]?.id ?? "";
+  let loading = false;
   let maximized = false;
-  let activeId = videos[0]?.id ?? "";
-
-  if (!document.querySelector('link[href="/css/app-tutorial-hero.css"]')) {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "/css/app-tutorial-hero.css";
-    document.head.appendChild(link);
-  }
 
   const root = document.createElement("div");
   root.className = "focusScope tutorial-hero-scope";
@@ -182,11 +254,33 @@ function mountHero(slug, appName, videos) {
     syncMaximizeButton();
   }
 
+  /** 再訪ユーザー向け: 初回クリック時だけ API から動画を取得 */
+  async function ensureVideosLoaded() {
+    if (videos) return true;
+    if (loading) return false;
+    loading = true;
+    render();
+    try {
+      const payload = await fetchTutorialVideos(slug);
+      if (!payload) return false;
+      appName = payload.appName;
+      videos = payload.videos;
+      activeId = videos[0]?.id ?? "";
+      return true;
+    } finally {
+      loading = false;
+    }
+  }
+
   /** 描画 */
   function render() {
-    const active = videos.find((video) => video.id === activeId) ?? videos[0];
-    const dialog = open && active
-      ? `<div class="tutorialDialog fade-enter-done${maximized ? " is-maximized" : ""}" role="dialog" aria-label="${escapeHtml(appName)}のチュートリアル">
+    const hasVideos = Array.isArray(videos) && videos.length > 0;
+    const active = hasVideos ? (videos.find((video) => video.id === activeId) ?? videos[0]) : null;
+    const shouldLoadVideo = open && active && !loading;
+
+    const dialog =
+      open && (loading || active)
+        ? `<div class="tutorialDialog fade-enter-done${maximized ? " is-maximized" : ""}" role="dialog" aria-label="${escapeHtml(appName)}のチュートリアル">
           <div class="tutorialDialog-header">
             <h2 class="tutorialDialog-title">${escapeHtml(appName)}</h2>
             <div class="tutorialDialog-header-actions">
@@ -195,8 +289,11 @@ function mountHero(slug, appName, videos) {
             </div>
           </div>
           <div class="tutorialDialog-player">
-            <div class="tutorialDialog-stage">
-              <video class="tutorialDialog-video" src="${escapeHtml(active.file_url)}" playsinline preload="metadata"></video>
+            ${
+              loading
+                ? `<div class="tutorialDialog-loading" aria-live="polite">読み込み中…</div>`
+                : `<div class="tutorialDialog-stage">
+              <video class="tutorialDialog-video"${shouldLoadVideo ? ` src="${escapeHtml(active.file_url)}"` : ""} playsinline${shouldLoadVideo ? ' preload="metadata"' : ' preload="none"'}></video>
               <div class="tutorialDialog-overlay">
                 <button type="button" class="tutorialDialog-play" aria-label="再生">${PLAY_ICON}</button>
               </div>
@@ -209,14 +306,17 @@ function mountHero(slug, appName, videos) {
                 </div>
                 <span class="tutorialDialog-time">0:00 / 0:00</span>
               </div>
-            </div>
+            </div>`
+            }
           </div>
-          <ul class="tutorialDialog-list">
+          ${
+            hasVideos
+              ? `<ul class="tutorialDialog-list">
             ${videos
               .map(
                 (video, index) => `
               <li>
-                <button type="button" class="tutorialDialog-item${video.id === active.id ? " is-active" : ""}" data-tutorial-id="${escapeHtml(video.id)}">
+                <button type="button" class="tutorialDialog-item${video.id === active?.id ? " is-active" : ""}" data-tutorial-id="${escapeHtml(video.id)}">
                   <span class="tutorialDialog-item-index">${index + 1}</span>
                   <span class="tutorialDialog-item-body">
                     <span class="tutorialDialog-item-title">${escapeHtml(video.title)}</span>
@@ -225,32 +325,37 @@ function mountHero(slug, appName, videos) {
               </li>`
               )
               .join("")}
-          </ul>
+          </ul>`
+              : ""
+          }
         </div>`
-      : "";
+        : "";
+
+    const badgeCount = hasVideos ? videos.length : null;
 
     root.innerHTML = `
       ${dialog}
       <div class="tutorial-hero-trigger-wrap">
-        <span class="tutorial-hero-badge">${videos.length}</span>
+        ${badgeCount ? `<span class="tutorial-hero-badge">${badgeCount}</span>` : ""}
         <button type="button" class="tutorial-hero-trigger" data-tutorial-toggle aria-label="チュートリアル" aria-expanded="${open ? "true" : "false"}">
           <span class="tutorial-hero-trigger-icon">?</span>
         </button>
       </div>
     `;
 
-    if (open && active) {
-      setupVideoPlayer(root);
+    if (shouldLoadVideo) {
+      setupVideoPlayer(root, { autoplay });
+      autoplay = false;
     }
   }
 
-  root.addEventListener("click", (event) => {
+  root.addEventListener("click", async (event) => {
     const closeBtn = event.target.closest("[data-tutorial-close]");
     if (closeBtn) {
       pauseCurrentVideo();
       maximized = false;
       open = false;
-      sessionStorage.setItem(dismissedKey, "1");
+      localStorage.setItem(dismissedKey, "1");
       render();
       return;
     }
@@ -263,11 +368,22 @@ function mountHero(slug, appName, videos) {
 
     const toggleBtn = event.target.closest("[data-tutorial-toggle]");
     if (toggleBtn) {
-      if (open) pauseCurrentVideo();
-      maximized = false;
-      open = !open;
-      if (!open) sessionStorage.setItem(dismissedKey, "1");
-      else sessionStorage.removeItem(dismissedKey);
+      if (open) {
+        pauseCurrentVideo();
+        maximized = false;
+        open = false;
+        localStorage.setItem(dismissedKey, "1");
+        render();
+        return;
+      }
+
+      const loaded = await ensureVideosLoaded();
+      if (!loaded) {
+        open = false;
+        render();
+        return;
+      }
+      open = true;
       render();
       return;
     }
