@@ -204,27 +204,65 @@ function extractApiError(body: unknown, status: number): string {
   return `画像生成 API エラー (${status})`;
 }
 
-function collectImagePayloads(value: unknown, out: string[]): void {
-  if (typeof value === "string" && value.trim()) {
+function looksLikeImagePayload(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.length > 256
+  );
+}
+
+function collectImagePayloads(
+  value: unknown,
+  out: string[],
+  depth = 0
+): void {
+  if (depth > 8) return;
+
+  if (typeof value === "string" && looksLikeImagePayload(value)) {
     out.push(value.trim());
     return;
   }
   if (!value || typeof value !== "object") return;
 
   const record = value as Record<string, unknown>;
-  if (typeof record.image === "string" && record.image.trim()) {
+  if (typeof record.image === "string" && looksLikeImagePayload(record.image)) {
     out.push(record.image.trim());
+  }
+  if (
+    typeof record.b64_json === "string" &&
+    looksLikeImagePayload(record.b64_json)
+  ) {
+    out.push(record.b64_json.trim());
+  }
+  if (typeof record.url === "string" && looksLikeImagePayload(record.url)) {
+    out.push(record.url.trim());
   }
   if (Array.isArray(record.images)) {
     for (const item of record.images) {
-      collectImagePayloads(item, out);
+      collectImagePayloads(item, out, depth + 1);
     }
   }
   if (Array.isArray(record.data)) {
     for (const item of record.data) {
-      collectImagePayloads(item, out);
+      collectImagePayloads(item, out, depth + 1);
     }
   }
+  if (record.result !== undefined) {
+    collectImagePayloads(record.result, out, depth + 1);
+  }
+  if (record.output !== undefined) {
+    collectImagePayloads(record.output, out, depth + 1);
+  }
+}
+
+function extractRunState(body: Record<string, unknown>): string | null {
+  const payload = body.result;
+  if (!payload || typeof payload !== "object") return null;
+  const state = (payload as Record<string, unknown>).state;
+  return typeof state === "string" ? state : null;
 }
 
 function extractImagesFromResponse(body: unknown): string[] {
@@ -232,8 +270,14 @@ function extractImagesFromResponse(body: unknown): string[] {
   if (!body || typeof body !== "object") return images;
 
   const root = body as Record<string, unknown>;
-  collectImagePayloads(root.result, images);
-  if (!images.length) collectImagePayloads(root, images);
+  if (root.success === false) {
+    return images;
+  }
+
+  collectImagePayloads(root.result ?? root, images);
+  if (!images.length) {
+    collectImagePayloads(root, images);
+  }
   return images;
 }
 
@@ -367,9 +411,22 @@ async function callWorkersAiImage(
     throw new Error(extractApiError(body, response.status));
   }
 
+  if (body && typeof body === "object") {
+    const root = body as Record<string, unknown>;
+    if (root.success === false) {
+      throw new Error(extractApiError(body, response.status));
+    }
+    const state = extractRunState(root);
+    if (state && state !== "Completed") {
+      throw new Error(`画像生成が完了しませんでした（state: ${state}）`);
+    }
+  }
+
   const images = extractImagesFromResponse(body);
   if (!images.length) {
-    throw new Error("画像生成 API から画像が返されませんでした");
+    throw new Error(
+      "画像生成 API から画像が返されませんでした（レスポンス形式を解釈できませんでした）"
+    );
   }
   return images;
 }
