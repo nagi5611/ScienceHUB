@@ -49,3 +49,19 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
 export function imageBytesToDataUri(bytes: Uint8Array, mime: SupportedImageMime): string {
   return `data:${mime};base64,${uint8ArrayToBase64(bytes)}`;
 }
+
+/** data URI がデコード可能で PNG/JPEG マジックバイトを持つか */
+export function validateImageDataUri(dataUri: string): boolean {
+  const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUri.trim());
+  if (!match) return false;
+  try {
+    const binary = atob(match[2]!);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return detectImageMimeFromBytes(bytes) !== null;
+  } catch {
+    return false;
+  }
+}

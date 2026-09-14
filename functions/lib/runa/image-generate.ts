@@ -7,6 +7,7 @@ import {
   EDIT_IMAGE_COMPRESS_THRESHOLD_BYTES,
   EDIT_IMAGE_MAX_EDGE_PX,
   imageBytesToDataUri,
+  validateImageDataUri,
   type SupportedImageMime,
 } from "./image-bytes";
 import { getFiles } from "../r2";
@@ -78,6 +79,11 @@ interface ImageGenerateArgs {
   count: number;
 }
 
+interface ImageReferenceInput {
+  url: string;
+  type: "image_url";
+}
+
 interface WorkersAiImageInput {
   prompt: string;
   aspect_ratio?: string;
@@ -85,9 +91,9 @@ interface WorkersAiImageInput {
   resolution?: "1k" | "2k";
   response_format?: "url" | "b64_json";
   n?: number;
-  image?: { image: string };
-  images?: Array<{ image: string }>;
-  mask?: { image: string };
+  image?: ImageReferenceInput;
+  images?: ImageReferenceInput[];
+  mask?: ImageReferenceInput;
 }
 
 interface SavedImageResult {
@@ -171,6 +177,10 @@ function resolveModel(mode: ImageGenerateMode): string {
   return mode === "draft" ? MODEL_DRAFT : MODEL_FINAL;
 }
 
+function toImageReferenceInput(dataUri: string): ImageReferenceInput {
+  return { url: dataUri, type: "image_url" };
+}
+
 function buildModelInput(
   args: ImageGenerateArgs,
   referenceImages: string[]
@@ -191,9 +201,9 @@ function buildModelInput(
   }
 
   if (referenceImages.length === 1) {
-    input.image = { image: referenceImages[0]! };
+    input.image = toImageReferenceInput(referenceImages[0]!);
   } else if (referenceImages.length > 1) {
-    input.images = referenceImages.map((image) => ({ image }));
+    input.images = referenceImages.map(toImageReferenceInput);
   }
 
   return input;
@@ -206,12 +216,24 @@ function extractApiError(body: unknown, status: number): string {
     if (Array.isArray(errors) && errors.length > 0) {
       const first = errors[0];
       if (first && typeof first === "object" && "message" in first) {
-        console.error("Runa image generate API error:", (first as { message: unknown }).message);
+        const message = String((first as { message: unknown }).message);
+        console.error("Runa image generate API error:", message);
+        return message;
       }
     }
     const error = record.error;
     if (error && typeof error === "object" && "message" in error) {
-      console.error("Runa image generate API error:", (error as { message: unknown }).message);
+      const message = String((error as { message: unknown }).message);
+      console.error("Runa image generate API error:", message);
+      return message;
+    }
+    const result = record.result;
+    if (result && typeof result === "object" && "error" in result) {
+      const message = String((result as { error: unknown }).error);
+      if (message) {
+        console.error("Runa image generate API error:", message);
+        return message;
+      }
     }
   }
   console.error("Runa image generate API error: HTTP", status);
@@ -373,6 +395,11 @@ async function compressImageForEditApi(
   }
 
   if (!env.IMAGE_CONVERTER) {
+    if (bytes.length > 4 * 1024 * 1024) {
+      throw new Error(
+        "編集用画像が大きすぎます（4MB以下）。image-converter Worker をデプロイすると自動圧縮されます"
+      );
+    }
     console.warn(
       "Runa image edit: large image without IMAGE_CONVERTER, sending data URI as-is",
       { bytes: bytes.length, filename }
@@ -403,7 +430,9 @@ async function compressImageForEditApi(
       filename,
       bytes: bytes.length,
     });
-    return { bytes, mime: detectedMime };
+    throw new Error(
+      "編集用画像の圧縮に失敗しました。image-converter Worker のデプロイを確認してください"
+    );
   }
 
   const compressed = new Uint8Array(await workerResponse.arrayBuffer());
@@ -465,7 +494,11 @@ async function readImageReference(
   );
 
   // xAI は非公開 R2 URL を取得できないため、常に data URI を渡す
-  return imageBytesToDataUri(bytes, mime);
+  const dataUri = imageBytesToDataUri(bytes, mime);
+  if (!validateImageDataUri(dataUri)) {
+    throw new Error("編集用画像データのエンコードに失敗しました");
+  }
+  return dataUri;
 }
 
 async function callWorkersAiImage(
@@ -490,6 +523,17 @@ async function callWorkersAiImage(
       body: JSON.stringify({ model, input }),
     }
   );
+
+  if (input.image || input.images?.length || input.mask) {
+    const ref = input.image ?? input.images?.[0] ?? input.mask;
+    console.info("Runa image edit API request", {
+      model,
+      refBytesApprox: ref?.url.startsWith("data:")
+        ? Math.floor((ref.url.length * 3) / 4)
+        : null,
+      refPrefix: ref?.url.slice(0, 40),
+    });
+  }
 
   const body = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
@@ -636,9 +680,9 @@ export async function runImageGenerate(
   const model = resolveModel(parsed.mode);
   const input = buildModelInput(parsed, referenceImages);
   if (parsed.mask_path) {
-    input.mask = {
-      image: await readImageReference(env, db, user, parsed.mask_path),
-    };
+    input.mask = toImageReferenceInput(
+      await readImageReference(env, db, user, parsed.mask_path)
+    );
   }
 
   const payloads = await callWorkersAiImage(env, model, input);
