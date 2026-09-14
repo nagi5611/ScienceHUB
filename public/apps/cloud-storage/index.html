@@ -281,6 +281,19 @@
       </header>
       <p class="runa-status" id="runa-status" hidden></p>
       <p class="runa-context-hint" id="runa-context-hint" hidden></p>
+      <div class="runa-context-usage" id="runa-context-usage" hidden aria-live="polite">
+        <div class="runa-context-usage-row">
+          <span class="runa-context-usage-label">Context</span>
+          <div class="runa-context-usage-track" id="runa-context-usage-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="runa-context-usage-fill" id="runa-context-usage-fill"></div>
+          </div>
+          <span class="runa-context-usage-pct" id="runa-context-usage-pct">0%</span>
+        </div>
+        <div class="runa-context-usage-actions" id="runa-context-usage-actions" hidden>
+          <span class="runa-context-usage-warn" id="runa-context-usage-warn">精度低下中</span>
+          <button type="button" class="runa-context-summarize-btn" id="runa-context-summarize-btn">要約</button>
+        </div>
+      </div>
       <div class="runa-body">
         <div class="runa-messages" id="runa-messages"></div>
         <div class="runa-attach-list" id="runa-attach-list" hidden></div>

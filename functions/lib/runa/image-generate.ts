@@ -2,6 +2,13 @@
  * Runa — Cloudflare Workers AI (Grok Imagine) 画像生成
  */
 
+import {
+  detectImageMimeFromBytes,
+  EDIT_IMAGE_COMPRESS_THRESHOLD_BYTES,
+  EDIT_IMAGE_MAX_EDGE_PX,
+  imageBytesToDataUri,
+  type SupportedImageMime,
+} from "./image-bytes";
 import { getFiles } from "../r2";
 import type { Env, SessionUser } from "../types";
 import {
@@ -184,7 +191,7 @@ function buildModelInput(
   }
 
   if (referenceImages.length === 1) {
-    input.image = { image: referenceImages[0] };
+    input.image = { image: referenceImages[0]! };
   } else if (referenceImages.length > 1) {
     input.images = referenceImages.map((image) => ({ image }));
   }
@@ -324,7 +331,8 @@ async function decodeImagePayload(payload: string): Promise<{
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return { bytes: bytes.buffer, mime: "image/png" };
+  const detected = detectImageMimeFromBytes(bytes);
+  return { bytes: bytes.buffer, mime: detected ?? "image/png" };
 }
 
 function extensionForMime(mime: string): string {
@@ -354,6 +362,60 @@ function applyDestIndex(destPath: string, index: number): string {
   return `${base}-${String(index + 1).padStart(2, "0")}${ext}`;
 }
 
+async function compressImageForEditApi(
+  env: Env,
+  bytes: Uint8Array,
+  filename: string,
+  detectedMime: SupportedImageMime
+): Promise<{ bytes: Uint8Array; mime: SupportedImageMime }> {
+  if (bytes.length <= EDIT_IMAGE_COMPRESS_THRESHOLD_BYTES) {
+    return { bytes, mime: detectedMime };
+  }
+
+  if (!env.IMAGE_CONVERTER) {
+    console.warn(
+      "Runa image edit: large image without IMAGE_CONVERTER, sending data URI as-is",
+      { bytes: bytes.length, filename }
+    );
+    return { bytes, mime: detectedMime };
+  }
+
+  const form = new FormData();
+  form.append("file", new File([bytes], filename, { type: detectedMime }));
+  form.append("quality", "85");
+  form.append("maxEdge", String(EDIT_IMAGE_MAX_EDGE_PX));
+
+  const headers = new Headers();
+  const secret = env.IMAGE_CONVERTER_WORKER_SECRET?.trim();
+  if (secret) headers.set("X-Image-Converter-Secret", secret);
+
+  const workerResponse = await env.IMAGE_CONVERTER.fetch(
+    new Request("https://image-converter/prepare", {
+      method: "POST",
+      headers,
+      body: form,
+    })
+  );
+
+  if (!workerResponse.ok) {
+    console.error("Runa image edit prepare failed", {
+      status: workerResponse.status,
+      filename,
+      bytes: bytes.length,
+    });
+    return { bytes, mime: detectedMime };
+  }
+
+  const compressed = new Uint8Array(await workerResponse.arrayBuffer());
+  const compressedMime = detectImageMimeFromBytes(compressed) ?? "image/jpeg";
+  console.info("Runa image edit: compressed reference image", {
+    beforeBytes: bytes.length,
+    afterBytes: compressed.length,
+    filename,
+  });
+  return { bytes: compressed, mime: compressedMime };
+}
+
 async function readImageReference(
   env: Env,
   db: D1Database,
@@ -377,9 +439,8 @@ async function readImageReference(
   if (typeof auth === "string") throw new Error(auth);
 
   const bucket = getFiles(env);
-  const obj = await bucket.get(
-    toR2Key(parsed.rootType, parsed.rootKey, parsed.relativePath)
-  );
+  const r2Key = toR2Key(parsed.rootType, parsed.rootKey, parsed.relativePath);
+  const obj = await bucket.get(r2Key);
   if (!obj) throw new Error(`参照画像が見つかりません: ${logicalPath}`);
 
   const sizeBytes = obj.size;
@@ -389,13 +450,22 @@ async function readImageReference(
     );
   }
 
-  const bytes = new Uint8Array(await obj.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const rawBytes = new Uint8Array(await obj.arrayBuffer());
+  const detectedMime = detectImageMimeFromBytes(rawBytes);
+  if (!detectedMime) {
+    throw new Error("編集できるのは PNG または JPEG のみです");
   }
-  const mime = obj.httpMetadata?.contentType || "image/png";
-  return `data:${mime};base64,${btoa(binary)}`;
+
+  const filename = parsed.relativePath.split("/").pop() ?? "image.png";
+  const { bytes, mime } = await compressImageForEditApi(
+    env,
+    rawBytes,
+    filename,
+    detectedMime
+  );
+
+  // xAI は非公開 R2 URL を取得できないため、常に data URI を渡す
+  return imageBytesToDataUri(bytes, mime);
 }
 
 async function callWorkersAiImage(
@@ -527,7 +597,7 @@ async function saveGeneratedImage(
   if (init.mode !== "simple") {
     failImageGenerate("保存先の容量が不足しています");
   }
-  const uploaded = await simpleStorageUpload(env, db, user, init.sessionId, bytes);
+  const uploaded = await simpleStorageUpload(env, db, user, init.sessionId, bytes, mime);
   return { path: uploaded.path, sizeBytes: bytes.byteLength };
 }
 
@@ -587,7 +657,9 @@ async function persistGeneratedImages(
 
   for (let i = 0; i < capped.length; i++) {
     const { bytes, mime } = await decodeImagePayload(capped[i]);
-    const ext = extensionForMime(mime);
+    const byteView = new Uint8Array(bytes);
+    const storedMime = detectImageMimeFromBytes(byteView) ?? mime;
+    const ext = extensionForMime(storedMime);
     let destPath = args.dest_path
       ? applyDestIndex(args.dest_path, i)
       : defaultDestPath(user, ext, i);
@@ -642,7 +714,7 @@ async function persistGeneratedImages(
       user,
       destPath,
       bytes,
-      mime
+      storedMime
     );
     saved.push({
       name: result.path.split("/").pop() ?? result.path,

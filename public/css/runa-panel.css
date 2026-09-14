@@ -137,6 +137,105 @@
   white-space: nowrap;
 }
 
+.runa-context-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.35rem 1.25rem 0.55rem;
+  font-size: 0.75rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-context-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.runa-context-usage-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.runa-context-usage-warn {
+  color: var(--cf-orange, #f38020);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.runa-context-summarize-btn {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--cf-orange, #f38020);
+  border-radius: var(--cf-radius, 8px);
+  background: var(--cf-orange-soft, #fff4eb);
+  color: var(--cf-orange, #f38020);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.runa-context-summarize-btn:hover:not(:disabled) {
+  background: var(--cf-orange, #f38020);
+  color: #fff;
+}
+
+.runa-context-summarize-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.runa-context-usage-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.runa-context-usage-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cf-border, #e2e5e9);
+  overflow: hidden;
+}
+
+.runa-context-usage-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--cf-teal, #0d9488);
+  transition: width 0.25s ease, background-color 0.25s ease;
+}
+
+.runa-context-usage.is-warning .runa-context-usage-fill {
+  background: var(--cf-orange, #f38020);
+}
+
+.runa-context-usage.is-critical .runa-context-usage-fill {
+  background: #dc2626;
+}
+
+.runa-context-usage-pct {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.runa-msg--summary .runa-msg-bubble {
+  border-style: dashed;
+  background: var(--cf-bg-muted, #f8fafc);
+  font-size: 0.92rem;
+}
+
+.runa-msg--summary .runa-msg-content {
+  opacity: 0.92;
+}
+
 .runa-body {
   position: relative;
   flex: 1;

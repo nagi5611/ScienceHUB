@@ -103,7 +103,8 @@ export async function insertRunaMessage(
   userId: string,
   role: "user" | "assistant",
   content: string,
-  files: RunaFileItem[] | null = null
+  files: RunaFileItem[] | null = null,
+  createdAt?: number
 ): Promise<string> {
   const id = createId("runa");
   await db
@@ -117,10 +118,26 @@ export async function insertRunaMessage(
       role,
       content,
       files?.length ? JSON.stringify(files) : null,
-      now()
+      createdAt ?? now()
     )
     .run();
   return id;
+}
+
+/** 指定 ID のメッセージを削除 */
+export async function deleteRunaMessagesByIds(
+  db: D1Database,
+  userId: string,
+  ids: string[]
+): Promise<void> {
+  if (!ids.length) return;
+  const placeholders = ids.map(() => "?").join(", ");
+  await db
+    .prepare(
+      `DELETE FROM runa_messages WHERE user_id = ? AND id IN (${placeholders})`
+    )
+    .bind(userId, ...ids)
+    .run();
 }
 
 /** ユーザーの Runa チャット履歴をすべて削除 */

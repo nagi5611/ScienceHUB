@@ -71,6 +71,36 @@ export interface UploadPlan {
   directUpload: boolean;
 }
 
+const STORAGE_MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+  pdf: "application/pdf",
+  json: "application/json",
+  txt: "text/plain; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  csv: "text/csv; charset=utf-8",
+  zip: "application/zip",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+};
+
+function contentTypeForFilename(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  return STORAGE_MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
 /** ファイルサイズに応じたアップロード計画 */
 export function getUploadPlan(env: Env, size: number): UploadPlan {
   const directUpload = isR2PresignConfigured(env);
@@ -429,7 +459,8 @@ export async function simpleStorageUpload(
   db: D1Database,
   user: SessionUser,
   sessionId: string,
-  body: ArrayBuffer | ReadableStream
+  body: ArrayBuffer | ReadableStream,
+  contentType?: string
 ): Promise<{ path: string; size: number }> {
   const session = await getUploadSession(db, sessionId);
   if (!session || session.status !== "in_progress") {
@@ -446,8 +477,10 @@ export async function simpleStorageUpload(
   }
 
   const bucket = getFiles(env);
+  const resolvedContentType =
+    contentType ?? contentTypeForFilename(session.resolved_filename);
   await bucket.put(session.r2_key, body, {
-    httpMetadata: { contentType: "application/octet-stream" },
+    httpMetadata: { contentType: resolvedContentType },
   });
 
   if (!(body instanceof ArrayBuffer)) {

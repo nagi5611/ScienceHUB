@@ -233,6 +233,12 @@ const els = {
   fileInput: document.getElementById("runa-file-input"),
   body: document.querySelector(".runa-body"),
   status: document.getElementById("runa-status"),
+  contextUsage: document.getElementById("runa-context-usage"),
+  contextUsageFill: document.getElementById("runa-context-usage-fill"),
+  contextUsagePct: document.getElementById("runa-context-usage-pct"),
+  contextUsageTrack: document.getElementById("runa-context-usage-track"),
+  contextUsageActions: document.getElementById("runa-context-usage-actions"),
+  contextSummarizeBtn: document.getElementById("runa-context-summarize-btn"),
 };
 
 /** @type {Array<{ id?: string, role: string, content: string, files?: object[], pending?: boolean, activities?: object[] }>} */
@@ -247,6 +253,9 @@ let pendingAttachments = [];
 let attachDragDepth = 0;
 /** @type {string | null} */
 let pendingEditImagePath = null;
+/** @type {{ usedTokens?: number, limitTokens?: number, percent?: number, accuracyWarningPercent?: number, isAccuracyDegrading?: boolean, summarizeThresholdPercent?: number, shouldSummarize?: boolean } | null} */
+let contextUsageState = null;
+let summarizeBusy = false;
 
 const EDIT_INPUT_PLACEHOLDER = "変更したい内容を入力…";
 
@@ -312,6 +321,79 @@ function updateContextHint() {
   }
 }
 
+/** コンテキスト使用率 UI を更新 */
+function updateContextUsageDisplay(usage) {
+  if (!usage || typeof usage.percent !== "number") return;
+  contextUsageState = usage;
+
+  if (!els.contextUsage || !els.contextUsageFill || !els.contextUsagePct) return;
+
+  const percent = Math.max(0, Math.min(100, usage.percent));
+  const autoThreshold = usage.summarizeThresholdPercent ?? 85;
+  const warningThreshold = usage.accuracyWarningPercent ?? 50;
+  const isDegrading =
+    usage.isAccuracyDegrading ?? percent >= warningThreshold;
+
+  els.contextUsage.hidden = false;
+  els.contextUsageFill.style.width = `${percent}%`;
+  els.contextUsagePct.textContent = `${percent}%`;
+  els.contextUsage.classList.toggle("is-warning", isDegrading);
+  els.contextUsage.classList.toggle("is-critical", percent >= autoThreshold);
+
+  if (els.contextUsageActions) {
+    els.contextUsageActions.hidden = !isDegrading;
+  }
+  if (els.contextSummarizeBtn) {
+    els.contextSummarizeBtn.disabled =
+      summarizeBusy || chatBusy || !isDegrading;
+  }
+
+  if (els.contextUsageTrack) {
+    els.contextUsageTrack.setAttribute("aria-valuenow", String(Math.round(percent)));
+    els.contextUsageTrack.title = usage.usedTokens
+      ? `約 ${usage.usedTokens.toLocaleString()} / ${usage.limitTokens?.toLocaleString() ?? "?"} tokens`
+      : "";
+  }
+}
+
+/** 手動で会話履歴を要約 */
+async function requestContextSummarize() {
+  if (summarizeBusy || chatBusy) return;
+  if (!contextUsageState?.isAccuracyDegrading && (contextUsageState?.percent ?? 0) < 50) {
+    return;
+  }
+
+  summarizeBusy = true;
+  updateContextUsageDisplay(contextUsageState);
+  setStatus("会話履歴を要約しています…");
+
+  try {
+    const res = await fetch("/api/runa/summarize", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || "要約に失敗しました");
+    }
+
+    messageState = (data.messages ?? []).map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      files: m.files,
+    }));
+    updateContextUsageDisplay(data.contextUsage);
+    renderMessages();
+    setStatus("会話を要約しました");
+  } catch (error) {
+    setStatus(error.message || "要約に失敗しました");
+  } finally {
+    summarizeBusy = false;
+    if (contextUsageState) updateContextUsageDisplay(contextUsageState);
+  }
+}
+
 function setPanelOpen(open) {
   if (!els.panel || !els.fab) return;
   els.panel.classList.toggle("is-open", open);
@@ -356,13 +438,19 @@ function renderActivitiesHtml(activities) {
 function renderMessageHtml(msg) {
   const roleClass =
     msg.role === "user" ? "runa-msg--user" : "runa-msg--assistant";
+  const summaryClass =
+    msg.role === "assistant" &&
+    typeof msg.content === "string" &&
+    msg.content.startsWith("[Runa 会話サマリー")
+      ? " runa-msg--summary"
+      : "";
   const streamingClass =
     msg.pending && msg.role === "assistant" && msg.content
       ? " is-streaming"
       : "";
   const activities = renderActivitiesHtml(msg.activities);
   const content = renderMessageContent(msg);
-  return `<div class="runa-msg ${roleClass}">
+  return `<div class="runa-msg ${roleClass}${summaryClass}">
     <div class="runa-msg-bubble${streamingClass}">${activities}${content}</div>
   </div>`;
 }
@@ -504,6 +592,7 @@ function setChatBusy(busy) {
   if (els.send) els.send.disabled = busy;
   if (els.input) els.input.disabled = busy;
   if (els.attachBtn) els.attachBtn.disabled = busy;
+  if (contextUsageState) updateContextUsageDisplay(contextUsageState);
 }
 
 async function ensureUsername() {
@@ -568,6 +657,7 @@ async function loadMessages() {
     content: m.content,
     files: m.files,
   }));
+  updateContextUsageDisplay(data.contextUsage);
   renderMessages();
   return true;
 }
@@ -600,6 +690,8 @@ async function startNewChat() {
   messageState = [];
   pendingAttachments = [];
   resetEditContext();
+  contextUsageState = null;
+  if (els.contextUsage) els.contextUsage.hidden = true;
   renderPendingAttachments();
   renderMessages();
   setStatus("");
@@ -659,6 +751,14 @@ async function postRunaChat(message, attachments) {
     } else if (eventName === "files" && Array.isArray(payload.items)) {
       pending.files = payload.items;
       updatePendingAssistantBubble(pending);
+    } else if (eventName === "context_usage") {
+      updateContextUsageDisplay(payload);
+    } else if (eventName === "history_compact") {
+      if (!pending.pending) {
+        void loadMessages();
+      } else {
+        setStatus("古い会話を要約してコンテキストを圧縮しました");
+      }
     } else if (eventName === "done") {
       finalResult = payload;
     } else if (eventName === "error") {
@@ -895,6 +995,7 @@ function bindEvents() {
   els.close?.addEventListener("click", () => setPanelOpen(false));
   els.backdrop?.addEventListener("click", () => setPanelOpen(false));
   els.newChat?.addEventListener("click", () => void startNewChat());
+  els.contextSummarizeBtn?.addEventListener("click", () => void requestContextSummarize());
   els.form?.addEventListener("submit", handleSubmit);
   els.input?.addEventListener("keydown", handleInputKeydown);
   els.attachBtn?.addEventListener("click", () => els.fileInput?.click());

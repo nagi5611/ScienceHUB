@@ -43,6 +43,11 @@ import {
   formatFileProbeForRuna,
   probeStorageFileForRuna,
 } from "./storage-io";
+import {
+  compactInMemoryMessagesIfNeeded,
+  compactRunaDbHistoryIfNeeded,
+} from "./context-summarize";
+import { computeContextUsage, type ContextUsageInfo } from "./context-usage";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -253,6 +258,31 @@ function buildContextSystemHint(context?: RunaChatContext): string {
   return parts.join("");
 }
 
+/** システムプロンプト本文（ルート一覧付き） */
+export async function buildRunaSystemMessageContent(
+  _env: Env,
+  db: D1Database,
+  user: SessionUser,
+  context?: RunaChatContext
+): Promise<string> {
+  let rootsHint = "（ストレージ未初期化の可能性があります）";
+  try {
+    const roots = await buildVisibleRoots(
+      db,
+      user.id,
+      user.username,
+      user.is_admin
+    );
+    rootsHint = roots
+      .map((r) => `${r.path} (${r.type}: ${r.label})`)
+      .join(", ");
+  } catch {
+    /* skip */
+  }
+
+  return `${RUNA_SYSTEM_PROMPT}${buildContextSystemHint(context)}\n\n## このユーザーがアクセスできるルート\n${rootsHint}\n\n個人ルートは u/${user.username} です。`;
+}
+
 function attachVisionToLastUserMessage(
   messages: ChatMessage[],
   imageDataUrls: string[]
@@ -402,25 +432,17 @@ export async function runRunaChat(
 
   const activity = new RunaActivityLog(send);
   const history = await buildRunaChatHistory(db, user.id, 20);
-  let rootsHint = "（ストレージ未初期化の可能性があります）";
-  try {
-    const roots = await buildVisibleRoots(
-      db,
-      user.id,
-      user.username,
-      user.is_admin
-    );
-    rootsHint = roots
-      .map((r) => `${r.path} (${r.type}: ${r.label})`)
-      .join(", ");
-  } catch {
-    /* skip */
-  }
+  const systemContent = await buildRunaSystemMessageContent(
+    env,
+    db,
+    user,
+    context
+  );
 
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${RUNA_SYSTEM_PROMPT}${buildContextSystemHint(context)}\n\n## このユーザーがアクセスできるルート\n${rootsHint}\n\n個人ルートは u/${user.username} です。`,
+      content: systemContent,
     },
     ...history.map((h) => ({
       role: h.role,
@@ -435,6 +457,40 @@ export async function runRunaChat(
     enrichedAttachments
   );
   attachVisionToLastUserMessage(messages, imageDataUrls);
+
+  let usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
+  send("context_usage", usage);
+  if (usage.shouldSummarize) {
+    const dbCompacted = await compactRunaDbHistoryIfNeeded(
+      env,
+      db,
+      user.id,
+      send
+    );
+    if (dbCompacted) {
+      const refreshedHistory = await buildRunaChatHistory(db, user.id, 20);
+      messages.splice(
+        1,
+        messages.length - 1,
+        ...refreshedHistory.map((h) => ({
+          role: h.role,
+          content: h.content,
+        }))
+      );
+      attachVisionToLastUserMessage(messages, imageDataUrls);
+      usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
+      send("context_usage", usage);
+    } else {
+      await compactInMemoryMessagesIfNeeded(
+        env,
+        messages,
+        ALL_RUNA_TOOLS,
+        send
+      );
+      usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
+      send("context_usage", usage);
+    }
+  }
 
   const collectedFiles: RunaFileItem[] = [];
   const maxRounds = resolveMaxToolRounds(env);
@@ -526,6 +582,19 @@ export async function runRunaChat(
 
       for (const call of completion.toolCalls) {
         await handleToolCall(env, db, user, call, messages, collectedFiles, send);
+      }
+
+      usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
+      send("context_usage", usage);
+      if (usage.shouldSummarize) {
+        await compactInMemoryMessagesIfNeeded(
+          env,
+          messages,
+          ALL_RUNA_TOOLS,
+          send
+        );
+        usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
+        send("context_usage", usage);
       }
       continue;
     }
@@ -710,4 +779,28 @@ export async function listRecentFilesForUser(
 
   all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return dedupeFiles(all).slice(0, capped);
+}
+
+/** 現在の推定コンテキスト使用量 */
+export async function estimateRunaContextUsage(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  context?: RunaChatContext
+): Promise<ContextUsageInfo> {
+  const systemContent = await buildRunaSystemMessageContent(
+    env,
+    db,
+    user,
+    context
+  );
+  const history = await buildRunaChatHistory(db, user.id, 20);
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemContent },
+    ...history.map((row) => ({
+      role: row.role,
+      content: row.content,
+    })),
+  ];
+  return computeContextUsage(messages, ALL_RUNA_TOOLS, env);
 }

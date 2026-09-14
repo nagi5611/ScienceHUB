@@ -27,6 +27,72 @@ function checkSecret(request: Request, env: WorkerEnv): boolean {
   return request.headers.get("X-Image-Converter-Secret") === secret;
 }
 
+/** POST /prepare — Runa 画像編集 API 向けに PNG/JPEG をリサイズ・JPEG 圧縮 */
+async function handlePrepare(request: Request, env: WorkerEnv): Promise<Response> {
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return Response.json({ error: "フォームデータの解析に失敗しました" }, { status: 400 });
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return Response.json({ error: "file を指定してください" }, { status: 400 });
+  }
+
+  if (!file.size) {
+    return Response.json({ error: "空のファイルは変換できません" }, { status: 400 });
+  }
+
+  if (file.size > MAX_SERVER_CONVERT_BYTES) {
+    return Response.json(
+      {
+        error: `ファイルサイズは ${Math.round(MAX_SERVER_CONVERT_BYTES / (1024 * 1024))}MB 以下にしてください`,
+      },
+      { status: 400 }
+    );
+  }
+
+  const quality = Number(formData.get("quality") ?? 85);
+  const maxEdge = Number(formData.get("maxEdge") ?? 2048);
+
+  try {
+    const converted = await transformWithCloudflareImages(env, file.stream(), {
+      format: "jpeg",
+      quality: Number.isFinite(quality) ? quality : 85,
+      maxEdge: Number.isFinite(maxEdge) && maxEdge > 0 ? Math.round(maxEdge) : 2048,
+    });
+
+    if (!converted.ok) {
+      const detail = await converted.text().catch(() => "");
+      console.error("Cloudflare Images prepare failed", {
+        status: converted.status,
+        detail: detail.slice(0, 500),
+        inputExt: getFileExtension(file.name),
+      });
+      return Response.json(
+        { error: "画像の圧縮に失敗しました" },
+        { status: 502 }
+      );
+    }
+
+    const body = await converted.arrayBuffer();
+    return new Response(body, {
+      headers: {
+        "Content-Type": getServerOutputMime("jpeg"),
+        "Cache-Control": "private, no-store",
+      },
+    });
+  } catch (error) {
+    console.error("image-converter prepare error", error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : "変換に失敗しました" },
+      { status: 500 }
+    );
+  }
+}
+
 /** POST /convert */
 async function handleConvert(request: Request, env: WorkerEnv): Promise<Response> {
   let formData: FormData;
@@ -112,6 +178,9 @@ export default {
     }
 
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/prepare") {
+      return handlePrepare(request, env);
+    }
     if (request.method === "POST" && (url.pathname === "/convert" || url.pathname === "/")) {
       return handleConvert(request, env);
     }

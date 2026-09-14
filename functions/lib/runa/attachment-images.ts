@@ -27,6 +27,8 @@ function guessImageMime(path: string, fromMeta: string | null): string {
   return IMAGE_MIME_BY_EXT[ext] ?? "image/jpeg";
 }
 
+export { guessImageMime };
+
 function toDataUrl(mime: string, base64: string): string {
   return `data:${mime};base64,${base64}`;
 }

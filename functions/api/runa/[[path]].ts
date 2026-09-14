@@ -3,6 +3,7 @@
  * GET  /api/runa/messages
  * GET  /api/runa/recent-files
  * POST /api/runa/chat?stream=1
+ * POST /api/runa/summarize
  */
 
 import type { Env } from "../../lib/types";
@@ -11,9 +12,11 @@ import { getDb } from "../../lib/db";
 import { requireUser } from "../../lib/auth";
 import { createRunaSseResponse } from "../../lib/runa/chat-sse";
 import { clearRunaMessages, listRunaMessages } from "../../lib/runa/messages";
+import { compactRunaDbHistory } from "../../lib/runa/context-summarize";
 import {
   runRunaChat,
   listRecentFilesForUser,
+  estimateRunaContextUsage,
   type RunaChatAttachment,
   type RunaChatContext,
 } from "../../lib/runa/agent";
@@ -49,7 +52,36 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "50", 10) || 50)
       );
       const messages = await listRunaMessages(db, auth.id, limit);
-      return Response.json({ messages });
+      const contextUsage = await estimateRunaContextUsage(env, db, auth);
+      return Response.json({ messages, contextUsage });
+    }
+
+    if (route === "summarize" && method === "POST") {
+      const auth = await requireUser(request, env);
+      if (auth instanceof Response) return auth;
+
+      const result = await compactRunaDbHistory(env, db, auth.id);
+      const contextUsage = await estimateRunaContextUsage(env, db, auth);
+      if (!result.compacted) {
+        return Response.json(
+          {
+            ok: false,
+            error: "要約できる履歴が不足しています",
+            contextUsage,
+          },
+          { status: 400 }
+        );
+      }
+
+      const messages = await listRunaMessages(db, auth.id, 50);
+      return Response.json({
+        ok: true,
+        removed: result.removed,
+        kept: result.kept,
+        summaryPreview: result.summaryPreview,
+        messages,
+        contextUsage,
+      });
     }
 
     if (route === "recent-files" && method === "GET") {

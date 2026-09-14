@@ -1,0 +1,35 @@
+﻿笏・Checking if file needs uploading
+笏・笏・劇 Uploading 1cce62b0-51f4-4619-9207-6a808557984c.54b1f12feb92ea30.sql
+笏・劇 Uploading complete.
+笏・[
+  {
+    "results": [
+      {
+        "Total queries executed": 1,
+        "Rows read": 50,
+        "Rows written": 0,
+        "Database size (MB)": "139.78"
+      }
+    ],
+    "success": true,
+    "finalBookmark": "00000840-00000008-000050e6-90a5da4c58ab88cc0a50c4425aeff2f9",
+    "meta": {
+      "served_by": "v3-prod",
+      "served_by_region": "APAC",
+      "served_by_colo": "NRT",
+      "served_by_primary": true,
+      "timings": {
+        "sql_duration_ms": 1.9496
+      },
+      "duration": 1.9496,
+      "changes": 1,
+      "last_row_id": 0,
+      "changed_db": true,
+      "size_after": 139776000,
+      "rows_read": 50,
+      "rows_written": 0,
+      "num_tables": 78,
+      "total_attempts": 1
+    }
+  }
+]
