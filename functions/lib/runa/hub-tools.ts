@@ -252,7 +252,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "image_generate",
       description:
-        "Grok Imagine で画像を生成しストレージに保存する。draft=下書き（速い）、final=完成品（高精細・文字向き）、edit=既存画像の編集（source_path 必須）",
+        "Runa の画像生成能力。draft=下書き（速い）、final=完成品（高精細・文字向き）、edit=既存画像の編集（source_path 必須）。生成した画像はストレージに保存する",
       parameters: {
         type: "object",
         properties: {
@@ -429,9 +429,20 @@ export async function executeHubTool(
         return { text: `不明なツール: ${toolName}`, files: [] };
     }
   } catch (error) {
-    const message =
+    const raw =
       error instanceof Error ? error.message : "ツール実行に失敗しました";
-    return { text: `エラー: ${message}`, files: [] };
+    if (toolName === "image_generate") {
+      const text =
+        raw.startsWith("画像生成") ||
+        raw.startsWith("Runa") ||
+        raw.includes("prompt") ||
+        raw.includes("source_path") ||
+        raw.includes("クラウドストレージ")
+          ? raw
+          : "画像生成に失敗しました";
+      return { text, files: [] };
+    }
+    return { text: `エラー: ${raw}`, files: [] };
   }
 }
 

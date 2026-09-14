@@ -11,14 +11,19 @@ export function parentStoragePath(logicalPath: string): string {
   return parts.slice(0, -1).join("/");
 }
 
-/** クラウドストレージアプリで開く URL */
+/** クラウドストレージアプリで開く URL（ファイルは file= で選択・強調表示） */
 export function storageBrowserUrl(
   logicalPath: string,
   type: "file" | "folder" = "file"
 ): string {
-  const target =
-    type === "folder" ? logicalPath : parentStoragePath(logicalPath);
-  return `/apps/cloud-storage/?path=${encodeURIComponent(target)}`;
+  const params = new URLSearchParams();
+  if (type === "folder") {
+    params.set("path", logicalPath);
+  } else {
+    params.set("path", parentStoragePath(logicalPath));
+    params.set("file", logicalPath);
+  }
+  return `/apps/cloud-storage/?${params.toString()}`;
 }
 
 /** 検索結果などを Markdown リンク付きで整形 */

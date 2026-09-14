@@ -88,6 +88,12 @@ interface SavedImageResult {
   sizeBytes: number;
 }
 
+/** ユーザー向け: Runa の画像生成失敗 */
+function failImageGenerate(reason?: string): never {
+  const base = "画像生成に失敗しました";
+  throw new Error(reason ? `${base}（${reason}）` : base);
+}
+
 function resolveAccountId(env: Env): string {
   const accountId =
     env.CLOUDFLARE_ACCOUNT_ID?.trim() || env.R2_ACCOUNT_ID?.trim() || "";
@@ -193,15 +199,16 @@ function extractApiError(body: unknown, status: number): string {
     if (Array.isArray(errors) && errors.length > 0) {
       const first = errors[0];
       if (first && typeof first === "object" && "message" in first) {
-        return String((first as { message: unknown }).message);
+        console.error("Runa image generate API error:", (first as { message: unknown }).message);
       }
     }
     const error = record.error;
     if (error && typeof error === "object" && "message" in error) {
-      return String((error as { message: unknown }).message);
+      console.error("Runa image generate API error:", (error as { message: unknown }).message);
     }
   }
-  return `画像生成 API エラー (${status})`;
+  console.error("Runa image generate API error: HTTP", status);
+  return "画像生成に失敗しました";
 }
 
 function looksLikeImagePayload(value: string): boolean {
@@ -305,7 +312,7 @@ async function decodeImagePayload(payload: string): Promise<{
   if (payload.startsWith("http://") || payload.startsWith("https://")) {
     const response = await fetch(payload);
     if (!response.ok) {
-      throw new Error("生成画像の取得に失敗しました");
+      failImageGenerate("結果を取得できませんでした");
     }
     const bytes = await response.arrayBuffer();
     const mime = response.headers.get("content-type") || "image/png";
@@ -396,12 +403,20 @@ async function callWorkersAiImage(
   model: string,
   input: WorkersAiImageInput
 ): Promise<string[]> {
-  const accountId = resolveAccountId(env);
+  let accountId: string;
+  let headers: Record<string, string>;
+  try {
+    accountId = resolveAccountId(env);
+    headers = buildAiRunHeaders(env);
+  } catch {
+    throw new Error("Runaの画像生成機能は現在利用できません");
+  }
+
   const response = await fetch(
     `${CLOUDFLARE_AI_RUN_PREFIX}${accountId}/ai/run`,
     {
       method: "POST",
-      headers: buildAiRunHeaders(env),
+      headers,
       body: JSON.stringify({ model, input }),
     }
   );
@@ -418,15 +433,13 @@ async function callWorkersAiImage(
     }
     const state = extractRunState(root);
     if (state && state !== "Completed") {
-      throw new Error(`画像生成が完了しませんでした（state: ${state}）`);
+      failImageGenerate("処理が完了しませんでした");
     }
   }
 
   const images = extractImagesFromResponse(body);
   if (!images.length) {
-    throw new Error(
-      "画像生成 API から画像が返されませんでした（レスポンス形式を解釈できませんでした）"
-    );
+    failImageGenerate("結果を取得できませんでした");
   }
   return images;
 }
@@ -512,7 +525,7 @@ async function saveGeneratedImage(
     bytes.byteLength
   );
   if (init.mode !== "simple") {
-    throw new Error("生成画像が大きすぎて保存できません");
+    failImageGenerate("保存先の容量が不足しています");
   }
   const uploaded = await simpleStorageUpload(env, db, user, init.sessionId, bytes);
   return { path: uploaded.path, sizeBytes: bytes.byteLength };
@@ -559,7 +572,7 @@ export async function runImageGenerate(
   }
 
   const payloads = await callWorkersAiImage(env, model, input);
-  return await persistGeneratedImages(env, db, user, parsed, payloads, model);
+  return await persistGeneratedImages(env, db, user, parsed, payloads);
 }
 
 async function persistGeneratedImages(
@@ -567,8 +580,7 @@ async function persistGeneratedImages(
   db: D1Database,
   user: SessionUser,
   args: ImageGenerateArgs,
-  payloads: string[],
-  model: string
+  payloads: string[]
 ): Promise<ToolRunResult> {
   const saved: RunaFileItem[] = [];
   const capped = payloads.slice(0, args.count);
@@ -655,7 +667,7 @@ async function persistGeneratedImages(
 
   return {
     text:
-      `画像を生成しました（${modeLabel} / ${model} / ${saved.length} 枚）:\n` +
+      `Runa の画像生成が完了しました（${modeLabel} / ${saved.length} 枚）:\n` +
       lines.join("\n"),
     files: saved,
   };

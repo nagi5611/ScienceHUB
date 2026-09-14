@@ -36,7 +36,7 @@ export async function assertRunaDailyImageLimit(
 
   if ((row?.image_count ?? 0) + requestedCount > maxImages) {
     throw new Error(
-      `本日の画像生成上限（${maxImages} 枚）に達しました。明日またお試しください。`
+      `Runaの画像生成は1日${maxImages}枚までです。本日の上限に達したため、明日またお試しください。`
     );
   }
 }

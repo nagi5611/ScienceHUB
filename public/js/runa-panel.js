@@ -23,11 +23,124 @@ function parentStoragePath(logicalPath) {
   return parts.slice(0, -1).join("/");
 }
 
-/** クラウドストレージで開く URL */
+/** クラウドストレージで開く URL（ファイルは file= で選択・強調表示） */
 function storageBrowserUrl(logicalPath, type = "file") {
-  const target =
-    type === "folder" ? logicalPath : parentStoragePath(logicalPath);
-  return `/apps/cloud-storage/?path=${encodeURIComponent(target)}`;
+  const params = new URLSearchParams();
+  if (type === "folder") {
+    params.set("path", logicalPath);
+  } else {
+    params.set("path", parentStoragePath(logicalPath));
+    params.set("file", logicalPath);
+  }
+  return `/apps/cloud-storage/?${params.toString()}`;
+}
+
+/** 画像ファイル名かどうか */
+function isImageFileName(name) {
+  return /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(String(name));
+}
+
+/** ストレージファイルのダウンロード URL（チャット内プレビュー用） */
+function storageDownloadUrl(logicalPath) {
+  return `/api/storage/download?path=${encodeURIComponent(logicalPath)}`;
+}
+
+/** @type {HTMLElement | null} */
+let imageLightboxEl = null;
+
+/** 画像ライトボックス DOM を用意 */
+function ensureImageLightbox() {
+  if (imageLightboxEl) return imageLightboxEl;
+
+  const root = document.createElement("div");
+  root.id = "runa-image-lightbox";
+  root.className = "runa-image-lightbox";
+  root.hidden = true;
+  root.innerHTML = `<button type="button" class="runa-image-lightbox-backdrop" aria-label="閉じる"></button>
+<figure class="runa-image-lightbox-dialog">
+  <img class="runa-image-lightbox-img" alt="">
+  <figcaption class="runa-image-lightbox-caption"></figcaption>
+  <button type="button" class="runa-image-lightbox-edit">この画像を編集</button>
+  <button type="button" class="runa-image-lightbox-close" aria-label="閉じる">×</button>
+</figure>`;
+
+  root.querySelector(".runa-image-lightbox-backdrop")?.addEventListener("click", closeImageLightbox);
+  root.querySelector(".runa-image-lightbox-close")?.addEventListener("click", closeImageLightbox);
+  root.querySelector(".runa-image-lightbox-edit")?.addEventListener("click", () => {
+    const path = root.dataset.lightboxPath;
+    const name = root.dataset.lightboxName || "";
+    if (!path) return;
+    closeImageLightbox();
+    attachStorageReference({ path, name, type: "file" }, { forEdit: true });
+  });
+
+  document.body.appendChild(root);
+  imageLightboxEl = root;
+  return root;
+}
+
+/** 画像をポップアップで拡大表示 */
+function openImageLightbox(src, alt = "", logicalPath = "") {
+  const root = ensureImageLightbox();
+  const img = root.querySelector(".runa-image-lightbox-img");
+  const caption = root.querySelector(".runa-image-lightbox-caption");
+  const editBtn = root.querySelector(".runa-image-lightbox-edit");
+  if (!(img instanceof HTMLImageElement)) return;
+
+  img.src = src;
+  img.alt = alt;
+  root.dataset.lightboxPath = logicalPath;
+  root.dataset.lightboxName = alt;
+  if (caption) caption.textContent = alt;
+  if (editBtn instanceof HTMLButtonElement) {
+    editBtn.hidden = !logicalPath;
+  }
+  root.hidden = false;
+  document.body.classList.add("runa-lightbox-open");
+  root.querySelector(".runa-image-lightbox-close")?.focus();
+}
+
+/** ライトボックスを閉じる。開いていれば true */
+function closeImageLightbox() {
+  if (!imageLightboxEl || imageLightboxEl.hidden) return false;
+  const img = imageLightboxEl.querySelector(".runa-image-lightbox-img");
+  if (img instanceof HTMLImageElement) {
+    img.removeAttribute("src");
+  }
+  imageLightboxEl.hidden = true;
+  document.body.classList.remove("runa-lightbox-open");
+  return true;
+}
+
+/** チャット内プレビュー画像クリック */
+function handleMessageAreaClick(event) {
+  const editBtn = event.target.closest(".runa-file-ref-edit");
+  if (editBtn) {
+    event.preventDefault();
+    const path = editBtn.getAttribute("data-path");
+    const name = editBtn.getAttribute("data-name") || "";
+    if (!path) return;
+    const sizeRaw = editBtn.getAttribute("data-size-bytes");
+    const sizeBytes = sizeRaw ? Number(sizeRaw) : null;
+    attachStorageReference(
+      {
+        path,
+        name,
+        type: "file",
+        sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : null,
+      },
+      { forEdit: true }
+    );
+    return;
+  }
+
+  const trigger = event.target.closest(".runa-file-ref-preview");
+  if (!trigger) return;
+  event.preventDefault();
+  const src = trigger.getAttribute("data-lightbox-src");
+  const alt = trigger.getAttribute("data-lightbox-alt") || "";
+  const logicalPath = trigger.getAttribute("data-lightbox-path") || "";
+  if (src) openImageLightbox(src, alt, logicalPath);
 }
 
 /** 軽量 Markdown（太字・斜体・コード・リンク） */
@@ -73,8 +186,18 @@ function renderFileRefsHtml(files) {
       const type = f.type === "folder" ? "folder" : "file";
       const icon = type === "folder" ? "📁" : "📄";
       const openUrl = storageBrowserUrl(f.path, type);
-      const openLabel = type === "folder" ? "フォルダを開く" : "フォルダで開く";
+      const openLabel = type === "folder" ? "フォルダを開く" : "ストレージで開く";
+      const previewHtml =
+        type === "file" && isImageFileName(f.name)
+          ? `<div class="runa-file-ref-preview-wrap">
+              <button type="button" class="runa-file-ref-preview" data-lightbox-src="${escapeHtml(storageDownloadUrl(f.path))}" data-lightbox-alt="${escapeHtml(f.name)}" data-lightbox-path="${escapeHtml(f.path)}" title="${escapeHtml(f.name)}（クリックで拡大）">
+                <img class="runa-preview-img" src="${escapeHtml(storageDownloadUrl(f.path))}" alt="${escapeHtml(f.name)}" loading="lazy">
+              </button>
+              <button type="button" class="runa-file-ref-edit" data-path="${escapeHtml(f.path)}" data-name="${escapeHtml(f.name)}" data-size-bytes="${f.sizeBytes ?? ""}">編集</button>
+            </div>`
+          : "";
       return `<li class="runa-file-ref">
+        ${previewHtml}
         <span class="runa-file-ref-icon" aria-hidden="true">${icon}</span>
         <span class="runa-file-ref-name">${escapeHtml(f.name)}</span>
         <a class="runa-file-ref-link" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a>
@@ -119,11 +242,35 @@ let runaDataLoaded = false;
 let runaDataLoadFailed = false;
 /** @type {HTMLElement | null} */
 let pendingAssistantRow = null;
-/** @type {{ id: string, name: string, path?: string, uploading?: boolean, statusLabel?: string, extractedText?: string, imagePaths?: string[] }[]} */
+/** @type {{ id: string, name: string, path?: string, uploading?: boolean, statusLabel?: string, extractedText?: string, imagePaths?: string[], storageRef?: boolean, sizeBytes?: number | null }[]} */
 let pendingAttachments = [];
 let attachDragDepth = 0;
 /** @type {string | null} */
-let currentUsername = null;
+let pendingEditImagePath = null;
+
+const EDIT_INPUT_PLACEHOLDER = "変更したい内容を入力…";
+
+/** 編集コンテキストをリセット */
+function resetEditContext() {
+  pendingEditImagePath = null;
+  if (els.input && panelOptions.placeholder) {
+    els.input.placeholder = panelOptions.placeholder;
+  }
+}
+
+/** API 送信用コンテキスト（編集意図をマージ） */
+function buildRunaChatContext() {
+  const base = panelOptions.getContext?.() ?? {};
+  if (!pendingEditImagePath) return base;
+  return {
+    ...base,
+    editImagePath: pendingEditImagePath,
+    editIntent: true,
+  };
+}
+/** @type {{ getContext?: () => object | null, placeholder?: string, getContextLabel?: () => string | null }} */
+let panelOptions = {};
+let eventsBound = false;
 
 async function safeFetch(url, options) {
   try {
@@ -152,12 +299,26 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
+function updateContextHint() {
+  const hint = document.getElementById("runa-context-hint");
+  if (!hint) return;
+  const label = panelOptions.getContextLabel?.();
+  if (label) {
+    hint.textContent = label;
+    hint.hidden = false;
+  } else {
+    hint.textContent = "";
+    hint.hidden = true;
+  }
+}
+
 function setPanelOpen(open) {
   if (!els.panel || !els.fab) return;
   els.panel.classList.toggle("is-open", open);
   els.panel.setAttribute("aria-hidden", open ? "false" : "true");
   els.fab.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
+    updateContextHint();
     void ensureRunaDataLoaded();
     if (els.input) els.input.focus();
   } else {
@@ -308,11 +469,10 @@ function renderPendingAttachments() {
   els.attachList.hidden = false;
   els.attachList.innerHTML = pendingAttachments
     .map((item) => {
-      const label = item.uploading
-        ? `${item.name}（${item.statusLabel || "アップロード中…"}）`
-        : item.statusLabel
-          ? `${item.name}（${item.statusLabel}）`
-          : item.name;
+      const label =
+        item.storageRef || !item.uploading
+          ? item.name
+          : `${item.name}（${item.statusLabel || "アップロード中…"}）`;
       return `<span class="runa-attach-chip" data-id="${escapeHtml(item.id)}">
         <span class="runa-attach-chip-name">${escapeHtml(label)}</span>
         <button type="button" class="runa-attach-chip-remove" aria-label="添付を削除" data-id="${escapeHtml(item.id)}">×</button>
@@ -323,7 +483,11 @@ function renderPendingAttachments() {
   for (const btn of els.attachList.querySelectorAll(".runa-attach-chip-remove")) {
     btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-id");
+      const removed = pendingAttachments.find((a) => a.id === id);
       pendingAttachments = pendingAttachments.filter((a) => a.id !== id);
+      if (removed?.path && removed.path === pendingEditImagePath) {
+        resetEditContext();
+      }
       renderPendingAttachments();
     });
   }
@@ -435,6 +599,7 @@ async function startNewChat() {
   }
   messageState = [];
   pendingAttachments = [];
+  resetEditContext();
   renderPendingAttachments();
   renderMessages();
   setStatus("");
@@ -442,11 +607,12 @@ async function startNewChat() {
 }
 
 async function postRunaChat(message, attachments) {
+  const context = buildRunaChatContext();
   const res = await fetch("/api/runa/chat?stream=1", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, attachments }),
+    body: JSON.stringify({ message, attachments, context }),
   });
 
   if (!res.ok) {
@@ -553,8 +719,10 @@ async function handleSubmit(event) {
   const attachments = readyAttachments.map((a) => ({
     path: a.path,
     name: a.name,
-    extractedText: a.extractedText,
-    imagePaths: a.imagePaths,
+    extractedText: a.storageRef ? undefined : a.extractedText,
+    imagePaths: a.storageRef ? undefined : a.imagePaths,
+    storageRef: a.storageRef ? true : undefined,
+    sizeBytes: a.sizeBytes ?? null,
   }));
 
   messageState.push({
@@ -564,7 +732,7 @@ async function handleSubmit(event) {
       name: a.name,
       path: a.path,
       type: "file",
-      sizeBytes: null,
+      sizeBytes: a.sizeBytes ?? null,
       updatedAt: null,
     })),
   });
@@ -584,6 +752,7 @@ async function handleSubmit(event) {
     setStatus("");
     renderMessages();
   } finally {
+    resetEditContext();
     setChatBusy(false);
   }
 }
@@ -720,6 +889,8 @@ function handleAttachDrop(event) {
 }
 
 function bindEvents() {
+  if (eventsBound) return;
+  eventsBound = true;
   els.fab?.addEventListener("click", () => setPanelOpen(true));
   els.close?.addEventListener("click", () => setPanelOpen(false));
   els.backdrop?.addEventListener("click", () => setPanelOpen(false));
@@ -732,9 +903,12 @@ function bindEvents() {
   els.body?.addEventListener("dragover", handleAttachDragOver);
   els.body?.addEventListener("dragleave", handleAttachDragLeave);
   els.body?.addEventListener("drop", handleAttachDrop);
+  els.messages?.addEventListener("click", handleMessageAreaClick);
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && els.panel?.classList.contains("is-open")) {
+    if (e.key !== "Escape") return;
+    if (closeImageLightbox()) return;
+    if (els.panel?.classList.contains("is-open")) {
       setPanelOpen(false);
     }
   });
@@ -748,9 +922,53 @@ function bindEvents() {
   });
 }
 
-export function initRunaPanel() {
+/** Runa パネルを初期化（複数ページから options をマージ可能） */
+export function initRunaPanel(options = {}) {
+  panelOptions = { ...panelOptions, ...options };
+  if (els.input && panelOptions.placeholder) {
+    els.input.placeholder = panelOptions.placeholder;
+  }
   if (!els.fab || !els.panel) return;
   bindEvents();
+  updateContextHint();
 }
 
-initRunaPanel();
+/** パネルを開く */
+export function openRunaPanel() {
+  setPanelOpen(true);
+}
+
+/** ストレージ上のファイルを参照添付してパネルを開く */
+export function attachStorageReference(item, options = {}) {
+  const { forEdit = false } = options;
+  if (!item?.path || item.type === "folder") return;
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+    setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
+    return;
+  }
+  if (!pendingAttachments.some((a) => a.path === item.path)) {
+    pendingAttachments.push({
+      id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: item.name,
+      path: item.path,
+      sizeBytes: item.sizeBytes ?? item.size ?? null,
+      storageRef: true,
+    });
+    renderPendingAttachments();
+  }
+  if (forEdit) {
+    pendingEditImagePath = item.path;
+    closeImageLightbox();
+    if (els.input) {
+      els.input.placeholder = EDIT_INPUT_PLACEHOLDER;
+    }
+  }
+  openRunaPanel();
+  if (els.input) els.input.focus();
+}
+
+if (document.getElementById("runa-fab")) {
+  initRunaPanel({
+    placeholder: "ファイルの検索や操作を依頼…",
+  });
+}

@@ -15,6 +15,8 @@ import {
   renameWithAuth,
 } from "../storage/operations";
 import {
+  formatFileProbeForRuna,
+  probeStorageFileForRuna,
   readStorageFileForRuna,
   writeStorageFileForRuna,
 } from "./storage-io";
@@ -100,8 +102,24 @@ export const RUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "storage_probe_file",
+      description:
+        "ファイルの概要（サイズ・形式・推定行数・先頭数行）を取得する。大きいファイルを読む前に必ず使う",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "ファイルの論理パス" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "storage_read_file",
-      description: "ファイルの内容を読み込む（テキストは UTF-8、バイナリは base64）",
+      description:
+        "ファイル内容を読む。大きいテキストは grep または line_start/line_limit で部分読み。全文読みは small 分類のみ",
       parameters: {
         type: "object",
         properties: {
@@ -109,6 +127,22 @@ export const RUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
           max_bytes: {
             type: "number",
             description: "最大読み込みバイト（既定 512KB）",
+          },
+          offset_bytes: {
+            type: "number",
+            description: "読み始めバイト位置（バイト単位の続き読み）",
+          },
+          line_start: {
+            type: "number",
+            description: "1始まりの行番号（部分読み）",
+          },
+          line_limit: {
+            type: "number",
+            description: "読む行数（既定 200、最大 500）",
+          },
+          grep: {
+            type: "string",
+            description: "行内容にマッチする正規表現（行番号付きで返る）",
           },
         },
         required: ["path"],
@@ -441,6 +475,8 @@ export async function executeRunaTool(
         return await runStorageList(env, db, user, args);
       case "storage_stat":
         return await runStorageStat(env, db, user, args);
+      case "storage_probe_file":
+        return await runStorageProbeFile(env, db, user, args);
       case "storage_read_file":
         return await runStorageReadFile(env, db, user, args);
       case "storage_write_file":
@@ -619,6 +655,29 @@ async function runStorageStat(
   };
 }
 
+async function runStorageProbeFile(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  const path = strArg(args, "path");
+  if (!path) return { text: "path が必要です", files: [] };
+
+  const probe = await probeStorageFileForRuna(env, db, user, path);
+  const item: RunaFileItem = {
+    name: probe.name,
+    path: probe.path,
+    type: "file",
+    sizeBytes: probe.sizeBytes,
+    updatedAt: null,
+  };
+  return {
+    text: formatFileProbeForRuna(probe),
+    files: [item],
+  };
+}
+
 async function runStorageReadFile(
   env: Env,
   db: D1Database,
@@ -626,17 +685,45 @@ async function runStorageReadFile(
   args: Record<string, unknown>
 ): Promise<ToolRunResult> {
   const path = strArg(args, "path");
+  if (!path) return { text: "path が必要です", files: [] };
+
   const maxBytes = Math.min(
     1024 * 1024,
     numArg(args, "max_bytes", 512 * 1024)
   );
-  if (!path) return { text: "path が必要です", files: [] };
+  const offsetBytes =
+    typeof args.offset_bytes === "number" && Number.isFinite(args.offset_bytes)
+      ? Math.max(0, Math.floor(args.offset_bytes))
+      : undefined;
+  const lineStart =
+    typeof args.line_start === "number" && Number.isFinite(args.line_start)
+      ? Math.max(1, Math.floor(args.line_start))
+      : undefined;
+  const lineLimit =
+    typeof args.line_limit === "number" && Number.isFinite(args.line_limit)
+      ? Math.max(1, Math.floor(args.line_limit))
+      : undefined;
+  const grep = strArg(args, "grep") || undefined;
 
-  const result = await readStorageFileForRuna(env, db, user, path, maxBytes);
+  const result = await readStorageFileForRuna(env, db, user, path, {
+    maxBytes,
+    offsetBytes,
+    lineStart,
+    lineLimit,
+    grep,
+  });
+
   const preview =
     result.encoding === "utf-8"
       ? result.content.slice(0, 8000)
       : `[base64 ${result.content.length} chars]`;
+  const modeLabel = result.readMode ?? "full";
+  const extra =
+    result.lineRange != null
+      ? `, 行 ${result.lineRange.start}-${result.lineRange.end}`
+      : result.grepMatchCount != null
+        ? `, grep ${result.grepMatchCount} 件`
+        : "";
   const item: RunaFileItem = {
     name: path.split("/").pop() ?? path,
     path: result.path,
@@ -645,7 +732,7 @@ async function runStorageReadFile(
     updatedAt: null,
   };
   return {
-    text: `読み込み ${result.path}（${result.sizeBytes} bytes, ${result.encoding}${result.truncated ? ", 切り詰め" : ""}）:\n${preview}`,
+    text: `読み込み ${result.path}（${result.sizeBytes} bytes, ${result.encoding}, ${modeLabel}${extra}${result.truncated ? ", 切り詰め" : ""}）:\n${preview}`,
     files: [item],
   };
 }

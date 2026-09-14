@@ -15,6 +15,7 @@ import {
   runRunaChat,
   listRecentFilesForUser,
   type RunaChatAttachment,
+  type RunaChatContext,
 } from "../../lib/runa/agent";
 
 function parseRoute(path: string | string[] | undefined): string[] {
@@ -72,11 +73,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const auth = await requireUser(request, env);
       if (auth instanceof Response) return auth;
 
-      let body: { message?: string; attachments?: RunaChatAttachment[] };
+      let body: {
+        message?: string;
+        attachments?: RunaChatAttachment[];
+        context?: RunaChatContext;
+      };
       try {
         body = (await request.json()) as {
           message?: string;
           attachments?: RunaChatAttachment[];
+          context?: RunaChatContext;
         };
       } catch {
         return jsonError("JSON の解析に失敗しました", 400);
@@ -93,14 +99,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         .map((a) => ({
           path: a.path.trim(),
           name: a.name.trim(),
-          extractedText: a.extractedText
-            ? a.extractedText.slice(0, MAX_EXTRACTED)
-            : undefined,
+          extractedText:
+            a.storageRef || !a.extractedText
+              ? undefined
+              : a.extractedText.slice(0, MAX_EXTRACTED),
           imagePaths: (a.imagePaths ?? [])
             .filter((p): p is string => typeof p === "string" && Boolean(p.trim()))
             .map((p) => p.trim())
             .slice(0, 10),
+          storageRef: Boolean(a.storageRef),
+          sizeBytes:
+            typeof a.sizeBytes === "number" && Number.isFinite(a.sizeBytes)
+              ? a.sizeBytes
+              : null,
         }));
+
+      const context: RunaChatContext | undefined = body.context
+        ? {
+            storagePath: body.context.storagePath?.trim() || null,
+            trashView: Boolean(body.context.trashView),
+            searchActive: Boolean(body.context.searchActive),
+            editImagePath: body.context.editImagePath?.trim() || null,
+            editIntent: Boolean(body.context.editIntent),
+          }
+        : undefined;
 
       if (!message && !attachments.length) {
         return jsonError("メッセージを入力してください", 400);
@@ -111,7 +133,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       if (stream) {
         return createRunaSseResponse(async (send) => {
-          return await runRunaChat(env, db, auth, message, send, attachments);
+          return await runRunaChat(
+            env,
+            db,
+            auth,
+            message,
+            send,
+            attachments,
+            context
+          );
         });
       }
 
@@ -126,7 +156,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           chunks.push(String((data as { text: string }).text));
         }
         },
-        attachments
+        attachments,
+        context
       );
 
       return Response.json({

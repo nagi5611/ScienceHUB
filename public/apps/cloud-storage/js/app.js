@@ -47,6 +47,7 @@ import {
   renderOfficePreview,
 } from "./preview-office.js";
 import { initAgentTokensDialog } from "./agent-tokens.js";
+import { attachStorageReference, initRunaPanel } from "/js/runa-panel.js";
 
 let roots = [];
 let currentPath = "";
@@ -69,6 +70,8 @@ const STORAGE_MOVE_MIME = "application/x-sciencehub-storage-move";
 let activeDragMoveItems = null;
 
 let listLoadGeneration = 0;
+/** @type {string | null} 初回ロード時に ?file= で強調表示するパス */
+let pendingDeepLinkFile = null;
 let sortField = "name";
 let sortOrder = "asc";
 
@@ -572,6 +575,39 @@ function selectSingleItem(path) {
   applySelectionToUi();
 }
 
+/** ?file= ディープリンク: 該当ファイルを選択・スクロール・強調表示 */
+function focusFileFromDeepLink(filePath) {
+  const normalized = filePath.trim();
+  if (!normalized) return;
+
+  const item = getItemByPath(normalized);
+  if (!item) {
+    showToast("指定されたファイルが見つかりません", true);
+    return;
+  }
+
+  selectSingleItem(normalized);
+
+  let targetEntry = null;
+  document.querySelectorAll(".cs-file-entry").forEach((entry) => {
+    if (entry.dataset.path === normalized) targetEntry = entry;
+  });
+
+  if (targetEntry) {
+    targetEntry.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    targetEntry.classList.add("is-deep-link-focus");
+    window.setTimeout(() => {
+      targetEntry?.classList.remove("is-deep-link-focus");
+    }, 2600);
+  }
+
+  const url = new URL(location.href);
+  if (url.searchParams.has("file")) {
+    url.searchParams.delete("file");
+    history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+}
+
 /** チェックボックス用: 他の選択を維持したまま1件だけ切り替え */
 function toggleItemSelection(path) {
   const index = getItemIndex(path);
@@ -814,6 +850,7 @@ function showContextMenu(clientX, clientY, item) {
     actions.push({ id: "download", label: "ダウンロード" });
     actions.push({ id: "share", label: "共有リンクを作成" });
     actions.push({ id: "shortcut", label: "ショートカットリンクを取得" });
+    actions.push({ id: "runa-ask", label: "Runaに質問" });
   }
 
   actions.push({ id: "rename", label: "名称変更" });
@@ -1078,6 +1115,10 @@ function handleContextAction(action, item) {
       break;
     case "shortcut":
       openShortcutDialogForItem(item);
+      break;
+    case "runa-ask":
+      selectSingleItem(item.path);
+      attachStorageReference(item);
       break;
     case "rename":
       renameItem(item);
@@ -2332,14 +2373,31 @@ async function loadRoots() {
   const data = await apiRequest("roots");
   roots = data.roots ?? [];
 
-  // ?path= ディープリンク（プロジェクト管理などから）
+  // ?path= / ?file= ディープリンク（Runa・プロジェクト管理などから）
+  const deepLinkParams = new URLSearchParams(location.search);
   if (!currentPath) {
-    const initialPath = new URLSearchParams(location.search).get("path")?.trim() ?? "";
+    const initialPath = deepLinkParams.get("path")?.trim() ?? "";
     if (initialPath) {
       const rootOfInitial = getRootPath(initialPath);
       const allowed = roots.some((r) => r.path === rootOfInitial || initialPath === r.path);
       if (allowed) {
         currentPath = initialPath;
+      }
+    }
+  }
+
+  const deepLinkFile = deepLinkParams.get("file")?.trim() ?? "";
+  if (deepLinkFile) {
+    pendingDeepLinkFile = deepLinkFile;
+    if (!currentPath) {
+      const parts = deepLinkFile.split("/").filter(Boolean);
+      if (parts.length > 1) {
+        const parent = parts.slice(0, -1).join("/");
+        const rootOfParent = getRootPath(parent);
+        const allowed = roots.some((r) => r.path === rootOfParent || parent === r.path);
+        if (allowed) {
+          currentPath = parent;
+        }
       }
     }
   }
@@ -2350,6 +2408,12 @@ async function loadRoots() {
   syncViewModeForCurrentPath();
   renderRoots();
   await loadDirectory();
+
+  if (pendingDeepLinkFile) {
+    const targetFile = pendingDeepLinkFile;
+    pendingDeepLinkFile = null;
+    focusFileFromDeepLink(targetFile);
+  }
 }
 
 async function handleDownloadSelected() {
@@ -3004,6 +3068,23 @@ async function init() {
   loadSortPreference();
   bindEvents();
   initAgentTokensDialog();
+  initRunaPanel({
+    placeholder: "このフォルダや添付ファイルについて質問…",
+    getContext: () => {
+      if (trashView) return { trashView: true };
+      if (searchActive) return { searchActive: true };
+      return {
+        storagePath: currentPath || null,
+        trashView: false,
+        searchActive: false,
+      };
+    },
+    getContextLabel: () => {
+      if (trashView) return "ごみ箱";
+      if (searchActive) return "検索結果";
+      return currentPath || "ルート";
+    },
+  });
   updateSortUi();
   updateToolbarForView();
   updateViewModeUi();

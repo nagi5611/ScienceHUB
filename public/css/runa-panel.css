@@ -127,6 +127,16 @@
   background: var(--cf-orange-soft, #fff4eb);
 }
 
+.runa-context-hint {
+  margin: 0;
+  padding: 0 1.25rem 0.35rem;
+  font-size: 0.78rem;
+  color: var(--cf-muted, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .runa-body {
   position: relative;
   flex: 1;
@@ -332,6 +342,154 @@
   align-items: center;
   gap: 0.35rem 0.5rem;
   font-size: 0.85rem;
+}
+
+.runa-file-ref-preview-wrap {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.runa-file-ref-preview {
+  display: block;
+  max-width: 240px;
+  border-radius: var(--cf-radius, 8px);
+  overflow: hidden;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  line-height: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+  font: inherit;
+}
+
+.runa-file-ref-preview:hover {
+  border-color: var(--cf-orange, #f38020);
+}
+
+.runa-file-ref-edit {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  border-radius: var(--cf-radius, 8px);
+  background: var(--cf-bg, #fff);
+  color: var(--cf-text, #1f2937);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.runa-file-ref-edit:hover {
+  border-color: var(--cf-orange, #f38020);
+  color: var(--cf-orange, #f38020);
+}
+
+.runa-msg--user .runa-file-ref-edit {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.runa-msg--user .runa-file-ref-edit:hover {
+  border-color: #fff;
+  color: #fff;
+}
+
+.runa-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.runa-image-lightbox[hidden] {
+  display: none !important;
+}
+
+.runa-image-lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgba(15, 23, 42, 0.82);
+  cursor: zoom-out;
+}
+
+.runa-image-lightbox-dialog {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  max-width: min(95vw, 1200px);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.runa-image-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(90vh - 3rem);
+  object-fit: contain;
+  border-radius: var(--cf-radius, 8px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.runa-image-lightbox-caption {
+  max-width: 100%;
+  font-size: 0.85rem;
+  color: #f8fafc;
+  text-align: center;
+  word-break: break-all;
+}
+
+.runa-image-lightbox-edit {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--cf-radius, 8px);
+  background: rgba(255, 255, 255, 0.12);
+  color: #f8fafc;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.runa-image-lightbox-edit:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: #fff;
+}
+
+.runa-image-lightbox-edit[hidden] {
+  display: none;
+}
+
+.runa-image-lightbox-close {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #111827;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.runa-image-lightbox-close:hover {
+  background: #fff;
+}
+
+body.runa-lightbox-open {
+  overflow: hidden;
 }
 
 .runa-file-ref-name {

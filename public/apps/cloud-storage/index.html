@@ -16,6 +16,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/mobile-shell.css">
   <link rel="stylesheet" href="/css/apps/cloud-storage.css">
+  <link rel="stylesheet" href="/css/runa-panel.css">
   <link
     id="excalidraw-preview-css"
     rel="stylesheet"
@@ -35,7 +36,11 @@
         "@excalidraw/excalidraw": "https://esm.sh/@excalidraw/excalidraw@0.18.1?external=react,react-dom",
         "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
         "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/",
-        "fflate": "https://esm.sh/fflate@0.8.2?target=es2022"
+        "fflate": "https://esm.sh/fflate@0.8.2?target=es2022",
+        "pdfjs-dist": "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs",
+        "mammoth": "https://esm.sh/mammoth@1.8.0",
+        "xlsx": "https://esm.sh/xlsx@0.18.5",
+        "jszip": "https://esm.sh/jszip@3.10.1"
       }
     }
   </script>
@@ -256,6 +261,38 @@
       <button type="button" class="cs-btn" id="cs-agent-dialog-close-btn">閉じる</button>
     </footer>
   </dialog>
+
+  <!-- Runa ファイルエージェント -->
+  <button type="button" class="runa-fab" id="runa-fab" aria-expanded="false" aria-controls="runa-panel">
+    <span class="runa-fab-label">Runa</span>
+  </button>
+  <div class="runa-panel" id="runa-panel" aria-hidden="true" role="dialog" aria-labelledby="runa-panel-title">
+    <div class="runa-backdrop" id="runa-backdrop" aria-hidden="true"></div>
+    <div class="runa-dialog">
+      <header class="runa-header">
+        <div>
+          <p class="runa-kicker">ScienceHUB Agent</p>
+          <h2 class="runa-title" id="runa-panel-title">Runa</h2>
+        </div>
+        <div class="runa-header-actions">
+          <button type="button" class="runa-new-chat" id="runa-new-chat">新規チャット</button>
+          <button type="button" class="runa-close" id="runa-close" aria-label="閉じる">×</button>
+        </div>
+      </header>
+      <p class="runa-status" id="runa-status" hidden></p>
+      <p class="runa-context-hint" id="runa-context-hint" hidden></p>
+      <div class="runa-body">
+        <div class="runa-messages" id="runa-messages"></div>
+        <div class="runa-attach-list" id="runa-attach-list" hidden></div>
+        <form class="runa-form" id="runa-form">
+          <button type="button" class="runa-attach-btn" id="runa-attach-btn" aria-label="ファイルを添付" title="ファイルを添付（ドラッグ＆ドロップ可）">📎</button>
+          <input type="file" id="runa-file-input" class="runa-file-input" hidden multiple>
+          <textarea class="runa-input" id="runa-input" rows="2" placeholder="このフォルダやファイルについて質問…" aria-label="メッセージ"></textarea>
+          <button type="submit" class="runa-send" id="runa-send">送信</button>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/apps/cloud-storage/js/app.js"></script>
   <script src="/js/pwa-register.js" type="module"></script>

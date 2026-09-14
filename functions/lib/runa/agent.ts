@@ -32,12 +32,17 @@ import {
 } from "./messages";
 import {
   formatThinkingSummary,
+  isOpenDirectoryQuery,
   isRecentFilesQuery,
   RunaActivityLog,
   summarizeToolArgs,
 } from "./activity";
 import { formatFileItemsMarkdown } from "./storage-links";
 import { loadAttachmentImageDataUrls } from "./attachment-images";
+import {
+  formatFileProbeForRuna,
+  probeStorageFileForRuna,
+} from "./storage-io";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -60,6 +65,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   storage_list_roots: "ストレージルートを取得しています…",
   storage_list: "フォルダを一覧しています…",
   storage_stat: "ファイル情報を取得しています…",
+  storage_probe_file: "ファイル概要を確認しています…",
   storage_read_file: "ファイルを読み込んでいます…",
   storage_write_file: "ファイルを書き込んでいます…",
   storage_search: "ファイルを検索しています…",
@@ -86,7 +92,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   excalidraw_list_notes: "ホワイトボードを取得しています…",
   design_list_projects: "設計プロジェクトを取得しています…",
   image_convert_storage: "画像を変換しています…",
-  image_generate: "画像を生成しています…",
+  image_generate: "Runaが画像を生成しています…",
 };
 
 function streamTextDeltas(send: RunaSseSend, text: string): void {
@@ -103,11 +109,25 @@ function formatRecentFilesReply(files: RunaFileItem[]): string {
   return `${formatFileItemsMarkdown("過去30日で更新されたファイル（全ユーザー・操作者問わず）", files)}\n\n※ 特定ユーザーのファイルは storage_files_by_user を使います。`;
 }
 
+export interface RunaChatContext {
+  storagePath?: string | null;
+  trashView?: boolean;
+  searchActive?: boolean;
+  editImagePath?: string | null;
+  editIntent?: boolean;
+}
+
 export interface RunaChatAttachment {
   path: string;
   name: string;
   extractedText?: string;
   imagePaths?: string[];
+  storageRef?: boolean;
+  sizeBytes?: number | null;
+}
+
+interface EnrichedRunaAttachment extends RunaChatAttachment {
+  probeText?: string;
 }
 
 const MAX_EXTRACTED_TEXT_CHARS = 24 * 1024;
@@ -119,7 +139,7 @@ function truncateExtractedText(text: string): string {
 
 function buildUserMessageText(
   trimmed: string,
-  attachments: RunaChatAttachment[]
+  attachments: EnrichedRunaAttachment[]
 ): string {
   const parts: string[] = [];
   if (trimmed) parts.push(trimmed);
@@ -128,15 +148,23 @@ function buildUserMessageText(
     parts.push("", "[添付ファイル]");
     for (const attachment of attachments) {
       parts.push(`- \`${attachment.path}\`（${attachment.name}）`);
-      const extracted = attachment.extractedText?.trim();
-      if (extracted) {
+      if (attachment.storageRef && attachment.probeText) {
         parts.push(
           "",
-          `[添付: ${attachment.name} の抽出内容]`,
-          "```",
-          truncateExtractedText(extracted),
-          "```"
+          `[参照: ${attachment.name}]`,
+          attachment.probeText
         );
+      } else {
+        const extracted = attachment.extractedText?.trim();
+        if (extracted) {
+          parts.push(
+            "",
+            `[添付: ${attachment.name} の抽出内容]`,
+            "```",
+            truncateExtractedText(extracted),
+            "```"
+          );
+        }
       }
       if (attachment.imagePaths?.length) {
         parts.push(
@@ -151,6 +179,78 @@ function buildUserMessageText(
   }
 
   return parts.join("\n").trim();
+}
+
+async function enrichAttachmentsForRuna(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  attachments: RunaChatAttachment[]
+): Promise<EnrichedRunaAttachment[]> {
+  const out: EnrichedRunaAttachment[] = [];
+  for (const attachment of attachments) {
+    if (!attachment.storageRef) {
+      out.push(attachment);
+      continue;
+    }
+    try {
+      const probe = await probeStorageFileForRuna(env, db, user, attachment.path);
+      out.push({
+        ...attachment,
+        probeText: formatFileProbeForRuna(probe),
+        imagePaths:
+          probe.kind === "image"
+            ? [attachment.path]
+            : attachment.imagePaths,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "ファイル概要の取得に失敗";
+      out.push({
+        ...attachment,
+        probeText: `ファイル: \`${attachment.path}\`\n（概要取得失敗: ${message}）`,
+      });
+    }
+  }
+  return out;
+}
+
+function buildContextSystemHint(context?: RunaChatContext): string {
+  if (!context) return "";
+
+  const parts: string[] = [];
+
+  const editPath = context.editImagePath?.trim();
+  if (editPath) {
+    parts.push(
+      `\n\n## 画像編集コンテキスト\nユーザーは \`${editPath}\` の**追加編集**を意図しています。\n` +
+        `- 修正指示が来たら必ず image_generate を mode=edit、source_path=\`${editPath}\` で呼ぶ\n` +
+        `- draft や新規 final は使わない\n` +
+        `- プロンプトは変更点1つに絞り、それ以外は維持すると明示する（例: 背景のみ夕焼けに。人物・構図・照明はそのまま）\n` +
+        `- aspect_ratio は auto を使う\n` +
+        `- 編集結果は別ファイルとして保存される。続けて編集する場合は**最新の結果 path** を source_path に使う\n` +
+        `- 複数の変更を一度に求められたら、1回の edit にまとめるか、段階的に最新結果へ chain することをユーザーに短く案内してよい`
+    );
+  }
+
+  if (context.trashView) {
+    parts.push(
+      `\n\n## 現在の画面\nユーザーはクラウドストレージの**ごみ箱**を見ています。`
+    );
+  } else if (context.searchActive) {
+    parts.push(
+      `\n\n## 現在の画面\nユーザーはクラウドストレージで**検索結果**を見ています。フォルダ直下の一覧とは限りません。`
+    );
+  } else {
+    const path = context.storagePath?.trim();
+    if (path) {
+      parts.push(
+        `\n\n## 現在の画面\nユーザーはクラウドストレージで \`${path}\` を開いています。「ここ」「このフォルダ」「表示中」はこのパスを指します。内容確認は storage_list で path=${path} を使ってください。`
+      );
+    }
+  }
+
+  return parts.join("");
 }
 
 function attachVisionToLastUserMessage(
@@ -208,6 +308,49 @@ async function tryRecentFilesFastPath(
   return { message: reply, files };
 }
 
+/** クラウドストレージで開いているフォルダの内容質問を即答 */
+async function tryOpenDirectoryFastPath(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  message: string,
+  context: RunaChatContext | undefined,
+  send: RunaSseSend
+): Promise<RunaChatResult | null> {
+  const path = context?.storagePath?.trim();
+  if (!path || context?.trashView || context?.searchActive) return null;
+  if (!isOpenDirectoryQuery(message)) return null;
+
+  const activity = new RunaActivityLog(send);
+  const workId = activity.start(
+    "working",
+    "フォルダの内容を取得しています…",
+    path
+  );
+
+  const result = await executeRunaTool(
+    env,
+    db,
+    user,
+    "storage_list",
+    JSON.stringify({ path, limit: 50 })
+  );
+  activity.finish(workId, "working", `${result.files.length} 件`);
+
+  const reply =
+    result.files.length > 0
+      ? formatFileItemsMarkdown(`**${path}** の内容`, result.files)
+      : `\`${path}\` にはファイルがありません（空のフォルダです）。`;
+
+  const writeId = activity.start("writing", "結果を表示しています…");
+  streamTextDeltas(send, reply);
+  activity.finish(writeId, "writing");
+
+  if (result.files.length) send("files", { items: result.files });
+  await insertRunaMessage(db, user.id, "assistant", reply, result.files);
+  return { message: reply, files: result.files };
+}
+
 /** ユーザーメッセージを処理してアシスタント応答を返す */
 export async function runRunaChat(
   env: Env,
@@ -215,14 +358,21 @@ export async function runRunaChat(
   user: SessionUser,
   message: string,
   send: RunaSseSend,
-  attachments: RunaChatAttachment[] = []
+  attachments: RunaChatAttachment[] = [],
+  context?: RunaChatContext
 ): Promise<RunaChatResult> {
   const trimmed = message.trim();
   if (!trimmed && !attachments.length) {
     throw new Error("メッセージを入力してください");
   }
 
-  const userText = buildUserMessageText(trimmed, attachments);
+  const enrichedAttachments = await enrichAttachmentsForRuna(
+    env,
+    db,
+    user,
+    attachments
+  );
+  const userText = buildUserMessageText(trimmed, enrichedAttachments);
   const userFiles = attachments.length
     ? attachmentsToFileItems(attachments)
     : null;
@@ -231,8 +381,24 @@ export async function runRunaChat(
   await insertRunaMessage(db, user.id, "user", userText, userFiles);
   await incrementRunaDailyTurn(db, user.id);
 
-  const fast = await tryRecentFilesFastPath(env, db, user, trimmed || userText, send);
-  if (fast) return fast;
+  const fastRecent = await tryRecentFilesFastPath(
+    env,
+    db,
+    user,
+    trimmed || userText,
+    send
+  );
+  if (fastRecent) return fastRecent;
+
+  const fastDir = await tryOpenDirectoryFastPath(
+    env,
+    db,
+    user,
+    trimmed || userText,
+    context,
+    send
+  );
+  if (fastDir) return fastDir;
 
   const activity = new RunaActivityLog(send);
   const history = await buildRunaChatHistory(db, user.id, 20);
@@ -254,7 +420,7 @@ export async function runRunaChat(
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${RUNA_SYSTEM_PROMPT}\n\n## このユーザーがアクセスできるルート\n${rootsHint}\n\n個人ルートは u/${user.username} です。`,
+      content: `${RUNA_SYSTEM_PROMPT}${buildContextSystemHint(context)}\n\n## このユーザーがアクセスできるルート\n${rootsHint}\n\n個人ルートは u/${user.username} です。`,
     },
     ...history.map((h) => ({
       role: h.role,
@@ -266,7 +432,7 @@ export async function runRunaChat(
     env,
     db,
     user,
-    attachments
+    enrichedAttachments
   );
   attachVisionToLastUserMessage(messages, imageDataUrls);
 

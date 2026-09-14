@@ -110,6 +110,30 @@ export function isUserScopedFilesQuery(message: string): boolean {
   return false;
 }
 
+/** クラウドストレージで開いているフォルダに関する質問か（高速パス用） */
+export function isOpenDirectoryQuery(message: string): boolean {
+  const text = message.trim();
+  if (!text) return false;
+  if (isRecentFilesQuery(text)) return false;
+  if (isUserScopedFilesQuery(text)) return false;
+
+  const refersHere =
+    /ここ|このフォルダ|この中|このディレクトリ|開いている|表示されている|表示中|今見ている|今開いている/.test(
+      text
+    );
+  const asksContents =
+    /ファイル|フォルダ|中身|一覧|何がある|あるもの|中には|入って|入っている/.test(text);
+
+  if (refersHere && asksContents) return true;
+  if (/^(この中|ここ|このフォルダ).{0,12}(何|ファイル|一覧)/.test(text)) {
+    return true;
+  }
+  return (
+    /^(何|どんな).{0,8}(ファイル|フォルダ).{0,8}(ある|いる)/.test(text) &&
+    refersHere
+  );
+}
+
 /** 最近更新ファイルの質問かどうか（AI を迂回する高速パス用） */
 export function isRecentFilesQuery(message: string): boolean {
   const text = message.trim();
@@ -158,6 +182,12 @@ export function summarizeToolArgs(
   }
   if (typeof args.dest_path === "string" && args.dest_path) {
     parts.push(`dest: ${args.dest_path}`);
+  }
+  if (typeof args.grep === "string" && args.grep) {
+    parts.push(`grep: ${args.grep.slice(0, 60)}`);
+  }
+  if (typeof args.line_start === "number") {
+    parts.push(`line: ${args.line_start}`);
   }
   if (!parts.length) {
     const compact = JSON.stringify(args);
