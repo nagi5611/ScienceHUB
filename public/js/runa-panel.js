@@ -3,6 +3,7 @@
  */
 
 import { prepareAttachmentFile } from "./runa-attachments/prepare.js";
+import { iconHtml } from "./hub-icons.js";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -988,6 +989,12 @@ function handleAttachDrop(event) {
   void addAttachmentFiles(files);
 }
 
+/** 添付ボタンにストローク SVG アイコンを表示 */
+function hydrateAttachButtonIcon() {
+  if (!els.attachBtn) return;
+  els.attachBtn.innerHTML = iconHtml("paperclip", "hub-icon runa-attach-btn-icon");
+}
+
 function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
@@ -1030,6 +1037,7 @@ export function initRunaPanel(options = {}) {
     els.input.placeholder = panelOptions.placeholder;
   }
   if (!els.fab || !els.panel) return;
+  hydrateAttachButtonIcon();
   bindEvents();
   updateContextHint();
 }

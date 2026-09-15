@@ -667,12 +667,18 @@ body.runa-lightbox-open {
   border: 1px solid var(--cf-border, #e2e5e9);
   border-radius: var(--cf-radius, 8px);
   background: var(--cf-bg, #fff);
-  font-size: 1.1rem;
+  color: var(--cf-muted, #6b7280);
   cursor: pointer;
+}
+
+.runa-attach-btn-icon {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .runa-attach-btn:hover:not(:disabled) {
   background: var(--cf-surface, #f6f6f7);
+  color: var(--cf-text, #1d2433);
 }
 
 .runa-attach-btn:disabled {

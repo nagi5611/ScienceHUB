@@ -21,6 +21,7 @@ const ICONS = {
   clipboard: `<rect x="6" y="4" width="12" height="17" rx="2" ${STROKE}/><path d="M9 4.5h6v2H9z" ${STROKE}/><path d="M9 11h6M9 15h4" ${STROKE}/>`,
   chart: `<path d="M4 19V5M4 19h16M8 17V11M12 17V7M16 17v-4" ${STROKE}/>`,
   globe: `<circle cx="12" cy="12" r="9" ${STROKE}/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" ${STROKE}/>`,
+  paperclip: `<path d="M16.5 6.5v9a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v9a1.5 1.5 0 0 1-3 0V6" ${STROKE}/>`,
 };
 
 const SLUG_ICON = {
