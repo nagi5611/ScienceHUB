@@ -411,10 +411,23 @@ function setPanelOpen(open) {
 }
 
 const ACTIVITY_PHASE_LABELS = {
-  thinking: "考え中",
-  working: "実行中",
-  writing: "作成中",
+  thinking: "thinking..",
+  working: "working..",
+  writing: "writing..",
 };
+
+function getCompactPhaseLabel(phase) {
+  return ACTIVITY_PHASE_LABELS[phase] || `${phase}..`;
+}
+
+function getActivityDetailText(activity) {
+  if (activity.detail?.trim()) return activity.detail;
+  if (activity.phase === "working" && activity.label && activity.label !== getCompactPhaseLabel(activity.phase)) {
+    return activity.label;
+  }
+  if (activity.state !== "done") return "処理中…";
+  return "（詳細は記録されませんでした）";
+}
 
 let pendingBubbleRaf = 0;
 let lastActivityDetailPaintAt = 0;
@@ -424,6 +437,7 @@ function schedulePendingBubbleUpdate(pending) {
   if (pendingBubbleRaf) return;
   pendingBubbleRaf = requestAnimationFrame(() => {
     pendingBubbleRaf = 0;
+    lastActivityDetailPaintAt = Date.now();
     updatePendingAssistantBubble(pending);
   });
 }
@@ -431,24 +445,24 @@ function schedulePendingBubbleUpdate(pending) {
 function renderLivePhaseHtml(activities) {
   const active = activities?.find((a) => a.state !== "done");
   if (!active) return "";
-  const phase = ACTIVITY_PHASE_LABELS[active.phase] || active.phase;
+  const compact = getCompactPhaseLabel(active.phase);
   return `<div class="runa-live-phase" aria-live="polite">
     <span class="runa-live-phase-dot" aria-hidden="true"></span>
-    <span class="runa-live-phase-text"><span class="runa-live-phase-kind">${escapeHtml(phase)}</span>${escapeHtml(active.label || phase)}</span>
+    <span class="runa-live-phase-text runa-live-phase-compact">${escapeHtml(compact)}</span>
   </div>`;
 }
 
 function renderActivityHtml(activity) {
-  const phase = ACTIVITY_PHASE_LABELS[activity.phase] || activity.phase;
+  const compact = getCompactPhaseLabel(activity.phase);
   const done = activity.state === "done";
   const open = activity.open ? " open" : "";
   const doneClass = done ? " is-done" : " is-active";
-  const detailText =
-    activity.detail ||
-    (done ? "（詳細は記録されませんでした）" : "処理中…");
-  const detail = `<div class="runa-activity-detail">${escapeHtml(detailText)}</div>`;
+  const streaming =
+    !done && (activity.phase === "thinking" || activity.phase === "writing");
+  const detailText = getActivityDetailText(activity);
+  const detail = `<div class="runa-activity-detail${streaming ? " is-streaming" : ""}">${escapeHtml(detailText)}</div>`;
   return `<details class="runa-activity runa-activity--${activity.phase}${doneClass}"${open} data-activity-id="${escapeHtml(activity.id)}">
-    <summary><span class="runa-activity-phase">${phase}</span><span class="runa-activity-chevron">›</span> ${escapeHtml(activity.label || phase)}</summary>
+    <summary><span class="runa-activity-phase">${escapeHtml(compact)}</span><span class="runa-activity-chevron" aria-hidden="true">›</span></summary>
     ${detail}
   </details>`;
 }
@@ -561,6 +575,23 @@ function bindActivityToggleHandlers(root) {
       if (item) item.open = el.open;
     });
   }
+
+  const livePhase = root.querySelector(".runa-live-phase");
+  if (livePhase && !livePhase.dataset.bound) {
+    livePhase.dataset.bound = "1";
+    livePhase.classList.add("is-clickable");
+    livePhase.addEventListener("click", () => {
+      const pending = messageState.find((m) => m.pending);
+      const active = pending?.activities?.find((a) => a.state !== "done");
+      if (!active || !pendingAssistantRow) return;
+      active.open = true;
+      const details = pendingAssistantRow.querySelector(
+        `.runa-activity[data-activity-id="${active.id}"]`
+      );
+      if (details) details.open = true;
+      updatePendingAssistantBubble(pending);
+    });
+  }
 }
 
 function mountPendingAssistantBubble(pending) {
@@ -592,8 +623,17 @@ function updatePendingAssistantBubble(pending) {
   bindActivityToggleHandlers(pendingAssistantRow);
 
   const active = pending.activities?.find((a) => a.state !== "done");
-  setStatus(active?.label || "");
+  setStatus(active ? getCompactPhaseLabel(active.phase) : "");
   scrollMessagesToBottom();
+
+  if (active?.open) {
+    const detailEl = pendingAssistantRow?.querySelector(
+      `.runa-activity[data-activity-id="${active.id}"] .runa-activity-detail`
+    );
+    if (detailEl) {
+      detailEl.scrollTop = detailEl.scrollHeight;
+    }
+  }
 }
 
 function applyActivityEvent(pending, payload) {
@@ -622,8 +662,9 @@ function applyActivityEvent(pending, payload) {
   if (existing) {
     if (payload.state === "update") {
       if (payload.detail) existing.detail = payload.detail;
+      const throttleMs = existing.phase === "thinking" ? 24 : 100;
       const now = Date.now();
-      if (now - lastActivityDetailPaintAt < 100) {
+      if (now - lastActivityDetailPaintAt < throttleMs) {
         schedulePendingBubbleUpdate(pending);
         return;
       }
@@ -843,7 +884,11 @@ async function postRunaChat(message, attachments) {
       };
       updatePendingAssistantBubble(pending);
     } else if (eventName === "status" && payload.label) {
-      setStatus(payload.label);
+      const phaseLabel =
+        payload.phase && ACTIVITY_PHASE_LABELS[payload.phase]
+          ? ACTIVITY_PHASE_LABELS[payload.phase]
+          : payload.label;
+      setStatus(phaseLabel);
     } else if (eventName === "delta" && payload.text) {
       pending.content += payload.text;
       updatePendingAssistantBubble(pending);

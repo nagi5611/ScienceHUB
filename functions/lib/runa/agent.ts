@@ -113,6 +113,10 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   image_generate: "Runaが画像を生成しています…",
 };
 
+const THINKING_STATUS = "thinking..";
+const WORKING_STATUS = "working..";
+const WRITING_STATUS = "writing..";
+
 function streamTextDeltas(send: RunaSseSend, text: string): void {
   const chunkSize = 8;
   for (let i = 0; i < text.length; i += chunkSize) {
@@ -454,7 +458,11 @@ export async function runRunaChat(
 
   let taskPlan: RunaTaskPlan | null = null;
   if (shouldPlanRunaTasks(trimmed || userText, attachments, context)) {
-    const planId = activity.start("thinking", "タスクを整理しています…", trimmed);
+    const planId = activity.start(
+      "thinking",
+      THINKING_STATUS,
+      "タスクを整理しています…"
+    );
     try {
       taskPlan = await planRunaTasks(env, trimmed || userText, attachments);
       send("tasks", toTasksSsePayload(taskPlan));
@@ -532,9 +540,6 @@ export async function runRunaChat(
   let writingActivityId: string | null = null;
   /** ツール完了直後に先行開始した thinking（無音ギャップ防止） */
   let prefetchedThinkId: string | null = null;
-  const firstThinkLabel = "応答を考えています…";
-  const nextThinkLabel = "次の操作を考えています…";
-
   for (let round = 0; round < maxRounds; round++) {
     let streamedReply = false;
     let thinkId: string | null = prefetchedThinkId;
@@ -543,11 +548,11 @@ export async function runRunaChat(
     if (!thinkId) {
       thinkId = activity.start(
         "thinking",
-        round === 0 ? firstThinkLabel : nextThinkLabel,
+        THINKING_STATUS,
         `ラウンド ${round + 1}/${maxRounds}`
       );
     } else {
-      send("status", { label: nextThinkLabel, phase: "thinking" });
+      send("status", { label: THINKING_STATUS, phase: "thinking" });
     }
     let reasoningBuffer = "";
 
@@ -577,17 +582,7 @@ export async function runRunaChat(
       onReasoningDelta: (text) => {
         reasoningBuffer += text;
         if (thinkId) {
-          activity.update(
-            thinkId,
-            "thinking",
-            formatThinkingSummary({
-              round: round + 1,
-              maxRounds,
-              reasoning: reasoningBuffer,
-              content: null,
-              toolPlans: [],
-            })
-          );
+          activity.update(thinkId, "thinking", reasoningBuffer);
         }
       },
       onTextDelta: (text) => {
@@ -606,7 +601,11 @@ export async function runRunaChat(
             );
             thinkId = null;
           }
-          writingActivityId = activity.start("writing", "回答を書いています…");
+          writingActivityId = activity.start(
+            "writing",
+            WRITING_STATUS,
+            "回答を書いています…"
+          );
         }
         streamedReply = true;
         send("delta", { text });
@@ -651,10 +650,10 @@ export async function runRunaChat(
       if (round + 1 < maxRounds) {
         prefetchedThinkId = activity.start(
           "thinking",
-          nextThinkLabel,
+          THINKING_STATUS,
           `ラウンド ${round + 2}/${maxRounds}`
         );
-        send("status", { label: nextThinkLabel, phase: "thinking" });
+        send("status", { label: THINKING_STATUS, phase: "thinking" });
       }
 
       usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
@@ -683,7 +682,11 @@ export async function runRunaChat(
 
     if (!streamedReply) {
       if (!writingActivityId) {
-        writingActivityId = activity.start("writing", "回答を書いています…");
+        writingActivityId = activity.start(
+          "writing",
+          WRITING_STATUS,
+          "回答を書いています…"
+        );
       }
       streamTextDeltas(send, reply);
     }
@@ -704,7 +707,11 @@ export async function runRunaChat(
 
   const fallback =
     "ツール呼び出しの上限に達しました。もう少し具体的な指示をお試しください。";
-  const writeId = activity.start("writing", "回答を書いています…");
+  const writeId = activity.start(
+    "writing",
+    WRITING_STATUS,
+    "回答を書いています…"
+  );
   streamTextDeltas(send, fallback);
   activity.finish(writeId, "writing");
   await insertRunaMessage(db, user.id, "assistant", fallback, collectedFiles);
@@ -722,10 +729,16 @@ async function handleToolCall(
   activity: RunaActivityLog
 ): Promise<void> {
   const name = call.function.name;
-  const label = TOOL_STATUS_LABELS[name] ?? `${name} を実行中…`;
+  const actionLabel = TOOL_STATUS_LABELS[name] ?? `${name} を実行中…`;
   const argDetail = summarizeToolArgs(name, call.function.arguments);
-  send("status", { label, tool: name, detail: argDetail, phase: "working" });
-  const workId = activity.start("working", label, argDetail);
+  const detail = argDetail ? `${actionLabel}\n${argDetail}` : actionLabel;
+  send("status", {
+    label: WORKING_STATUS,
+    tool: name,
+    detail: actionLabel,
+    phase: "working",
+  });
+  const workId = activity.start("working", WORKING_STATUS, detail);
 
   const result = isHubTool(name)
     ? await executeHubTool(env, db, user, name, call.function.arguments)
