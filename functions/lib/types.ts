@@ -97,6 +97,8 @@ export interface Env {
   GEMINI_OPENFOAM_REVIEW_MODEL?: string;
   /** 一次審査プロンプト用 OpenFOAM 構文リファレンス全文の上書き */
   OPENFOAM_REVIEW_SYNTAX_REFERENCE?: string;
+  /** Cloudflare Images（Runa 画像圧縮・編集 API 入力） */
+  IMAGES?: unknown;
   /** 画像変換 Worker（Cloudflare Images） */
   IMAGE_CONVERTER?: Fetcher;
   /** 画像変換 Worker 内部認証 */
