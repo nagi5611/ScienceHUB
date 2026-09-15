@@ -8,6 +8,7 @@ import { parseLogicalPath, type StorageRootType } from "../storage/keys";
 import { authorizeStoragePath } from "../storage/permissions";
 import { STORAGE_APP_SLUG } from "../storage/constants";
 import { createStorageShareLink } from "../storage/share";
+import { buildRunaOriginRequest } from "./origin";
 import { buildVisibleRoots, listDirectory } from "../storage/list";
 import { searchStorageFiles, parseSearchDateFrom, parseSearchDateTo } from "../storage/search";
 import { getFileMeta, getFolderMeta } from "../storage/meta";
@@ -487,13 +488,6 @@ function pathsArg(args: Record<string, unknown>, key: string): string[] {
   }
   if (typeof v === "string" && v.trim()) return [v.trim()];
   return [];
-}
-
-function buildRunaOriginRequest(env: Env): Request {
-  const origin =
-    env.OAUTH_REDIRECT_BASE?.trim().replace(/\/$/, "") ||
-    "https://s.mmh-virtual.jp";
-  return new Request(`${origin}/`);
 }
 
 export interface ToolRunResult {
