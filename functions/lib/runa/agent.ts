@@ -338,15 +338,15 @@ async function tryRecentFilesFastPath(
   const activity = new RunaActivityLog(send);
   const workId = activity.start(
     "working",
-    "最近更新されたファイルを検索しています…",
-    "R2 ストレージを全ルート並列検索（.meta 読み込みなし）"
+    WORKING_STATUS,
+    "最近更新されたファイルを検索しています…\nR2 ストレージを全ルート並列検索（.meta 読み込みなし）"
   );
 
   const files = await listRecentFilesForUser(env, db, user, 20);
   activity.finish(workId, "working", `${files.length} 件ヒット`);
 
   const reply = formatRecentFilesReply(files);
-  const writeId = activity.start("writing", "結果を表示しています…");
+  const writeId = activity.start("writing", WRITING_STATUS, "結果を表示しています…");
   streamTextDeltas(send, reply);
   activity.finish(writeId, "writing");
 
@@ -371,8 +371,8 @@ async function tryOpenDirectoryFastPath(
   const activity = new RunaActivityLog(send);
   const workId = activity.start(
     "working",
-    "フォルダの内容を取得しています…",
-    path
+    WORKING_STATUS,
+    `フォルダの内容を取得しています…\npath: ${path}`
   );
 
   const result = await executeRunaTool(
@@ -389,7 +389,7 @@ async function tryOpenDirectoryFastPath(
       ? formatFileItemsMarkdown(`**${path}** の内容`, result.files)
       : `\`${path}\` にはファイルがありません（空のフォルダです）。`;
 
-  const writeId = activity.start("writing", "結果を表示しています…");
+  const writeId = activity.start("writing", WRITING_STATUS, "結果を表示しています…");
   streamTextDeltas(send, reply);
   activity.finish(writeId, "writing");
 
