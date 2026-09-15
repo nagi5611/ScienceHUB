@@ -47,13 +47,14 @@ import {
   renderOfficePreview,
 } from "./preview-office.js";
 import { initAgentTokensDialog } from "./agent-tokens.js";
+import { attachStorageReference, initRunaPanel } from "/js/runa-panel.js";
 import {
-  attachStorageReference,
-  clearWebSiteEditContext,
-  initRunaPanel,
-  openRunaPanelDocked,
-  setWebSiteEditContext,
-} from "/js/runa-panel.js";
+  clearWebsiteEditorRunaContext,
+  hideWebsiteEditorRuna,
+  initWebsiteEditorRuna,
+  setWebsiteEditorRunaContext,
+  toggleWebsiteEditorRuna,
+} from "./website-editor-runa.js";
 import {
   deleteWebSitePaths,
   expandWebSitePathsToFiles,
@@ -582,14 +583,15 @@ function getWebSiteRelPath(item) {
 
 function closeWebSiteTextEditor() {
   editingWebSitePath = null;
-  clearWebSiteEditContext();
+  clearWebsiteEditorRunaContext();
+  hideWebsiteEditorRuna();
   document.getElementById("cs-website-edit-dialog")?.close();
 }
 
 function syncWebSiteEditorRunaContext(filePath) {
   if (!currentWebSiteId || !filePath) return;
   const contentEl = document.getElementById("cs-website-edit-content");
-  setWebSiteEditContext({
+  setWebsiteEditorRunaContext({
     siteId: currentWebSiteId,
     path: filePath,
     name: filePath.split("/").pop() ?? filePath,
@@ -613,7 +615,6 @@ async function openWebSiteTextEditor(filePath) {
     contentEl.value = data.content ?? "";
     dialog.showModal();
     syncWebSiteEditorRunaContext(filePath);
-    openRunaPanelDocked();
   } catch (err) {
     showToast(err instanceof Error ? err.message : "読み込みに失敗しました", true);
   }
@@ -3838,14 +3839,16 @@ function bindEvents() {
   document.getElementById("cs-website-edit-cancel")?.addEventListener("click", closeWebSiteTextEditor);
   document.getElementById("cs-website-edit-runa-btn")?.addEventListener("click", () => {
     if (editingWebSitePath) syncWebSiteEditorRunaContext(editingWebSitePath);
-    openRunaPanelDocked();
+    toggleWebsiteEditorRuna();
   });
   document.getElementById("cs-website-edit-dialog")?.addEventListener("close", () => {
     if (editingWebSitePath) {
       editingWebSitePath = null;
-      clearWebSiteEditContext();
+      clearWebsiteEditorRunaContext();
+      hideWebsiteEditorRuna();
     }
   });
+  initWebsiteEditorRuna();
   document.getElementById("cs-website-edit-form")?.addEventListener("submit", (e) => {
     saveWebSiteTextEditor(e).catch((err) => {
       showToast(err instanceof Error ? err.message : "保存に失敗しました", true);

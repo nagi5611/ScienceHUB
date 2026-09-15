@@ -247,24 +247,50 @@
     </footer>
   </dialog>
 
-  <dialog class="cs-upload-dialog cs-editor-dialog" id="cs-website-edit-dialog">
-    <form method="dialog" class="cs-editor-form" id="cs-website-edit-form">
-      <header class="cs-upload-dialog-header">
-        <h2 class="cs-upload-dialog-title">ファイル編集</h2>
-        <div class="cs-editor-header-actions">
-          <button type="button" class="cs-btn cs-btn-runa" id="cs-website-edit-runa-btn">Runa</button>
-          <button type="button" class="cs-preview-close" id="cs-website-edit-close" aria-label="閉じる">✕</button>
+  <dialog class="cs-upload-dialog cs-editor-shell-dialog" id="cs-website-edit-dialog">
+    <div class="cs-editor-shell" id="cs-editor-shell">
+      <section class="cs-editor-pane" aria-label="ファイル編集">
+        <form method="dialog" class="cs-editor-form" id="cs-website-edit-form">
+          <header class="cs-upload-dialog-header">
+            <h2 class="cs-upload-dialog-title">ファイル編集</h2>
+            <div class="cs-editor-header-actions">
+              <button type="button" class="cs-btn cs-btn-runa" id="cs-website-edit-runa-btn" aria-pressed="false">Runa</button>
+              <button type="button" class="cs-preview-close" id="cs-website-edit-close" aria-label="閉じる">✕</button>
+            </div>
+          </header>
+          <div class="cs-upload-dialog-body cs-editor-dialog-body">
+            <p class="cs-editor-path" id="cs-website-edit-path"></p>
+            <textarea id="cs-website-edit-content" class="cs-editor-textarea" spellcheck="false"></textarea>
+          </div>
+          <footer class="cs-upload-dialog-footer">
+            <button type="button" class="cs-btn" id="cs-website-edit-cancel">キャンセル</button>
+            <button type="submit" class="cs-btn cs-btn-primary">保存</button>
+          </footer>
+        </form>
+      </section>
+      <aside class="cs-editor-runa-pane" id="cs-editor-runa-pane" aria-label="Runa" hidden>
+        <div class="cs-editor-runa-inner">
+          <header class="runa-header cs-editor-runa-header">
+            <div>
+              <p class="runa-kicker">ScienceHUB Agent</p>
+              <h2 class="runa-title">Runa</h2>
+            </div>
+            <div class="runa-header-actions">
+              <button type="button" class="runa-new-chat" id="cs-er-new-chat">新規チャット</button>
+            </div>
+          </header>
+          <p class="runa-status" id="cs-er-status" hidden></p>
+          <p class="runa-context-hint" id="cs-er-context-hint" hidden></p>
+          <div class="runa-body cs-editor-runa-body">
+            <div class="runa-messages" id="cs-er-messages"></div>
+            <form class="runa-form" id="cs-er-form">
+              <textarea class="runa-input" id="cs-er-input" rows="2" aria-label="メッセージ"></textarea>
+              <button type="submit" class="runa-send" id="cs-er-send">送信</button>
+            </form>
+          </div>
         </div>
-      </header>
-      <div class="cs-upload-dialog-body cs-editor-dialog-body">
-        <p class="cs-editor-path" id="cs-website-edit-path"></p>
-        <textarea id="cs-website-edit-content" class="cs-editor-textarea" spellcheck="false"></textarea>
-      </div>
-      <footer class="cs-upload-dialog-footer">
-        <button type="button" class="cs-btn" id="cs-website-edit-cancel">キャンセル</button>
-        <button type="submit" class="cs-btn cs-btn-primary">保存</button>
-      </footer>
-    </form>
+      </aside>
+    </div>
   </dialog>
 
   <dialog class="cs-upload-dialog" id="cs-agent-dialog">
