@@ -1,8 +1,7 @@
 /**
- * Runa — 編集 API / ストレージ向け画像圧縮（Cloudflare Images）
+ * Runa — 編集 API / ストレージ向け画像圧縮（image-converter Worker 経由）
  */
 
-import { transformWithCloudflareImages } from "../image-converter/cloudflare-images";
 import type { Env } from "../types";
 import {
   EDIT_IMAGE_MAX_EDGE_PX,
@@ -18,37 +17,6 @@ export const EDIT_IMAGE_STORE_COMPRESS_THRESHOLD_BYTES = 512 * 1024;
 interface CompressOptions {
   maxEdge: number;
   quality: number;
-}
-
-async function compressViaImagesBinding(
-  env: Env,
-  bytes: Uint8Array,
-  mime: SupportedImageMime,
-  options: CompressOptions
-): Promise<Uint8Array | null> {
-  if (!env.IMAGES) return null;
-
-  const response = await transformWithCloudflareImages(
-    { IMAGES: env.IMAGES as Parameters<typeof transformWithCloudflareImages>[0]["IMAGES"] },
-    new Blob([bytes], { type: mime }).stream(),
-    {
-      format: "jpeg",
-      quality: options.quality,
-      maxEdge: options.maxEdge,
-    }
-  );
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    console.error("Runa image compress via IMAGES binding failed", {
-      status: response.status,
-      detail: detail.slice(0, 300),
-      inputBytes: bytes.length,
-    });
-    return null;
-  }
-
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function compressViaConverterService(
@@ -78,8 +46,10 @@ async function compressViaConverterService(
   );
 
   if (!workerResponse.ok) {
+    const detail = await workerResponse.text().catch(() => "");
     console.error("Runa image compress via IMAGE_CONVERTER failed", {
       status: workerResponse.status,
+      detail: detail.slice(0, 300),
       filename,
       inputBytes: bytes.length,
     });
@@ -89,7 +59,7 @@ async function compressViaConverterService(
   return new Uint8Array(await workerResponse.arrayBuffer());
 }
 
-/** Cloudflare Images で JPEG 圧縮（IMAGES バインディング → image-converter サービス） */
+/** image-converter Worker で JPEG 圧縮 */
 export async function compressImageToJpeg(
   env: Env,
   bytes: Uint8Array,
@@ -99,25 +69,13 @@ export async function compressImageToJpeg(
 ): Promise<{ bytes: Uint8Array; mime: SupportedImageMime } | null> {
   const maxEdge = options.maxEdge ?? EDIT_IMAGE_MAX_EDGE_PX;
   const quality = options.quality ?? 85;
-  const compressOptions = { maxEdge, quality };
-
-  const viaBinding = await compressViaImagesBinding(
-    env,
-    bytes,
-    detectedMime,
-    compressOptions
-  );
-  if (viaBinding) {
-    const mime = detectImageMimeFromBytes(viaBinding) ?? "image/jpeg";
-    return { bytes: viaBinding, mime };
-  }
 
   const viaService = await compressViaConverterService(
     env,
     bytes,
     filename,
     detectedMime,
-    compressOptions
+    { maxEdge, quality }
   );
   if (!viaService) return null;
 
@@ -148,7 +106,7 @@ export async function prepareReferenceImageForEdit(
 
   if (bytes.length > EDIT_IMAGE_MAX_REFERENCE_BYTES) {
     throw new Error(
-      "編集用画像が大きすぎます。image-converter Worker または Images バインディングの設定を確認してください"
+      "編集用画像が大きすぎます。image-converter Worker のデプロイを確認してください"
     );
   }
 

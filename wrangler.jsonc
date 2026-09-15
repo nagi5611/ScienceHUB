@@ -51,8 +51,5 @@
 			"binding": "IMAGE_CONVERTER",
 			"service": "image-converter"
 		}
-	],
-	"images": {
-		"binding": "IMAGES"
-	}
+	]
 }
