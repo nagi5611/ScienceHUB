@@ -493,6 +493,11 @@ function pathsArg(args: Record<string, unknown>, key: string): string[] {
 export interface ToolRunResult {
   text: string;
   files: RunaFileItem[];
+  siteFileUpdate?: {
+    siteId: string;
+    path: string;
+    content: string;
+  };
 }
 
 /** ツールを実行して結果テキストとファイル一覧を返す */
