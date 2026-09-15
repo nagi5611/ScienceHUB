@@ -334,9 +334,6 @@ function updateToolbarForView() {
   const trashStatus = document.getElementById("cs-trash-status");
   if (trashStatus) trashStatus.hidden = !trashView;
 
-  const webSitesStatus = document.getElementById("cs-websites-status");
-  if (webSitesStatus) webSitesStatus.hidden = !webSitesView;
-
   const openUrlBtn = document.getElementById("cs-websites-open-url-btn");
   if (openUrlBtn) {
     const site = currentWebSiteId ? getWebSiteById(currentWebSiteId) : null;
