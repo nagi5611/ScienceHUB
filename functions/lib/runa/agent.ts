@@ -48,6 +48,14 @@ import {
   compactRunaDbHistoryIfNeeded,
 } from "./context-summarize";
 import { computeContextUsage, type ContextUsageInfo } from "./context-usage";
+import {
+  advanceRunaTaskPlan,
+  formatTasksForSystemPrompt,
+  planRunaTasks,
+  shouldPlanRunaTasks,
+  toTasksSsePayload,
+  type RunaTaskPlan,
+} from "./task-plan";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -439,10 +447,31 @@ export async function runRunaChat(
     context
   );
 
+  let taskPlan: RunaTaskPlan | null = null;
+  if (shouldPlanRunaTasks(trimmed || userText, attachments, context)) {
+    const planId = activity.start("thinking", "タスクを整理しています…", trimmed);
+    try {
+      taskPlan = await planRunaTasks(env, trimmed || userText, attachments);
+      send("tasks", toTasksSsePayload(taskPlan));
+      activity.finish(
+        planId,
+        "thinking",
+        taskPlan.tasks.map((t) => t.title).join(" → ")
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "タスク計画に失敗";
+      activity.finish(planId, "thinking", message);
+      taskPlan = null;
+    }
+  }
+
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: systemContent,
+      content: taskPlan
+        ? `${systemContent}${formatTasksForSystemPrompt(taskPlan)}`
+        : systemContent,
     },
     ...history.map((h) => ({
       role: h.role,
@@ -604,6 +633,15 @@ export async function runRunaChat(
         );
       }
 
+      if (taskPlan) {
+        taskPlan = advanceRunaTaskPlan(taskPlan);
+        send("tasks", toTasksSsePayload(taskPlan));
+        const systemMessage = messages[0];
+        if (systemMessage?.role === "system") {
+          systemMessage.content = `${systemContent}${formatTasksForSystemPrompt(taskPlan)}`;
+        }
+      }
+
       // 検索・ツール完了直後に次フェーズを表示（AWS AGENTPERF02-BP04 / 72Tech 推奨）
       if (round + 1 < maxRounds) {
         prefetchedThinkId = activity.start(
@@ -632,6 +670,11 @@ export async function runRunaChat(
     const reply =
       completion.content?.trim() ||
       "申し訳ありません。応答を生成できませんでした。";
+
+    if (taskPlan) {
+      taskPlan = advanceRunaTaskPlan(taskPlan, { finalize: true });
+      send("tasks", toTasksSsePayload(taskPlan));
+    }
 
     if (!streamedReply) {
       if (!writingActivityId) {
