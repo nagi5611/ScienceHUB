@@ -83,6 +83,14 @@ let searchUpdatedTo = "";
 let searchStatusText = "";
 let trashView = false;
 let trashQuota = { totalBytes: 0, quotaBytes: 50 * 1024 ** 3 };
+let webSitesView = false;
+let webPublishAccess = false;
+/** @type {string | null} */
+let currentWebSiteId = null;
+let webSiteDir = "";
+/** @type {Array<{ id: string; title: string; path_slug: string; used_bytes: number; max_bytes: number; public_url: string; has_index: boolean; updated_at: number }>} */
+let webSitesCache = [];
+const WEB_PUBLISH_API = "/api/website-publish";
 let viewMode = "list";
 
 const SEARCH_SCOPE_LABELS = {
@@ -219,12 +227,16 @@ function resolveViewModeForPath(path) {
   return "list";
 }
 
+function isAlternateView() {
+  return trashView || webSitesView;
+}
+
 function isIconViewMode() {
-  return viewMode === "icons" && !trashView;
+  return viewMode === "icons" && !isAlternateView();
 }
 
 function syncViewModeForCurrentPath() {
-  if (trashView) {
+  if (isAlternateView()) {
     viewMode = "list";
   } else if (currentPath) {
     viewMode = resolveViewModeForPath(currentPath);
@@ -242,7 +254,7 @@ function updateViewModeUi() {
 
   if (table) table.hidden = icons;
   if (grid) grid.hidden = !icons;
-  if (viewModeBar) viewModeBar.hidden = trashView;
+  if (viewModeBar) viewModeBar.hidden = isAlternateView();
 
   document.querySelectorAll(".cs-view-mode-btn").forEach((btn) => {
     const active = btn.dataset.viewMode === viewMode;
@@ -252,7 +264,7 @@ function updateViewModeUi() {
 }
 
 function handleViewModeChange(mode) {
-  if (trashView || !currentPath || mode === viewMode) return;
+  if (isAlternateView() || !currentPath || mode === viewMode) return;
   if (mode !== "list" && mode !== "icons") return;
 
   viewMode = mode;
@@ -299,21 +311,40 @@ function updateToolbarForView() {
     "cs-trash-purge-btn",
     "cs-trash-empty-btn",
   ];
+  const webSiteIds = [
+    "cs-websites-back-btn",
+    "cs-websites-open-app-btn",
+    "cs-websites-open-url-btn",
+  ];
 
+  const hideExplorer = isAlternateView();
   for (const id of explorerIds) {
     const el = document.getElementById(id);
-    if (el) el.hidden = trashView;
+    if (el) el.hidden = hideExplorer;
   }
   for (const id of trashIds) {
     const el = document.getElementById(id);
     if (el) el.hidden = !trashView;
   }
+  for (const id of webSiteIds) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !webSitesView;
+  }
 
-  const status = document.getElementById("cs-trash-status");
-  if (status) status.hidden = !trashView;
+  const trashStatus = document.getElementById("cs-trash-status");
+  if (trashStatus) trashStatus.hidden = !trashView;
+
+  const webSitesStatus = document.getElementById("cs-websites-status");
+  if (webSitesStatus) webSitesStatus.hidden = !webSitesView;
+
+  const openUrlBtn = document.getElementById("cs-websites-open-url-btn");
+  if (openUrlBtn) {
+    const site = currentWebSiteId ? getWebSiteById(currentWebSiteId) : null;
+    openUrlBtn.hidden = !webSitesView || !site?.public_url;
+  }
 
   const sortControls = document.querySelector(".cs-sort-controls");
-  if (sortControls) sortControls.hidden = trashView;
+  if (sortControls) sortControls.hidden = isAlternateView();
 }
 
 function enterTrashView(rootPath = null) {
@@ -321,6 +352,9 @@ function enterTrashView(rootPath = null) {
   if (!target) return;
   currentPath = target;
   trashView = true;
+  webSitesView = false;
+  currentWebSiteId = null;
+  webSiteDir = "";
   searchActive = false;
   selectedItems.clear();
   selectionAnchorIndex = -1;
@@ -339,6 +373,161 @@ function exitTrashView() {
   updateViewModeUi();
   renderRoots();
   refreshListing();
+}
+
+async function checkWebPublishAccess() {
+  try {
+    const res = await fetch("/api/apps/website-publish/access", {
+      credentials: "same-origin",
+    });
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    return Boolean(data.allowed);
+  } catch {
+    return false;
+  }
+}
+
+async function webPublishApi(path, options = {}) {
+  const headers = { ...(options.headers ?? {}) };
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(`${WEB_PUBLISH_API}/${path}`, {
+    credentials: "same-origin",
+    ...options,
+    headers,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error ?? "リクエストに失敗しました");
+  }
+  return data;
+}
+
+function getWebSiteById(siteId) {
+  return webSitesCache.find((site) => site.id === siteId) ?? null;
+}
+
+function parseWspPath(path) {
+  if (!path?.startsWith("wsp:")) return null;
+  const rest = path.slice(4);
+  const slash = rest.indexOf("/");
+  if (slash < 0) return { siteId: rest, relPath: "" };
+  return { siteId: rest.slice(0, slash), relPath: rest.slice(slash + 1) };
+}
+
+function joinWebSiteDir(base, segment) {
+  if (!base) return segment;
+  if (!segment) return base;
+  return `${base}/${segment}`;
+}
+
+function buildWebSiteDirListing(files, currentDir) {
+  const folders = new Set();
+  const fileItems = [];
+  const prefix = currentDir ? `${currentDir}/` : "";
+
+  for (const file of files) {
+    if (currentDir && !file.path.startsWith(prefix)) continue;
+    const rest = currentDir ? file.path.slice(prefix.length) : file.path;
+    if (!rest) continue;
+    const slash = rest.indexOf("/");
+    if (slash >= 0) {
+      folders.add(rest.slice(0, slash));
+    } else {
+      fileItems.push({ ...file, name: rest });
+    }
+  }
+
+  return {
+    folders: [...folders].sort((a, b) => a.localeCompare(b, "ja")),
+    files: fileItems.sort((a, b) => a.name.localeCompare(b.name, "ja")),
+  };
+}
+
+function enterWebSitesView(rootPath = null) {
+  const personalRoot = roots.find((root) => root.type === "user");
+  const target = rootPath ?? personalRoot?.path ?? getRootPath(currentPath);
+  if (!target || !webPublishAccess) return;
+  currentPath = target;
+  webSitesView = true;
+  trashView = false;
+  currentWebSiteId = null;
+  webSiteDir = "";
+  searchActive = false;
+  selectedItems.clear();
+  selectionAnchorIndex = -1;
+  updateSearchUi();
+  updateToolbarForView();
+  updateViewModeUi();
+  renderRoots();
+  refreshListing();
+}
+
+function exitWebSitesView() {
+  webSitesView = false;
+  currentWebSiteId = null;
+  webSiteDir = "";
+  selectedItems.clear();
+  selectionAnchorIndex = -1;
+  updateToolbarForView();
+  updateViewModeUi();
+  renderRoots();
+  refreshListing();
+}
+
+function handleWebSitesBack() {
+  if (!webSitesView) return;
+  if (currentWebSiteId) {
+    if (webSiteDir) {
+      const parts = webSiteDir.split("/").filter(Boolean);
+      parts.pop();
+      webSiteDir = parts.join("/");
+      selectedItems.clear();
+      selectionAnchorIndex = -1;
+      refreshListing();
+      return;
+    }
+    currentWebSiteId = null;
+    webSiteDir = "";
+    selectedItems.clear();
+    selectionAnchorIndex = -1;
+    updateToolbarForView();
+    refreshListing();
+    return;
+  }
+  exitWebSitesView();
+}
+
+function openWebSitePublicUrl() {
+  const site = currentWebSiteId ? getWebSiteById(currentWebSiteId) : null;
+  const url = site?.public_url;
+  if (!url) {
+    showToast("公開URLがありません", true);
+    return;
+  }
+  const absolute = url.startsWith("http") ? url : `${window.location.origin}${url}`;
+  window.open(absolute, "_blank", "noopener,noreferrer");
+}
+
+function openWebsitePublishApp() {
+  const url = new URL("/apps/website-publish/", window.location.origin);
+  if (currentWebSiteId) {
+    url.searchParams.set("site", currentWebSiteId);
+  }
+  window.open(url.toString(), "_blank", "noopener,noreferrer");
+}
+
+function downloadWebSiteFile(siteId, filePath) {
+  const url = `${WEB_PUBLISH_API}/sites/${encodeURIComponent(siteId)}/files/download?path=${encodeURIComponent(filePath)}`;
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filePath.split("/").pop() ?? "download";
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function updateTrashStatus() {
@@ -372,7 +561,7 @@ function applyQuotaBar(bar, usedBytes, quotaBytes) {
 }
 
 function canDragMove() {
-  return !trashView && !searchActive;
+  return !isAlternateView() && !searchActive;
 }
 
 function getParentLogicalPath(path) {
@@ -813,9 +1002,97 @@ function hideContextMenu() {
 }
 
 /** 単一項目のコンテキストメニュー */
+function showWebSiteContextMenu(clientX, clientY, item) {
+  const menu = document.getElementById("cs-context-menu");
+  const title = document.getElementById("cs-context-menu-title");
+  const itemsEl = document.getElementById("cs-context-menu-items");
+  if (!menu || !title || !itemsEl) return;
+
+  contextMenuItem = item;
+  title.textContent = item.name;
+
+  const actions = [];
+  if (item.isWebSiteRoot) {
+    actions.push({ id: "open", label: "開く" });
+    if (item.webSiteMeta?.public_url) {
+      actions.push({ id: "open-public-url", label: "公開URLを開く" });
+    }
+    actions.push({ id: "open-web-app", label: "ウェブサイト公開アプリで開く" });
+  } else if (item.type === "folder") {
+    actions.push({ id: "open", label: "開く" });
+  } else {
+    actions.push({ id: "download", label: "ダウンロード" });
+    actions.push({ id: "open-web-app", label: "ウェブサイト公開アプリで開く" });
+  }
+
+  renderContextMenu(menu, title, itemsEl, clientX, clientY, actions, (action) => {
+    handleWebSiteContextAction(action, item);
+  });
+}
+
+function handleWebSiteContextAction(action, item) {
+  hideContextMenu();
+  if (action === "open") {
+    navigateWebSiteItem(item);
+    return;
+  }
+  if (action === "open-public-url") {
+    const site = item.webSiteMeta ?? getWebSiteById(currentWebSiteId ?? "");
+    if (site?.public_url) {
+      const absolute = site.public_url.startsWith("http")
+        ? site.public_url
+        : `${window.location.origin}${site.public_url}`;
+      window.open(absolute, "_blank", "noopener,noreferrer");
+    }
+    return;
+  }
+  if (action === "open-web-app") {
+    const parsed = parseWspPath(item.path);
+    const siteId = parsed?.siteId ?? currentWebSiteId;
+    const url = new URL("/apps/website-publish/", window.location.origin);
+    if (siteId) url.searchParams.set("site", siteId);
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (action === "download" && item.webSiteFilePath && item.webSiteId) {
+    downloadWebSiteFile(item.webSiteId, item.webSiteFilePath);
+  }
+}
+
+function navigateWebSiteItem(item) {
+  if (item.isWebSiteRoot) {
+    const parsed = parseWspPath(item.path);
+    if (!parsed?.siteId) return;
+    currentWebSiteId = parsed.siteId;
+    webSiteDir = "";
+    selectedItems.clear();
+    selectionAnchorIndex = -1;
+    updateToolbarForView();
+    refreshListing();
+    return;
+  }
+  if (item.type === "folder") {
+    const parsed = parseWspPath(item.path);
+    if (!parsed) return;
+    currentWebSiteId = parsed.siteId;
+    webSiteDir = parsed.relPath;
+    selectedItems.clear();
+    selectionAnchorIndex = -1;
+    refreshListing();
+    return;
+  }
+  if (item.type === "file" && item.webSiteId && item.webSiteFilePath) {
+    downloadWebSiteFile(item.webSiteId, item.webSiteFilePath);
+  }
+}
+
 function showContextMenu(clientX, clientY, item) {
   if (trashView || item.isTrash) {
     showTrashContextMenu(clientX, clientY, item);
+    return;
+  }
+  if (webSitesView || item.isWebSite) {
+    showWebSiteContextMenu(clientX, clientY, item);
     return;
   }
 
@@ -866,6 +1143,10 @@ function showContextMenu(clientX, clientY, item) {
 function showMultiContextMenu(clientX, clientY) {
   if (trashView) {
     showTrashMultiContextMenu(clientX, clientY);
+    return;
+  }
+  if (webSitesView) {
+    hideContextMenu();
     return;
   }
 
@@ -1514,7 +1795,7 @@ function updateSortUi() {
 }
 
 function getTableColSpan() {
-  if (trashView) return 6;
+  if (isAlternateView()) return 6;
   return searchActive ? 6 : 5;
 }
 
@@ -1575,7 +1856,10 @@ function clearSearch() {
 function refreshListing() {
   syncViewModeForCurrentPath();
   if (trashView) loadTrash();
-  else if (searchActive) loadSearchResults();
+  else if (webSitesView) {
+    if (currentWebSiteId) loadWebSiteFiles();
+    else loadWebSites();
+  } else if (searchActive) loadSearchResults();
   else loadDirectory();
 }
 
@@ -1750,21 +2034,32 @@ function renderRoots() {
     .map((root) => {
       const isInRoot = currentPath.startsWith(root.path);
       const isTrashForRoot = trashView && getRootPath(currentPath) === root.path;
+      const isWebSitesForRoot =
+        webSitesView && root.type === "user" && getRootPath(currentPath) === root.path;
+      const showSubRoots = isInRoot || isTrashForRoot || isWebSitesForRoot;
+      const isRootActive = !isAlternateView() && isInRoot;
+      const websitesButton =
+        showSubRoots && root.type === "user" && webPublishAccess
+          ? `<button type="button" class="cs-root-websites${isWebSitesForRoot ? " is-active" : ""}" data-root-path="${escapeHtml(root.path)}" aria-label="${escapeHtml(root.label)}の公開サイト">
+        <span class="cs-root-icon">🌐</span>
+        <span class="cs-root-label">公開サイト</span>
+      </button>`
+          : "";
+      const trashButton = showSubRoots
+        ? `<button type="button" class="cs-root-trash${isTrashForRoot ? " is-active" : ""}" data-root-path="${escapeHtml(root.path)}" aria-label="${escapeHtml(root.label)}のごみ箱">
+        <span class="cs-root-icon">🗑️</span>
+        <span class="cs-root-label">ごみ箱</span>
+      </button>`
+        : "";
       return `
     <div class="cs-root-group">
-      <button type="button" class="cs-root-item${!trashView && isInRoot ? " is-active" : ""}" data-path="${escapeHtml(root.path)}">
+      <button type="button" class="cs-root-item${isRootActive ? " is-active" : ""}" data-path="${escapeHtml(root.path)}">
         <span class="cs-root-icon">${root.type === "user" ? "👤" : "👥"}</span>
         <span class="cs-root-label">${escapeHtml(root.label)}</span>
         <span class="cs-root-type">${root.type === "user" ? "個人" : "グループ"}</span>
       </button>
-      ${
-        isInRoot || isTrashForRoot
-          ? `<button type="button" class="cs-root-trash${isTrashForRoot ? " is-active" : ""}" data-root-path="${escapeHtml(root.path)}" aria-label="${escapeHtml(root.label)}のごみ箱">
-        <span class="cs-root-icon">🗑️</span>
-        <span class="cs-root-label">ごみ箱</span>
-      </button>`
-          : ""
-      }
+      ${websitesButton}
+      ${trashButton}
     </div>`;
     })
     .join("");
@@ -1772,6 +2067,9 @@ function renderRoots() {
   list.querySelectorAll(".cs-root-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       trashView = false;
+      webSitesView = false;
+      currentWebSiteId = null;
+      webSiteDir = "";
       currentPath = btn.dataset.path;
       selectedItems.clear();
       selectionAnchorIndex = -1;
@@ -1788,6 +2086,13 @@ function renderRoots() {
       closeSidebarDrawer();
     });
   });
+
+  list.querySelectorAll(".cs-root-websites").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      enterWebSitesView(btn.dataset.rootPath);
+      closeSidebarDrawer();
+    });
+  });
 }
 
 function renderBreadcrumb() {
@@ -1799,6 +2104,59 @@ function renderBreadcrumb() {
     const root = roots.find((r) => r.path === rootPath);
     const label = root?.label ?? rootPath;
     el.innerHTML = `<span class="cs-crumb is-current">ごみ箱 · ${escapeHtml(label)}</span>`;
+    return;
+  }
+
+  if (webSitesView) {
+    const rootPath = getRootPath(currentPath);
+    const root = roots.find((r) => r.path === rootPath);
+    const rootLabel = root?.label ?? rootPath;
+    /** @type {Array<{ label: string; siteId: string | null; dir: string | null }>} */
+    const crumbs = [{ label: `公開サイト · ${rootLabel}`, siteId: null, dir: null }];
+
+    if (currentWebSiteId) {
+      const site = getWebSiteById(currentWebSiteId);
+      crumbs.push({
+        label: site?.title ?? "サイト",
+        siteId: currentWebSiteId,
+        dir: "",
+      });
+
+      if (webSiteDir) {
+        let acc = "";
+        for (const part of webSiteDir.split("/").filter(Boolean)) {
+          acc = acc ? `${acc}/${part}` : part;
+          crumbs.push({
+            label: part,
+            siteId: currentWebSiteId,
+            dir: acc,
+          });
+        }
+      }
+    }
+
+    el.innerHTML = crumbs
+      .map((crumb, idx) => {
+        const isLast = idx === crumbs.length - 1;
+        if (isLast) {
+          return `<span class="cs-crumb is-current">${escapeHtml(crumb.label)}</span>`;
+        }
+        return `<button type="button" class="cs-crumb" data-site-id="${escapeHtml(crumb.siteId ?? "")}" data-dir="${escapeHtml(crumb.dir ?? "")}">${escapeHtml(crumb.label)}</button>`;
+      })
+      .join('<span class="cs-crumb-sep">/</span>');
+
+    el.querySelectorAll(".cs-crumb[data-site-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const siteId = btn.dataset.siteId || null;
+        const dir = btn.dataset.dir ?? "";
+        currentWebSiteId = siteId;
+        webSiteDir = dir;
+        selectedItems.clear();
+        selectionAnchorIndex = -1;
+        updateToolbarForView();
+        refreshListing();
+      });
+    });
     return;
   }
 
@@ -1905,6 +2263,10 @@ function bindFileEntryEvents(entry) {
     if (!item) return;
 
     if (item.isTrash || trashView) return;
+    if (item.isWebSite || webSitesView) {
+      navigateWebSiteItem(item);
+      return;
+    }
 
     if (item.type === "folder") {
       currentPath = path;
@@ -1926,6 +2288,10 @@ function bindFileEntryEvents(entry) {
     const path = entry.dataset.path;
     const item = getItemByPath(path);
     if (!item || item.isTrash || trashView) return;
+    if (item.isWebSite || webSitesView) {
+      navigateWebSiteItem(item);
+      return;
+    }
     if (item.type === "folder") {
       currentPath = path;
       selectedItems.clear();
@@ -2112,7 +2478,7 @@ function renderFileList() {
 }
 
 async function loadQuota() {
-  if (!currentPath || trashView) return;
+  if (!currentPath || isAlternateView()) return;
   try {
     const data = await apiRequest(`quota?path=${encodeURIComponent(currentPath)}`);
     const bar = document.getElementById("cs-quota-bar");
@@ -2123,6 +2489,182 @@ async function loadQuota() {
     }
   } catch {
     /* ignore */
+  }
+}
+
+function renderWebSitesTableHeader() {
+  const thead = document.querySelector("#cs-files-table thead tr");
+  if (!thead) return;
+  if (!currentWebSiteId) {
+    thead.innerHTML = `
+      <th scope="col" aria-label="選択"></th>
+      <th scope="col">名前</th>
+      <th scope="col">使用量</th>
+      <th scope="col">更新日時</th>
+      <th scope="col">公開URL</th>
+      <th scope="col">index.html</th>`;
+    return;
+  }
+  thead.innerHTML = `
+    <th scope="col" aria-label="選択"></th>
+    <th scope="col">名前</th>
+    <th scope="col">サイズ</th>
+    <th scope="col">更新日時</th>
+    <th scope="col">種類</th>
+    <th scope="col">—</th>`;
+}
+
+function buildWebSiteRowHtml(item) {
+  const selected = selectedItems.has(item.path);
+  if (item.isWebSiteRoot) {
+    const publicUrl = item.webSiteMeta?.public_url ?? "—";
+    const hasIndex = item.webSiteMeta?.has_index ? "あり" : "なし";
+    return `<tr class="cs-file-entry cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
+    <td><input type="checkbox" class="cs-select" ${selected ? "checked" : ""} aria-label="選択"></td>
+    <td><span class="cs-file-name-cell">${renderFileTypeIcon(item)}<span class="cs-file-name">${escapeHtml(item.name)}</span></span></td>
+    <td>${formatBytes(item.sizeBytes ?? 0)}</td>
+    <td>${formatDate(item.updatedAt)}</td>
+    <td>${escapeHtml(publicUrl)}</td>
+    <td>${hasIndex}</td>
+  </tr>`;
+  }
+
+  return `<tr class="cs-file-entry cs-file-row cs-file-row--appear${selected ? " is-selected" : ""}" data-path="${escapeHtml(item.path)}" data-type="${item.type}">
+    <td><input type="checkbox" class="cs-select" ${selected ? "checked" : ""} aria-label="選択"></td>
+    <td><span class="cs-file-name-cell">${renderFileTypeIcon(item)}<span class="cs-file-name">${escapeHtml(item.name)}</span></span></td>
+    <td>${item.type === "folder" ? "—" : formatBytes(item.sizeBytes ?? 0)}</td>
+    <td>${item.updatedAt ? formatDate(item.updatedAt) : "—"}</td>
+    <td>${item.type === "folder" ? "フォルダ" : "ファイル"}</td>
+    <td>—</td>
+  </tr>`;
+}
+
+function renderWebSitesFileList() {
+  const tbody = getFileListBody();
+  renderWebSitesTableHeader();
+  if (!tbody) return;
+  if (listItems.length === 0) {
+    const emptyLabel = currentWebSiteId ? "ファイルがありません" : "公開サイトがありません";
+    setFileListEmpty(emptyLabel);
+    return;
+  }
+
+  tbody.innerHTML = listItems.map((item) => buildWebSiteRowHtml(item)).join("");
+  tbody.querySelectorAll(".cs-file-row").forEach((row) => {
+    row.classList.remove("cs-file-row--appear");
+    bindFileEntryEvents(row);
+  });
+}
+
+async function loadWebSites() {
+  if (!currentPath) return;
+
+  const generation = ++listLoadGeneration;
+  listItems = [];
+  renderBreadcrumb();
+  setFileListLoading();
+  setLoading(true);
+
+  try {
+    const data = await webPublishApi("sites");
+    if (generation !== listLoadGeneration || !webSitesView || currentWebSiteId) return;
+
+    webSitesCache = data.sites ?? [];
+    listItems = webSitesCache.map((site) => ({
+      path: `wsp:${site.id}`,
+      name: site.title,
+      type: "folder",
+      sizeBytes: site.used_bytes ?? 0,
+      updatedAt: site.updated_at,
+      isWebSite: true,
+      isWebSiteRoot: true,
+      webSiteMeta: site,
+    }));
+
+    if (listItems.length === 0) {
+      setFileListEmpty("公開サイトがありません");
+    } else {
+      setLoading(false);
+      renderWebSitesFileList();
+    }
+  } catch (err) {
+    if (generation === listLoadGeneration) {
+      showToast(err.message, true);
+      setFileListEmpty("公開サイトの読み込みに失敗しました");
+    }
+  } finally {
+    if (generation === listLoadGeneration) {
+      setLoading(false);
+      clearFileListStatusRows();
+    }
+  }
+}
+
+async function loadWebSiteFiles() {
+  if (!currentPath || !currentWebSiteId) return;
+
+  const generation = ++listLoadGeneration;
+  const siteId = currentWebSiteId;
+  const dirSnapshot = webSiteDir;
+
+  listItems = [];
+  renderBreadcrumb();
+  setFileListLoading();
+  setLoading(true);
+
+  try {
+    const data = await webPublishApi(`sites/${encodeURIComponent(siteId)}/files`);
+    if (
+      generation !== listLoadGeneration ||
+      !webSitesView ||
+      currentWebSiteId !== siteId ||
+      webSiteDir !== dirSnapshot
+    ) {
+      return;
+    }
+
+    const files = data.files ?? [];
+    const { folders, files: fileEntries } = buildWebSiteDirListing(files, webSiteDir);
+
+    listItems = [
+      ...folders.map((name) => {
+        const relPath = joinWebSiteDir(webSiteDir, name);
+        return {
+          path: `wsp:${siteId}/${relPath}`,
+          name,
+          type: "folder",
+          isWebSite: true,
+          webSiteId: siteId,
+        };
+      }),
+      ...fileEntries.map((file) => ({
+        path: `wsp:${siteId}/${file.path}`,
+        name: file.name,
+        type: "file",
+        sizeBytes: file.size ?? 0,
+        updatedAt: file.updated,
+        isWebSite: true,
+        webSiteId: siteId,
+        webSiteFilePath: file.path,
+      })),
+    ];
+
+    if (listItems.length === 0) {
+      setFileListEmpty("ファイルがありません");
+    } else {
+      setLoading(false);
+      renderWebSitesFileList();
+    }
+  } catch (err) {
+    if (generation === listLoadGeneration) {
+      showToast(err.message, true);
+      setFileListEmpty("ファイルの読み込みに失敗しました");
+    }
+  } finally {
+    if (generation === listLoadGeneration) {
+      setLoading(false);
+      clearFileListStatusRows();
+    }
   }
 }
 
@@ -2822,6 +3364,10 @@ function openShortcutDialogFromSelection() {
     showToast("ごみ箱ではショートカットを作成できません", true);
     return;
   }
+  if (webSitesView) {
+    showToast("公開サイトではショートカットを作成できません", true);
+    return;
+  }
 
   const items = getSelectedItems();
   if (items.length === 0) {
@@ -2966,6 +3512,9 @@ function bindEvents() {
   document.getElementById("cs-trash-restore-btn")?.addEventListener("click", handleTrashRestore);
   document.getElementById("cs-trash-purge-btn")?.addEventListener("click", handleTrashPurge);
   document.getElementById("cs-trash-empty-btn")?.addEventListener("click", handleTrashEmpty);
+  document.getElementById("cs-websites-back-btn")?.addEventListener("click", handleWebSitesBack);
+  document.getElementById("cs-websites-open-app-btn")?.addEventListener("click", openWebsitePublishApp);
+  document.getElementById("cs-websites-open-url-btn")?.addEventListener("click", openWebSitePublicUrl);
 
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("cs-context-menu");
@@ -2979,7 +3528,7 @@ function bindEvents() {
 
   document.addEventListener("paste", (e) => {
     if (shouldIgnorePasteTarget(e.target)) return;
-    if (trashView || !currentPath) return;
+    if (isAlternateView() || !currentPath) return;
 
     const files = collectMediaFilesFromClipboard(e.clipboardData);
     if (files.length === 0) return;
@@ -3052,7 +3601,7 @@ function bindEvents() {
   dropZone?.addEventListener("drop", async (e) => {
     e.preventDefault();
     dropZone.classList.remove("is-dragover");
-    if (trashView || activeDragMoveItems?.length) return;
+    if (isAlternateView() || activeDragMoveItems?.length) return;
     try {
       const files = await collectFilesFromDataTransfer(e.dataTransfer);
       if (files.length) handleUpload(files);
@@ -3065,6 +3614,7 @@ function bindEvents() {
 async function init() {
   const ok = await checkAccess();
   if (!ok) return;
+  webPublishAccess = await checkWebPublishAccess();
   loadSortPreference();
   bindEvents();
   initAgentTokensDialog();
@@ -3072,15 +3622,31 @@ async function init() {
     placeholder: "このフォルダや添付ファイルについて質問…",
     getContext: () => {
       if (trashView) return { trashView: true };
+      if (webSitesView) {
+        return {
+          webSitesView: true,
+          webSiteId: currentWebSiteId,
+          webSiteDir: webSiteDir || null,
+        };
+      }
       if (searchActive) return { searchActive: true };
       return {
         storagePath: currentPath || null,
         trashView: false,
+        webSitesView: false,
         searchActive: false,
       };
     },
     getContextLabel: () => {
       if (trashView) return "ごみ箱";
+      if (webSitesView) {
+        if (currentWebSiteId) {
+          const site = getWebSiteById(currentWebSiteId);
+          const suffix = webSiteDir ? ` / ${webSiteDir}` : "";
+          return `公開サイト · ${site?.title ?? "サイト"}${suffix}`;
+        }
+        return "公開サイト";
+      }
       if (searchActive) return "検索結果";
       return currentPath || "ルート";
     },
