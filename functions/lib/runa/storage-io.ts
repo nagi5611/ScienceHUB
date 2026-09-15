@@ -25,9 +25,9 @@ import {
 } from "../storage/file-index";
 import {
   addUsedBytes,
-  canAllocateBytes,
   subtractUsedBytes,
 } from "../storage/quota";
+import { canAllocateStorageBytes } from "../storage/user-combined-quota";
 import { resolveRootForPath } from "../storage/roots";
 import {
   initiateStorageUpload,
@@ -647,7 +647,7 @@ export async function writeStorageFileForRuna(
 
     const oldSize = existingMeta?.sizeBytes ?? existingHead?.size ?? 0;
     const delta = bytes.byteLength - oldSize;
-    if (delta > 0 && !canAllocateBytes(root, delta)) {
+    if (delta > 0 && !(await canAllocateStorageBytes(db, root, user.id, delta))) {
       throw new Error("割り当て領域を超えるため書き込めません");
     }
 

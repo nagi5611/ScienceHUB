@@ -37,9 +37,9 @@ import { authorizeStoragePath } from "../storage/permissions";
 import { createFileMeta, resolveEffectivePermissions, writeMetaJson } from "../storage/meta";
 import {
   addUsedBytes,
-  canAllocateBytes,
   subtractUsedBytes,
 } from "../storage/quota";
+import { canAllocateStorageBytes } from "../storage/user-combined-quota";
 import { resolveRootForPath } from "../storage/roots";
 import {
   initiateStorageUpload,
@@ -1105,7 +1105,7 @@ async function runImageConvert(
     if (!root) return { text: "ストレージルートが見つかりません", files: [] };
     const oldSize = existing.size;
     const delta = outBytes.byteLength - oldSize;
-    if (delta > 0 && !canAllocateBytes(root, delta)) {
+    if (delta > 0 && !(await canAllocateStorageBytes(db, root, user.id, delta))) {
       return { text: "割り当て領域不足です", files: [] };
     }
     await bucket.put(

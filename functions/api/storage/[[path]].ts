@@ -388,6 +388,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const root = await resolveRootForPath(db, parsed.rootType, parsed.rootKey);
       if (!root) return jsonError("ストレージルートが見つかりません", 404);
 
+      if (root.root_type === "user" && auth.id) {
+        const { getUserCombinedQuota } = await import(
+          "../../lib/storage/user-combined-quota"
+        );
+        const combined = await getUserCombinedQuota(db, auth.id);
+        if (combined) {
+          return Response.json({
+            quota_bytes: combined.quota_bytes,
+            used_bytes: combined.combined_used_bytes,
+            personal_used_bytes: combined.personal_used_bytes,
+            website_used_bytes: combined.website_used_bytes,
+          });
+        }
+      }
+
       return Response.json({
         quota_bytes: root.quota_bytes,
         used_bytes: root.used_bytes,

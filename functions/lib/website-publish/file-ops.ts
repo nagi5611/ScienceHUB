@@ -70,8 +70,10 @@ export async function writeSiteFileText(
   const oldSize = head?.size ?? 0;
   const delta = bytes.byteLength - oldSize;
 
-  if (!canAllocateSiteBytes(site, delta)) {
-    throw new Error("サイトの容量上限（5GB）を超えるため保存できません");
+  if (!(await canAllocateSiteBytes(db, site, delta))) {
+    throw new Error(
+      "ストレージ上限（個人ファイルと公開サイトの合計）を超えるため保存できません"
+    );
   }
 
   await bucket.put(r2Key, content, {

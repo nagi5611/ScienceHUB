@@ -58,8 +58,10 @@ export async function extractZipToSite(
     totalNewBytes += delta;
   }
 
-  if (!canAllocateSiteBytes(site, totalNewBytes)) {
-    throw new Error("サイトの容量上限（5GB）を超えるため ZIP を展開できません");
+  if (!(await canAllocateSiteBytes(db, site, totalNewBytes))) {
+    throw new Error(
+      "ストレージ上限（個人ファイルと公開サイトの合計）を超えるため ZIP を展開できません"
+    );
   }
 
   for (const [rawName, data] of entries) {

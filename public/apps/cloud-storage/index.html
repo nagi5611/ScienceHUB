@@ -82,6 +82,9 @@
             <button type="button" class="cs-btn cs-btn-primary" id="cs-trash-restore-btn" hidden>復元</button>
             <button type="button" class="cs-btn cs-btn-danger" id="cs-trash-purge-btn" hidden>完全削除</button>
             <button type="button" class="cs-btn cs-btn-danger" id="cs-trash-empty-btn" hidden>ごみ箱を空にする</button>
+            <button type="button" class="cs-btn" id="cs-websites-back-btn" hidden>← 戻る</button>
+            <button type="button" class="cs-btn" id="cs-websites-open-app-btn" hidden>ウェブサイト公開アプリ</button>
+            <button type="button" class="cs-btn" id="cs-websites-open-url-btn" hidden>公開URLを開く</button>
           </div>
           <div class="cs-toolbar-overflow" id="cs-toolbar-overflow">
             <button type="button" class="cs-btn cs-toolbar-more-btn" id="cs-toolbar-more" aria-haspopup="true" aria-expanded="false" aria-controls="cs-toolbar-menu">その他 ▾</button>
@@ -124,6 +127,9 @@
             <span class="cs-quota-label" id="cs-trash-quota-label">—</span>
           </div>
           <p class="cs-trash-status-note">90日経過または50GB超過で自動削除</p>
+        </div>
+        <div class="cs-websites-status" id="cs-websites-status" hidden role="status">
+          <p class="cs-websites-status-note">公開サイトの容量は個人ストレージと合算で上限内です。編集やアップロードはウェブサイト公開アプリから行えます。</p>
         </div>
         <p class="cs-upload-progress" id="cs-delete-progress" hidden role="status"></p>
         <nav class="cs-breadcrumb" id="cs-breadcrumb" aria-label="パス"></nav>

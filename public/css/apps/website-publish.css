@@ -382,6 +382,16 @@
   font-size: 0.9rem;
 }
 
+.wsp-quota--account {
+  margin-bottom: 1rem;
+}
+
+.wsp-quota-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--wsp-muted, #6b7280);
+}
+
 .wsp-quota-label {
   display: block;
   font-size: 0.8125rem;

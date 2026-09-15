@@ -35,9 +35,9 @@ import {
 } from "./file-index";
 import {
   addUsedBytes,
-  canAllocateBytes,
   type StorageRootRow,
 } from "./quota";
+import { canAllocateStorageBytes } from "./user-combined-quota";
 import { resolveRootForPath } from "./roots";
 import { authorizeWriteDir } from "./permissions";
 import type { SessionUser } from "../types";
@@ -274,7 +274,7 @@ export async function initiateStorageUpload(
   const root = await resolveRootForPath(db, rootType, rootKey);
   if (!root) throw new Error("ストレージルートが見つかりません");
 
-  if (!canAllocateBytes(root, size)) {
+  if (!(await canAllocateStorageBytes(db, root, user.id, size))) {
     throw new Error("割り当て領域を超えるためアップロードできません");
   }
 

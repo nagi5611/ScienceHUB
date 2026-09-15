@@ -171,8 +171,10 @@ export async function initiateWebUpload(
   const replacedSize = existing?.size ?? 0;
   const delta = size - replacedSize;
 
-  if (!canAllocateSiteBytes(site, delta)) {
-    throw new Error("サイトの容量上限（5GB）を超えるためアップロードできません");
+  if (!(await canAllocateSiteBytes(db, site, delta))) {
+    throw new Error(
+      "ストレージ上限（個人ファイルと公開サイトの合計）を超えるためアップロードできません"
+    );
   }
 
   const plan = getUploadPlan(env, size);

@@ -40,10 +40,11 @@
       <div class="wsp-panel-head">
         <div>
           <h2 class="wsp-panel-title">マイサイト</h2>
-          <p class="wsp-panel-sub">最大3サイト・各5GB。静的ファイルを <code>/web/</code> 配下で公開します。</p>
+          <p class="wsp-panel-sub">最大3サイト。公開サイトの容量は個人ストレージと合算で上限内です。静的ファイルを <code>/web/</code> 配下で公開します。</p>
         </div>
         <button type="button" class="wsp-btn wsp-btn--primary" id="create-site-btn">新規サイト</button>
       </div>
+      <div class="wsp-quota wsp-quota--account" id="account-quota" aria-label="ストレージ使用量" hidden></div>
       <ul class="wsp-site-list" id="site-list" aria-label="サイト一覧"></ul>
       <p class="wsp-empty" id="site-empty" hidden>サイトがありません。新規作成してください。</p>
     </section>
