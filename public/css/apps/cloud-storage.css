@@ -563,6 +563,102 @@ body.cs-app-body {
   color: var(--cs-muted);
 }
 
+.cs-editor-dialog {
+  width: min(96vw, 900px);
+  max-width: none;
+}
+
+body.cs-website-editor-open .cs-editor-dialog {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: min(58vw, 720px);
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  border-left: none;
+  border-top: none;
+  border-bottom: none;
+}
+
+.cs-editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cs-btn-runa {
+  border-color: var(--cs-accent);
+  color: var(--cs-accent);
+}
+
+.cs-btn-runa:hover {
+  background: var(--cs-accent-soft);
+}
+
+.cs-editor-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cs-editor-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: min(70vh, 640px);
+}
+
+.cs-editor-path {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-family: ui-monospace, monospace;
+  color: var(--cs-muted);
+}
+
+.cs-editor-textarea {
+  width: 100%;
+  min-height: 320px;
+  max-height: 55vh;
+  padding: 0.75rem;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius);
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.cs-editor-textarea:focus {
+  outline: 2px solid var(--cs-accent);
+  outline-offset: 1px;
+}
+
+body.cs-website-editor-open .cs-editor-dialog-body {
+  flex: 1;
+  min-height: 0;
+}
+
+body.cs-website-editor-open .cs-editor-form {
+  height: 100%;
+}
+
+body.cs-website-editor-open .cs-editor-textarea {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+body.cs-website-editor-open .cs-editor-dialog-body {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  flex: 1;
+}
+
 .cs-upload-file-list {
   display: flex;
   flex-direction: column;

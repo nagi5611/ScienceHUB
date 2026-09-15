@@ -146,11 +146,33 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               : null,
         }));
 
+      const webSiteEditRaw = body.context?.webSiteEditFile;
+      const webSiteEditFile =
+        webSiteEditRaw &&
+        typeof webSiteEditRaw === "object" &&
+        typeof webSiteEditRaw.siteId === "string" &&
+        typeof webSiteEditRaw.path === "string" &&
+        webSiteEditRaw.siteId.trim() &&
+        webSiteEditRaw.path.trim()
+          ? {
+              siteId: webSiteEditRaw.siteId.trim(),
+              path: webSiteEditRaw.path.trim(),
+              content:
+                typeof webSiteEditRaw.content === "string"
+                  ? webSiteEditRaw.content.slice(0, 24 * 1024)
+                  : undefined,
+            }
+          : null;
+
       const context: RunaChatContext | undefined = body.context
         ? {
             storagePath: body.context.storagePath?.trim() || null,
             trashView: Boolean(body.context.trashView),
             searchActive: Boolean(body.context.searchActive),
+            webSitesView: Boolean(body.context.webSitesView),
+            webSiteId: body.context.webSiteId?.trim() || null,
+            webSiteDir: body.context.webSiteDir?.trim() || null,
+            webSiteEditFile,
             editImagePath: body.context.editImagePath?.trim() || null,
             editIntent: Boolean(body.context.editIntent),
           }
