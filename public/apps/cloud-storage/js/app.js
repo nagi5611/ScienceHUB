@@ -53,6 +53,7 @@ import {
   hideWebsiteEditorRuna,
   initWebsiteEditorRuna,
   setWebsiteEditorRunaContext,
+  setWebsiteEditorRunaFileSyncHandler,
   toggleWebsiteEditorRuna,
 } from "./website-editor-runa.js";
 import {
@@ -598,6 +599,18 @@ function syncWebSiteEditorRunaContext(filePath) {
     webSiteDir: webSiteDir || null,
     getContent: () => contentEl?.value ?? "",
   });
+}
+
+function applyRunaUpdateToWebSiteEditor({ siteId, path, content }) {
+  if (!currentWebSiteId || currentWebSiteId !== siteId) return;
+  if (!editingWebSitePath || editingWebSitePath !== path) return;
+
+  const contentEl = document.getElementById("cs-website-edit-content");
+  if (!contentEl) return;
+  if (contentEl.value === content) return;
+
+  contentEl.value = content;
+  showToast("Runa がファイルを更新しました");
 }
 
 /** 公開サイト内のテキストファイルをエディタで開く */
@@ -3848,6 +3861,7 @@ function bindEvents() {
       hideWebsiteEditorRuna();
     }
   });
+  setWebsiteEditorRunaFileSyncHandler(applyRunaUpdateToWebSiteEditor);
   initWebsiteEditorRuna();
   document.getElementById("cs-website-edit-form")?.addEventListener("submit", (e) => {
     saveWebSiteTextEditor(e).catch((err) => {

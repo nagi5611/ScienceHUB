@@ -7,6 +7,8 @@ const MAX_CONTENT_CHARS = 24 * 1024;
 
 /** @type {{ siteId: string, path: string, name?: string, webSiteDir?: string | null, getContent?: () => string } | null} */
 let editContext = null;
+/** @type {((update: { siteId: string, path: string, content: string }) => void) | null} */
+let onSiteFileUpdated = null;
 let runaVisible = false;
 let chatBusy = false;
 let dataLoaded = false;
@@ -237,6 +239,8 @@ async function postChat(message, attachments) {
       if (eventName === "delta" && payload.text) {
         pending.content += payload.text;
         updatePendingBubble(pending);
+      } else if (eventName === "web_site_file_updated") {
+        applySiteFileUpdate(payload);
       } else if (eventName === "done") {
         finalResult = payload;
       } else if (eventName === "error") {
@@ -288,6 +292,22 @@ async function handleSubmit(event) {
   } finally {
     setChatBusy(false);
   }
+}
+
+function applySiteFileUpdate(payload) {
+  if (!payload?.siteId || !payload?.path || typeof payload.content !== "string") return;
+  if (
+    editContext?.siteId !== payload.siteId ||
+    editContext?.path !== payload.path
+  ) {
+    return;
+  }
+  onSiteFileUpdated?.(payload);
+}
+
+/** Runa が保存したファイル内容をエディタへ反映するハンドラ */
+export function setWebsiteEditorRunaFileSyncHandler(handler) {
+  onSiteFileUpdated = handler ?? null;
 }
 
 /** 編集ファイルの Runa コンテキストを設定 */

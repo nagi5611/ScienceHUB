@@ -888,6 +888,11 @@ async function runWebWriteFile(
       `サイトにファイルを保存しました: ${result.path} (${result.size} bytes)\n` +
       `公開 URL: ${buildRunaPublicWebUrl(env, site.path_slug, result.path)}`,
     files: [],
+    siteFileUpdate: {
+      siteId: site.id,
+      path: result.path,
+      content,
+    },
   };
 }
 

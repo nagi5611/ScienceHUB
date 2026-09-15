@@ -804,6 +804,10 @@ async function handleToolCall(
     send("files", { items: result.files });
   }
 
+  if (result.siteFileUpdate) {
+    send("web_site_file_updated", result.siteFileUpdate);
+  }
+
   messages.push({
     role: "tool",
     tool_call_id: call.id,
