@@ -4,7 +4,7 @@
 
 export const WEBSITE_PUBLISH_APP_SLUG = "website-publish";
 
-export const MAX_SITES_PER_USER = 3;
+export const MAX_SITES_PER_USER = 100;
 export const MAX_SITE_BYTES = 5 * 1024 ** 3;
 export const MAX_ZIP_BYTES = 500 * 1024 ** 2;
 export const R2_ROOT_PREFIX = "web";

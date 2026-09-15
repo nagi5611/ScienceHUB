@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { MAX_SITES_PER_USER } from "../../functions/lib/website-publish/constants";
 import {
   buildIndexHtml,
   loginAsAdmin,
@@ -61,12 +62,17 @@ test.describe("ウェブサイト公開 E2E", () => {
     await request.delete(`/api/website-publish/sites/${site.id}`);
   });
 
-  test("3サイト上限で作成拒否", async ({ request }) => {
+  test("サイト上限で作成拒否", async ({ request }) => {
+    test.skip(
+      MAX_SITES_PER_USER > 10,
+      "上限が大きいため一括作成による拒否テストは省略（constants.test.ts で上限値を検証）"
+    );
+
     const listRes = await request.get("/api/website-publish/sites");
     const { sites } = await listRes.json();
     const createdIds: string[] = [];
 
-    const need = Math.max(0, 3 - (sites?.length ?? 0));
+    const need = Math.max(0, MAX_SITES_PER_USER - (sites?.length ?? 0));
     for (let i = 0; i < need; i++) {
       const res = await request.post("/api/website-publish/sites", {
         data: {
@@ -87,7 +93,7 @@ test.describe("ウェブサイト公開 E2E", () => {
     });
     expect(failRes.status()).toBe(400);
     const failBody = await failRes.json();
-    expect(failBody.error).toContain("3");
+    expect(failBody.error).toContain(String(MAX_SITES_PER_USER));
 
     for (const id of createdIds) {
       await request.delete(`/api/website-publish/sites/${id}`);
