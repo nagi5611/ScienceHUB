@@ -7,7 +7,7 @@ import { hideContextMenu, showContextMenu } from "./js/context-menu.js";
 
 const APP_SLUG = "website-publish";
 const API_BASE = "/api/website-publish";
-const MAX_SITES = 3;
+const MAX_SITES = 100;
 
 const EDITABLE_EXTENSIONS = new Set([
   ".html",
