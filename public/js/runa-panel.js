@@ -3,6 +3,7 @@
  */
 
 import { prepareAttachmentFile } from "./runa-attachments/prepare.js";
+import { openRunaStoragePicker } from "./runa-attachments/storage-picker.js";
 import { iconHtml } from "./hub-icons.js";
 
 const MAX_ATTACHMENTS = 5;
@@ -252,6 +253,10 @@ let pendingAssistantRow = null;
 /** @type {{ id: string, name: string, path?: string, uploading?: boolean, statusLabel?: string, extractedText?: string, imagePaths?: string[], storageRef?: boolean, sizeBytes?: number | null }[]} */
 let pendingAttachments = [];
 let attachDragDepth = 0;
+/** @type {HTMLElement | null} */
+let attachMenuEl = null;
+/** @type {boolean | null} */
+let storageAttachAllowed = null;
 /** @type {string | null} */
 let pendingEditImagePath = null;
 /** @type {{ usedTokens?: number, limitTokens?: number, percent?: number, accuracyWarningPercent?: number, isAccuracyDegrading?: boolean, summarizeThresholdPercent?: number, shouldSummarize?: boolean } | null} */
@@ -678,6 +683,125 @@ function applyActivityEvent(pending, payload) {
     if (existing.state === "done") existing.open = false;
     updatePendingAssistantBubble(pending);
   }
+}
+
+function getRemainingAttachmentSlots() {
+  return Math.max(0, MAX_ATTACHMENTS - pendingAttachments.length);
+}
+
+function getStoragePickerInitialPath() {
+  const context = panelOptions.getContext?.() ?? {};
+  const storagePath = context.storagePath?.trim();
+  if (storagePath) return storagePath;
+  return "";
+}
+
+/** ストレージ参照を pendingAttachments に追加 */
+function pushStorageAttachment(item) {
+  if (!item?.path) return false;
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+    setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
+    return false;
+  }
+  if (pendingAttachments.some((a) => a.path === item.path)) return false;
+  pendingAttachments.push({
+    id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: item.name || item.path.split("/").pop() || item.path,
+    path: item.path,
+    sizeBytes: item.sizeBytes ?? item.size ?? null,
+    storageRef: true,
+  });
+  renderPendingAttachments();
+  return true;
+}
+
+function closeAttachMenu() {
+  if (!attachMenuEl || attachMenuEl.hidden) return false;
+  attachMenuEl.hidden = true;
+  return true;
+}
+
+async function checkStorageAttachAccess() {
+  if (storageAttachAllowed !== null) return storageAttachAllowed;
+  const res = await safeFetch("/api/storage/access", { credentials: "same-origin" });
+  storageAttachAllowed = Boolean(res?.ok);
+  return storageAttachAllowed;
+}
+
+function renderAttachMenuItems(storageAllowed) {
+  const storageItem = storageAllowed
+    ? `<button type="button" class="runa-attach-menu-item" data-action="storage">クラウドストレージから選択</button>`
+    : "";
+  return `<button type="button" class="runa-attach-menu-item" data-action="local">この端末から選択</button>${storageItem}`;
+}
+
+function ensureAttachMenu() {
+  if (!attachMenuEl) {
+    const menu = document.createElement("div");
+    menu.className = "runa-attach-menu";
+    menu.hidden = true;
+    menu.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-action]");
+      if (!btn) return;
+      const action = btn.getAttribute("data-action");
+      closeAttachMenu();
+      if (action === "local") {
+        els.fileInput?.click();
+        return;
+      }
+      if (action === "storage") {
+        void openStorageAttachmentPicker();
+      }
+    });
+    els.form?.appendChild(menu);
+    attachMenuEl = menu;
+  }
+  return attachMenuEl;
+}
+
+async function toggleAttachMenu() {
+  if (chatBusy || getRemainingAttachmentSlots() <= 0) {
+    if (getRemainingAttachmentSlots() <= 0) {
+      setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
+    }
+    return;
+  }
+  const menu = ensureAttachMenu();
+  const wasOpen = !menu.hidden;
+  closeAttachMenu();
+  if (wasOpen) return;
+
+  const storageAllowed = await checkStorageAttachAccess();
+  menu.innerHTML = renderAttachMenuItems(storageAllowed);
+  menu.hidden = false;
+}
+
+async function openStorageAttachmentPicker() {
+  const allowed = await checkStorageAttachAccess();
+  if (!allowed) {
+    setStatus("クラウドストレージへのアクセス権がありません");
+    return;
+  }
+  const remaining = getRemainingAttachmentSlots();
+  if (remaining <= 0) {
+    setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
+    return;
+  }
+  openRunaStoragePicker({
+    initialPath: getStoragePickerInitialPath(),
+    maxSelect: remaining,
+    excludePaths: pendingAttachments.map((item) => item.path).filter(Boolean),
+    onConfirm: (files) => {
+      let added = 0;
+      for (const file of files) {
+        if (pushStorageAttachment(file)) added += 1;
+      }
+      if (added > 0) {
+        setStatus("");
+        els.input?.focus();
+      }
+    },
+  });
 }
 
 function renderPendingAttachments() {
@@ -1148,7 +1272,10 @@ function bindEvents() {
   els.contextSummarizeBtn?.addEventListener("click", () => void requestContextSummarize());
   els.form?.addEventListener("submit", handleSubmit);
   els.input?.addEventListener("keydown", handleInputKeydown);
-  els.attachBtn?.addEventListener("click", () => els.fileInput?.click());
+  els.attachBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void toggleAttachMenu();
+  });
   els.fileInput?.addEventListener("change", handleFileInputChange);
   els.body?.addEventListener("dragenter", handleAttachDragEnter);
   els.body?.addEventListener("dragover", handleAttachDragOver);
@@ -1156,8 +1283,18 @@ function bindEvents() {
   els.body?.addEventListener("drop", handleAttachDrop);
   els.messages?.addEventListener("click", handleMessageAreaClick);
 
+  document.addEventListener("click", (event) => {
+    if (!attachMenuEl || attachMenuEl.hidden) return;
+    const target = event.target;
+    if (target instanceof Node && (attachMenuEl.contains(target) || els.attachBtn?.contains(target))) {
+      return;
+    }
+    closeAttachMenu();
+  });
+
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (closeAttachMenu()) return;
     if (closeImageLightbox()) return;
     if (els.panel?.classList.contains("is-open")) {
       setPanelOpen(false);
@@ -1194,20 +1331,7 @@ export function openRunaPanel() {
 export function attachStorageReference(item, options = {}) {
   const { forEdit = false } = options;
   if (!item?.path || item.type === "folder") return;
-  if (pendingAttachments.length >= MAX_ATTACHMENTS) {
-    setStatus(`添付は最大 ${MAX_ATTACHMENTS} 件までです`);
-    return;
-  }
-  if (!pendingAttachments.some((a) => a.path === item.path)) {
-    pendingAttachments.push({
-      id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name: item.name,
-      path: item.path,
-      sizeBytes: item.sizeBytes ?? item.size ?? null,
-      storageRef: true,
-    });
-    renderPendingAttachments();
-  }
+  pushStorageAttachment(item);
   if (forEdit) {
     pendingEditImagePath = item.path;
     closeImageLightbox();

@@ -844,11 +844,267 @@ body.runa-lightbox-open {
 }
 
 .runa-form {
+  position: relative;
   display: flex;
   gap: 0.5rem;
   align-items: flex-end;
   padding: 0.75rem 1rem 1rem;
   border-top: 1px solid var(--cf-border, #e2e5e9);
+}
+
+.runa-attach-menu {
+  position: absolute;
+  left: 1rem;
+  bottom: calc(100% + 0.35rem);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 12.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  border-radius: var(--cf-radius, 8px);
+  background: var(--cf-bg, #fff);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 0.12);
+}
+
+.runa-attach-menu[hidden] {
+  display: none !important;
+}
+
+.runa-attach-menu-item {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cf-text, #1d2433);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.runa-attach-menu-item:hover {
+  background: var(--cf-surface, #f6f6f7);
+}
+
+.runa-storage-picker {
+  width: min(92vw, 520px);
+  max-height: min(88vh, 640px);
+  padding: 0;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  border-radius: var(--cf-radius-lg, 12px);
+  background: var(--cf-bg, #fff);
+  box-shadow: 0 16px 48px rgb(15 23 42 / 0.2);
+}
+
+.runa-storage-picker::backdrop {
+  background: rgb(15 23 42 / 0.45);
+}
+
+.runa-storage-picker-form {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 640px);
+}
+
+.runa-storage-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem 0.65rem;
+  border-bottom: 1px solid var(--cf-border, #e2e5e9);
+}
+
+.runa-storage-picker-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.runa-storage-picker-close {
+  border: none;
+  background: transparent;
+  color: var(--cf-muted, #6b7280);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.runa-storage-picker-status {
+  margin: 0;
+  padding: 0.45rem 1rem 0;
+  font-size: 0.78rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-storage-picker-status.is-error {
+  color: #dc2626;
+}
+
+.runa-storage-picker-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.35rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--cf-border, #e2e5e9);
+  font-size: 0.76rem;
+}
+
+.runa-storage-picker-crumb-btn,
+.runa-storage-picker-root {
+  border: none;
+  background: transparent;
+  color: var(--cf-orange, #f38020);
+  font: inherit;
+  cursor: pointer;
+  padding: 0.1rem 0.2rem;
+}
+
+.runa-storage-picker-crumb-sep {
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-storage-picker-roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.runa-storage-picker-root {
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: var(--cf-surface, #f6f6f7);
+}
+
+.runa-storage-picker-list {
+  flex: 1;
+  min-height: 12rem;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.35rem;
+}
+
+.runa-storage-picker-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cf-text, #1d2433);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.runa-storage-picker-row:hover:not(:disabled) {
+  background: var(--cf-surface, #f6f6f7);
+}
+
+.runa-storage-picker-row--file {
+  grid-template-columns: 1.1rem auto 1fr auto;
+}
+
+.runa-storage-picker-row.is-selected {
+  background: rgb(243 128 32 / 0.1);
+}
+
+.runa-storage-picker-row.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.runa-storage-picker-check {
+  color: var(--cf-orange, #f38020);
+  font-weight: 700;
+}
+
+.runa-storage-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runa-storage-picker-meta {
+  color: var(--cf-muted, #6b7280);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.runa-storage-picker-empty {
+  margin: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-storage-picker-empty.is-error {
+  color: #dc2626;
+}
+
+.runa-storage-picker-load-more {
+  margin: 0 1rem 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  border-radius: 8px;
+  background: var(--cf-bg, #fff);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.runa-storage-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem 0.85rem;
+  border-top: 1px solid var(--cf-border, #e2e5e9);
+}
+
+.runa-storage-picker-selected {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-storage-picker-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.runa-storage-picker-cancel,
+.runa-storage-picker-confirm {
+  padding: 0.45rem 0.75rem;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.runa-storage-picker-cancel {
+  border: 1px solid var(--cf-border, #e2e5e9);
+  background: var(--cf-bg, #fff);
+  color: var(--cf-text, #1d2433);
+}
+
+.runa-storage-picker-confirm {
+  border: none;
+  background: var(--cf-orange, #f38020);
+  color: #fff;
+}
+
+.runa-storage-picker-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .runa-attach-btn {
