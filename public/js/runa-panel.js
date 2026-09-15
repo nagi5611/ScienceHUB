@@ -460,6 +460,61 @@ function renderActivitiesHtml(activities) {
   return `${live}<div class="runa-activities">${items}</div>`;
 }
 
+/** Cursor 風コンパクト TODO カード */
+function renderRunaTodosHtml(taskPlan) {
+  const tasks = taskPlan?.tasks;
+  if (!tasks?.length) return "";
+
+  const current = taskPlan.current ?? 0;
+  const doneCount = tasks.filter((t) => t.status === "done").length;
+  const allDone = doneCount === tasks.length;
+
+  const items = tasks
+    .map((task, index) => {
+      const isDone = task.status === "done";
+      const isFailed = task.status === "failed";
+      const isCurrent = !isDone && !isFailed && index === current;
+      const stateClass = isDone
+        ? " is-done"
+        : isFailed
+          ? " is-failed"
+          : isCurrent
+            ? " is-current"
+            : "";
+
+      let icon = "○";
+      if (isDone) icon = "✓";
+      else if (isFailed) icon = "✕";
+      else if (isCurrent) {
+        icon = '<span class="runa-todo-spinner" aria-hidden="true"></span>';
+      }
+
+      return `<li class="runa-todo-item${stateClass}">
+        <span class="runa-todo-check" aria-hidden="true">${icon}</span>
+        <span class="runa-todo-label">${escapeHtml(task.title)}</span>
+      </li>`;
+    })
+    .join("");
+
+  const statusText = allDone
+    ? "完了"
+    : `${doneCount} / ${tasks.length} 完了`;
+
+  return `<div class="runa-chat-todos" aria-label="作業タスク">
+    <div class="runa-chat-todos-head">
+      <span class="runa-chat-todos-title">To-do</span>
+      <span class="runa-chat-todos-meta">${escapeHtml(statusText)}</span>
+    </div>
+    <ul class="runa-chat-todos-list">${items}</ul>
+  </div>`;
+}
+
+function renderAssistantExtrasHtml(msg) {
+  const todos = renderRunaTodosHtml(msg.taskPlan);
+  const activities = renderActivitiesHtml(msg.activities);
+  return `${todos}${activities}`;
+}
+
 function renderMessageHtml(msg) {
   const roleClass =
     msg.role === "user" ? "runa-msg--user" : "runa-msg--assistant";
@@ -473,10 +528,10 @@ function renderMessageHtml(msg) {
     msg.pending && msg.role === "assistant" && msg.content
       ? " is-streaming"
       : "";
-  const activities = renderActivitiesHtml(msg.activities);
+  const extras = msg.role === "assistant" ? renderAssistantExtrasHtml(msg) : "";
   const content = renderMessageContent(msg);
   return `<div class="runa-msg ${roleClass}${summaryClass}">
-    <div class="runa-msg-bubble${streamingClass}">${activities}${content}</div>
+    <div class="runa-msg-bubble${streamingClass}">${extras}${content}</div>
   </div>`;
 }
 
@@ -533,7 +588,7 @@ function updatePendingAssistantBubble(pending) {
   if (!bubble) return;
 
   bubble.classList.toggle("is-streaming", Boolean(pending.content));
-  bubble.innerHTML = `${renderActivitiesHtml(pending.activities)}${renderMessageContent(pending)}`;
+  bubble.innerHTML = `${renderAssistantExtrasHtml(pending)}${renderMessageContent(pending)}`;
   bindActivityToggleHandlers(pendingAssistantRow);
 
   const active = pending.activities?.find((a) => a.state !== "done");
@@ -760,6 +815,7 @@ async function postRunaChat(message, attachments) {
     content: "",
     pending: true,
     activities: [],
+    taskPlan: null,
     files: [],
   };
   messageState.push(pending);
@@ -780,6 +836,12 @@ async function postRunaChat(message, attachments) {
     }
     if (eventName === "activity") {
       applyActivityEvent(pending, payload);
+    } else if (eventName === "tasks" && Array.isArray(payload.tasks)) {
+      pending.taskPlan = {
+        tasks: payload.tasks,
+        current: typeof payload.current === "number" ? payload.current : 0,
+      };
+      updatePendingAssistantBubble(pending);
     } else if (eventName === "status" && payload.label) {
       setStatus(payload.label);
     } else if (eventName === "delta" && payload.text) {

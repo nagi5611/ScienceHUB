@@ -382,6 +382,111 @@
   color: var(--cf-orange, #f38020);
 }
 
+.runa-chat-todos {
+  margin-bottom: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--cf-border, #e2e5e9);
+  background: #fff;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.runa-chat-todos-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.runa-chat-todos-title {
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--cf-text, #1d2433);
+}
+
+.runa-chat-todos-meta {
+  font-size: 0.72rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-chat-todos-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.runa-todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--cf-muted, #6b7280);
+}
+
+.runa-todo-item.is-current {
+  color: var(--cf-text, #1d2433);
+  font-weight: 600;
+}
+
+.runa-todo-item.is-done {
+  color: #94a3b8;
+}
+
+.runa-todo-item.is-done .runa-todo-label {
+  text-decoration: line-through;
+}
+
+.runa-todo-item.is-failed {
+  color: #dc2626;
+}
+
+.runa-todo-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  min-height: 1rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #94a3b8;
+}
+
+.runa-todo-item.is-done .runa-todo-check {
+  color: #16a34a;
+}
+
+.runa-todo-item.is-current .runa-todo-check {
+  color: var(--cf-orange, #f38020);
+}
+
+.runa-todo-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.runa-todo-spinner {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid rgb(243 128 32 / 0.25);
+  border-top-color: var(--cf-orange, #f38020);
+  border-radius: 50%;
+  animation: runa-todo-spin 0.75s linear infinite;
+}
+
+@keyframes runa-todo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .runa-activities {
   display: flex;
   flex-direction: column;
