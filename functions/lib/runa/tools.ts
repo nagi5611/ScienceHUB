@@ -3,8 +3,11 @@
  */
 
 import type { Env, SessionUser } from "../types";
+import { canUserAccessApp } from "../apps";
 import { parseLogicalPath, type StorageRootType } from "../storage/keys";
 import { authorizeStoragePath } from "../storage/permissions";
+import { STORAGE_APP_SLUG } from "../storage/constants";
+import { createStorageShareLink } from "../storage/share";
 import { buildVisibleRoots, listDirectory } from "../storage/list";
 import { searchStorageFiles, parseSearchDateFrom, parseSearchDateTo } from "../storage/search";
 import { getFileMeta, getFolderMeta } from "../storage/meta";
@@ -360,6 +363,29 @@ export const RUNA_TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "storage_create_share_link",
+      description:
+        "クラウドストレージのファイルに共有リンクを作成する（ダウンロード上限付きの公開 URL）。ファイルのみ対応",
+      parameters: {
+        type: "object",
+        properties: {
+          paths: {
+            type: "array",
+            items: { type: "string" },
+            description: "共有するファイルの論理パス（例: u/alice/report.pdf）",
+          },
+          max_downloads: {
+            type: "number",
+            description: "ダウンロード上限（1〜1000、省略時 10）",
+          },
+        },
+        required: ["paths"],
+      },
+    },
+  },
 ];
 
 function indexedToRunaItem(item: IndexedRecentFile): RunaFileItem {
@@ -452,6 +478,24 @@ function offsetArg(args: Record<string, unknown>, key: string): number {
   return 0;
 }
 
+function pathsArg(args: Record<string, unknown>, key: string): string[] {
+  const v = args[key];
+  if (Array.isArray(v)) {
+    return v
+      .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      .map((item) => item.trim());
+  }
+  if (typeof v === "string" && v.trim()) return [v.trim()];
+  return [];
+}
+
+function buildRunaOriginRequest(env: Env): Request {
+  const origin =
+    env.OAUTH_REDIRECT_BASE?.trim().replace(/\/$/, "") ||
+    "https://s.mmh-virtual.jp";
+  return new Request(`${origin}/`);
+}
+
 export interface ToolRunResult {
   text: string;
   files: RunaFileItem[];
@@ -497,6 +541,8 @@ export async function executeRunaTool(
         return await runStorageRename(env, db, user, args);
       case "storage_delete":
         return await runStorageDelete(env, db, user, args);
+      case "storage_create_share_link":
+        return await runStorageCreateShareLink(env, db, user, args);
       default:
         return { text: `不明なツール: ${toolName}`, files: [] };
     }
@@ -1076,5 +1122,51 @@ async function runStorageDelete(
   return {
     text: `ごみ箱へ移動しました: ${path} (trashId=${result.trashId})`,
     files: [],
+  };
+}
+
+async function runStorageCreateShareLink(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  const allowed = await canUserAccessApp(db, user.id, STORAGE_APP_SLUG);
+  if (!allowed) {
+    return { text: "クラウドストレージへのアクセス権限がありません", files: [] };
+  }
+
+  const paths = pathsArg(args, "paths");
+  if (!paths.length) {
+    return { text: "paths に共有するファイルを指定してください", files: [] };
+  }
+
+  const maxDownloads = args.max_downloads;
+  const result = await createStorageShareLink(
+    env,
+    db,
+    user,
+    paths,
+    maxDownloads,
+    buildRunaOriginRequest(env)
+  );
+
+  const fileLines = result.files
+    .map((file) => `- ${file.filename} (${file.size_bytes} bytes)`)
+    .join("\n");
+
+  return {
+    text:
+      `共有リンクを作成しました。\n` +
+      `URL: ${result.url}\n` +
+      `ダウンロード上限: ${result.max_downloads} 回\n` +
+      `ファイル:\n${fileLines}`,
+    files: result.files.map((file) => ({
+      name: file.filename,
+      path: paths.find((p) => p.endsWith(file.filename)) ?? file.filename,
+      type: "file",
+      sizeBytes: file.size_bytes,
+      updatedAt: null,
+    })),
   };
 }

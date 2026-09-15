@@ -18,8 +18,15 @@ import { getUserUpcomingReservations as getSimReservations } from "../simulation
 import { listFdsRequestsForUser } from "../simulation/fds-requests";
 import { listOpenfoamRequestsForUser } from "../simulation/openfoam-requests";
 import { listMyProjects, THIRD_PARTY_APP_SLUG } from "../third-party";
-import { listUserWebSites } from "../website-publish/sites";
-import { WEBSITE_PUBLISH_APP_SLUG } from "../website-publish/constants";
+import {
+  createWebSite,
+  getOwnedWebSite,
+  listUserWebSites,
+} from "../website-publish/sites";
+import { WEBSITE_PUBLISH_APP_SLUG, MAX_SITES_PER_USER } from "../website-publish/constants";
+import { writeSiteFileText } from "../website-publish/file-ops";
+import { listSiteFiles } from "../website-publish/r2-ops";
+import { importStorageFilesToWebSite } from "./web-bridge";
 import { listNotes, EXCALIDRAW_APP_SLUG } from "../excalidraw-notes";
 import { listProjects as listDesignProjects, DESIGN_APP_SLUG } from "../design";
 import { STORAGE_APP_SLUG } from "../storage/constants";
@@ -234,6 +241,83 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "web_create_site",
+      description:
+        "ウェブサイト公開に新しいサイトを作成する。公開 URL は /web/{path_slug}/",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "サイトの表示名" },
+          path_slug: {
+            type: "string",
+            description: "URL 用スラッグ（英数字・ハイフン、例: my-landing）",
+          },
+        },
+        required: ["title", "path_slug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_write_file",
+      description:
+        "ウェブサイト公開のサイト内にテキストファイル（HTML/CSS/JS 等）を書き込む",
+      parameters: {
+        type: "object",
+        properties: {
+          site_id: { type: "string", description: "サイト ID（web_list_sites で取得）" },
+          path: {
+            type: "string",
+            description: "サイト内の相対パス（例: index.html, css/style.css）",
+          },
+          content: { type: "string", description: "書き込む内容" },
+        },
+        required: ["site_id", "path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_list_site_files",
+      description: "ウェブサイト公開のサイト内ファイル一覧",
+      parameters: {
+        type: "object",
+        properties: {
+          site_id: { type: "string", description: "サイト ID" },
+        },
+        required: ["site_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_import_from_storage",
+      description:
+        "クラウドストレージのファイルまたはフォルダをウェブサイト公開サイトへ取り込む",
+      parameters: {
+        type: "object",
+        properties: {
+          site_id: { type: "string", description: "サイト ID" },
+          storage_paths: {
+            type: "array",
+            items: { type: "string" },
+            description: "ストレージの論理パス（ファイルまたはフォルダ）",
+          },
+          dest_prefix: {
+            type: "string",
+            description: "サイト内の配置先プレフィックス（任意、例: assets）",
+          },
+        },
+        required: ["site_id", "storage_paths"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "excalidraw_list_notes",
       description: "ホワイトボード（Excalidraw）の自分のノート一覧",
       parameters: { type: "object", properties: {} },
@@ -358,6 +442,17 @@ function numArg(args: Record<string, unknown>, key: string, fallback: number): n
   return fallback;
 }
 
+function pathsArg(args: Record<string, unknown>, key: string): string[] {
+  const v = args[key];
+  if (Array.isArray(v)) {
+    return v
+      .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      .map((item) => item.trim());
+  }
+  if (typeof v === "string" && v.trim()) return [v.trim()];
+  return [];
+}
+
 function todayJst(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
@@ -417,6 +512,14 @@ export async function executeHubTool(
         return await runTpList(db, user);
       case "web_list_sites":
         return await runWebList(env, db, user);
+      case "web_create_site":
+        return await runWebCreateSite(db, user, args);
+      case "web_write_file":
+        return await runWebWriteFile(env, db, user, args);
+      case "web_list_site_files":
+        return await runWebListSiteFiles(env, db, user, args);
+      case "web_import_from_storage":
+        return await runWebImportFromStorage(env, db, user, args);
       case "excalidraw_list_notes":
         return await runExcalidrawList(db, user);
       case "design_list_projects":
@@ -725,6 +828,142 @@ async function runWebList(
       `- ${s.title} /web/${s.path_slug}/ [${s.status}] ${s.public_url} id=${s.id}`
   );
   return { text: `ウェブサイト（${sites.length} 件）:\n${lines.join("\n")}`, files: [] };
+}
+
+async function runWebCreateSite(
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  await requireApp(db, user.id, WEBSITE_PUBLISH_APP_SLUG);
+
+  const title = strArg(args, "title");
+  const pathSlug = strArg(args, "path_slug");
+  if (!title || !pathSlug) {
+    return { text: "title と path_slug が必要です", files: [] };
+  }
+
+  const site = await createWebSite(db, user.id, title, pathSlug);
+  const count = await db
+    .prepare("SELECT COUNT(*) AS n FROM web_sites WHERE owner_user_id = ?")
+    .bind(user.id)
+    .first<{ n: number }>();
+  const remaining = Math.max(0, MAX_SITES_PER_USER - (count?.n ?? 0));
+
+  return {
+    text:
+      `サイトを作成しました。\n` +
+      `タイトル: ${site.title}\n` +
+      `公開 URL: /web/${site.path_slug}/\n` +
+      `site_id: ${site.id}\n` +
+      `残り作成可能: ${remaining} 件`,
+    files: [],
+  };
+}
+
+async function runWebWriteFile(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  await requireApp(db, user.id, WEBSITE_PUBLISH_APP_SLUG);
+
+  const siteId = strArg(args, "site_id");
+  const path = strArg(args, "path");
+  const content = typeof args.content === "string" ? args.content : "";
+  if (!siteId || !path) {
+    return { text: "site_id と path が必要です", files: [] };
+  }
+
+  const site = await getOwnedWebSite(db, user.id, siteId);
+  if (!site) return { text: "サイトが見つかりません", files: [] };
+
+  const result = await writeSiteFileText(env, db, site, path, content);
+  return {
+    text:
+      `サイトにファイルを保存しました: ${result.path} (${result.size} bytes)\n` +
+      `公開 URL: /web/${site.path_slug}/${result.path === "index.html" ? "" : result.path}`,
+    files: [],
+  };
+}
+
+async function runWebListSiteFiles(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  await requireApp(db, user.id, WEBSITE_PUBLISH_APP_SLUG);
+
+  const siteId = strArg(args, "site_id");
+  if (!siteId) return { text: "site_id が必要です", files: [] };
+
+  const site = await getOwnedWebSite(db, user.id, siteId);
+  if (!site) return { text: "サイトが見つかりません", files: [] };
+
+  const files = await listSiteFiles(getFiles(env), site.r2_prefix);
+  if (!files.length) {
+    return { text: `サイト ${site.title} にはファイルがありません`, files: [] };
+  }
+
+  const lines = files.map(
+    (file) => `- ${file.path} (${file.size} bytes)`
+  );
+  const hasIndex = files.some((file) => file.path === "index.html");
+
+  return {
+    text:
+      `サイト ${site.title}（/web/${site.path_slug}/）のファイル:\n` +
+      `${lines.join("\n")}\n` +
+      `index.html: ${hasIndex ? "あり（公開可能）" : "なし（追加が必要）"}`,
+    files: [],
+  };
+}
+
+async function runWebImportFromStorage(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  await requireApp(db, user.id, WEBSITE_PUBLISH_APP_SLUG);
+  await requireApp(db, user.id, STORAGE_APP_SLUG);
+
+  const siteId = strArg(args, "site_id");
+  const storagePaths = pathsArg(args, "storage_paths");
+  const destPrefix = strArg(args, "dest_prefix");
+  if (!siteId) return { text: "site_id が必要です", files: [] };
+  if (!storagePaths.length) {
+    return { text: "storage_paths を指定してください", files: [] };
+  }
+
+  const site = await getOwnedWebSite(db, user.id, siteId);
+  if (!site) return { text: "サイトが見つかりません", files: [] };
+
+  const result = await importStorageFilesToWebSite(
+    env,
+    db,
+    user,
+    site,
+    storagePaths,
+    destPrefix
+  );
+
+  const importedLines = result.imported
+    .map((file) => `- ${file.storage_path} → ${file.site_path} (${file.size} bytes)`)
+    .join("\n");
+  const skippedLines = result.skipped.length
+    ? `\nスキップ:\n${result.skipped.map((line) => `- ${line}`).join("\n")}`
+    : "";
+
+  return {
+    text:
+      `${result.imported.length} 件をサイトへ取り込みました。\n` +
+      `公開 URL: ${result.public_url}\n` +
+      `${importedLines}${skippedLines}`,
+    files: [],
+  };
 }
 
 async function runExcalidrawList(
