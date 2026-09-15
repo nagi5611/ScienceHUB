@@ -187,17 +187,6 @@ body.cs-app-body {
   font-weight: 500;
 }
 
-.cs-websites-status {
-  margin: 0.5rem 0 0;
-  padding: 0 0.25rem;
-}
-
-.cs-websites-status-note {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--cs-muted);
-}
-
 .cs-trash-status {
   margin: 0.5rem 0 0;
   padding: 0 0.25rem;
