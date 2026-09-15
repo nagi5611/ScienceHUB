@@ -320,6 +320,68 @@
   }
 }
 
+.runa-live-phase {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: var(--cf-orange-soft, #fff4eb);
+  border: 1px solid rgb(243 128 32 / 0.22);
+  font-size: 0.84rem;
+  color: var(--cf-text, #1d2433);
+  animation: runa-live-phase-in 0.18s ease-out;
+}
+
+@keyframes runa-live-phase-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.runa-live-phase-dot {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--cf-orange, #f38020);
+  animation: runa-live-phase-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes runa-live-phase-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+.runa-live-phase-text {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.runa-live-phase-kind {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: rgb(243 128 32 / 0.14);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--cf-orange, #f38020);
+}
+
 .runa-activities {
   display: flex;
   flex-direction: column;
@@ -359,10 +421,17 @@
 
 .runa-activity.is-active summary {
   color: var(--cf-text, #1d2433);
+  font-weight: 500;
+}
+
+.runa-activity.is-active {
+  border-color: rgb(243 128 32 / 0.35);
+  box-shadow: 0 0 0 1px rgb(243 128 32 / 0.08);
 }
 
 .runa-activity.is-done {
-  opacity: 0.85;
+  opacity: 0.72;
+  transition: opacity 0.2s ease;
 }
 
 .runa-activity.is-done .runa-activity-detail {

@@ -416,6 +416,28 @@ const ACTIVITY_PHASE_LABELS = {
   writing: "作成中",
 };
 
+let pendingBubbleRaf = 0;
+let lastActivityDetailPaintAt = 0;
+
+/** 推論ストリーム等の高頻度更新をまとめて描画 */
+function schedulePendingBubbleUpdate(pending) {
+  if (pendingBubbleRaf) return;
+  pendingBubbleRaf = requestAnimationFrame(() => {
+    pendingBubbleRaf = 0;
+    updatePendingAssistantBubble(pending);
+  });
+}
+
+function renderLivePhaseHtml(activities) {
+  const active = activities?.find((a) => a.state !== "done");
+  if (!active) return "";
+  const phase = ACTIVITY_PHASE_LABELS[active.phase] || active.phase;
+  return `<div class="runa-live-phase" aria-live="polite">
+    <span class="runa-live-phase-dot" aria-hidden="true"></span>
+    <span class="runa-live-phase-text"><span class="runa-live-phase-kind">${escapeHtml(phase)}</span>${escapeHtml(active.label || phase)}</span>
+  </div>`;
+}
+
 function renderActivityHtml(activity) {
   const phase = ACTIVITY_PHASE_LABELS[activity.phase] || activity.phase;
   const done = activity.state === "done";
@@ -433,7 +455,9 @@ function renderActivityHtml(activity) {
 
 function renderActivitiesHtml(activities) {
   if (!activities?.length) return "";
-  return `<div class="runa-activities">${activities.map(renderActivityHtml).join("")}</div>`;
+  const live = renderLivePhaseHtml(activities);
+  const items = activities.map(renderActivityHtml).join("");
+  return `${live}<div class="runa-activities">${items}</div>`;
 }
 
 function renderMessageHtml(msg) {
@@ -524,26 +548,39 @@ function applyActivityEvent(pending, payload) {
   const existing = pending.activities.find((a) => a.id === payload.id);
   if (payload.state === "start") {
     if (!existing) {
+      for (const item of pending.activities) {
+        if (item.state !== "done") item.open = false;
+      }
       pending.activities.push({
         id: payload.id,
         phase: payload.phase,
         label: payload.label,
         detail: payload.detail || "",
         state: "start",
-        open: false,
+        open: true,
       });
     }
+    updatePendingAssistantBubble(pending);
     return;
   }
 
   if (existing) {
     if (payload.state === "update") {
       if (payload.detail) existing.detail = payload.detail;
+      const now = Date.now();
+      if (now - lastActivityDetailPaintAt < 100) {
+        schedulePendingBubbleUpdate(pending);
+        return;
+      }
+      lastActivityDetailPaintAt = now;
+      schedulePendingBubbleUpdate(pending);
       return;
     }
     existing.state = payload.state || "done";
     if (payload.detail) existing.detail = payload.detail;
     if (!existing.label && payload.label) existing.label = payload.label;
+    if (existing.state === "done") existing.open = false;
+    updatePendingAssistantBubble(pending);
   }
 }
 
@@ -743,7 +780,6 @@ async function postRunaChat(message, attachments) {
     }
     if (eventName === "activity") {
       applyActivityEvent(pending, payload);
-      updatePendingAssistantBubble(pending);
     } else if (eventName === "status" && payload.label) {
       setStatus(payload.label);
     } else if (eventName === "delta" && payload.text) {

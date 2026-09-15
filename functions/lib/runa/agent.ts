@@ -496,14 +496,25 @@ export async function runRunaChat(
   const maxRounds = resolveMaxToolRounds(env);
 
   let writingActivityId: string | null = null;
+  /** ツール完了直後に先行開始した thinking（無音ギャップ防止） */
+  let prefetchedThinkId: string | null = null;
+  const firstThinkLabel = "応答を考えています…";
+  const nextThinkLabel = "次の操作を考えています…";
 
   for (let round = 0; round < maxRounds; round++) {
     let streamedReply = false;
-    let thinkId: string | null = activity.start(
-      "thinking",
-      round === 0 ? "応答を考えています…" : "次の操作を考えています…",
-      `ラウンド ${round + 1}/${maxRounds}`
-    );
+    let thinkId: string | null = prefetchedThinkId;
+    prefetchedThinkId = null;
+
+    if (!thinkId) {
+      thinkId = activity.start(
+        "thinking",
+        round === 0 ? firstThinkLabel : nextThinkLabel,
+        `ラウンド ${round + 1}/${maxRounds}`
+      );
+    } else {
+      send("status", { label: nextThinkLabel, phase: "thinking" });
+    }
     let reasoningBuffer = "";
 
     const finishThinking = (completion: Awaited<
@@ -581,7 +592,26 @@ export async function runRunaChat(
       });
 
       for (const call of completion.toolCalls) {
-        await handleToolCall(env, db, user, call, messages, collectedFiles, send);
+        await handleToolCall(
+          env,
+          db,
+          user,
+          call,
+          messages,
+          collectedFiles,
+          send,
+          activity
+        );
+      }
+
+      // 検索・ツール完了直後に次フェーズを表示（AWS AGENTPERF02-BP04 / 72Tech 推奨）
+      if (round + 1 < maxRounds) {
+        prefetchedThinkId = activity.start(
+          "thinking",
+          nextThinkLabel,
+          `ラウンド ${round + 2}/${maxRounds}`
+        );
+        send("status", { label: nextThinkLabel, phase: "thinking" });
       }
 
       usage = computeContextUsage(messages, ALL_RUNA_TOOLS, env);
@@ -640,13 +670,13 @@ async function handleToolCall(
   call: ToolCall,
   messages: ChatMessage[],
   collectedFiles: RunaFileItem[],
-  send: RunaSseSend
+  send: RunaSseSend,
+  activity: RunaActivityLog
 ): Promise<void> {
   const name = call.function.name;
   const label = TOOL_STATUS_LABELS[name] ?? `${name} を実行中…`;
   const argDetail = summarizeToolArgs(name, call.function.arguments);
-  send("status", { label, tool: name, detail: argDetail });
-  const activity = new RunaActivityLog(send);
+  send("status", { label, tool: name, detail: argDetail, phase: "working" });
   const workId = activity.start("working", label, argDetail);
 
   const result = isHubTool(name)
