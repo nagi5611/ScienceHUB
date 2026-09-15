@@ -657,9 +657,13 @@ body.runa-lightbox-open {
 
 .runa-attach-btn {
   flex: 0 0 auto;
-  align-self: flex-end;
-  width: 2.5rem;
-  height: 2.5rem;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
   border: 1px solid var(--cf-border, #e2e5e9);
   border-radius: var(--cf-radius, 8px);
   background: var(--cf-bg, #fff);
