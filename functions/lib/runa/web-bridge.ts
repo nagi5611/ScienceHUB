@@ -90,8 +90,10 @@ export async function importStorageFilesToWebSite(
   }
 
   const totalBytes = resolved.reduce((sum, item) => sum + item.size, 0);
-  if (!canAllocateSiteBytes(site, totalBytes)) {
-    throw new Error("サイトの容量上限（5GB）を超えるため取り込めません");
+  if (!(await canAllocateSiteBytes(db, site, totalBytes))) {
+    throw new Error(
+      "ストレージ上限（個人ファイルと公開サイトの合計）を超えるため取り込めません"
+    );
   }
 
   const imported: ImportedWebFile[] = [];

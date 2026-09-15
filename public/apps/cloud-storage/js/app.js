@@ -2478,14 +2478,19 @@ function renderFileList() {
 }
 
 async function loadQuota() {
-  if (!currentPath || isAlternateView()) return;
+  if (!currentPath || trashView) return;
   try {
     const data = await apiRequest(`quota?path=${encodeURIComponent(currentPath)}`);
     const bar = document.getElementById("cs-quota-bar");
     const label = document.getElementById("cs-quota-label");
     applyQuotaBar(bar, data.used_bytes, data.quota_bytes);
     if (label) {
-      label.textContent = `${formatBytes(data.used_bytes)} / ${formatBytes(data.quota_bytes)}`;
+      const hasBreakdown =
+        typeof data.personal_used_bytes === "number" &&
+        typeof data.website_used_bytes === "number";
+      label.textContent = hasBreakdown
+        ? `${formatBytes(data.used_bytes)} / ${formatBytes(data.quota_bytes)}（個人 ${formatBytes(data.personal_used_bytes)} + 公開 ${formatBytes(data.website_used_bytes)}）`
+        : `${formatBytes(data.used_bytes)} / ${formatBytes(data.quota_bytes)}`;
     }
   } catch {
     /* ignore */
@@ -2587,6 +2592,9 @@ async function loadWebSites() {
       setLoading(false);
       renderWebSitesFileList();
     }
+    if (generation === listLoadGeneration) {
+      await loadQuota();
+    }
   } catch (err) {
     if (generation === listLoadGeneration) {
       showToast(err.message, true);
@@ -2654,6 +2662,9 @@ async function loadWebSiteFiles() {
     } else {
       setLoading(false);
       renderWebSitesFileList();
+    }
+    if (generation === listLoadGeneration) {
+      await loadQuota();
     }
   } catch (err) {
     if (generation === listLoadGeneration) {

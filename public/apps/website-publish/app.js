@@ -39,6 +39,7 @@ const backToSites = document.getElementById("back-to-sites");
 const currentSiteTitle = document.getElementById("current-site-title");
 const currentSiteUrl = /** @type {HTMLAnchorElement} */ (document.getElementById("current-site-url"));
 const siteQuota = document.getElementById("site-quota");
+const accountQuota = document.getElementById("account-quota");
 const siteStats = document.getElementById("site-stats");
 const deleteSiteBtn = document.getElementById("delete-site-btn");
 const fileInput = /** @type {HTMLInputElement} */ (document.getElementById("file-input"));
@@ -56,6 +57,9 @@ const editCancel = document.getElementById("edit-cancel");
 
 /** @type {string | null} */
 let editingPath = null;
+
+/** @type {{ quota_bytes: number; personal_used_bytes: number; website_used_bytes: number; combined_used_bytes: number; available_bytes: number } | null} */
+let userQuota = null;
 
 /** @type {Array<{ id: string; title: string; path_slug: string; used_bytes: number; max_bytes: number; public_url: string; has_index: boolean; visit_count: number; last_visit_at: number | null }>} */
 let sites = [];
@@ -393,26 +397,45 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+/** 統合ストレージ使用量を描画 */
+function renderAccountQuota() {
+  if (!accountQuota) return;
+  if (!userQuota) {
+    accountQuota.hidden = true;
+    accountQuota.replaceChildren();
+    return;
+  }
+
+  const pct =
+    userQuota.quota_bytes > 0
+      ? (userQuota.combined_used_bytes / userQuota.quota_bytes) * 100
+      : 0;
+  accountQuota.hidden = false;
+  accountQuota.innerHTML = `
+    <span class="wsp-quota-label">ストレージ合計 ${formatBytes(userQuota.combined_used_bytes)} / ${formatBytes(userQuota.quota_bytes)}（個人 ${formatBytes(userQuota.personal_used_bytes)} + 公開 ${formatBytes(userQuota.website_used_bytes)}）</span>
+    <div class="wsp-quota-bar" aria-hidden="true"><span style="width:${Math.min(100, pct)}%"></span></div>
+  `;
+}
+
 /** サイト一覧を描画 */
 function renderSiteList() {
   siteList.replaceChildren();
   siteEmpty.hidden = sites.length > 0;
   createSiteBtn.disabled = sites.length >= MAX_SITES;
+  renderAccountQuota();
 
   for (const site of sites) {
     const li = document.createElement("li");
     li.className = "wsp-site-card";
-    const pct = site.max_bytes > 0 ? (site.used_bytes / site.max_bytes) * 100 : 0;
     li.innerHTML = `
       <div class="wsp-site-card-main">
         <h3 class="wsp-site-card-title">${escapeHtml(site.title)}</h3>
         <p class="wsp-site-card-url"><a href="${escapeHtml(site.public_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(site.public_url)}</a></p>
         <div class="wsp-site-card-stats">
           <span>訪問 ${site.visit_count ?? 0} 回</span>
-          <span>${formatBytes(site.used_bytes)} / ${formatBytes(site.max_bytes)}</span>
+          <span>このサイト ${formatBytes(site.used_bytes)}</span>
           ${site.has_index ? "" : '<span class="wsp-warn">index.html 未設定</span>'}
         </div>
-        <div class="wsp-quota-bar" aria-hidden="true"><span style="width:${Math.min(100, pct)}%"></span></div>
       </div>
       <button type="button" class="wsp-btn wsp-btn--secondary" data-site-id="${escapeHtml(site.id)}">管理</button>
     `;
@@ -425,6 +448,7 @@ function renderSiteList() {
 async function loadSites() {
   const data = await api("sites");
   sites = data.sites ?? [];
+  userQuota = data.user_quota ?? null;
   renderSiteList();
 }
 
@@ -465,9 +489,22 @@ function updateStatsDisplay(site) {
 
 /** 使用量表示 */
 function updateQuotaDisplay(site) {
+  if (userQuota) {
+    const pct =
+      userQuota.quota_bytes > 0
+        ? (userQuota.combined_used_bytes / userQuota.quota_bytes) * 100
+        : 0;
+    siteQuota.innerHTML = `
+      <span class="wsp-quota-label">ストレージ合計 ${formatBytes(userQuota.combined_used_bytes)} / ${formatBytes(userQuota.quota_bytes)}（個人 ${formatBytes(userQuota.personal_used_bytes)} + 公開 ${formatBytes(userQuota.website_used_bytes)}）</span>
+      <p class="wsp-quota-note">このサイト ${formatBytes(site.used_bytes)}</p>
+      <div class="wsp-quota-bar" aria-hidden="true"><span style="width:${Math.min(100, pct)}%"></span></div>
+    `;
+    return;
+  }
+
   const pct = site.max_bytes > 0 ? (site.used_bytes / site.max_bytes) * 100 : 0;
   siteQuota.innerHTML = `
-    <span class="wsp-quota-label">使用量 ${formatBytes(site.used_bytes)} / ${formatBytes(site.max_bytes)}</span>
+    <span class="wsp-quota-label">このサイト ${formatBytes(site.used_bytes)} / ${formatBytes(site.max_bytes)}</span>
     <div class="wsp-quota-bar" aria-hidden="true"><span style="width:${Math.min(100, pct)}%"></span></div>
   `;
 }

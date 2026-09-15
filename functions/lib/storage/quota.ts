@@ -9,6 +9,7 @@ import {
   QUOTA_MEMBER,
 } from "./constants";
 import { now } from "../types";
+import { getUserWebSitesUsedBytes } from "./user-combined-quota";
 
 export interface StorageRootRow {
   id: string;
@@ -123,7 +124,12 @@ export async function updateRootQuota(
   const root = await getStorageRootById(db, rootId);
   if (!root) return "ストレージルートが見つかりません";
 
-  if (quotaBytes < root.used_bytes) {
+  if (root.root_type === "user" && root.user_id) {
+    const websiteUsed = await getUserWebSitesUsedBytes(db, root.user_id);
+    if (quotaBytes < root.used_bytes + websiteUsed) {
+      return "使用中のサイズ（個人ファイルと公開サイトの合計）より小さい割り当て領域には設定できません";
+    }
+  } else if (quotaBytes < root.used_bytes) {
     return "使用中のサイズより小さい割り当て領域には設定できません";
   }
 

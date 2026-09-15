@@ -8,6 +8,7 @@ import { getRootGroup } from "../groups";
 import { TRASH_QUOTA_BYTES } from "./constants";
 import { buildVisibleRoots, type StorageRootEntry } from "./list";
 import type { StorageRootRow } from "./quota";
+import { getUserWebSitesUsedBytes } from "./user-combined-quota";
 import {
   ensureGroupStorageRoot,
   ensureUserStorageRoot,
@@ -143,9 +144,25 @@ export async function getStorageOverviewForDashboard(
   }
   resolved.sort((a, b) => sortOverviewEntries(a, b, rootGroupSlug));
 
+  const websiteUsedByUserId = new Map<string, number>();
+  for (const { entry, root } of resolved) {
+    if (entry.type !== "user" || !root.user_id) continue;
+    if (websiteUsedByUserId.has(root.user_id)) continue;
+    websiteUsedByUserId.set(
+      root.user_id,
+      await getUserWebSitesUsedBytes(db, root.user_id)
+    );
+  }
+
   const roots: StorageOverviewRow[] = resolved.map(({ entry, root }) => {
     const trashUsed = trashMap.get(root.id) ?? 0;
-    const available = Math.max(0, root.quota_bytes - root.used_bytes);
+    const websiteUsed =
+      entry.type === "user" && root.user_id
+        ? websiteUsedByUserId.get(root.user_id) ?? 0
+        : 0;
+    const usedBytes =
+      entry.type === "user" ? root.used_bytes + websiteUsed : root.used_bytes;
+    const available = Math.max(0, root.quota_bytes - usedBytes);
     const trashAvailable = Math.max(0, TRASH_QUOTA_BYTES - trashUsed);
 
     return {
@@ -153,9 +170,9 @@ export async function getStorageOverviewForDashboard(
       path: entry.path,
       type: entry.type,
       quota_bytes: root.quota_bytes,
-      used_bytes: root.used_bytes,
+      used_bytes: usedBytes,
       available_bytes: available,
-      usage_ratio: calcRatio(root.used_bytes, root.quota_bytes),
+      usage_ratio: calcRatio(usedBytes, root.quota_bytes),
       trash_quota_bytes: TRASH_QUOTA_BYTES,
       trash_used_bytes: trashUsed,
       trash_available_bytes: trashAvailable,

@@ -79,7 +79,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   try {
     if (parts[0] === "sites" && parts.length === 1) {
       const sites = await listUserWebSites(db, bucket, auth.id);
-      return Response.json({ sites });
+      const { getUserCombinedQuota } = await import(
+        "../../lib/storage/user-combined-quota"
+      );
+      const userQuota = await getUserCombinedQuota(db, auth.id);
+      return Response.json({ sites, user_quota: userQuota });
     }
 
     if (parts[0] === "sites" && parts[1] && parts[2] === "files") {

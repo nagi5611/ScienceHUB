@@ -29,9 +29,9 @@ import {
 } from "../storage/meta";
 import {
   addUsedBytes,
-  canAllocateBytes,
   subtractUsedBytes,
 } from "../storage/quota";
+import { canAllocateStorageBytes } from "../storage/user-combined-quota";
 import { resolveRootForPath } from "../storage/roots";
 import {
   initiateStorageUpload,
@@ -543,7 +543,7 @@ async function saveGeneratedImage(
     if (!root) throw new Error("ストレージルートが見つかりません");
 
     const delta = bytes.byteLength - existing.size;
-    if (delta > 0 && !canAllocateBytes(root, delta)) {
+    if (delta > 0 && !(await canAllocateStorageBytes(db, root, user.id, delta))) {
       throw new Error("割り当て領域不足です");
     }
 

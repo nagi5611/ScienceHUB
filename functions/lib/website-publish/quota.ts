@@ -2,8 +2,12 @@
  * ウェブサイト公開 — クォータ
  */
 
-import { MAX_SITE_BYTES } from "./constants";
 import { now } from "../types";
+import { getUserStorageRoot } from "../storage/quota";
+import {
+  canAllocateUserCombinedBytes,
+  getUserWebSitesUsedBytes,
+} from "../storage/user-combined-quota";
 
 export interface WebSiteRow {
   id: string;
@@ -20,9 +24,17 @@ export interface WebSiteRow {
   updated_at: number;
 }
 
-/** 追加バイトを割り当て可能か */
-export function canAllocateSiteBytes(site: WebSiteRow, additionalBytes: number): boolean {
-  return site.used_bytes + additionalBytes <= MAX_SITE_BYTES;
+/** 追加バイトを割り当て可能か（個人ファイルと公開サイトの合計上限） */
+export async function canAllocateSiteBytes(
+  db: D1Database,
+  site: WebSiteRow,
+  additionalBytes: number
+): Promise<boolean> {
+  if (additionalBytes <= 0) return true;
+  const root = await getUserStorageRoot(db, site.owner_user_id);
+  if (!root) return false;
+  const websiteUsed = await getUserWebSitesUsedBytes(db, site.owner_user_id);
+  return canAllocateUserCombinedBytes(root, websiteUsed, additionalBytes);
 }
 
 /** 使用量を加算 */

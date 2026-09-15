@@ -8,6 +8,7 @@ import {
   MAX_SITES_PER_USER,
   WEBSITE_PUBLISH_APP_SLUG,
 } from "./constants";
+import { getUserCombinedQuota } from "../storage/user-combined-quota";
 import { siteR2Prefix } from "./keys";
 import type { WebSiteRow } from "./quota";
 import { deleteSitePrefix } from "./r2-ops";
@@ -85,13 +86,17 @@ async function allocateDirName(db: D1Database): Promise<string> {
   return createId("wsd").slice(4);
 }
 
-function toSummary(row: WebSiteRow, hasIndex = false): WebSiteSummary {
+function toSummary(
+  row: WebSiteRow,
+  hasIndex = false,
+  userQuotaBytes = 0
+): WebSiteSummary {
   return {
     id: row.id,
     path_slug: row.path_slug,
     title: row.title,
     used_bytes: row.used_bytes,
-    max_bytes: 5 * 1024 ** 3,
+    max_bytes: userQuotaBytes,
     status: row.status,
     public_url: `/web/${row.path_slug}/`,
     created_at: row.created_at,
@@ -116,11 +121,13 @@ export async function listUserWebSites(
     .all<WebSiteRow>();
 
   const sites = rows.results ?? [];
+  const combined = await getUserCombinedQuota(db, userId);
+  const userQuotaBytes = combined?.quota_bytes ?? 0;
   const summaries: WebSiteSummary[] = [];
 
   for (const row of sites) {
     const indexHead = await bucket.head(`${row.r2_prefix}index.html`);
-    summaries.push(toSummary(row, indexHead !== null));
+    summaries.push(toSummary(row, indexHead !== null, userQuotaBytes));
   }
 
   return summaries;
