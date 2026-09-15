@@ -563,24 +563,77 @@ body.cs-app-body {
   color: var(--cs-muted);
 }
 
-.cs-editor-dialog {
-  width: min(96vw, 900px);
+.cs-editor-shell-dialog {
+  width: min(92vw, 900px);
   max-width: none;
+  padding: 0;
+  overflow: hidden;
 }
 
-body.cs-website-editor-open .cs-editor-dialog {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: min(58vw, 720px);
-  height: 100vh;
-  max-width: none;
-  max-height: none;
-  margin: 0;
-  border-radius: 0;
-  border-left: none;
-  border-top: none;
-  border-bottom: none;
+.cs-editor-shell-dialog.cs-editor-shell--split,
+.cs-editor-shell-dialog:has(.cs-editor-shell--split) {
+  width: min(96vw, 1400px);
+  height: min(92vh, 900px);
+  max-height: calc(100vh - 2rem);
+}
+
+.cs-editor-shell {
+  display: flex;
+  flex-direction: row;
+  min-height: min(72vh, 680px);
+  max-height: calc(100vh - 2rem);
+}
+
+.cs-editor-shell--split {
+  min-height: min(92vh, 900px);
+  height: 100%;
+}
+
+.cs-editor-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-editor-shell--split .cs-editor-pane {
+  flex: 0 0 50%;
+  border-right: 1px solid var(--cs-border);
+}
+
+.cs-editor-runa-pane {
+  flex: 0 0 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--cs-bg);
+}
+
+.cs-editor-runa-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.cs-editor-runa-header {
+  flex-shrink: 0;
+}
+
+.cs-editor-runa-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.cs-editor-runa-body .runa-messages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cs-editor-runa-body .runa-form {
+  flex-shrink: 0;
 }
 
 .cs-editor-header-actions {
@@ -594,14 +647,23 @@ body.cs-website-editor-open .cs-editor-dialog {
   color: var(--cs-accent);
 }
 
-.cs-btn-runa:hover {
+.cs-btn-runa:hover,
+.cs-btn-runa.is-active {
   background: var(--cs-accent-soft);
+}
+
+.cs-btn-runa.is-active {
+  color: #fff;
+  background: var(--cs-accent);
+  border-color: var(--cs-accent);
 }
 
 .cs-editor-form {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
+  height: 100%;
 }
 
 .cs-editor-dialog-body {
@@ -637,26 +699,19 @@ body.cs-website-editor-open .cs-editor-dialog {
   outline-offset: 1px;
 }
 
-body.cs-website-editor-open .cs-editor-dialog-body {
+.cs-editor-shell--split .cs-editor-form,
+.cs-editor-shell--split .cs-editor-dialog-body {
   flex: 1;
   min-height: 0;
-}
-
-body.cs-website-editor-open .cs-editor-form {
-  height: 100%;
-}
-
-body.cs-website-editor-open .cs-editor-textarea {
-  flex: 1;
-  min-height: 0;
-  max-height: none;
-}
-
-body.cs-website-editor-open .cs-editor-dialog-body {
   display: flex;
   flex-direction: column;
   max-height: none;
+}
+
+.cs-editor-shell--split .cs-editor-textarea {
   flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 .cs-upload-file-list {

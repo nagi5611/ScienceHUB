@@ -259,14 +259,11 @@ let attachMenuEl = null;
 let storageAttachAllowed = null;
 /** @type {string | null} */
 let pendingEditImagePath = null;
-/** @type {{ siteId: string, path: string, name?: string, webSiteDir?: string | null, getContent?: () => string } | null} */
-let webSiteEditContext = null;
 /** @type {{ usedTokens?: number, limitTokens?: number, percent?: number, accuracyWarningPercent?: number, isAccuracyDegrading?: boolean, summarizeThresholdPercent?: number, shouldSummarize?: boolean } | null} */
 let contextUsageState = null;
 let summarizeBusy = false;
 
 const EDIT_INPUT_PLACEHOLDER = "変更したい内容を入力…";
-const WEB_SITE_EDIT_PLACEHOLDER = "開いているファイルについて質問や修正を依頼…";
 
 /** 編集コンテキストをリセット */
 function resetEditContext() {
@@ -276,44 +273,14 @@ function resetEditContext() {
   }
 }
 
-/** API 送信用コンテキスト（編集意図・公開サイト編集をマージ） */
+/** API 送信用コンテキスト（編集意図をマージ） */
 function buildRunaChatContext() {
   const base = panelOptions.getContext?.() ?? {};
-  const merged = { ...base };
-
-  if (webSiteEditContext?.siteId && webSiteEditContext.path) {
-    merged.webSitesView = true;
-    merged.webSiteId = webSiteEditContext.siteId;
-    merged.webSiteDir = webSiteEditContext.webSiteDir ?? null;
-    const content = webSiteEditContext.getContent?.() ?? "";
-    merged.webSiteEditFile = {
-      siteId: webSiteEditContext.siteId,
-      path: webSiteEditContext.path,
-      content: content.slice(0, 24 * 1024),
-    };
-  }
-
-  if (pendingEditImagePath) {
-    merged.editImagePath = pendingEditImagePath;
-    merged.editIntent = true;
-  }
-
-  return merged;
-}
-
-/** 公開サイト編集中のファイルをチャット添付用に組み立て */
-function buildWebSiteEditAttachment() {
-  if (!webSiteEditContext?.siteId || !webSiteEditContext.path) return null;
-  const content = webSiteEditContext.getContent?.() ?? "";
-  const name =
-    webSiteEditContext.name ??
-    webSiteEditContext.path.split("/").pop() ??
-    "file";
+  if (!pendingEditImagePath) return base;
   return {
-    path: `wsp:${webSiteEditContext.siteId}/${webSiteEditContext.path}`,
-    name,
-    extractedText: content,
-    sizeBytes: content.length,
+    ...base,
+    editImagePath: pendingEditImagePath,
+    editIntent: true,
   };
 }
 /** @type {{ getContext?: () => object | null, placeholder?: string, getContextLabel?: () => string | null }} */
@@ -350,11 +317,6 @@ function formatBytes(bytes) {
 function updateContextHint() {
   const hint = document.getElementById("runa-context-hint");
   if (!hint) return;
-  if (webSiteEditContext?.path) {
-    hint.textContent = `編集中: ${webSiteEditContext.path}`;
-    hint.hidden = false;
-    return;
-  }
   const label = panelOptions.getContextLabel?.();
   if (label) {
     hint.textContent = label;
@@ -1131,14 +1093,6 @@ async function handleSubmit(event) {
     sizeBytes: a.sizeBytes ?? null,
   }));
 
-  const webSiteAttachment = buildWebSiteEditAttachment();
-  if (
-    webSiteAttachment &&
-    !attachments.some((a) => a.path === webSiteAttachment.path)
-  ) {
-    attachments.unshift(webSiteAttachment);
-  }
-
   messageState.push({
     role: "user",
     content: text,
@@ -1371,34 +1325,6 @@ export function initRunaPanel(options = {}) {
 /** パネルを開く */
 export function openRunaPanel() {
   setPanelOpen(true);
-}
-
-/** ファイル編集画面右側に Runa をドック表示 */
-export function openRunaPanelDocked() {
-  document.body.classList.add("cs-website-editor-open");
-  els.panel?.classList.add("is-docked");
-  setPanelOpen(true);
-}
-
-/** 公開サイトの編集中ファイルを Runa コンテキストに設定 */
-export function setWebSiteEditContext(context) {
-  if (!context?.siteId || !context.path) return;
-  webSiteEditContext = context;
-  if (els.input) {
-    els.input.placeholder = WEB_SITE_EDIT_PLACEHOLDER;
-  }
-  updateContextHint();
-}
-
-/** 公開サイト編集コンテキストを解除 */
-export function clearWebSiteEditContext() {
-  webSiteEditContext = null;
-  document.body.classList.remove("cs-website-editor-open");
-  els.panel?.classList.remove("is-docked");
-  if (els.input && panelOptions.placeholder) {
-    els.input.placeholder = panelOptions.placeholder;
-  }
-  updateContextHint();
 }
 
 /** ストレージ上のファイルを参照添付してパネルを開く */
