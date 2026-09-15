@@ -14,9 +14,40 @@ export const EDIT_IMAGE_MAX_REFERENCE_BYTES = 1_500_000;
 /** 保存時に JPEG へ圧縮する閾値（生バイト） */
 export const EDIT_IMAGE_STORE_COMPRESS_THRESHOLD_BYTES = 512 * 1024;
 
+const DEFAULT_IMAGE_CONVERTER_PUBLIC_URL =
+  "https://image-converter.harumacci94.workers.dev";
+
 interface CompressOptions {
   maxEdge: number;
   quality: number;
+}
+
+function resolveConverterPublicUrl(env: Env): string | null {
+  const configured = env.IMAGE_CONVERTER_PUBLIC_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+  return DEFAULT_IMAGE_CONVERTER_PUBLIC_URL;
+}
+
+function buildPrepareForm(
+  bytes: Uint8Array,
+  filename: string,
+  mime: SupportedImageMime,
+  options: CompressOptions
+): FormData {
+  const copy = bytes.slice();
+  const prepareName = filename.replace(/\.[^.]+$/, "") + ".jpg";
+  const form = new FormData();
+  form.append("file", new File([copy], prepareName, { type: mime }));
+  form.append("quality", String(options.quality));
+  form.append("maxEdge", String(options.maxEdge));
+  return form;
+}
+
+function buildConverterHeaders(env: Env): Headers {
+  const headers = new Headers();
+  const secret = env.IMAGE_CONVERTER_WORKER_SECRET?.trim();
+  if (secret) headers.set("X-Image-Converter-Secret", secret);
+  return headers;
 }
 
 async function compressViaConverterService(
@@ -26,37 +57,81 @@ async function compressViaConverterService(
   mime: SupportedImageMime,
   options: CompressOptions
 ): Promise<Uint8Array | null> {
-  if (!env.IMAGE_CONVERTER) return null;
+  const headers = buildConverterHeaders(env);
+  const attempts: Array<{ label: string; run: () => Promise<Response> }> = [];
 
-  const form = new FormData();
-  form.append("file", new File([bytes], filename, { type: mime }));
-  form.append("quality", String(options.quality));
-  form.append("maxEdge", String(options.maxEdge));
+  if (env.IMAGE_CONVERTER) {
+    attempts.push({
+      label: "service_binding",
+      run: async () => {
+        const form = buildPrepareForm(bytes, filename, mime, options);
+        return env.IMAGE_CONVERTER!.fetch(
+          new Request("https://image-converter/prepare", {
+            method: "POST",
+            headers,
+            body: form,
+          })
+        );
+      },
+    });
+  }
 
-  const headers = new Headers();
-  const secret = env.IMAGE_CONVERTER_WORKER_SECRET?.trim();
-  if (secret) headers.set("X-Image-Converter-Secret", secret);
+  const publicUrl = resolveConverterPublicUrl(env);
+  if (publicUrl) {
+    attempts.push({
+      label: "public_url",
+      run: async () => {
+        const form = buildPrepareForm(bytes, filename, mime, options);
+        return fetch(`${publicUrl}/prepare`, {
+          method: "POST",
+          headers,
+          body: form,
+        });
+      },
+    });
+  }
 
-  const workerResponse = await env.IMAGE_CONVERTER.fetch(
-    new Request("https://image-converter/prepare", {
-      method: "POST",
-      headers,
-      body: form,
-    })
-  );
+  if (!attempts.length) return null;
 
-  if (!workerResponse.ok) {
-    const detail = await workerResponse.text().catch(() => "");
-    console.error("Runa image compress via IMAGE_CONVERTER failed", {
-      status: workerResponse.status,
-      detail: detail.slice(0, 300),
+  let lastStatus = 0;
+  let lastDetail = "";
+
+  for (const attempt of attempts) {
+    try {
+      const workerResponse = await attempt.run();
+      if (workerResponse.ok) {
+        return new Uint8Array(await workerResponse.arrayBuffer());
+      }
+
+      lastStatus = workerResponse.status;
+      lastDetail = await workerResponse.text().catch(() => "");
+      console.error("Runa image compress via image-converter failed", {
+        transport: attempt.label,
+        status: workerResponse.status,
+        detail: lastDetail.slice(0, 300),
+        filename,
+        inputBytes: bytes.length,
+      });
+    } catch (error) {
+      console.error("Runa image compress via image-converter threw", {
+        transport: attempt.label,
+        filename,
+        inputBytes: bytes.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (lastStatus) {
+    console.error("Runa image compress exhausted transports", {
+      status: lastStatus,
+      detail: lastDetail.slice(0, 300),
       filename,
       inputBytes: bytes.length,
     });
-    return null;
   }
 
-  return new Uint8Array(await workerResponse.arrayBuffer());
+  return null;
 }
 
 /** image-converter Worker で JPEG 圧縮 */
@@ -147,5 +222,10 @@ export async function prepareGeneratedImageForStorage(
     return compressed;
   }
 
+  console.warn("Runa image save: compression unavailable, storing original bytes", {
+    bytes: bytes.length,
+    filename,
+    force,
+  });
   return { bytes, mime: detectedMime };
 }

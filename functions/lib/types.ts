@@ -99,6 +99,8 @@ export interface Env {
   OPENFOAM_REVIEW_SYNTAX_REFERENCE?: string;
   /** 画像変換 Worker（Cloudflare Images） */
   IMAGE_CONVERTER?: Fetcher;
+  /** 画像変換 Worker の公開 URL（Service Binding 失敗時のフォールバック） */
+  IMAGE_CONVERTER_PUBLIC_URL?: string;
   /** 画像変換 Worker 内部認証 */
   IMAGE_CONVERTER_WORKER_SECRET?: string;
   /** Cloudflare アカウント ID（Runa / R2 等） */

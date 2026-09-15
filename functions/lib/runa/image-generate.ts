@@ -385,6 +385,14 @@ function applyDestIndex(destPath: string, index: number): string {
   return `${base}-${String(index + 1).padStart(2, "0")}${ext}`;
 }
 
+function replaceDestExtension(destPath: string, ext: string): string {
+  const dot = destPath.lastIndexOf(".");
+  if (dot <= destPath.lastIndexOf("/")) {
+    return `${destPath}.${ext}`;
+  }
+  return `${destPath.slice(0, dot)}.${ext}`;
+}
+
 async function readImageReference(
   env: Env,
   db: D1Database,
@@ -659,6 +667,7 @@ async function persistGeneratedImages(
     let destPath = args.dest_path
       ? applyDestIndex(args.dest_path, i)
       : defaultDestPath(user, ext, i);
+    destPath = replaceDestExtension(destPath, ext);
 
     if (args.dest_path) {
       const destParsed = parseLogicalPath(destPath);
