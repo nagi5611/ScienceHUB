@@ -250,6 +250,23 @@
     </footer>
   </dialog>
 
+  <dialog class="cs-upload-dialog cs-editor-dialog" id="cs-website-edit-dialog">
+    <form method="dialog" class="cs-editor-form" id="cs-website-edit-form">
+      <header class="cs-upload-dialog-header">
+        <h2 class="cs-upload-dialog-title">ファイル編集</h2>
+        <button type="button" class="cs-preview-close" id="cs-website-edit-close" aria-label="閉じる">✕</button>
+      </header>
+      <div class="cs-upload-dialog-body cs-editor-dialog-body">
+        <p class="cs-editor-path" id="cs-website-edit-path"></p>
+        <textarea id="cs-website-edit-content" class="cs-editor-textarea" spellcheck="false"></textarea>
+      </div>
+      <footer class="cs-upload-dialog-footer">
+        <button type="button" class="cs-btn" id="cs-website-edit-cancel">キャンセル</button>
+        <button type="submit" class="cs-btn cs-btn-primary">保存</button>
+      </footer>
+    </form>
+  </dialog>
+
   <dialog class="cs-upload-dialog" id="cs-agent-dialog">
     <header class="cs-upload-dialog-header">
       <h2 class="cs-upload-dialog-title">AI エージェント連携</h2>

@@ -48,6 +48,16 @@ import {
 } from "./preview-office.js";
 import { initAgentTokensDialog } from "./agent-tokens.js";
 import { attachStorageReference, initRunaPanel } from "/js/runa-panel.js";
+import {
+  deleteWebSitePaths,
+  expandWebSitePathsToFiles,
+  fetchWebSiteFileContent,
+  isEditableWebSiteFilePath,
+  listWebSiteFiles,
+  renameWebSitePath,
+  saveWebSiteFileContent,
+  uploadWebSiteFiles,
+} from "./web-site-file-ops.js";
 
 let roots = [];
 let currentPath = "";
@@ -88,6 +98,8 @@ let webPublishAccess = false;
 /** @type {string | null} */
 let currentWebSiteId = null;
 let webSiteDir = "";
+/** @type {string | null} */
+let editingWebSitePath = null;
 /** @type {Array<{ id: string; title: string; path_slug: string; used_bytes: number; max_bytes: number; public_url: string; has_index: boolean; updated_at: number }>} */
 let webSitesCache = [];
 const WEB_PUBLISH_API = "/api/website-publish";
@@ -231,6 +243,22 @@ function isAlternateView() {
   return trashView || webSitesView;
 }
 
+function isWebSiteFileView() {
+  return webSitesView && Boolean(currentWebSiteId);
+}
+
+function isWebSiteListView() {
+  return webSitesView && !currentWebSiteId;
+}
+
+function shouldHideExplorerToolbar() {
+  return trashView || isWebSiteListView();
+}
+
+function canUploadToCurrentView() {
+  return Boolean(currentPath) && !trashView && !isWebSiteListView();
+}
+
 function isIconViewMode() {
   return viewMode === "icons" && !isAlternateView();
 }
@@ -317,10 +345,23 @@ function updateToolbarForView() {
     "cs-websites-open-url-btn",
   ];
 
-  const hideExplorer = isAlternateView();
+  const hideExplorer = shouldHideExplorerToolbar();
   for (const id of explorerIds) {
     const el = document.getElementById(id);
     if (el) el.hidden = hideExplorer;
+  }
+
+  if (isWebSiteFileView()) {
+    for (const id of [
+      "cs-upload-btn",
+      "cs-upload-folder-btn",
+      "cs-download-btn",
+      "cs-rename-btn",
+      "cs-delete-btn",
+    ]) {
+      const el = document.getElementById(id);
+      if (el) el.hidden = false;
+    }
   }
   for (const id of trashIds) {
     const el = document.getElementById(id);
@@ -344,7 +385,7 @@ function updateToolbarForView() {
   }
 
   const sortControls = document.querySelector(".cs-sort-controls");
-  if (sortControls) sortControls.hidden = isAlternateView();
+  if (sortControls) sortControls.hidden = trashView || webSitesView;
 }
 
 function enterTrashView(rootPath = null) {
@@ -528,6 +569,122 @@ function downloadWebSiteFile(siteId, filePath) {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function getWebSiteRelPath(item) {
+  if (item.webSiteFilePath) return item.webSiteFilePath;
+  const parsed = parseWspPath(item.path);
+  return parsed?.relPath ?? "";
+}
+
+/** 公開サイト内のテキストファイルをエディタで開く */
+async function openWebSiteTextEditor(filePath) {
+  if (!currentWebSiteId) return;
+  showToast("ファイルを読み込み中…");
+  try {
+    const data = await fetchWebSiteFileContent(currentWebSiteId, filePath);
+    editingWebSitePath = filePath;
+    const pathLabel = document.getElementById("cs-website-edit-path");
+    const contentEl = document.getElementById("cs-website-edit-content");
+    const dialog = document.getElementById("cs-website-edit-dialog");
+    if (!pathLabel || !contentEl || !dialog) return;
+    pathLabel.textContent = filePath;
+    contentEl.value = data.content ?? "";
+    dialog.showModal();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : "読み込みに失敗しました", true);
+  }
+}
+
+/** 公開サイト内のテキストファイルを保存 */
+async function saveWebSiteTextEditor(event) {
+  event.preventDefault();
+  if (!currentWebSiteId || !editingWebSitePath) return;
+
+  const contentEl = document.getElementById("cs-website-edit-content");
+  const dialog = document.getElementById("cs-website-edit-dialog");
+  if (!contentEl || !dialog) return;
+
+  showToast("保存中…");
+  try {
+    await saveWebSiteFileContent(currentWebSiteId, editingWebSitePath, contentEl.value);
+    editingWebSitePath = null;
+    dialog.close();
+    showToast("保存しました");
+    await refreshListing();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : "保存に失敗しました", true);
+  }
+}
+
+/** 公開サイト内のファイルをアップロード */
+async function handleWebSiteUpload(files) {
+  if (!currentWebSiteId || files.length === 0) return;
+
+  const total = files.length;
+  showToast(`${total} 件をアップロード中…`);
+  try {
+    await uploadWebSiteFiles(currentWebSiteId, files, webSiteDir);
+    showToast(`${total} 件のアップロードが完了しました`);
+    await refreshListing();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : "アップロードに失敗しました", true);
+  }
+}
+
+/** 公開サイト内の項目を名称変更 */
+async function renameWebSiteItem(item) {
+  if (!currentWebSiteId) return;
+  const relPath = getWebSiteRelPath(item);
+  if (!relPath) return;
+
+  const newName = prompt("新しい名前", item.name);
+  if (!newName?.trim() || newName === item.name) return;
+
+  try {
+    await renameWebSitePath(
+      currentWebSiteId,
+      relPath,
+      item.type === "folder" ? "folder" : "file",
+      newName.trim()
+    );
+    selectedItems.clear();
+    showToast("名前を変更しました");
+    await refreshListing();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : "名称変更に失敗しました", true);
+  }
+}
+
+/** 公開サイト内の選択項目を削除 */
+async function deleteWebSiteSelection(storagePaths) {
+  if (!currentWebSiteId || storagePaths.length === 0) return;
+
+  const relPaths = storagePaths
+    .map((path) => {
+      const item = getItemByPath(path);
+      if (item) return getWebSiteRelPath(item);
+      return parseWspPath(path)?.relPath ?? "";
+    })
+    .filter(Boolean);
+
+  if (relPaths.length === 0) return;
+
+  try {
+    const files = await listWebSiteFiles(currentWebSiteId);
+    const toDelete = expandWebSitePathsToFiles(relPaths, files);
+    if (toDelete.length === 0) return;
+    if (!confirm(`${toDelete.length} 件を削除しますか？`)) return;
+
+    await deleteWebSitePaths(currentWebSiteId, relPaths, files);
+    for (const path of storagePaths) {
+      selectedItems.delete(path);
+    }
+    showToast(`${toDelete.length} 件を削除しました`);
+    await refreshListing();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : "削除に失敗しました", true);
+  }
 }
 
 function updateTrashStatus() {
@@ -1018,6 +1175,23 @@ function showWebSiteContextMenu(clientX, clientY, item) {
       actions.push({ id: "open-public-url", label: "公開URLを開く" });
     }
     actions.push({ id: "open-web-app", label: "ウェブサイト公開アプリで開く" });
+  } else if (isWebSiteFileView()) {
+    if (item.type === "folder") {
+      actions.push({ id: "open", label: "開く" });
+      actions.push({ id: "rename", label: "名称変更" });
+      actions.push({ id: "sep" });
+      actions.push({ id: "delete", label: "削除", danger: true });
+    } else {
+      const relPath = getWebSiteRelPath(item);
+      if (relPath && isEditableWebSiteFilePath(relPath)) {
+        actions.push({ id: "edit", label: "編集" });
+      }
+      actions.push({ id: "download", label: "ダウンロード" });
+      actions.push({ id: "rename", label: "名称変更" });
+      actions.push({ id: "open-web-app", label: "ウェブサイト公開アプリで開く" });
+      actions.push({ id: "sep" });
+      actions.push({ id: "delete", label: "削除", danger: true });
+    }
   } else if (item.type === "folder") {
     actions.push({ id: "open", label: "開く" });
   } else {
@@ -1054,8 +1228,27 @@ function handleWebSiteContextAction(action, item) {
     window.open(url.toString(), "_blank", "noopener,noreferrer");
     return;
   }
-  if (action === "download" && item.webSiteFilePath && item.webSiteId) {
-    downloadWebSiteFile(item.webSiteId, item.webSiteFilePath);
+  if (action === "download" && item.webSiteId) {
+    const relPath = getWebSiteRelPath(item);
+    if (relPath) downloadWebSiteFile(item.webSiteId, relPath);
+    return;
+  }
+  if (action === "edit") {
+    const relPath = getWebSiteRelPath(item);
+    if (relPath) {
+      openWebSiteTextEditor(relPath).catch((err) => {
+        showToast(err instanceof Error ? err.message : "編集を開けませんでした", true);
+      });
+    }
+    return;
+  }
+  if (action === "rename") {
+    renameWebSiteItem(item);
+    return;
+  }
+  if (action === "delete") {
+    deleteWebSiteSelection([item.path]);
+    return;
   }
 }
 
@@ -1081,8 +1274,16 @@ function navigateWebSiteItem(item) {
     refreshListing();
     return;
   }
-  if (item.type === "file" && item.webSiteId && item.webSiteFilePath) {
-    downloadWebSiteFile(item.webSiteId, item.webSiteFilePath);
+  if (item.type === "file" && item.webSiteId) {
+    const relPath = getWebSiteRelPath(item);
+    if (!relPath) return;
+    if (isWebSiteFileView() && isEditableWebSiteFilePath(relPath)) {
+      openWebSiteTextEditor(relPath).catch((err) => {
+        showToast(err instanceof Error ? err.message : "編集を開けませんでした", true);
+      });
+      return;
+    }
+    downloadWebSiteFile(item.webSiteId, relPath);
   }
 }
 
@@ -1145,7 +1346,7 @@ function showMultiContextMenu(clientX, clientY) {
     showTrashMultiContextMenu(clientX, clientY);
     return;
   }
-  if (webSitesView) {
+  if (webSitesView && !isWebSiteFileView()) {
     hideContextMenu();
     return;
   }
@@ -1160,6 +1361,16 @@ function showMultiContextMenu(clientX, clientY) {
   title.textContent = `${count} 件を選択中`;
 
   const actions = [];
+  if (isWebSiteFileView()) {
+    actions.push({ id: "download-selected", label: "選択項目をダウンロード" });
+    actions.push({ id: "sep" });
+    actions.push({ id: "delete-selected", label: "選択項目を削除", danger: true });
+    renderContextMenu(menu, title, itemsEl, clientX, clientY, actions, (action) => {
+      handleWebSiteMultiContextAction(action);
+    });
+    return;
+  }
+
   const fileCount = getSelectedFileItems().length;
   if (fileCount > 0) {
     actions.push({ id: "share-selected", label: "共有リンクを作成" });
@@ -1172,6 +1383,38 @@ function showMultiContextMenu(clientX, clientY) {
   renderContextMenu(menu, title, itemsEl, clientX, clientY, actions, (action) => {
     handleMultiContextAction(action);
   });
+}
+
+/** 公開サイト内の複数選択コンテキストメニュー操作 */
+async function handleWebSiteMultiContextAction(action) {
+  hideContextMenu();
+  const paths = [...selectedItems];
+  if (paths.length === 0) return;
+
+  if (action === "delete-selected") {
+    await deleteWebSiteSelection(paths);
+    return;
+  }
+
+  if (action === "download-selected" && currentWebSiteId) {
+    try {
+      const files = await listWebSiteFiles(currentWebSiteId);
+      const relPaths = paths
+        .map((path) => {
+          const item = getItemByPath(path);
+          return item ? getWebSiteRelPath(item) : "";
+        })
+        .filter(Boolean);
+      const filePaths = expandWebSitePathsToFiles(relPaths, files).filter((p) =>
+        files.some((f) => f.path === p)
+      );
+      for (const path of filePaths) {
+        downloadWebSiteFile(currentWebSiteId, path);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "ダウンロードに失敗しました", true);
+    }
+  }
 }
 
 /** ごみ箱: 単一項目のコンテキストメニュー */
@@ -2976,6 +3219,25 @@ async function handleDownloadSelected() {
     return;
   }
 
+  if (isWebSiteFileView() && currentWebSiteId) {
+    try {
+      const files = await listWebSiteFiles(currentWebSiteId);
+      const relPaths = items.map((item) => getWebSiteRelPath(item)).filter(Boolean);
+      const filePaths = expandWebSitePathsToFiles(relPaths, files).filter((p) =>
+        files.some((f) => f.path === p)
+      );
+      for (const path of filePaths) {
+        downloadWebSiteFile(currentWebSiteId, path);
+      }
+      if (filePaths.length > 0) {
+        showToast(`${filePaths.length} 件のダウンロードを開始しました`);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "ダウンロードに失敗しました", true);
+    }
+    return;
+  }
+
   const prog = document.getElementById("cs-upload-progress");
   try {
     showToast("ダウンロードを開始します…");
@@ -3016,7 +3278,12 @@ async function downloadFile(path) {
 }
 
 async function handleUpload(files) {
-  if (!currentPath || files.length === 0) return;
+  if (files.length === 0) return;
+  if (isWebSiteFileView()) {
+    await handleWebSiteUpload(files);
+    return;
+  }
+  if (!currentPath) return;
 
   let failed = 0;
   const total = files.length;
@@ -3084,6 +3351,10 @@ async function handleRename() {
   const path = [...selectedItems][0];
   const item = getItemByPath(path);
   if (!item) return;
+  if (isWebSiteFileView()) {
+    await renameWebSiteItem(item);
+    return;
+  }
   await renameItem(item);
 }
 
@@ -3430,6 +3701,10 @@ async function handleDelete() {
     showToast("削除する項目を選択してください", true);
     return;
   }
+  if (isWebSiteFileView()) {
+    await deleteWebSiteSelection([...selectedItems]);
+    return;
+  }
   if (!confirm(`${selectedItems.size} 件をごみ箱に移動しますか？`)) return;
 
   const prog = document.getElementById("cs-delete-progress");
@@ -3537,9 +3812,23 @@ function bindEvents() {
     if (e.key === "Escape") hideContextMenu();
   });
 
+  document.getElementById("cs-website-edit-close")?.addEventListener("click", () => {
+    editingWebSitePath = null;
+    document.getElementById("cs-website-edit-dialog")?.close();
+  });
+  document.getElementById("cs-website-edit-cancel")?.addEventListener("click", () => {
+    editingWebSitePath = null;
+    document.getElementById("cs-website-edit-dialog")?.close();
+  });
+  document.getElementById("cs-website-edit-form")?.addEventListener("submit", (e) => {
+    saveWebSiteTextEditor(e).catch((err) => {
+      showToast(err instanceof Error ? err.message : "保存に失敗しました", true);
+    });
+  });
+
   document.addEventListener("paste", (e) => {
     if (shouldIgnorePasteTarget(e.target)) return;
-    if (isAlternateView() || !currentPath) return;
+    if (!canUploadToCurrentView()) return;
 
     const files = collectMediaFilesFromClipboard(e.clipboardData);
     if (files.length === 0) return;
@@ -3612,7 +3901,7 @@ function bindEvents() {
   dropZone?.addEventListener("drop", async (e) => {
     e.preventDefault();
     dropZone.classList.remove("is-dragover");
-    if (isAlternateView() || activeDragMoveItems?.length) return;
+    if (!canUploadToCurrentView() || activeDragMoveItems?.length) return;
     try {
       const files = await collectFilesFromDataTransfer(e.dataTransfer);
       if (files.length) handleUpload(files);
