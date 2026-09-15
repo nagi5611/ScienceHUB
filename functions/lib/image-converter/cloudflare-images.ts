@@ -85,9 +85,13 @@ type ImageTransformOptions = {
   fit?: "scale-down" | "contain" | "cover" | "crop" | "pad";
 };
 
+type ImageOutputResult = {
+  response(options?: { headers?: HeadersInit }): Response;
+};
+
 type ImageTransformPipeline = {
   transform(options: ImageTransformOptions): ImageTransformPipeline;
-  output(options: ImageOutputOptions): { response(): Response };
+  output(options: ImageOutputOptions): Promise<ImageOutputResult>;
 };
 
 type ImagesBinding = {
@@ -128,5 +132,6 @@ export async function transformWithCloudflareImages(
     outputOptions.quality = Math.min(100, Math.max(40, options.quality));
   }
 
-  return pipeline.output(outputOptions).response();
+  const result = await pipeline.output(outputOptions);
+  return result.response();
 }

@@ -4,12 +4,13 @@
 
 import {
   detectImageMimeFromBytes,
-  EDIT_IMAGE_COMPRESS_THRESHOLD_BYTES,
-  EDIT_IMAGE_MAX_EDGE_PX,
   imageBytesToDataUri,
   validateImageDataUri,
-  type SupportedImageMime,
 } from "./image-bytes";
+import {
+  prepareGeneratedImageForStorage,
+  prepareReferenceImageForEdit,
+} from "./image-compress";
 import { getFiles } from "../r2";
 import type { Env, SessionUser } from "../types";
 import {
@@ -384,67 +385,6 @@ function applyDestIndex(destPath: string, index: number): string {
   return `${base}-${String(index + 1).padStart(2, "0")}${ext}`;
 }
 
-async function compressImageForEditApi(
-  env: Env,
-  bytes: Uint8Array,
-  filename: string,
-  detectedMime: SupportedImageMime
-): Promise<{ bytes: Uint8Array; mime: SupportedImageMime }> {
-  if (bytes.length <= EDIT_IMAGE_COMPRESS_THRESHOLD_BYTES) {
-    return { bytes, mime: detectedMime };
-  }
-
-  if (!env.IMAGE_CONVERTER) {
-    if (bytes.length > 4 * 1024 * 1024) {
-      throw new Error(
-        "編集用画像が大きすぎます（4MB以下）。image-converter Worker をデプロイすると自動圧縮されます"
-      );
-    }
-    console.warn(
-      "Runa image edit: large image without IMAGE_CONVERTER, sending data URI as-is",
-      { bytes: bytes.length, filename }
-    );
-    return { bytes, mime: detectedMime };
-  }
-
-  const form = new FormData();
-  form.append("file", new File([bytes], filename, { type: detectedMime }));
-  form.append("quality", "85");
-  form.append("maxEdge", String(EDIT_IMAGE_MAX_EDGE_PX));
-
-  const headers = new Headers();
-  const secret = env.IMAGE_CONVERTER_WORKER_SECRET?.trim();
-  if (secret) headers.set("X-Image-Converter-Secret", secret);
-
-  const workerResponse = await env.IMAGE_CONVERTER.fetch(
-    new Request("https://image-converter/prepare", {
-      method: "POST",
-      headers,
-      body: form,
-    })
-  );
-
-  if (!workerResponse.ok) {
-    console.error("Runa image edit prepare failed", {
-      status: workerResponse.status,
-      filename,
-      bytes: bytes.length,
-    });
-    throw new Error(
-      "編集用画像の圧縮に失敗しました。image-converter Worker のデプロイを確認してください"
-    );
-  }
-
-  const compressed = new Uint8Array(await workerResponse.arrayBuffer());
-  const compressedMime = detectImageMimeFromBytes(compressed) ?? "image/jpeg";
-  console.info("Runa image edit: compressed reference image", {
-    beforeBytes: bytes.length,
-    afterBytes: compressed.length,
-    filename,
-  });
-  return { bytes: compressed, mime: compressedMime };
-}
-
 async function readImageReference(
   env: Env,
   db: D1Database,
@@ -486,7 +426,7 @@ async function readImageReference(
   }
 
   const filename = parsed.relativePath.split("/").pop() ?? "image.png";
-  const { bytes, mime } = await compressImageForEditApi(
+  const { bytes, mime } = await prepareReferenceImageForEdit(
     env,
     rawBytes,
     filename,
@@ -701,8 +641,20 @@ async function persistGeneratedImages(
 
   for (let i = 0; i < capped.length; i++) {
     const { bytes, mime } = await decodeImagePayload(capped[i]);
-    const byteView = new Uint8Array(bytes);
-    const storedMime = detectImageMimeFromBytes(byteView) ?? mime;
+    const decodedMime = detectImageMimeFromBytes(new Uint8Array(bytes)) ?? mime;
+    const filenameForCompress =
+      args.dest_path?.split("/").pop() ?? `runa-generated-${i}.png`;
+    const prepared = await prepareGeneratedImageForStorage(
+      env,
+      new Uint8Array(bytes),
+      filenameForCompress,
+      decodedMime === "image/png" || decodedMime === "image/jpeg"
+        ? decodedMime
+        : "image/png",
+      args.mode === "edit" || args.mode === "final"
+    );
+    const byteView = prepared.bytes;
+    const storedMime = prepared.mime;
     const ext = extensionForMime(storedMime);
     let destPath = args.dest_path
       ? applyDestIndex(args.dest_path, i)
@@ -757,7 +709,7 @@ async function persistGeneratedImages(
       db,
       user,
       destPath,
-      bytes,
+      byteView.slice().buffer,
       storedMime
     );
     saved.push({
