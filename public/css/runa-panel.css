@@ -160,6 +160,10 @@
   gap: 0.5rem;
 }
 
+.runa-context-usage-actions[hidden] {
+  display: none !important;
+}
+
 .runa-context-usage-warn {
   color: var(--cf-orange, #f38020);
   font-weight: 600;
