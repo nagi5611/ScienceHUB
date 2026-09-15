@@ -27,6 +27,7 @@ import { WEBSITE_PUBLISH_APP_SLUG, MAX_SITES_PER_USER } from "../website-publish
 import { writeSiteFileText } from "../website-publish/file-ops";
 import { listSiteFiles } from "../website-publish/r2-ops";
 import { importStorageFilesToWebSite } from "./web-bridge";
+import { buildRunaPublicWebUrl } from "./origin";
 import { listNotes, EXCALIDRAW_APP_SLUG } from "../excalidraw-notes";
 import { listProjects as listDesignProjects, DESIGN_APP_SLUG } from "../design";
 import { STORAGE_APP_SLUG } from "../storage/constants";
@@ -234,7 +235,8 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "web_list_sites",
-      description: "ウェブサイト公開の自分のサイト一覧",
+      description:
+        "ウェブサイト公開の自分のサイト一覧。公開 URL は https://s.mmh-virtual.jp/web/{slug}/ 形式",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -243,7 +245,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "web_create_site",
       description:
-        "ウェブサイト公開に新しいサイトを作成する。公開 URL は /web/{path_slug}/",
+        "ウェブサイト公開に新しいサイトを作成する。公開 URL は https://s.mmh-virtual.jp/web/{path_slug}/",
       parameters: {
         type: "object",
         properties: {
@@ -262,7 +264,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "web_write_file",
       description:
-        "ウェブサイト公開のサイト内にテキストファイル（HTML/CSS/JS 等）を書き込む",
+        "ウェブサイト公開のサイト内にテキストファイル（HTML/CSS/JS 等）を書き込む。公開後の URL は https://s.mmh-virtual.jp/web/{slug}/...",
       parameters: {
         type: "object",
         properties: {
@@ -296,7 +298,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "web_import_from_storage",
       description:
-        "クラウドストレージのファイルまたはフォルダをウェブサイト公開サイトへ取り込む",
+        "クラウドストレージのファイルまたはフォルダをウェブサイト公開サイトへ取り込む。公開 URL は https://s.mmh-virtual.jp/web/{slug}/",
       parameters: {
         type: "object",
         properties: {
@@ -513,7 +515,7 @@ export async function executeHubTool(
       case "web_list_sites":
         return await runWebList(env, db, user);
       case "web_create_site":
-        return await runWebCreateSite(db, user, args);
+        return await runWebCreateSite(env, db, user, args);
       case "web_write_file":
         return await runWebWriteFile(env, db, user, args);
       case "web_list_site_files":
@@ -825,12 +827,13 @@ async function runWebList(
   if (!sites.length) return { text: "公開サイトはありません。", files: [] };
   const lines = sites.map(
     (s) =>
-      `- ${s.title} /web/${s.path_slug}/ [${s.status}] ${s.public_url} id=${s.id}`
+      `- ${s.title} ${buildRunaPublicWebUrl(env, s.path_slug)} [${s.status}] id=${s.id}`
   );
   return { text: `ウェブサイト（${sites.length} 件）:\n${lines.join("\n")}`, files: [] };
 }
 
 async function runWebCreateSite(
+  env: Env,
   db: D1Database,
   user: SessionUser,
   args: Record<string, unknown>
@@ -854,7 +857,7 @@ async function runWebCreateSite(
     text:
       `サイトを作成しました。\n` +
       `タイトル: ${site.title}\n` +
-      `公開 URL: /web/${site.path_slug}/\n` +
+      `公開 URL: ${buildRunaPublicWebUrl(env, site.path_slug)}\n` +
       `site_id: ${site.id}\n` +
       `残り作成可能: ${remaining} 件`,
     files: [],
@@ -883,7 +886,7 @@ async function runWebWriteFile(
   return {
     text:
       `サイトにファイルを保存しました: ${result.path} (${result.size} bytes)\n` +
-      `公開 URL: /web/${site.path_slug}/${result.path === "index.html" ? "" : result.path}`,
+      `公開 URL: ${buildRunaPublicWebUrl(env, site.path_slug, result.path)}`,
     files: [],
   };
 }
@@ -914,7 +917,7 @@ async function runWebListSiteFiles(
 
   return {
     text:
-      `サイト ${site.title}（/web/${site.path_slug}/）のファイル:\n` +
+      `サイト ${site.title}（${buildRunaPublicWebUrl(env, site.path_slug)}）のファイル:\n` +
       `${lines.join("\n")}\n` +
       `index.html: ${hasIndex ? "あり（公開可能）" : "なし（追加が必要）"}`,
     files: [],
@@ -960,7 +963,7 @@ async function runWebImportFromStorage(
   return {
     text:
       `${result.imported.length} 件をサイトへ取り込みました。\n` +
-      `公開 URL: ${result.public_url}\n` +
+      `公開 URL: ${buildRunaPublicWebUrl(env, site.path_slug)}\n` +
       `${importedLines}${skippedLines}`,
     files: [],
   };
