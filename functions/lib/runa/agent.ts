@@ -131,10 +131,20 @@ function formatRecentFilesReply(files: RunaFileItem[]): string {
   return `${formatFileItemsMarkdown("過去30日で更新されたファイル（全ユーザー・操作者問わず）", files)}\n\n※ 特定ユーザーのファイルは storage_files_by_user を使います。`;
 }
 
+export interface RunaWebSiteEditFileContext {
+  siteId: string;
+  path: string;
+  content?: string;
+}
+
 export interface RunaChatContext {
   storagePath?: string | null;
   trashView?: boolean;
   searchActive?: boolean;
+  webSitesView?: boolean;
+  webSiteId?: string | null;
+  webSiteDir?: string | null;
+  webSiteEditFile?: RunaWebSiteEditFileContext | null;
   editImagePath?: string | null;
   editIntent?: boolean;
 }
@@ -237,10 +247,40 @@ async function enrichAttachmentsForRuna(
   return out;
 }
 
+const MAX_WEB_SITE_EDIT_CONTENT_CHARS = 24 * 1024;
+
 function buildContextSystemHint(context?: RunaChatContext): string {
   if (!context) return "";
 
   const parts: string[] = [];
+
+  const webEdit = context.webSiteEditFile;
+  if (webEdit?.siteId?.trim() && webEdit.path?.trim()) {
+    const siteId = webEdit.siteId.trim();
+    const path = webEdit.path.trim();
+    parts.push(
+      `\n\n## 公開サイトファイル編集中\n` +
+        `ユーザーはサイト \`${siteId}\` の \`${path}\` をエディタで開いています。` +
+        `「このファイル」「開いている内容」「ここ」はこの path を指します。`
+    );
+    const rawContent = webEdit.content?.trim();
+    if (rawContent) {
+      const clipped =
+        rawContent.length > MAX_WEB_SITE_EDIT_CONTENT_CHARS
+          ? `${rawContent.slice(0, MAX_WEB_SITE_EDIT_CONTENT_CHARS)}\n\n…（${MAX_WEB_SITE_EDIT_CONTENT_CHARS} 文字で切り詰め）`
+          : rawContent;
+      parts.push(`\n### エディタ上の現在の内容\n\`\`\`\n${clipped}\n\`\`\``);
+    }
+    parts.push(
+      `\n修正の依頼があれば web_write_file（site_id=${siteId}, path=${path}, content=全文）で保存してください。` +
+        `ユーザーがエディタの保存ボタンを押す前でもツールで直接書き込めます。`
+    );
+  } else if (context.webSitesView && context.webSiteId?.trim()) {
+    const dir = context.webSiteDir?.trim();
+    parts.push(
+      `\n\n## 現在の画面\nユーザーはクラウドストレージの**公開サイト**（site_id=\`${context.webSiteId.trim()}\`${dir ? `, ディレクトリ \`${dir}\`` : ""}）を見ています。`
+    );
+  }
 
   const editPath = context.editImagePath?.trim();
   if (editPath) {

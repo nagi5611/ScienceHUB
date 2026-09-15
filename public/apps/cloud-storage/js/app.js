@@ -47,7 +47,13 @@ import {
   renderOfficePreview,
 } from "./preview-office.js";
 import { initAgentTokensDialog } from "./agent-tokens.js";
-import { attachStorageReference, initRunaPanel } from "/js/runa-panel.js";
+import {
+  attachStorageReference,
+  clearWebSiteEditContext,
+  initRunaPanel,
+  openRunaPanelDocked,
+  setWebSiteEditContext,
+} from "/js/runa-panel.js";
 import {
   deleteWebSitePaths,
   expandWebSitePathsToFiles,
@@ -577,6 +583,24 @@ function getWebSiteRelPath(item) {
   return parsed?.relPath ?? "";
 }
 
+function closeWebSiteTextEditor() {
+  editingWebSitePath = null;
+  clearWebSiteEditContext();
+  document.getElementById("cs-website-edit-dialog")?.close();
+}
+
+function syncWebSiteEditorRunaContext(filePath) {
+  if (!currentWebSiteId || !filePath) return;
+  const contentEl = document.getElementById("cs-website-edit-content");
+  setWebSiteEditContext({
+    siteId: currentWebSiteId,
+    path: filePath,
+    name: filePath.split("/").pop() ?? filePath,
+    webSiteDir: webSiteDir || null,
+    getContent: () => contentEl?.value ?? "",
+  });
+}
+
 /** 公開サイト内のテキストファイルをエディタで開く */
 async function openWebSiteTextEditor(filePath) {
   if (!currentWebSiteId) return;
@@ -591,6 +615,8 @@ async function openWebSiteTextEditor(filePath) {
     pathLabel.textContent = filePath;
     contentEl.value = data.content ?? "";
     dialog.showModal();
+    syncWebSiteEditorRunaContext(filePath);
+    openRunaPanelDocked();
   } catch (err) {
     showToast(err instanceof Error ? err.message : "読み込みに失敗しました", true);
   }
@@ -608,8 +634,7 @@ async function saveWebSiteTextEditor(event) {
   showToast("保存中…");
   try {
     await saveWebSiteFileContent(currentWebSiteId, editingWebSitePath, contentEl.value);
-    editingWebSitePath = null;
-    dialog.close();
+    closeWebSiteTextEditor();
     showToast("保存しました");
     await refreshListing();
   } catch (err) {
@@ -3812,13 +3837,17 @@ function bindEvents() {
     if (e.key === "Escape") hideContextMenu();
   });
 
-  document.getElementById("cs-website-edit-close")?.addEventListener("click", () => {
-    editingWebSitePath = null;
-    document.getElementById("cs-website-edit-dialog")?.close();
+  document.getElementById("cs-website-edit-close")?.addEventListener("click", closeWebSiteTextEditor);
+  document.getElementById("cs-website-edit-cancel")?.addEventListener("click", closeWebSiteTextEditor);
+  document.getElementById("cs-website-edit-runa-btn")?.addEventListener("click", () => {
+    if (editingWebSitePath) syncWebSiteEditorRunaContext(editingWebSitePath);
+    openRunaPanelDocked();
   });
-  document.getElementById("cs-website-edit-cancel")?.addEventListener("click", () => {
-    editingWebSitePath = null;
-    document.getElementById("cs-website-edit-dialog")?.close();
+  document.getElementById("cs-website-edit-dialog")?.addEventListener("close", () => {
+    if (editingWebSitePath) {
+      editingWebSitePath = null;
+      clearWebSiteEditContext();
+    }
   });
   document.getElementById("cs-website-edit-form")?.addEventListener("submit", (e) => {
     saveWebSiteTextEditor(e).catch((err) => {
