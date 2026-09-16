@@ -938,6 +938,10 @@ body.runa-lightbox-open {
   border-bottom: 1px solid #e0e0e0;
 }
 
+.runa-composer.is-deep-research .runa-composer-rise:has(.runa-deep-research-hint:not([hidden])) {
+  max-height: 6.5rem;
+}
+
 .runa-composer-rise-lead {
   margin: 0;
   font-size: 0.72rem;
