@@ -56,10 +56,10 @@ import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
 import { searchUsersForRuna } from "./user-search";
 import {
-  formatSerperResultsForRuna,
-  isSerperConfigured,
-  searchWebWithSerper,
-} from "./serper";
+  formatBraveResultsForRuna,
+  isBraveSearchConfigured,
+  searchWebWithBrave,
+} from "./brave-search";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
 const SIM_APP_SLUG = "simulation-request";
@@ -106,7 +106,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "web_search",
       description:
-        "インターネット（Google）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
+        "インターネット（Brave Web Search）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
       parameters: {
         type: "object",
         properties: {
@@ -118,7 +118,8 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
           tbs: {
             type: "string",
             enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
-            description: "期間絞り込み（任意）: 1時間/1日/1週/1月/1年",
+            description:
+              "期間絞り込み（任意）: 1時間/1日/1週/1月/1年。1時間・1日は API 上は24時間以内（pd）に近い",
           },
         },
         required: ["query"],
@@ -576,9 +577,9 @@ async function runWebSearch(
   env: Env,
   args: Record<string, unknown>
 ): Promise<ToolRunResult> {
-  if (!isSerperConfigured(env)) {
+  if (!isBraveSearchConfigured(env)) {
     return {
-      text: "Web 検索は現在利用できません（SERPER_APIKEY が未設定）",
+      text: "Web 検索は現在利用できません（BRAVESEARCH_APIKEY が未設定）",
       files: [],
     };
   }
@@ -591,14 +592,14 @@ async function runWebSearch(
   const num = numArg(args, "num", 8);
   const tbs = strArg(args, "tbs");
 
-  const payload = await searchWebWithSerper(env, {
+  const payload = await searchWebWithBrave(env, {
     query,
     num,
     tbs: tbs || undefined,
   });
 
   return {
-    text: formatSerperResultsForRuna(payload),
+    text: formatBraveResultsForRuna(payload),
     files: [],
   };
 }
