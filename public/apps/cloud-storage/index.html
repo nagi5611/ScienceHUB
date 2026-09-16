@@ -333,15 +333,32 @@
       <p class="runa-context-hint" id="runa-context-hint" hidden></p>
       <div class="runa-context-usage" id="runa-context-usage" hidden aria-live="polite">
         <div class="runa-context-usage-row">
-          <span class="runa-context-usage-label">Context</span>
-          <div class="runa-context-usage-track" id="runa-context-usage-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div class="runa-context-usage-fill" id="runa-context-usage-fill"></div>
+          <div
+            class="runa-context-usage-cycle"
+            id="runa-context-usage-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            aria-label="Context"
+          >
+            <svg class="runa-context-usage-svg" viewBox="0 0 36 36" aria-hidden="true">
+              <circle class="runa-context-usage-ring-bg" cx="18" cy="18" r="14" pathLength="100" />
+              <circle
+                class="runa-context-usage-ring-fill"
+                id="runa-context-usage-fill"
+                cx="18"
+                cy="18"
+                r="14"
+                pathLength="100"
+              />
+            </svg>
+            <span class="runa-context-usage-pct" id="runa-context-usage-pct">0</span>
           </div>
-          <span class="runa-context-usage-pct" id="runa-context-usage-pct">0%</span>
-        </div>
-        <div class="runa-context-usage-actions" id="runa-context-usage-actions" hidden>
-          <span class="runa-context-usage-warn" id="runa-context-usage-warn">精度低下中</span>
-          <button type="button" class="runa-context-summarize-btn" id="runa-context-summarize-btn">要約</button>
+          <div class="runa-context-usage-actions" id="runa-context-usage-actions" hidden>
+            <span class="runa-context-usage-warn" id="runa-context-usage-warn">精度低下中</span>
+            <button type="button" class="runa-context-summarize-btn" id="runa-context-summarize-btn">要約</button>
+          </div>
         </div>
       </div>
       <div class="runa-body">

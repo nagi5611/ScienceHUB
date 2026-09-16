@@ -419,8 +419,11 @@ function updateContextUsageDisplay(usage) {
     usage.isAccuracyDegrading ?? percent >= warningThreshold;
 
   els.contextUsage.hidden = false;
-  els.contextUsageFill.style.width = `${percent}%`;
-  els.contextUsagePct.textContent = `${percent}%`;
+  const rounded = Math.round(percent);
+  if (els.contextUsageFill instanceof SVGCircleElement) {
+    els.contextUsageFill.style.strokeDashoffset = String(100 - percent);
+  }
+  els.contextUsagePct.textContent = String(rounded);
   els.contextUsage.classList.toggle("is-warning", isDegrading);
   els.contextUsage.classList.toggle("is-critical", percent >= autoThreshold);
 
