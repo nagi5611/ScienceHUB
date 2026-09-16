@@ -524,34 +524,59 @@
       </header>
       <p class="runa-status" id="runa-status" hidden></p>
       <p class="runa-context-hint" id="runa-context-hint" hidden></p>
-      <div class="runa-context-usage" id="runa-context-usage" hidden aria-live="polite">
-        <div class="runa-context-usage-row">
-          <span class="runa-context-usage-label">Context</span>
-          <div class="runa-context-usage-track" id="runa-context-usage-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div class="runa-context-usage-fill" id="runa-context-usage-fill"></div>
-          </div>
-          <span class="runa-context-usage-pct" id="runa-context-usage-pct">0%</span>
-        </div>
-        <div class="runa-context-usage-actions" id="runa-context-usage-actions" hidden>
-          <span class="runa-context-usage-warn" id="runa-context-usage-warn">精度低下中</span>
-          <button type="button" class="runa-context-summarize-btn" id="runa-context-summarize-btn">要約</button>
-        </div>
-      </div>
       <div class="runa-body">
         <div class="runa-messages" id="runa-messages"></div>
-        <div class="runa-attach-list" id="runa-attach-list" hidden></div>
-        <div class="runa-deep-research-bar">
-          <button type="button" class="runa-deep-research-toggle" id="runa-deep-research-toggle" aria-pressed="false">
-            ディープリサーチ
-          </button>
-          <span class="runa-deep-research-hint" id="runa-deep-research-hint" hidden></span>
-        </div>
-        <form class="runa-form" id="runa-form">
+        <div class="runa-composer" id="runa-composer">
+          <div class="runa-attach-list" id="runa-attach-list" hidden></div>
+          <div class="runa-composer-rise" id="runa-deep-research-rise" aria-hidden="true">
+            <p class="runa-composer-rise-lead">並列 Web 検索を繰り返し、調査レポートを作成します</p>
+            <p class="runa-deep-research-hint" id="runa-deep-research-hint" hidden></p>
+          </div>
+          <div class="runa-composer-modes">
+            <button type="button" class="runa-deep-research-toggle" id="runa-deep-research-toggle" aria-pressed="false">
+              <svg class="runa-deep-research-toggle-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" aria-hidden="true">
+                <path d="M2.5 13h11M5 10.5V6.5M8 10.5V3M11 10.5V7.5"/>
+              </svg>
+              <span class="runa-deep-research-toggle-label">ディープリサーチ</span>
+            </button>
+          </div>
+          <form class="runa-form" id="runa-form">
           <button type="button" class="runa-attach-btn" id="runa-attach-btn" aria-label="ファイルを添付" title="ファイルを添付（端末・クラウドストレージ）"></button>
           <input type="file" id="runa-file-input" class="runa-file-input" hidden multiple>
           <textarea class="runa-input" id="runa-input" rows="2" placeholder="ファイルの検索や操作を依頼…" aria-label="メッセージ"></textarea>
-          <button type="submit" class="runa-send" id="runa-send">送信</button>
-        </form>
+          <div class="runa-form-trailing">
+            <div class="runa-context-usage" id="runa-context-usage" hidden aria-live="polite">
+              <div class="runa-context-usage-actions" id="runa-context-usage-actions" hidden>
+                <span class="runa-context-usage-warn" id="runa-context-usage-warn">精度低下中</span>
+                <button type="button" class="runa-context-summarize-btn" id="runa-context-summarize-btn">要約</button>
+              </div>
+              <div
+                class="runa-context-usage-cycle"
+                id="runa-context-usage-track"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+                aria-label="Context"
+              >
+                <svg class="runa-context-usage-svg" viewBox="0 0 36 36" aria-hidden="true">
+                  <circle class="runa-context-usage-ring-bg" cx="18" cy="18" r="14" pathLength="100" />
+                  <circle
+                    class="runa-context-usage-ring-fill"
+                    id="runa-context-usage-fill"
+                    cx="18"
+                    cy="18"
+                    r="14"
+                    pathLength="100"
+                  />
+                </svg>
+                <span class="runa-context-usage-pct" id="runa-context-usage-pct">0</span>
+              </div>
+            </div>
+            <button type="submit" class="runa-send" id="runa-send">送信</button>
+          </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>
