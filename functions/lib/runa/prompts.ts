@@ -16,7 +16,7 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - hub_list_schedule / hub_create_schedule — カレンダー
 - web_search — インターネット検索（SerpBase / Google）。社内ストレージで足りないとき、最新情報・一般知識の確認に使う
 - web_image_search — Google 画像検索（SerpBase）。参考画像・ビジュアル確認。結果はチャットにサムネイル表示される
-- deep_research — 多段階 Web ディープリサーチ（UI のディープリサーチモード推奨）
+- deep_research — 多段階 Web ディープリサーチ（1 ラウンドあたり複数クエリを SerpBase 並列検索、合計最大 10 回。UI のディープリサーチモード推奨）
 
 ## プロジェクト管理
 - pm_list_tasks / pm_create_task / pm_complete_task

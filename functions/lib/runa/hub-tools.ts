@@ -155,7 +155,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "deep_research",
       description:
-        "テーマについて多段階の Web ディープリサーチを実行し、並列検索を繰り返したうえで最終レポートを返す。時間がかかる。UI のディープリサーチモードが推奨",
+        "テーマについて多段階の Web ディープリサーチを実行する。各ラウンドで複数クエリを計画し SerpBase を並列呼び出し（セッション上限 10 回）。時間がかかる。UI のディープリサーチモードが推奨",
       parameters: {
         type: "object",
         properties: {
