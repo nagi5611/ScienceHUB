@@ -56,9 +56,12 @@ import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
 import { searchUsersForRuna } from "./user-search";
 import {
+  formatSerpBaseImageResultsForRuna,
   formatSerpBaseResultsForRuna,
   isSerpBaseConfigured,
+  searchImagesWithSerpBase,
   searchWebWithSerpBase,
+  serpBaseImagesToRunaFiles,
 } from "./serpbase";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
@@ -120,6 +123,25 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
             enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
             description:
               "期間絞り込み（任意）: SerpBase 公式 API 未対応のため現在は無視される",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_image_search",
+      description:
+        "Google 画像検索（SerpBase）で参考画像を探す。ユーザーが画像・ビジュアル・見た目の参考を求めたとき、または web_search では足りない視覚情報が必要なときに使う。結果はチャットにサムネイル表示される",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "画像検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜12、既定 8）",
           },
         },
         required: ["query"],
@@ -497,6 +519,8 @@ export async function executeHubTool(
         return await runHubSearchUsers(db, user, args);
       case "web_search":
         return await runWebSearch(env, args);
+      case "web_image_search":
+        return await runWebImageSearch(env, args);
       case "hub_list_schedule":
         return await runHubListSchedule(env, db, user, args);
       case "hub_create_schedule":
@@ -600,6 +624,37 @@ async function runWebSearch(
   return {
     text: formatSerpBaseResultsForRuna(payload),
     files: [],
+  };
+}
+
+async function runWebImageSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isSerpBaseConfigured(env)) {
+    return {
+      text: "Web 検索は現在利用できません（SERPBASE_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+
+  const payload = await searchImagesWithSerpBase(env, {
+    query,
+    num,
+  });
+
+  const files = serpBaseImagesToRunaFiles(payload.query, payload.results);
+
+  return {
+    text: formatSerpBaseImageResultsForRuna(payload),
+    files,
   };
 }
 
