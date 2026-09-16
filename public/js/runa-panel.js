@@ -136,7 +136,9 @@ function handleMessageAreaClick(event) {
     return;
   }
 
-  const trigger = event.target.closest(".runa-file-ref-preview");
+  const trigger = event.target.closest(
+    ".runa-file-ref-preview, .runa-web-image-preview"
+  );
   if (!trigger) return;
   event.preventDefault();
   const src = trigger.getAttribute("data-lightbox-src");
@@ -181,9 +183,39 @@ function renderMarkdown(text) {
   return safe.replace(/\n/g, "<br>");
 }
 
+/** 外部 Web 画像参照（SerpBase 画像検索など） */
+function isWebImageFileRef(f) {
+  return Boolean(f.previewUrl);
+}
+
+function renderWebImageRefsHtml(files) {
+  const items = files
+    .map((f) => {
+      const thumb = f.previewUrl || f.imageUrl || "";
+      const full = f.imageUrl || f.previewUrl || thumb;
+      const source = f.sourcePageUrl || full;
+      const caption = f.name || "画像";
+      return `<li class="runa-web-image-item">
+        <button type="button" class="runa-web-image-preview" data-lightbox-src="${escapeHtml(full)}" data-lightbox-alt="${escapeHtml(caption)}" title="${escapeHtml(caption)}（クリックで拡大）">
+          <img class="runa-web-image-thumb" src="${escapeHtml(thumb)}" alt="${escapeHtml(caption)}" loading="lazy" referrerpolicy="no-referrer">
+        </button>
+        <p class="runa-web-image-caption">${escapeHtml(caption)}</p>
+        <a class="runa-web-image-source" href="${escapeHtml(source)}" target="_blank" rel="noopener noreferrer">元ページ</a>
+      </li>`;
+    })
+    .join("");
+  return `<ul class="runa-web-image-grid" aria-label="画像検索結果">${items}</ul>`;
+}
+
 function renderFileRefsHtml(files) {
   if (!files?.length) return "";
-  const items = files
+  const webImages = files.filter(isWebImageFileRef);
+  const storageFiles = files.filter((f) => !isWebImageFileRef(f));
+  const parts = [];
+  if (webImages.length) parts.push(renderWebImageRefsHtml(webImages));
+  if (!storageFiles.length) return parts.join("");
+
+  const items = storageFiles
     .map((f) => {
       const type = f.type === "folder" ? "folder" : "file";
       const icon = type === "folder" ? "📁" : "📄";
@@ -206,7 +238,10 @@ function renderFileRefsHtml(files) {
       </li>`;
     })
     .join("");
-  return `<ul class="runa-file-refs">${items}</ul>`;
+  if (items) {
+    parts.push(`<ul class="runa-file-refs">${items}</ul>`);
+  }
+  return parts.join("");
 }
 
 function renderMessageContent(msg) {
