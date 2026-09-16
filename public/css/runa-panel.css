@@ -908,6 +908,43 @@ body.runa-lightbox-open {
   padding: 0 0.1rem;
 }
 
+.runa-deep-research-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 1rem 0;
+  border-top: 1px solid var(--cf-border, #e2e5e9);
+}
+
+.runa-deep-research-toggle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+  cursor: pointer;
+}
+
+.runa-deep-research-toggle:hover {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.runa-deep-research-toggle.is-active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.runa-deep-research-hint {
+  font-size: 0.75rem;
+  color: var(--cf-muted, #6b7280);
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
 .runa-form {
   position: relative;
   display: flex;

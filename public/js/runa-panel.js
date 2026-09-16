@@ -276,6 +276,8 @@ const els = {
   contextUsageTrack: document.getElementById("runa-context-usage-track"),
   contextUsageActions: document.getElementById("runa-context-usage-actions"),
   contextSummarizeBtn: document.getElementById("runa-context-summarize-btn"),
+  deepResearchToggle: document.getElementById("runa-deep-research-toggle"),
+  deepResearchHint: document.getElementById("runa-deep-research-hint"),
 };
 
 /** @type {Array<{ id?: string, role: string, content: string, files?: object[], pending?: boolean, activities?: object[] }>} */
@@ -297,27 +299,62 @@ let pendingEditImagePath = null;
 /** @type {{ usedTokens?: number, limitTokens?: number, percent?: number, accuracyWarningPercent?: number, isAccuracyDegrading?: boolean, summarizeThresholdPercent?: number, shouldSummarize?: boolean } | null} */
 let contextUsageState = null;
 let summarizeBusy = false;
+let deepResearchMode = false;
 
+const DEEP_RESEARCH_INPUT_PLACEHOLDER = "調査したいテーマを入力…";
 const EDIT_INPUT_PLACEHOLDER = "変更したい内容を入力…";
-
-/** 編集コンテキストをリセット */
 function resetEditContext() {
   pendingEditImagePath = null;
-  if (els.input && panelOptions.placeholder) {
-    els.input.placeholder = panelOptions.placeholder;
-  }
+  syncDeepResearchUi();
 }
 
 /** API 送信用コンテキスト（編集意図をマージ） */
 function buildRunaChatContext() {
   const base = panelOptions.getContext?.() ?? {};
-  if (!pendingEditImagePath) return base;
-  return {
-    ...base,
-    editImagePath: pendingEditImagePath,
-    editIntent: true,
-  };
+  const merged = !pendingEditImagePath
+    ? { ...base }
+    : {
+        ...base,
+        editImagePath: pendingEditImagePath,
+        editIntent: true,
+      };
+  if (deepResearchMode) {
+    merged.deepResearchMode = true;
+  }
+  return merged;
 }
+
+/** ディープリサーチモード UI を同期 */
+function syncDeepResearchUi() {
+  const on = deepResearchMode;
+  if (els.deepResearchToggle) {
+    els.deepResearchToggle.classList.toggle("is-active", on);
+    els.deepResearchToggle.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  if (els.input) {
+    if (on && !pendingEditImagePath) {
+      els.input.placeholder = DEEP_RESEARCH_INPUT_PLACEHOLDER;
+    } else if (!pendingEditImagePath && panelOptions.placeholder) {
+      els.input.placeholder = panelOptions.placeholder;
+    }
+  }
+  if (els.deepResearchHint && !on) {
+    els.deepResearchHint.hidden = true;
+    els.deepResearchHint.textContent = "";
+  }
+}
+
+function setDeepResearchHint(message) {
+  if (!els.deepResearchHint) return;
+  if (!message) {
+    els.deepResearchHint.hidden = true;
+    els.deepResearchHint.textContent = "";
+    return;
+  }
+  els.deepResearchHint.hidden = false;
+  els.deepResearchHint.textContent = message;
+}
+
 /** @type {{ getContext?: () => object | null, placeholder?: string, getContextLabel?: () => string | null }} */
 let panelOptions = {};
 let eventsBound = false;
@@ -575,7 +612,8 @@ function renderMessageHtml(msg) {
   const summaryClass =
     msg.role === "assistant" &&
     typeof msg.content === "string" &&
-    msg.content.startsWith("[Runa 会話サマリー")
+    (msg.content.startsWith("[Runa 会話サマリー") ||
+      msg.content.startsWith("## 結論"))
       ? " runa-msg--summary"
       : "";
   const streamingClass =
@@ -983,6 +1021,8 @@ async function startNewChat() {
   messageState = [];
   pendingAttachments = [];
   resetEditContext();
+  deepResearchMode = false;
+  syncDeepResearchUi();
   contextUsageState = null;
   if (els.contextUsage) els.contextUsage.hidden = true;
   renderPendingAttachments();
@@ -1042,6 +1082,8 @@ async function postRunaChat(message, attachments) {
         current: typeof payload.current === "number" ? payload.current : 0,
       };
       updatePendingAssistantBubble(pending);
+    } else if (eventName === "deep_research" && payload.message) {
+      setDeepResearchHint(payload.message);
     } else if (eventName === "status" && payload.label) {
       const phaseLabel =
         payload.phase && ACTIVITY_PHASE_LABELS[payload.phase]
@@ -1095,6 +1137,7 @@ async function postRunaChat(message, attachments) {
     pending.files = finalResult.files;
   }
   setStatus("");
+  setDeepResearchHint("");
   pendingAssistantRow = null;
   renderMessages();
   return finalResult;
@@ -1305,6 +1348,10 @@ function bindEvents() {
   els.backdrop?.addEventListener("click", () => setPanelOpen(false));
   els.newChat?.addEventListener("click", () => void startNewChat());
   els.contextSummarizeBtn?.addEventListener("click", () => void requestContextSummarize());
+  els.deepResearchToggle?.addEventListener("click", () => {
+    deepResearchMode = !deepResearchMode;
+    syncDeepResearchUi();
+  });
   els.form?.addEventListener("submit", handleSubmit);
   els.input?.addEventListener("keydown", handleInputKeydown);
   els.attachBtn?.addEventListener("click", (event) => {
@@ -1354,6 +1401,7 @@ export function initRunaPanel(options = {}) {
   if (!els.fab || !els.panel) return;
   hydrateAttachButtonIcon();
   bindEvents();
+  syncDeepResearchUi();
   updateContextHint();
 }
 

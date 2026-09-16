@@ -56,6 +56,7 @@ import {
   toTasksSsePayload,
   type RunaTaskPlan,
 } from "./task-plan";
+import { runDeepResearchSession } from "./deep-research";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -95,6 +96,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   hub_list_announcements: "お知らせを取得しています…",
   web_search: "Web を検索しています…",
   web_image_search: "画像を検索しています…",
+  deep_research: "ディープリサーチ中…",
   hub_list_schedule: "予定を取得しています…",
   hub_create_schedule: "予定を作成しています…",
   pm_list_tasks: "タスクを取得しています…",
@@ -148,6 +150,8 @@ export interface RunaChatContext {
   webSiteEditFile?: RunaWebSiteEditFileContext | null;
   editImagePath?: string | null;
   editIntent?: boolean;
+  /** ディープリサーチモード（専用パイプライン） */
+  deepResearchMode?: boolean;
 }
 
 export interface RunaChatAttachment {
@@ -487,6 +491,13 @@ export async function runRunaChat(
     send
   );
   if (fastDir) return fastDir;
+
+  if (context?.deepResearchMode) {
+    if (!trimmed) {
+      throw new Error("ディープリサーチには調査テーマを入力してください");
+    }
+    return await runDeepResearchSession(env, db, user, trimmed, send);
+  }
 
   const activity = new RunaActivityLog(send);
   const history = await buildRunaChatHistory(db, user.id, 20);

@@ -175,6 +175,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             webSiteEditFile,
             editImagePath: body.context.editImagePath?.trim() || null,
             editIntent: Boolean(body.context.editIntent),
+            deepResearchMode: Boolean(body.context.deepResearchMode),
           }
         : undefined;
 

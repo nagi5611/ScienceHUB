@@ -63,6 +63,8 @@ import {
   searchWebWithSerpBase,
   serpBaseImagesToRunaFiles,
 } from "./serpbase";
+import { runDeepResearchSession } from "./deep-research";
+import type { RunaSseSend } from "./chat-sse";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
 const SIM_APP_SLUG = "simulation-request";
@@ -145,6 +147,24 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
           },
         },
         required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "deep_research",
+      description:
+        "テーマについて多段階の Web ディープリサーチを実行し、並列検索を繰り返したうえで最終レポートを返す。時間がかかる。UI のディープリサーチモードが推奨",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: {
+            type: "string",
+            description: "調査テーマ・ユーザーの質問",
+          },
+        },
+        required: ["topic"],
       },
     },
   },
@@ -521,6 +541,8 @@ export async function executeHubTool(
         return await runWebSearch(env, args);
       case "web_image_search":
         return await runWebImageSearch(env, args);
+      case "deep_research":
+        return await runDeepResearchTool(env, db, user, args);
       case "hub_list_schedule":
         return await runHubListSchedule(env, db, user, args);
       case "hub_create_schedule":
@@ -656,6 +678,35 @@ async function runWebImageSearch(
     text: formatSerpBaseImageResultsForRuna(payload),
     files,
   };
+}
+
+async function runDeepResearchTool(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  const topic = strArg(args, "topic");
+  if (!topic) {
+    return { text: "topic を指定してください", files: [] };
+  }
+
+  const noopSend: RunaSseSend = () => {};
+  try {
+    const result = await runDeepResearchSession(
+      env,
+      db,
+      user,
+      topic,
+      noopSend,
+      { persistAssistantMessage: false }
+    );
+    return { text: result.message, files: result.files };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "ディープリサーチに失敗しました";
+    return { text: message, files: [] };
+  }
 }
 
 async function runHubAnnouncements(
