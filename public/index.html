@@ -539,19 +539,27 @@
       </div>
       <div class="runa-body">
         <div class="runa-messages" id="runa-messages"></div>
-        <div class="runa-attach-list" id="runa-attach-list" hidden></div>
-        <div class="runa-deep-research-bar">
-          <button type="button" class="runa-deep-research-toggle" id="runa-deep-research-toggle" aria-pressed="false">
-            ディープリサーチ
-          </button>
-          <span class="runa-deep-research-hint" id="runa-deep-research-hint" hidden></span>
-        </div>
-        <form class="runa-form" id="runa-form">
+        <div class="runa-composer" id="runa-composer">
+          <div class="runa-attach-list" id="runa-attach-list" hidden></div>
+          <div class="runa-composer-rise" id="runa-deep-research-rise" aria-hidden="true">
+            <p class="runa-composer-rise-lead">並列 Web 検索を繰り返し、調査レポートを作成します</p>
+            <p class="runa-deep-research-hint" id="runa-deep-research-hint" hidden></p>
+          </div>
+          <div class="runa-composer-modes">
+            <button type="button" class="runa-deep-research-toggle" id="runa-deep-research-toggle" aria-pressed="false">
+              <svg class="runa-deep-research-toggle-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" aria-hidden="true">
+                <path d="M2.5 13h11M5 10.5V6.5M8 10.5V3M11 10.5V7.5"/>
+              </svg>
+              <span class="runa-deep-research-toggle-label">ディープリサーチ</span>
+            </button>
+          </div>
+          <form class="runa-form" id="runa-form">
           <button type="button" class="runa-attach-btn" id="runa-attach-btn" aria-label="ファイルを添付" title="ファイルを添付（端末・クラウドストレージ）"></button>
           <input type="file" id="runa-file-input" class="runa-file-input" hidden multiple>
           <textarea class="runa-input" id="runa-input" rows="2" placeholder="ファイルの検索や操作を依頼…" aria-label="メッセージ"></textarea>
           <button type="submit" class="runa-send" id="runa-send">送信</button>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
   </div>

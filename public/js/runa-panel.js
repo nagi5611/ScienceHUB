@@ -276,6 +276,8 @@ const els = {
   contextUsageTrack: document.getElementById("runa-context-usage-track"),
   contextUsageActions: document.getElementById("runa-context-usage-actions"),
   contextSummarizeBtn: document.getElementById("runa-context-summarize-btn"),
+  composer: document.getElementById("runa-composer"),
+  deepResearchRise: document.getElementById("runa-deep-research-rise"),
   deepResearchToggle: document.getElementById("runa-deep-research-toggle"),
   deepResearchHint: document.getElementById("runa-deep-research-hint"),
 };
@@ -327,6 +329,10 @@ function buildRunaChatContext() {
 /** ディープリサーチモード UI を同期 */
 function syncDeepResearchUi() {
   const on = deepResearchMode;
+  els.composer?.classList.toggle("is-deep-research", on);
+  if (els.deepResearchRise) {
+    els.deepResearchRise.setAttribute("aria-hidden", on ? "false" : "true");
+  }
   if (els.deepResearchToggle) {
     els.deepResearchToggle.classList.toggle("is-active", on);
     els.deepResearchToggle.setAttribute("aria-pressed", on ? "true" : "false");
