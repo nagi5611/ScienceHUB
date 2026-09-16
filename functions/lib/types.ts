@@ -119,8 +119,8 @@ export interface Env {
   RUNA_CONTEXT_WINDOW_TOKENS?: string;
   RUNA_CONTEXT_SUMMARIZE_THRESHOLD?: string;
   RUNA_CONTEXT_ACCURACY_WARNING?: string;
-  /** Brave Search API キー（Runa web_search） */
-  BRAVESEARCH_APIKEY?: string;
+  /** SerpBase API キー（Runa web_search） */
+  SERPBASE_APIKEY?: string;
 }
 
 export interface RoleRow {

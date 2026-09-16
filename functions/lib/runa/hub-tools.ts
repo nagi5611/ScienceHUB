@@ -56,10 +56,10 @@ import type { ToolDefinition } from "./openai";
 import type { RunaFileItem, ToolRunResult } from "./tools";
 import { searchUsersForRuna } from "./user-search";
 import {
-  formatBraveResultsForRuna,
-  isBraveSearchConfigured,
-  searchWebWithBrave,
-} from "./brave-search";
+  formatSerpBaseResultsForRuna,
+  isSerpBaseConfigured,
+  searchWebWithSerpBase,
+} from "./serpbase";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
 const SIM_APP_SLUG = "simulation-request";
@@ -106,7 +106,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "web_search",
       description:
-        "インターネット（Brave Web Search）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
+        "インターネット（SerpBase / Google 検索結果）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
       parameters: {
         type: "object",
         properties: {
@@ -119,7 +119,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
             type: "string",
             enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
             description:
-              "期間絞り込み（任意）: 1時間/1日/1週/1月/1年。1時間・1日は API 上は24時間以内（pd）に近い",
+              "期間絞り込み（任意）: SerpBase 公式 API 未対応のため現在は無視される",
           },
         },
         required: ["query"],
@@ -577,9 +577,9 @@ async function runWebSearch(
   env: Env,
   args: Record<string, unknown>
 ): Promise<ToolRunResult> {
-  if (!isBraveSearchConfigured(env)) {
+  if (!isSerpBaseConfigured(env)) {
     return {
-      text: "Web 検索は現在利用できません（BRAVESEARCH_APIKEY が未設定）",
+      text: "Web 検索は現在利用できません（SERPBASE_APIKEY が未設定）",
       files: [],
     };
   }
@@ -590,16 +590,15 @@ async function runWebSearch(
   }
 
   const num = numArg(args, "num", 8);
-  const tbs = strArg(args, "tbs");
+  // tbs: SerpBase 公式 API 未対応 — ツール互換のため引数のみ受け取り無視
 
-  const payload = await searchWebWithBrave(env, {
+  const payload = await searchWebWithSerpBase(env, {
     query,
     num,
-    tbs: tbs || undefined,
   });
 
   return {
-    text: formatBraveResultsForRuna(payload),
+    text: formatSerpBaseResultsForRuna(payload),
     files: [],
   };
 }
