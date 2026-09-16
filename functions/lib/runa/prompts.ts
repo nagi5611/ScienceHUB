@@ -14,7 +14,7 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - hub_list_apps — 使えるアプリとグループ ID
 - hub_list_announcements — お知らせ
 - hub_list_schedule / hub_create_schedule — カレンダー
-- web_search — インターネット検索（Brave Web Search）。社内ストレージで足りないとき、最新情報・一般知識の確認に使う
+- web_search — インターネット検索（SerpBase / Google）。社内ストレージで足りないとき、最新情報・一般知識の確認に使う
 
 ## プロジェクト管理
 - pm_list_tasks / pm_create_task / pm_complete_task
