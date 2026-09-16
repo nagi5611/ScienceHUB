@@ -138,25 +138,26 @@
 }
 
 .runa-context-usage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
   margin: 0;
-  padding: 0.2rem 1.25rem 0.35rem;
+  padding: 0;
   font-size: 0.72rem;
   color: var(--cf-muted, #6b7280);
 }
 
-.runa-context-usage-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-height: 1.75rem;
+.runa-context-usage[hidden] {
+  display: none !important;
 }
 
 .runa-context-usage-actions {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  flex: 1;
-  justify-content: flex-end;
-  gap: 0.4rem;
+  gap: 0.2rem;
+  width: 100%;
   min-width: 0;
 }
 
@@ -167,18 +168,20 @@
 .runa-context-usage-warn {
   color: var(--cf-orange, #f38020);
   font-weight: 600;
-  font-size: 0.78rem;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .runa-context-summarize-btn {
   flex: 0 0 auto;
-  padding: 0.2rem 0.65rem;
+  padding: 0.15rem 0.45rem;
   border: 1px solid var(--cf-orange, #f38020);
   border-radius: var(--cf-radius, 8px);
   background: var(--cf-orange-soft, #fff4eb);
   color: var(--cf-orange, #f38020);
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1047,6 +1050,15 @@ body.runa-lightbox-open {
   border-top: none;
 }
 
+.runa-form-trailing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.28rem;
+  flex-shrink: 0;
+}
+
 .runa-attach-menu {
   position: absolute;
   left: 1rem;
@@ -1345,7 +1357,6 @@ body.runa-lightbox-open {
 }
 
 .runa-send {
-  align-self: flex-end;
   border: none;
   border-radius: var(--cf-radius, 8px);
   padding: 0.65rem 1rem;
