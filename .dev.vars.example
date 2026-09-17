@@ -16,6 +16,9 @@ RUNA_MAX_TOOL_ROUNDS=12
 # Runa Web 検索（SerpBase API）
 # SERPBASE_APIKEY=
 
+# Runa Web / 画像検索（Serper API — serper_search / serper_image_search）
+# SERPER_APIKEY=
+
 FIREBASE_PROJECT_ID=
 FIREBASE_WEB_API_KEY=
 FIREBASE_APP_ID=

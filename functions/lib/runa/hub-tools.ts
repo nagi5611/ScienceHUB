@@ -63,6 +63,14 @@ import {
   searchWebWithSerpBase,
   serpBaseImagesToRunaFiles,
 } from "./serpbase";
+import {
+  formatSerperImageResultsForRuna,
+  formatSerperResultsForRuna,
+  isSerperConfigured,
+  searchImagesWithSerper,
+  searchWebWithSerper,
+  serperImagesToRunaFiles,
+} from "./serper";
 import { runDeepResearchSession } from "./deep-research";
 import type { RunaSseSend } from "./chat-sse";
 
@@ -137,6 +145,50 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
       name: "web_image_search",
       description:
         "Google 画像検索（SerpBase）で参考画像を探す。ユーザーが画像・ビジュアル・見た目の参考を求めたとき、または web_search では足りない視覚情報が必要なときに使う。結果はチャットにサムネイル表示される",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "画像検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜12、既定 8）",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "serper_search",
+      description:
+        "Google Web 検索（Serper API）。一般知識・最新情報の確認。期間絞り込み（tbs）は Serper 経由で有効。SerpBase 経路は web_search",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜10、既定 8）",
+          },
+          tbs: {
+            type: "string",
+            enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
+            description:
+              "期間絞り込み（任意）: qdr:h=1時間, qdr:d=1日, qdr:w=1週, qdr:m=1月, qdr:y=1年",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "serper_image_search",
+      description:
+        "Google 画像検索（Serper）。参考画像・ビジュアル確認。SerpBase 経路は web_image_search。結果はチャットにサムネイル表示",
       parameters: {
         type: "object",
         properties: {
@@ -541,6 +593,10 @@ export async function executeHubTool(
         return await runWebSearch(env, args);
       case "web_image_search":
         return await runWebImageSearch(env, args);
+      case "serper_search":
+        return await runSerperSearch(env, args);
+      case "serper_image_search":
+        return await runSerperImageSearch(env, args);
       case "deep_research":
         return await runDeepResearchTool(env, db, user, args);
       case "hub_list_schedule":
@@ -676,6 +732,77 @@ async function runWebImageSearch(
 
   return {
     text: formatSerpBaseImageResultsForRuna(payload),
+    files,
+  };
+}
+
+const SERPER_TBS_VALUES = new Set([
+  "qdr:h",
+  "qdr:d",
+  "qdr:w",
+  "qdr:m",
+  "qdr:y",
+]);
+
+async function runSerperSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isSerperConfigured(env)) {
+    return {
+      text: "Serper 検索は現在利用できません（SERPER_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+  const tbsRaw = strArg(args, "tbs");
+  const tbs = SERPER_TBS_VALUES.has(tbsRaw) ? tbsRaw : undefined;
+
+  const payload = await searchWebWithSerper(env, {
+    query,
+    num,
+    tbs,
+  });
+
+  return {
+    text: formatSerperResultsForRuna(payload),
+    files: [],
+  };
+}
+
+async function runSerperImageSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isSerperConfigured(env)) {
+    return {
+      text: "Serper 画像検索は現在利用できません（SERPER_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+
+  const payload = await searchImagesWithSerper(env, {
+    query,
+    num,
+  });
+
+  const files = serperImagesToRunaFiles(payload.query, payload.results);
+
+  return {
+    text: formatSerperImageResultsForRuna(payload),
     files,
   };
 }
