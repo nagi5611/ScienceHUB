@@ -1093,6 +1093,8 @@ async function postRunaChat(message, attachments) {
       updatePendingAssistantBubble(pending);
     } else if (eventName === "deep_research" && payload.message) {
       setDeepResearchHint(payload.message);
+    } else if (eventName === "multi_search" && payload.message) {
+      setDeepResearchHint(payload.message);
     } else if (eventName === "status" && payload.label) {
       const phaseLabel =
         payload.phase && ACTIVITY_PHASE_LABELS[payload.phase]
