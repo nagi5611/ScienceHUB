@@ -49,6 +49,13 @@ function renderProviderToggles(container, category, settings) {
     .join("");
 }
 
+function applyMultiSearchSummarizeToggle(settings) {
+  const input = document.getElementById("runa-multi-search-summarize");
+  if (input instanceof HTMLInputElement && settings) {
+    input.checked = settings.multi_search_summarize === true;
+  }
+}
+
 function collectSettingsFromDom() {
   const multi = { serpbase: true, serper: true, brave: true, exa: true };
   const deep = { serpbase: true, serper: true, brave: true, exa: true };
@@ -61,7 +68,10 @@ function collectSettingsFromDom() {
     if (category === "multi_search") multi[provider] = value;
     if (category === "deep_research") deep[provider] = value;
   });
-  return { multi_search: multi, deep_research: deep };
+  const summarizeInput = document.getElementById("runa-multi-search-summarize");
+  const multi_search_summarize =
+    summarizeInput instanceof HTMLInputElement && summarizeInput.checked;
+  return { multi_search: multi, deep_research: deep, multi_search_summarize };
 }
 
 export async function loadRunaSettings(api) {
@@ -77,6 +87,7 @@ export async function loadRunaSettings(api) {
     "deep_research",
     runaSettings
   );
+  applyMultiSearchSummarizeToggle(runaSettings);
 }
 
 function showRunaProviderTestResult(result, variant) {

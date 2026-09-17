@@ -2529,6 +2529,12 @@ body.cf-admin-login {
   cursor: pointer;
 }
 
+.cf-runa-multi-summarize {
+  display: flex;
+  margin-top: 0.85rem;
+  max-width: 28rem;
+}
+
 .cf-runa-provider-tests {
   margin-top: 1.5rem;
   padding-top: 1.25rem;
