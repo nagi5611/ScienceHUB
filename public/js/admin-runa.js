@@ -79,6 +79,56 @@ export async function loadRunaSettings(api) {
   );
 }
 
+function showRunaProviderTestResult(result, variant) {
+  const el = document.getElementById("runa-provider-test-result");
+  if (!el) return;
+  el.hidden = false;
+  el.className = "cf-runa-provider-test-result";
+  if (variant === "loading") {
+    el.classList.add("is-loading");
+    el.textContent = result;
+    return;
+  }
+  if (variant === "warn") el.classList.add("is-warn");
+  else if (variant === "error") el.classList.add("is-error");
+  else el.classList.add("is-success");
+
+  const label = result.label ?? result.provider ?? "";
+  const message = result.message ?? String(result);
+  el.innerHTML = `<strong>${label}</strong>: ${message}`;
+}
+
+async function runRunaProviderTest(api, provider) {
+  const buttons = document.querySelectorAll("[data-runa-provider-test]");
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+  });
+  showRunaProviderTestResult(`${provider} — テスト実行中…`, "loading");
+
+  try {
+    const result = await api("/api/admin/runa/providers/test", {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+    });
+    if (result.ok) {
+      showRunaProviderTestResult(result, "success");
+    } else if (result.configured === false) {
+      showRunaProviderTestResult(result, "warn");
+    } else {
+      showRunaProviderTestResult(result, "error");
+    }
+  } catch (err) {
+    showRunaProviderTestResult(
+      { label: provider, message: err.message ?? "接続テストに失敗しました" },
+      "error"
+    );
+  } finally {
+    buttons.forEach((btn) => {
+      btn.disabled = false;
+    });
+  }
+}
+
 export async function saveRunaSettings(api) {
   const settings = collectSettingsFromDom();
   const data = await api("/api/admin/runa/settings", {
@@ -164,6 +214,14 @@ async function loadRunaMessages(api, conversationId) {
 }
 
 export function bindRunaEvents({ api }) {
+  document.querySelectorAll("[data-runa-provider-test]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const provider = btn.getAttribute("data-runa-provider-test");
+      if (!provider) return;
+      runRunaProviderTest(api, provider);
+    });
+  });
+
   document.getElementById("runa-settings-save")?.addEventListener("click", async () => {
     try {
       await saveRunaSettings(api);

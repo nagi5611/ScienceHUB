@@ -2529,6 +2529,56 @@ body.cf-admin-login {
   cursor: pointer;
 }
 
+.cf-runa-provider-tests {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--cf-border, #e5e7eb);
+}
+
+.cf-runa-provider-tests h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.35rem;
+}
+
+.cf-runa-provider-test-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.cf-runa-provider-test-result {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.cf-runa-provider-test-result.is-success {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.cf-runa-provider-test-result.is-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.cf-runa-provider-test-result.is-warn {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.cf-runa-provider-test-result.is-loading {
+  color: #4b5563;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
 .cf-runa-settings-actions {
   display: flex;
   align-items: center;
