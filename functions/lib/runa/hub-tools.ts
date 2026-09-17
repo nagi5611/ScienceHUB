@@ -63,6 +63,11 @@ import {
   searchWebWithSerpBase,
   serpBaseImagesToRunaFiles,
 } from "./serpbase";
+import {
+  formatExaResultsForRuna,
+  isExaConfigured,
+  searchWebWithExa,
+} from "./exa";
 import { runDeepResearchSession } from "./deep-research";
 import type { RunaSseSend } from "./chat-sse";
 
@@ -125,6 +130,28 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
             enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
             description:
               "期間絞り込み（任意）: SerpBase 公式 API 未対応のため現在は無視される",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "exa_search",
+      description:
+        "Exa の意味検索で Web を調べる。自然言語の質問・最新トピック・論文/技術記事の探索向け。Google の検索結果一覧が欲しいときは web_search を使う",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "自然言語の検索クエリ",
+          },
+          num: {
+            type: "number",
+            description: "取得件数（1〜10、既定 8）",
           },
         },
         required: ["query"],
@@ -539,6 +566,8 @@ export async function executeHubTool(
         return await runHubSearchUsers(db, user, args);
       case "web_search":
         return await runWebSearch(env, args);
+      case "exa_search":
+        return await runExaSearch(env, args);
       case "web_image_search":
         return await runWebImageSearch(env, args);
       case "deep_research":
@@ -645,6 +674,35 @@ async function runWebSearch(
 
   return {
     text: formatSerpBaseResultsForRuna(payload),
+    files: [],
+  };
+}
+
+async function runExaSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isExaConfigured(env)) {
+    return {
+      text: "Exa 検索は現在利用できません（EXA_API_KEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+
+  const payload = await searchWebWithExa(env, {
+    query,
+    num,
+  });
+
+  return {
+    text: formatExaResultsForRuna(payload),
     files: [],
   };
 }

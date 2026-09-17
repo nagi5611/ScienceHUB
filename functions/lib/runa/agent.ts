@@ -95,6 +95,7 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   hub_list_apps: "アプリ一覧を取得しています…",
   hub_list_announcements: "お知らせを取得しています…",
   web_search: "Web を検索しています…",
+  exa_search: "Exa で Web を検索しています…",
   web_image_search: "画像を検索しています…",
   deep_research: "ディープリサーチ中…",
   hub_list_schedule: "予定を取得しています…",
