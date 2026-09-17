@@ -121,6 +121,12 @@ export interface Env {
   RUNA_CONTEXT_ACCURACY_WARNING?: string;
   /** SerpBase API キー（Runa web_search） */
   SERPBASE_APIKEY?: string;
+  /** Serper API キー（Runa serper_search / serper_image_search） */
+  SERPER_APIKEY?: string;
+  /** Brave Search API キー（Runa brave_search / brave_image_search） */
+  BRAVESEARCH_APIKEY?: string;
+  /** Exa API キー（Runa exa_search） */
+  EXA_API_KEY?: string;
 }
 
 export interface RoleRow {
