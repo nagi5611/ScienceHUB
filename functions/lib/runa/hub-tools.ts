@@ -90,6 +90,7 @@ import {
   runMultiSearchSession,
 } from "./multi-search";
 import { runDeepResearchSession } from "./deep-research";
+import { getRunaSearchProviderFlags } from "./site-settings";
 import type { RunaSseSend } from "./chat-sse";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
@@ -718,7 +719,7 @@ export async function executeHubTool(
       case "brave_image_search":
         return await runBraveImageSearch(env, args);
       case "multi_search":
-        return await runMultiSearchTool(env, args, hooks);
+        return await runMultiSearchTool(env, db, args, hooks);
       case "deep_research":
         return await runDeepResearchTool(env, db, user, args, hooks);
       case "hub_list_schedule":
@@ -1023,12 +1024,14 @@ async function runBraveImageSearch(
 
 async function runMultiSearchTool(
   env: Env,
+  db: D1Database,
   args: Record<string, unknown>,
   hooks?: HubToolRuntimeHooks
 ): Promise<ToolRunResult> {
-  if (!hasAnyMultiSearchProvider(env)) {
+  const flags = await getRunaSearchProviderFlags(db, "multi_search");
+  if (!hasAnyMultiSearchProvider(env, flags)) {
     return {
-      text: "マルチ検索は現在利用できません（検索 API キーが未設定）",
+      text: "マルチ検索は現在利用できません（API キー未設定、または管理画面で OFF）",
       files: [],
     };
   }
@@ -1042,7 +1045,7 @@ async function runMultiSearchTool(
   const noopSend: RunaSseSend = () => {};
 
   try {
-    const result = await runMultiSearchSession(env, topic, noopSend, {
+    const result = await runMultiSearchSession(env, db, topic, noopSend, {
       focus: focus || undefined,
       skipSynthesize: true,
       onWorkingDetail: hooks?.reportWorkingDetail,
