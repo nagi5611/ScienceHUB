@@ -22,6 +22,9 @@ RUNA_MAX_TOOL_ROUNDS=12
 # Runa Web / 画像検索（Brave Search API — brave_search / brave_image_search）
 # BRAVESEARCH_APIKEY=
 
+# Runa Web 検索（Exa Search API — exa_search）
+# EXA_API_KEY=
+
 FIREBASE_PROJECT_ID=
 FIREBASE_WEB_API_KEY=
 FIREBASE_APP_ID=

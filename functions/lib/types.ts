@@ -125,6 +125,8 @@ export interface Env {
   SERPER_APIKEY?: string;
   /** Brave Search API キー（Runa brave_search / brave_image_search） */
   BRAVESEARCH_APIKEY?: string;
+  /** Exa API キー（Runa exa_search） */
+  EXA_API_KEY?: string;
 }
 
 export interface RoleRow {

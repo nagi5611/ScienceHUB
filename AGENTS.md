@@ -50,8 +50,10 @@ caveats are captured below.
 - Excalidraw/Design live collab needs the Durable Object workers bound via `npm run dev:all`.
   Without them, `/api/excalidraw` and `/api/design` return `503`; non-realtime save via D1/R2
   still works. All other external integrations (Google/Microsoft OAuth, Google Calendar, AWS
-  FDS simulation, Gemini, Discord, Firebase SMS, R2 presigned URLs, SerpBase/Serper/Brave
-  search keys) are optional and feature-gated — the core app runs without any of their secrets.
+  FDS simulation, Gemini, Discord, Firebase SMS, R2 presigned URLs) are optional and
+  feature-gated — the core app runs without any of their secrets. Runa search keys are likewise
+  optional: `SERPBASE_APIKEY` (web_search / deep research / images), `EXA_API_KEY` (exa_search),
+  `SERPER_APIKEY`, `BRAVESEARCH_APIKEY`.
 
 ### Smoke test
 - New-user signup at `/login/` (サインアップ tab) creates a guest user in D1 and logs in with a
