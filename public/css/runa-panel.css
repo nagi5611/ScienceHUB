@@ -1379,11 +1379,13 @@ body.runa-lightbox-open {
 .runa-stop {
   border: 1px solid rgba(220, 38, 38, 0.45);
   border-radius: var(--cf-radius, 8px);
-  padding: 0.65rem 0.85rem;
+  padding: 0.55rem 0.65rem;
+  min-width: 2.5rem;
   background: rgba(220, 38, 38, 0.12);
   color: #b91c1c;
-  font: inherit;
-  font-weight: 600;
+  font-size: 0.85rem;
+  line-height: 1;
+  font-weight: 700;
   cursor: pointer;
 }
 
