@@ -177,6 +177,12 @@ export function summarizeToolArgs(
   if (typeof args.prompt === "string" && args.prompt) {
     parts.push(`prompt: ${args.prompt.slice(0, 80)}`);
   }
+  if (typeof args.topic === "string" && args.topic) {
+    parts.push(`topic: ${args.topic.slice(0, 80)}`);
+  }
+  if (typeof args.focus === "string" && args.focus) {
+    parts.push(`focus: ${args.focus.slice(0, 80)}`);
+  }
   if (typeof args.mode === "string" && args.mode) {
     parts.push(`mode: ${args.mode}`);
   }

@@ -18,6 +18,7 @@ import {
   type MultiSearchHit,
 } from "./multi-search";
 import type { RunaFileItem } from "./tools";
+import type { RunaRunController } from "./run-control";
 
 /** 1 セッションあたりの multi_search ラウンド上限 */
 export const DEEP_RESEARCH_MAX_MULTI_ROUNDS = 10;
@@ -215,8 +216,14 @@ export async function runDeepResearchSession(
   options?: {
     persistAssistantMessage?: boolean;
     reportWorkingDetail?: (detail: string) => void;
+    throwIfAborted?: () => void;
+    control?: RunaRunController;
   }
 ): Promise<{ message: string; files: RunaFileItem[] }> {
+  const throwIfAborted = (): void => {
+    options?.throwIfAborted?.();
+    options?.control?.throwIfAborted();
+  };
   const trimmedTopic = topic.trim();
   if (!trimmedTopic) {
     throw new Error("調査テーマを入力してください");
@@ -236,6 +243,7 @@ export async function runDeepResearchSession(
   let lastAssessment: DeepResearchAssessment | undefined;
 
   for (let round = 1; round <= DEEP_RESEARCH_MAX_MULTI_ROUNDS; round += 1) {
+    throwIfAborted();
     roundsExecuted = round;
     emitDeepResearchProgress(
       send,
@@ -279,9 +287,11 @@ export async function runDeepResearchSession(
     const searchHeader = `ディープリサーチ「${trimmedTopic}」\nラウンド ${round}/${DEEP_RESEARCH_MAX_MULTI_ROUNDS}: 5×4 並列検索`;
     const reportWorking = (detail: string): void => {
       activity.update(workId, "working", detail);
+      send("search_progress", { text: detail });
       options?.reportWorkingDetail?.(detail);
     };
     const batchHits = await executeMultiSearchBatch(env, queries, {
+      throwIfAborted,
       onProgress: (cells, qs) => {
         reportWorking(formatMultiSearchWorkingDetail(searchHeader, qs, cells));
       },

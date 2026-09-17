@@ -58,6 +58,7 @@ import {
   type RunaTaskPlan,
 } from "./task-plan";
 import { runDeepResearchSession } from "./deep-research";
+import { RunaRunController } from "./run-control";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -458,8 +459,13 @@ export async function runRunaChat(
   message: string,
   send: RunaSseSend,
   attachments: RunaChatAttachment[] = [],
-  context?: RunaChatContext
+  context?: RunaChatContext,
+  control?: RunaRunController
 ): Promise<RunaChatResult> {
+  const throwIfAborted = (): void => {
+    control?.throwIfAborted();
+  };
+  throwIfAborted();
   const trimmed = message.trim();
   if (!trimmed && !attachments.length) {
     throw new Error("メッセージを入力してください");
@@ -503,7 +509,10 @@ export async function runRunaChat(
     if (!trimmed) {
       throw new Error("ディープリサーチには調査テーマを入力してください");
     }
-    return await runDeepResearchSession(env, db, user, trimmed, send);
+    return await runDeepResearchSession(env, db, user, trimmed, send, {
+      control,
+      throwIfAborted,
+    });
   }
 
   const activity = new RunaActivityLog(send);
@@ -600,6 +609,7 @@ export async function runRunaChat(
   /** ツール完了直後に先行開始した thinking（無音ギャップ防止） */
   let prefetchedThinkId: string | null = null;
   for (let round = 0; round < maxRounds; round++) {
+    throwIfAborted();
     let streamedReply = false;
     let thinkId: string | null = prefetchedThinkId;
     prefetchedThinkId = null;
@@ -704,7 +714,9 @@ export async function runRunaChat(
           messages,
           collectedFiles,
           send,
-          activity
+          activity,
+          control,
+          { skipUi: false }
         );
         toolResultCache.set(cacheKey, result);
       }
@@ -803,6 +815,7 @@ async function handleToolCall(
   collectedFiles: RunaFileItem[],
   send: RunaSseSend,
   activity: RunaActivityLog,
+  control?: RunaRunController,
   options?: { skipUi?: boolean }
 ): Promise<ToolRunResult> {
   const name = call.function.name;
@@ -829,7 +842,13 @@ async function handleToolCall(
     hubHooks = {
       reportWorkingDetail: (progressDetail) => {
         activity.update(workId!, "working", progressDetail);
+        send("search_progress", { text: progressDetail });
       },
+      throwIfAborted: () => control?.throwIfAborted(),
+    };
+  } else if (control) {
+    hubHooks = {
+      throwIfAborted: () => control.throwIfAborted(),
     };
   }
 

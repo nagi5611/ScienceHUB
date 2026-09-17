@@ -266,6 +266,7 @@ const els = {
   form: document.getElementById("runa-form"),
   input: document.getElementById("runa-input"),
   send: document.getElementById("runa-send"),
+  stop: document.getElementById("runa-stop"),
   attachBtn: document.getElementById("runa-attach-btn"),
   fileInput: document.getElementById("runa-file-input"),
   body: document.querySelector(".runa-body"),
@@ -285,6 +286,8 @@ const els = {
 /** @type {Array<{ id?: string, role: string, content: string, files?: object[], pending?: boolean, activities?: object[] }>} */
 let messageState = [];
 let chatBusy = false;
+/** @type {AbortController | null} */
+let chatAbortController = null;
 let runaDataLoaded = false;
 let runaDataLoadFailed = false;
 /** @type {HTMLElement | null} */
@@ -544,7 +547,10 @@ function renderActivityHtml(activity) {
   const open = activity.open ? " open" : "";
   const doneClass = done ? " is-done" : " is-active";
   const streaming =
-    !done && (activity.phase === "thinking" || activity.phase === "writing");
+    !done &&
+    (activity.phase === "thinking" ||
+      activity.phase === "writing" ||
+      activity.phase === "working");
   const detailText = getActivityDetailText(activity);
   const detail = `<div class="runa-activity-detail${streaming ? " is-streaming" : ""}">${escapeHtml(detailText)}</div>`;
   return `<details class="runa-activity runa-activity--${activity.phase}${doneClass}"${open} data-activity-id="${escapeHtml(activity.id)}">
@@ -741,24 +747,46 @@ function applyActivityEvent(pending, payload) {
         state: "start",
         open: true,
       });
+    } else if (payload.detail) {
+      existing.detail = payload.detail;
     }
     updatePendingAssistantBubble(pending);
     return;
   }
 
-  if (existing) {
-    if (payload.state === "update") {
-      if (payload.detail) existing.detail = payload.detail;
-      const throttleMs = existing.phase === "thinking" ? 24 : 100;
-      const now = Date.now();
-      if (now - lastActivityDetailPaintAt < throttleMs) {
-        schedulePendingBubbleUpdate(pending);
-        return;
-      }
-      lastActivityDetailPaintAt = now;
+  if (payload.state === "update") {
+    const target =
+      existing ??
+      pending.activities.find(
+        (a) => a.id === payload.id || (a.state !== "done" && a.phase === payload.phase)
+      );
+    if (!target) {
+      pending.activities.push({
+        id: payload.id,
+        phase: payload.phase,
+        label: payload.label || getCompactPhaseLabel(payload.phase),
+        detail: payload.detail || "",
+        state: "start",
+        open: true,
+      });
+      updatePendingAssistantBubble(pending);
+      return;
+    }
+    if (payload.detail) target.detail = payload.detail;
+    target.open = true;
+    patchActivityDetailInDom(target.id, target.detail || "");
+    const throttleMs = target.phase === "thinking" ? 24 : 32;
+    const now = Date.now();
+    if (now - lastActivityDetailPaintAt < throttleMs) {
       schedulePendingBubbleUpdate(pending);
       return;
     }
+    lastActivityDetailPaintAt = now;
+    schedulePendingBubbleUpdate(pending);
+    return;
+  }
+
+  if (existing) {
     existing.state = payload.state || "done";
     if (payload.detail) existing.detail = payload.detail;
     if (!existing.label && payload.label) existing.label = payload.label;
@@ -929,10 +957,47 @@ function setStatus(text) {
 
 function setChatBusy(busy) {
   chatBusy = busy;
-  if (els.send) els.send.disabled = busy;
+  if (els.send) {
+    els.send.disabled = busy;
+    els.send.hidden = busy;
+  }
+  if (els.stop) els.stop.hidden = !busy;
   if (els.input) els.input.disabled = busy;
   if (els.attachBtn) els.attachBtn.disabled = busy;
   if (contextUsageState) updateContextUsageDisplay(contextUsageState);
+}
+
+function patchActivityDetailInDom(activityId, detailText) {
+  if (!pendingAssistantRow || !activityId) return;
+  const detailEl = pendingAssistantRow.querySelector(
+    `.runa-activity[data-activity-id="${CSS.escape(activityId)}"] .runa-activity-detail`
+  );
+  if (detailEl) {
+    detailEl.textContent = detailText;
+    detailEl.scrollTop = detailEl.scrollHeight;
+  }
+}
+
+/** 検索進捗 SSE — activity detail と composer ヒントを即時更新 */
+function applySearchProgress(pending, text) {
+  if (!text?.trim()) return;
+  const trimmed = text.trim();
+  setDeepResearchHint(trimmed.split("\n").slice(0, 3).join("\n"));
+  const active = pending.activities?.find(
+    (a) => a.state !== "done" && a.phase === "working"
+  );
+  if (active) {
+    active.detail = trimmed;
+    active.open = true;
+    patchActivityDetailInDom(active.id, trimmed);
+  }
+  const now = Date.now();
+  if (now - lastActivityDetailPaintAt >= 100) {
+    lastActivityDetailPaintAt = now;
+    updatePendingAssistantBubble(pending);
+  } else {
+    schedulePendingBubbleUpdate(pending);
+  }
 }
 
 async function ensureUsername() {
@@ -1042,11 +1107,13 @@ async function startNewChat() {
 
 async function postRunaChat(message, attachments) {
   const context = buildRunaChatContext();
+  chatAbortController = new AbortController();
   const res = await fetch("/api/runa/chat?stream=1", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, attachments, context }),
+    signal: chatAbortController.signal,
   });
 
   if (!res.ok) {
@@ -1085,6 +1152,8 @@ async function postRunaChat(message, attachments) {
     }
     if (eventName === "activity") {
       applyActivityEvent(pending, payload);
+    } else if (eventName === "search_progress" && payload.text) {
+      applySearchProgress(pending, payload.text);
     } else if (eventName === "tasks" && Array.isArray(payload.tasks)) {
       pending.taskPlan = {
         tasks: payload.tasks,
@@ -1117,13 +1186,31 @@ async function postRunaChat(message, attachments) {
       }
     } else if (eventName === "done") {
       finalResult = payload;
+    } else if (eventName === "aborted") {
+      finalResult = {
+        message: payload.message || "推論を停止しました",
+        files: pending.files ?? [],
+      };
     } else if (eventName === "error") {
       throw new Error(payload.message || "エラーが発生しました");
     }
   };
 
   while (true) {
-    const { done, value } = await reader.read();
+    let readResult;
+    try {
+      readResult = await reader.read();
+    } catch (readError) {
+      if (chatAbortController?.signal.aborted) {
+        finalResult = finalResult ?? {
+          message: "推論を停止しました",
+          files: pending.files ?? [],
+        };
+        break;
+      }
+      throw readError;
+    }
+    const { done, value } = readResult;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split("\n\n");
@@ -1147,8 +1234,15 @@ async function postRunaChat(message, attachments) {
   if (finalResult?.files?.length) {
     pending.files = finalResult.files;
   }
+  for (const item of pending.activities ?? []) {
+    if (item.state !== "done") {
+      item.state = "done";
+      item.open = false;
+    }
+  }
   setStatus("");
   setDeepResearchHint("");
+  chatAbortController = null;
   pendingAssistantRow = null;
   renderMessages();
   return finalResult;
@@ -1364,6 +1458,11 @@ function bindEvents() {
     syncDeepResearchUi();
   });
   els.form?.addEventListener("submit", handleSubmit);
+  els.stop?.addEventListener("click", () => {
+    if (!chatBusy || !chatAbortController) return;
+    chatAbortController.abort();
+    setStatus("停止しています…");
+  });
   els.input?.addEventListener("keydown", handleInputKeydown);
   els.attachBtn?.addEventListener("click", (event) => {
     event.stopPropagation();

@@ -187,7 +187,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const stream = url.searchParams.get("stream") === "1";
 
       if (stream) {
-        return createRunaSseResponse(async (send) => {
+        return createRunaSseResponse(async (send, control) => {
           return await runRunaChat(
             env,
             db,
@@ -195,9 +195,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             message,
             send,
             attachments,
-            context
+            context,
+            control
           );
-        });
+        }, request.signal);
       }
 
       const chunks: string[] = [];

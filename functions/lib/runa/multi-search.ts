@@ -346,6 +346,7 @@ async function fetchProviderHits(
 
 export interface ExecuteMultiSearchBatchOptions {
   onProgress?: (cells: MultiSearchTaskCell[], queries: string[]) => void;
+  throwIfAborted?: () => void;
 }
 
 /** 5 クエリ × 設定済み 4 プロバイダを並列実行 */
@@ -367,6 +368,7 @@ export async function executeMultiSearchBatch(
   notify();
 
   const runCell = async (cell: MultiSearchTaskCell): Promise<MultiSearchHit[]> => {
+    options?.throwIfAborted?.();
     cell.status = "running";
     notify();
     try {
@@ -449,6 +451,7 @@ export interface RunMultiSearchSessionOptions {
   skipSynthesize?: boolean;
   /** Runa ワーキング行の detail を逐次更新 */
   onWorkingDetail?: (detail: string) => void;
+  throwIfAborted?: () => void;
 }
 
 /** 1 回の multi_search（計画 → 並列検索 → 統合回答） */
@@ -473,6 +476,7 @@ export async function runMultiSearchSession(
   };
 
   emit("plan", "検索クエリを 5 件計画中…");
+  options?.throwIfAborted?.();
   options?.onWorkingDetail?.(
     `マルチ検索「${trimmedTopic}」\n\n検索クエリ ${MULTI_SEARCH_QUERY_COUNT} 件を計画中…`
   );
@@ -481,6 +485,7 @@ export async function runMultiSearchSession(
     focus: options?.focus ?? options?.planOptions?.focus,
   };
   const queries = await planMultiSearchQueries(env, trimmedTopic, planOpts);
+  options?.throwIfAborted?.();
 
   const searchHeader = `マルチ検索「${trimmedTopic}」\n5 クエリ × 4 プロバイダを並列実行`;
   emit(
@@ -488,6 +493,7 @@ export async function runMultiSearchSession(
     `5 クエリ × 検索プロバイダを並列実行中… (${queries.join(" / ")})`
   );
   const hits = await executeMultiSearchBatch(env, queries, {
+    throwIfAborted: options?.throwIfAborted,
     onProgress: (cells, qs) => {
       options?.onWorkingDetail?.(
         formatMultiSearchWorkingDetail(searchHeader, qs, cells)
