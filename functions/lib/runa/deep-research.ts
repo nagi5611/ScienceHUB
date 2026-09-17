@@ -13,11 +13,12 @@ import {
   formatMultiSearchWorkingDetail,
   hasAnyMultiSearchProvider,
   multiSearchHitsDigest,
-  planMultiSearchQueries,
+  planMultiSearch,
   buildMultiSearchTaskCells,
   type MultiSearchAssessmentInput,
   type MultiSearchHit,
 } from "./multi-search";
+import { curateMultiSearchHitsForRuna } from "./multi-search-curate";
 import type { RunaFileItem } from "./tools";
 import type { RunaRunController } from "./run-control";
 import { flushSseYield } from "./sse-flush";
@@ -260,13 +261,14 @@ export async function runDeepResearchSession(
       "thinking..",
       `ラウンド ${round}: 検索クエリを計画中`
     );
-    const queries = await planMultiSearchQueries(env, trimmedTopic, {
+    const plan = await planMultiSearch(env, trimmedTopic, {
       round,
       evidenceDigest: multiSearchHitsDigest(allHits, 80),
       assessment: lastAssessment
         ? assessmentToPlanInput(lastAssessment)
         : undefined,
     });
+    const queries = plan.queries;
     activity.finish(planId, "thinking", queries.join(", "));
 
     for (const q of queries) {
@@ -314,13 +316,24 @@ export async function runDeepResearchSession(
         },
       }
     );
-    allHits = dedupeMultiSearchHits([...allHits, ...batchHits]);
+    const batchDeduped = dedupeMultiSearchHits(batchHits);
+    await reportWorking(
+      `${searchHeader}\n\n✓ ラウンド ${round} 検索完了 (${batchDeduped.length} 件)\nキュレーション AI 実行中…`
+    );
+    throwIfAborted();
+    const curatedBatch = await curateMultiSearchHitsForRuna(
+      env,
+      trimmedTopic,
+      plan.informationNeeds,
+      batchDeduped
+    );
+    allHits = dedupeMultiSearchHits([...allHits, ...curatedBatch.hits]);
     await reportWorking(
       formatMultiSearchWorkingDetail(
-        `${searchHeader}\n\n✓ ラウンド ${round} 検索完了`,
+        `${searchHeader}\n\n✓ ラウンド ${round} キュレーション ${curatedBatch.inputCount} → ${curatedBatch.outputCount} 件 · 累計 ${allHits.length} 件`,
         queries,
         finalCells,
-        batchHits,
+        curatedBatch.hits,
         { maxHitLines: 40 }
       )
     );

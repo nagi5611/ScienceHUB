@@ -13,6 +13,10 @@ import {
 import { searchWebWithSerper, isSerperConfigured } from "./serper";
 import type { RunaSseSend } from "./chat-sse";
 import { flushSseYield } from "./sse-flush";
+import {
+  curateMultiSearchHitsForRuna,
+  curatedMultiSearchDigest,
+} from "./multi-search-curate";
 
 export const MULTI_SEARCH_QUERY_COUNT = 5;
 export const MULTI_SEARCH_RESULTS_PER_PROVIDER = 5;
@@ -175,6 +179,34 @@ export interface PlanMultiSearchOptions {
   round?: number;
 }
 
+export interface MultiSearchPlan {
+  queries: string[];
+  /** 最終回答に必要な情報観点（キュレーション・メイン Runa 用） */
+  informationNeeds: string[];
+}
+
+function normalizeInformationNeeds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const line = item.trim();
+    if (line) out.push(line.slice(0, 240));
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function defaultInformationNeeds(topic: string): string[] {
+  const base = topic.trim().slice(0, 120);
+  return [
+    `${base} の定義・背景`,
+    "最新の動向・数値・公式発表",
+    "信頼できる出典と根拠",
+    "反対意見・リスク・未確定事項",
+  ];
+}
+
 function extractJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
   try {
@@ -215,6 +247,56 @@ async function llmJsonCompletion(
   const raw = completion.content?.trim();
   if (!raw) return null;
   return extractJsonObject(raw);
+}
+
+/** LLM で 5 件の検索クエリと情報ニーズを計画 */
+export async function planMultiSearch(
+  env: Env,
+  topic: string,
+  options?: PlanMultiSearchOptions
+): Promise<MultiSearchPlan> {
+  const trimmedTopic = topic.trim();
+  const system = `あなたは Runa のマルチ検索計画担当です。ユーザーの調査テーマに答えるため、**同時に並列実行する Web 検索クエリをちょうど ${MULTI_SEARCH_QUERY_COUNT} 件**と、**最終回答に必要な情報観点**を JSON のみで返してください。
+
+ルール:
+- queries は必ず ${MULTI_SEARCH_QUERY_COUNT} 件（観点・キーワードを分ける。互いに重複しすぎない）
+- informationNeeds は 3〜6 件（短文。メイン AI が何を押さえるべきか）
+- 各 query は短い Google/Brave 向け検索語（日本語可）
+- 出力は JSON のみ
+
+形式:
+{"queries":["...","...","...","...","..."],"informationNeeds":["...","..."]}`;
+
+  const userParts = [`調査テーマ: ${trimmedTopic}`];
+  if (options?.focus?.trim()) {
+    userParts.push(`追加指示: ${options.focus.trim()}`);
+  }
+  if (options?.round) {
+    userParts.push(`ラウンド: ${options.round}`);
+  }
+  if (options?.evidenceDigest) {
+    userParts.push(`\nこれまでの検索結果:\n${options.evidenceDigest}`);
+  }
+  if (options?.assessment?.gaps) {
+    userParts.push(`\n不足・ギャップ: ${options.assessment.gaps}`);
+  }
+  if (options?.assessment?.nextQueryDirections) {
+    userParts.push(
+      `\n次に調べる方向: ${options.assessment.nextQueryDirections}`
+    );
+  }
+  if (options?.assessment?.resolutionNotes) {
+    userParts.push(`\n解像度メモ: ${options.assessment.resolutionNotes}`);
+  }
+
+  const data = await llmJsonCompletion(env, system, userParts.join("\n"));
+  let queries = normalizeQueryStrings(data?.queries);
+  queries = padQueriesToFive(trimmedTopic, queries);
+  let informationNeeds = normalizeInformationNeeds(data?.informationNeeds);
+  if (informationNeeds.length < 2) {
+    informationNeeds = defaultInformationNeeds(trimmedTopic);
+  }
+  return { queries, informationNeeds };
 }
 
 /** いずれかの Web 検索プロバイダが利用可能か */
@@ -261,49 +343,14 @@ function padQueriesToFive(topic: string, queries: string[]): string[] {
   return out.slice(0, MULTI_SEARCH_QUERY_COUNT);
 }
 
-/** LLM で 5 件の検索クエリを計画 */
+/** LLM で 5 件の検索クエリを計画（informationNeeds は planMultiSearch を参照） */
 export async function planMultiSearchQueries(
   env: Env,
   topic: string,
   options?: PlanMultiSearchOptions
 ): Promise<string[]> {
-  const trimmedTopic = topic.trim();
-  const system = `あなたは Runa のマルチ検索計画担当です。ユーザーの調査テーマに答えるため、**同時に並列実行する Web 検索クエリをちょうど ${MULTI_SEARCH_QUERY_COUNT} 件** JSON のみで返してください。
-
-ルール:
-- queries は必ず ${MULTI_SEARCH_QUERY_COUNT} 件（観点・キーワードを分ける。互いに重複しすぎない）
-- 各要素は短い Google/Brave 向け検索語（日本語可）
-- 出力は JSON のみ
-
-形式:
-{"queries":["...","...","...","...","..."]}`;
-
-  const userParts = [`調査テーマ: ${trimmedTopic}`];
-  if (options?.focus?.trim()) {
-    userParts.push(`追加指示: ${options.focus.trim()}`);
-  }
-  if (options?.round) {
-    userParts.push(`ラウンド: ${options.round}`);
-  }
-  if (options?.evidenceDigest) {
-    userParts.push(`\nこれまでの検索結果:\n${options.evidenceDigest}`);
-  }
-  if (options?.assessment?.gaps) {
-    userParts.push(`\n不足・ギャップ: ${options.assessment.gaps}`);
-  }
-  if (options?.assessment?.nextQueryDirections) {
-    userParts.push(
-      `\n次に調べる方向: ${options.assessment.nextQueryDirections}`
-    );
-  }
-  if (options?.assessment?.resolutionNotes) {
-    userParts.push(`\n解像度メモ: ${options.assessment.resolutionNotes}`);
-  }
-
-  const data = await llmJsonCompletion(env, system, userParts.join("\n"));
-  let queries = normalizeQueryStrings(data?.queries);
-  queries = padQueriesToFive(trimmedTopic, queries);
-  return queries;
+  const plan = await planMultiSearch(env, topic, options);
+  return plan.queries;
 }
 
 async function fetchProviderHits(
@@ -481,13 +528,18 @@ export interface RunMultiSearchSessionOptions {
   throwIfAborted?: () => void;
 }
 
-/** 1 回の multi_search（計画 → 並列検索 → 統合回答） */
+/** 1 回の multi_search（計画 → 並列検索 → キュレーション → 統合回答） */
 export async function runMultiSearchSession(
   env: Env,
   topic: string,
   send?: RunaSseSend,
   options?: RunMultiSearchSessionOptions
-): Promise<{ message: string; hits: MultiSearchHit[]; queries: string[] }> {
+): Promise<{
+  message: string;
+  hits: MultiSearchHit[];
+  queries: string[];
+  informationNeeds: string[];
+}> {
   const trimmedTopic = topic.trim();
   if (!trimmedTopic) {
     throw new Error("調査テーマを入力してください");
@@ -516,7 +568,9 @@ export async function runMultiSearchSession(
     ...options?.planOptions,
     focus: options?.focus ?? options?.planOptions?.focus,
   };
-  const queries = await planMultiSearchQueries(env, trimmedTopic, planOpts);
+  const plan = await planMultiSearch(env, trimmedTopic, planOpts);
+  const queries = plan.queries;
+  const informationNeeds = plan.informationNeeds;
   options?.throwIfAborted?.();
 
   const searchHeader = `マルチ検索「${trimmedTopic}」\n5 クエリ × 4 プロバイダを並列実行`;
@@ -553,27 +607,62 @@ export async function runMultiSearchSession(
     )
   );
 
+  const urlDeduped = dedupeMultiSearchHits(hits);
+  emit("curate", "重複除去・関連性フィルタ中（キュレーション AI）…");
+  await reportDetail(
+    `${searchHeader}\n\n✓ 検索完了 (${urlDeduped.length} 件)\n\nキュレーション AI で重複・無関係を除去中…`
+  );
+  options?.throwIfAborted?.();
+  const curated = await curateMultiSearchHitsForRuna(
+    env,
+    trimmedTopic,
+    informationNeeds,
+    urlDeduped
+  );
+  await reportDetail(
+    `${searchHeader}\n\n✓ キュレーション完了 ${curated.inputCount} → ${curated.outputCount} 件` +
+      (curated.usedLlm ? "" : "（フォールバック）")
+  );
+
   if (options?.skipSynthesize) {
-    return { message: "", hits, queries };
+    return {
+      message: "",
+      hits: curated.hits,
+      queries,
+      informationNeeds,
+    };
   }
 
   emit("synthesize", "検索結果を統合して回答を作成中…");
-  const message = await synthesizeMultiSearchAnswer(env, trimmedTopic, hits);
-  return { message, hits, queries };
+  const message = await synthesizeMultiSearchAnswer(
+    env,
+    trimmedTopic,
+    curated.hits
+  );
+  return { message, hits: curated.hits, queries, informationNeeds };
 }
 
-/** Hub ツール向け: 検索結果 digest（統合 LLM はエージェント側で 1 回） */
+/** Hub ツール向け: キュレーション済み digest（統合 LLM はエージェント＝メイン Runa で 1 回） */
 export function formatMultiSearchHitsForTool(
   topic: string,
   queries: string[],
-  hits: MultiSearchHit[]
+  hits: MultiSearchHit[],
+  informationNeeds?: string[]
 ): string {
+  const needs =
+    informationNeeds && informationNeeds.length > 0
+      ? [
+          "\n回答に必要な情報観点:",
+          ...informationNeeds.map((n, i) => `${i + 1}. ${n}`),
+        ]
+      : [];
   const lines: string[] = [
     `マルチ検索「${topic}」`,
+    ...needs,
     `\n実行クエリ（${queries.length} 件）:`,
     ...queries.map((q, i) => `${i + 1}. ${q}`),
-    `\n収集結果（${hits.length} 件）:`,
-    multiSearchHitsDigest(hits, 120),
+    `\nキュレーション済み収集結果（${hits.length} 件）:`,
+    curatedMultiSearchDigest(hits),
     "\n上記を踏まえ、ユーザーへの最終回答を Markdown で書いてください（出典 URL をリンクで示す）。",
   ];
   return lines.join("\n");

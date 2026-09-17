@@ -52,6 +52,11 @@ export interface CompletionCallbacks {
   onReasoningDelta?: (text: string) => void;
 }
 
+export interface RunaCompletionOptions extends CompletionCallbacks {
+  /** メイン Runa モデルを上書き（Workers AI @cf/ 等） */
+  model?: string;
+}
+
 const CLOUDFLARE_AI_V1_PREFIX =
   "https://api.cloudflare.com/client/v4/accounts/";
 
@@ -672,11 +677,17 @@ export async function runaChatCompletion(
   env: Env,
   messages: ChatMessage[],
   tools: ToolDefinition[],
-  callbacks?: CompletionCallbacks
+  options?: RunaCompletionOptions
 ): Promise<CompletionResult> {
-  const model = resolveRunaModel(env);
+  const model = options?.model?.trim() || resolveRunaModel(env);
   if (usesResponsesApi(model)) {
-    return await requestResponsesApi(env, model, messages, tools, callbacks);
+    return await requestResponsesApi(env, model, messages, tools, options);
   }
-  return await requestChatCompletionsApi(env, model, messages, tools, callbacks);
+  return await requestChatCompletionsApi(
+    env,
+    model,
+    messages,
+    tools,
+    options
+  );
 }
