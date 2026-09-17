@@ -123,6 +123,8 @@ export interface Env {
   SERPBASE_APIKEY?: string;
   /** Serper API キー（Runa serper_search / serper_image_search） */
   SERPER_APIKEY?: string;
+  /** Brave Search API キー（Runa brave_search / brave_image_search） */
+  BRAVESEARCH_APIKEY?: string;
 }
 
 export interface RoleRow {

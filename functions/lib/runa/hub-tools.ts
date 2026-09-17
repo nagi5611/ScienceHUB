@@ -71,6 +71,14 @@ import {
   searchWebWithSerper,
   serperImagesToRunaFiles,
 } from "./serper";
+import {
+  braveImagesToRunaFiles,
+  formatBraveImageResultsForRuna,
+  formatBraveResultsForRuna,
+  isBraveSearchConfigured,
+  searchImagesWithBrave,
+  searchWebWithBrave,
+} from "./brave-search";
 import { runDeepResearchSession } from "./deep-research";
 import type { RunaSseSend } from "./chat-sse";
 
@@ -189,6 +197,50 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
       name: "serper_image_search",
       description:
         "Google 画像検索（Serper）。参考画像・ビジュアル確認。SerpBase 経路は web_image_search。結果はチャットにサムネイル表示",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "画像検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜12、既定 8）",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "brave_search",
+      description:
+        "Brave Web Search。一般知識・最新情報。期間絞り込み（tbs）は Brave freshness に変換して送信。Google は serper_search、SerpBase は web_search",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "検索クエリ" },
+          num: {
+            type: "number",
+            description: "取得件数（1〜10、既定 8）",
+          },
+          tbs: {
+            type: "string",
+            enum: ["qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y"],
+            description:
+              "期間絞り込み（任意）: 1時間/1日→24h以内(pd), 1週(pw), 1月(pm), 1年(py)",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "brave_image_search",
+      description:
+        "Brave 画像検索。参考画像・ビジュアル確認。Google/SerpBase 経路は serper_image_search / web_image_search。結果はチャットにサムネイル表示",
       parameters: {
         type: "object",
         properties: {
@@ -597,6 +649,10 @@ export async function executeHubTool(
         return await runSerperSearch(env, args);
       case "serper_image_search":
         return await runSerperImageSearch(env, args);
+      case "brave_search":
+        return await runBraveSearch(env, args);
+      case "brave_image_search":
+        return await runBraveImageSearch(env, args);
       case "deep_research":
         return await runDeepResearchTool(env, db, user, args);
       case "hub_list_schedule":
@@ -803,6 +859,69 @@ async function runSerperImageSearch(
 
   return {
     text: formatSerperImageResultsForRuna(payload),
+    files,
+  };
+}
+
+async function runBraveSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isBraveSearchConfigured(env)) {
+    return {
+      text: "Brave 検索は現在利用できません（BRAVESEARCH_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+  const tbsRaw = strArg(args, "tbs");
+  const tbs = SERPER_TBS_VALUES.has(tbsRaw) ? tbsRaw : undefined;
+
+  const payload = await searchWebWithBrave(env, {
+    query,
+    num,
+    tbs,
+  });
+
+  return {
+    text: formatBraveResultsForRuna(payload),
+    files: [],
+  };
+}
+
+async function runBraveImageSearch(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!isBraveSearchConfigured(env)) {
+    return {
+      text: "Brave 画像検索は現在利用できません（BRAVESEARCH_APIKEY が未設定）",
+      files: [],
+    };
+  }
+
+  const query = strArg(args, "query");
+  if (!query) {
+    return { text: "query を指定してください", files: [] };
+  }
+
+  const num = numArg(args, "num", 8);
+
+  const payload = await searchImagesWithBrave(env, {
+    query,
+    num,
+  });
+
+  const files = braveImagesToRunaFiles(payload.query, payload.results);
+
+  return {
+    text: formatBraveImageResultsForRuna(payload),
     files,
   };
 }
