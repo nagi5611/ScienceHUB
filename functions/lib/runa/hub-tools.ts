@@ -90,7 +90,10 @@ import {
   runMultiSearchSession,
 } from "./multi-search";
 import { runDeepResearchSession } from "./deep-research";
-import { getRunaSearchProviderFlags } from "./site-settings";
+import {
+  getRunaMultiSearchSummarizeEnabled,
+  getRunaSearchProviderFlags,
+} from "./site-settings";
 import type { RunaSseSend } from "./chat-sse";
 
 const PRINT_APP_SLUG = "3dprint-reservation";
@@ -1043,20 +1046,26 @@ async function runMultiSearchTool(
 
   const focus = strArg(args, "focus");
   const noopSend: RunaSseSend = () => {};
+  const summarizeEnabled = await getRunaMultiSearchSummarizeEnabled(db);
 
   try {
     const result = await runMultiSearchSession(env, db, topic, noopSend, {
       focus: focus || undefined,
-      skipSynthesize: true,
+      skipCurate: !summarizeEnabled,
+      skipSynthesize: !summarizeEnabled,
       onWorkingDetail: hooks?.reportWorkingDetail,
       throwIfAborted: hooks?.throwIfAborted,
     });
+    if (summarizeEnabled && result.message.trim()) {
+      return { text: result.message, files: [] };
+    }
     return {
       text: formatMultiSearchHitsForTool(
         topic,
         result.queries,
         result.hits,
-        result.informationNeeds
+        result.informationNeeds,
+        { rawDigest: !summarizeEnabled }
       ),
       files: [],
     };

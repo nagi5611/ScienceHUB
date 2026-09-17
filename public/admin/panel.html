@@ -290,11 +290,27 @@
             <div>
               <h3>並列検索（multi_search）</h3>
               <div class="cf-runa-toggle-group" id="runa-providers-multi"></div>
+              <label class="cf-runa-toggle cf-runa-multi-summarize">
+                <input type="checkbox" id="runa-multi-search-summarize">
+                <span>検索後にサマリー（統合回答）を生成する</span>
+              </label>
+              <p class="cf-field-hint">OFF のときはキュレーション・統合サマリーを行わず、収集した検索結果をメイン Runa に渡して最終回答を組み立てます。</p>
             </div>
             <div>
               <h3>ディープリサーチ</h3>
               <div class="cf-runa-toggle-group" id="runa-providers-deep"></div>
             </div>
+          </div>
+          <div class="cf-runa-provider-tests">
+            <h3>API 接続テスト</h3>
+            <p class="cf-field-hint">Run test で各プロバイダのバックエンドへ最小検索（1 件）を送り、接続可否を確認します。</p>
+            <div class="cf-runa-provider-test-buttons">
+              <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-runa-provider-test="serpbase">SerpBase — Run test</button>
+              <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-runa-provider-test="serper">Serper — Run test</button>
+              <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-runa-provider-test="brave">Brave — Run test</button>
+              <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" data-runa-provider-test="exa">Exa — Run test</button>
+            </div>
+            <div id="runa-provider-test-result" class="cf-runa-provider-test-result" hidden></div>
           </div>
           <footer class="cf-runa-settings-actions">
             <p id="runa-settings-status" class="cf-form-success" hidden>保存しました</p>

@@ -49,6 +49,13 @@ function renderProviderToggles(container, category, settings) {
     .join("");
 }
 
+function applyMultiSearchSummarizeToggle(settings) {
+  const input = document.getElementById("runa-multi-search-summarize");
+  if (input instanceof HTMLInputElement && settings) {
+    input.checked = settings.multi_search_summarize === true;
+  }
+}
+
 function collectSettingsFromDom() {
   const multi = { serpbase: true, serper: true, brave: true, exa: true };
   const deep = { serpbase: true, serper: true, brave: true, exa: true };
@@ -61,7 +68,10 @@ function collectSettingsFromDom() {
     if (category === "multi_search") multi[provider] = value;
     if (category === "deep_research") deep[provider] = value;
   });
-  return { multi_search: multi, deep_research: deep };
+  const summarizeInput = document.getElementById("runa-multi-search-summarize");
+  const multi_search_summarize =
+    summarizeInput instanceof HTMLInputElement && summarizeInput.checked;
+  return { multi_search: multi, deep_research: deep, multi_search_summarize };
 }
 
 export async function loadRunaSettings(api) {
@@ -77,6 +87,57 @@ export async function loadRunaSettings(api) {
     "deep_research",
     runaSettings
   );
+  applyMultiSearchSummarizeToggle(runaSettings);
+}
+
+function showRunaProviderTestResult(result, variant) {
+  const el = document.getElementById("runa-provider-test-result");
+  if (!el) return;
+  el.hidden = false;
+  el.className = "cf-runa-provider-test-result";
+  if (variant === "loading") {
+    el.classList.add("is-loading");
+    el.textContent = result;
+    return;
+  }
+  if (variant === "warn") el.classList.add("is-warn");
+  else if (variant === "error") el.classList.add("is-error");
+  else el.classList.add("is-success");
+
+  const label = result.label ?? result.provider ?? "";
+  const message = result.message ?? String(result);
+  el.innerHTML = `<strong>${label}</strong>: ${message}`;
+}
+
+async function runRunaProviderTest(api, provider) {
+  const buttons = document.querySelectorAll("[data-runa-provider-test]");
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+  });
+  showRunaProviderTestResult(`${provider} — テスト実行中…`, "loading");
+
+  try {
+    const result = await api("/api/admin/runa/providers/test", {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+    });
+    if (result.ok) {
+      showRunaProviderTestResult(result, "success");
+    } else if (result.configured === false) {
+      showRunaProviderTestResult(result, "warn");
+    } else {
+      showRunaProviderTestResult(result, "error");
+    }
+  } catch (err) {
+    showRunaProviderTestResult(
+      { label: provider, message: err.message ?? "接続テストに失敗しました" },
+      "error"
+    );
+  } finally {
+    buttons.forEach((btn) => {
+      btn.disabled = false;
+    });
+  }
 }
 
 export async function saveRunaSettings(api) {
@@ -164,6 +225,14 @@ async function loadRunaMessages(api, conversationId) {
 }
 
 export function bindRunaEvents({ api }) {
+  document.querySelectorAll("[data-runa-provider-test]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const provider = btn.getAttribute("data-runa-provider-test");
+      if (!provider) return;
+      runRunaProviderTest(api, provider);
+    });
+  });
+
   document.getElementById("runa-settings-save")?.addEventListener("click", async () => {
     try {
       await saveRunaSettings(api);

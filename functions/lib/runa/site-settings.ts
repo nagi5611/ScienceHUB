@@ -22,6 +22,8 @@ const DEFAULT_FLAGS: RunaSearchProviderFlags = {
 export interface RunaSearchProvidersSettings {
   multi_search: RunaSearchProviderFlags;
   deep_research: RunaSearchProviderFlags;
+  /** true: multi_search 後に統合サマリー LLM を実行。false: メイン Runa に検索結果を渡す */
+  multi_search_summarize?: boolean;
 }
 
 function normalizeFlags(raw: unknown): RunaSearchProviderFlags {
@@ -37,6 +39,7 @@ function normalizeFlags(raw: unknown): RunaSearchProviderFlags {
 const DEFAULT_SETTINGS: RunaSearchProvidersSettings = {
   multi_search: { ...DEFAULT_FLAGS },
   deep_research: { ...DEFAULT_FLAGS },
+  multi_search_summarize: false,
 };
 
 function normalizeSettings(raw: unknown): RunaSearchProvidersSettings {
@@ -44,12 +47,17 @@ function normalizeSettings(raw: unknown): RunaSearchProvidersSettings {
     return {
       multi_search: { ...DEFAULT_FLAGS },
       deep_research: { ...DEFAULT_FLAGS },
+      multi_search_summarize: false,
     };
   }
   const record = raw as Record<string, unknown>;
   return {
     multi_search: normalizeFlags(record.multi_search),
     deep_research: normalizeFlags(record.deep_research),
+    multi_search_summarize:
+      typeof record.multi_search_summarize === "boolean"
+        ? record.multi_search_summarize
+        : false,
   };
 }
 
@@ -67,6 +75,14 @@ export async function getRunaSearchProvidersSettings(
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+/** multi_search 後の統合サマリー（synthesize）を実行するか */
+export async function getRunaMultiSearchSummarizeEnabled(
+  db: D1Database
+): Promise<boolean> {
+  const settings = await getRunaSearchProvidersSettings(db);
+  return settings.multi_search_summarize === true;
 }
 
 /** カテゴリ別フラグ */

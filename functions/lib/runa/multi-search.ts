@@ -533,6 +533,8 @@ ${multiSearchHitsDigest(hits, 100)}`;
 export interface RunMultiSearchSessionOptions {
   focus?: string;
   planOptions?: PlanMultiSearchOptions;
+  /** true ならキュレーション AI をスキップ（URL 重複除去のみ） */
+  skipCurate?: boolean;
   skipSynthesize?: boolean;
   /** Runa ワーキング行の detail を逐次更新 */
   onWorkingDetail?: (detail: string) => void | Promise<void>;
@@ -622,26 +624,36 @@ export async function runMultiSearchSession(
   );
 
   const urlDeduped = dedupeMultiSearchHits(hits);
-  emit("curate", "重複除去・関連性フィルタ中（キュレーション AI）…");
-  await reportDetail(
-    `${searchHeader}\n\n✓ 検索完了 (${urlDeduped.length} 件)\n\nキュレーション AI で重複・無関係を除去中…`
-  );
-  options?.throwIfAborted?.();
-  const curated = await curateMultiSearchHitsForRuna(
-    env,
-    trimmedTopic,
-    informationNeeds,
-    urlDeduped
-  );
-  await reportDetail(
-    `${searchHeader}\n\n✓ キュレーション完了 ${curated.inputCount} → ${curated.outputCount} 件` +
-      (curated.usedLlm ? "" : "（フォールバック）")
-  );
+  let outputHits = urlDeduped;
+
+  if (options?.skipCurate) {
+    emit("curate", "キュレーションをスキップ（検索結果をそのまま渡します）…");
+    await reportDetail(
+      `${searchHeader}\n\n✓ 検索完了 (${urlDeduped.length} 件)\n\nキュレーションなし — メイン Runa に渡します`
+    );
+  } else {
+    emit("curate", "重複除去・関連性フィルタ中（キュレーション AI）…");
+    await reportDetail(
+      `${searchHeader}\n\n✓ 検索完了 (${urlDeduped.length} 件)\n\nキュレーション AI で重複・無関係を除去中…`
+    );
+    options?.throwIfAborted?.();
+    const curated = await curateMultiSearchHitsForRuna(
+      env,
+      trimmedTopic,
+      informationNeeds,
+      urlDeduped
+    );
+    outputHits = curated.hits;
+    await reportDetail(
+      `${searchHeader}\n\n✓ キュレーション完了 ${curated.inputCount} → ${curated.outputCount} 件` +
+        (curated.usedLlm ? "" : "（フォールバック）")
+    );
+  }
 
   if (options?.skipSynthesize) {
     return {
       message: "",
-      hits: curated.hits,
+      hits: outputHits,
       queries,
       informationNeeds,
     };
@@ -651,9 +663,9 @@ export async function runMultiSearchSession(
   const message = await synthesizeMultiSearchAnswer(
     env,
     trimmedTopic,
-    curated.hits
+    outputHits
   );
-  return { message, hits: curated.hits, queries, informationNeeds };
+  return { message, hits: outputHits, queries, informationNeeds };
 }
 
 /** Hub ツール向け: キュレーション済み digest（統合 LLM はエージェント＝メイン Runa で 1 回） */
@@ -661,7 +673,8 @@ export function formatMultiSearchHitsForTool(
   topic: string,
   queries: string[],
   hits: MultiSearchHit[],
-  informationNeeds?: string[]
+  informationNeeds?: string[],
+  options?: { rawDigest?: boolean }
 ): string {
   const needs =
     informationNeeds && informationNeeds.length > 0
@@ -675,9 +688,13 @@ export function formatMultiSearchHitsForTool(
     ...needs,
     `\n実行クエリ（${queries.length} 件）:`,
     ...queries.map((q, i) => `${i + 1}. ${q}`),
-    `\nキュレーション済み収集結果（${hits.length} 件）:`,
-    curatedMultiSearchDigest(hits),
-    "\n上記を踏まえ、ユーザーへの最終回答を Markdown で書いてください（出典 URL をリンクで示す）。",
+    options?.rawDigest
+      ? `\n検索収集結果（${hits.length} 件・未サマリー）:`
+      : `\nキュレーション済み収集結果（${hits.length} 件）:`,
+    options?.rawDigest
+      ? multiSearchHitsDigest(hits, 120)
+      : curatedMultiSearchDigest(hits),
+    "\n上記の検索結果をそのまま踏まえ、ユーザーへの最終回答を Markdown で書いてください（出典 URL をリンクで示す）。",
   ];
   return lines.join("\n");
 }
