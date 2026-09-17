@@ -24,7 +24,7 @@ import {
   type RunaFileItem,
   type ToolRunResult,
 } from "./tools";
-import { executeHubTool, HUB_TOOL_DEFINITIONS, isHubTool } from "./hub-tools";
+import { executeHubTool, HUB_TOOL_DEFINITIONS, isHubTool, type HubToolRuntimeHooks } from "./hub-tools";
 import {
   assertRunaDailyTurnLimit,
   buildRunaChatHistory,
@@ -821,8 +821,27 @@ async function handleToolCall(
     workId = activity.start("working", WORKING_STATUS, detail);
   }
 
+  let hubHooks: HubToolRuntimeHooks | undefined;
+  if (
+    workId &&
+    (name === "multi_search" || name === "deep_research")
+  ) {
+    hubHooks = {
+      reportWorkingDetail: (progressDetail) => {
+        activity.update(workId!, "working", progressDetail);
+      },
+    };
+  }
+
   const result = isHubTool(name)
-    ? await executeHubTool(env, db, user, name, call.function.arguments)
+    ? await executeHubTool(
+        env,
+        db,
+        user,
+        name,
+        call.function.arguments,
+        hubHooks
+      )
     : await executeRunaTool(
         env,
         db,

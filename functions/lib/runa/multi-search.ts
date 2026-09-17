@@ -18,6 +18,123 @@ export const MULTI_SEARCH_RESULTS_PER_PROVIDER = 5;
 
 export type MultiSearchProvider = "serpbase" | "serper" | "brave" | "exa";
 
+export type MultiSearchTaskStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "error"
+  | "skipped";
+
+export interface MultiSearchTaskCell {
+  query: string;
+  queryIndex: number;
+  provider: MultiSearchProvider;
+  status: MultiSearchTaskStatus;
+  hitCount?: number;
+}
+
+const MULTI_SEARCH_PROVIDER_LABEL: Record<MultiSearchProvider, string> = {
+  serpbase: "SerpBase",
+  serper: "Serper",
+  brave: "Brave",
+  exa: "Exa",
+};
+
+function taskStatusGlyph(
+  status: MultiSearchTaskStatus,
+  hitCount?: number
+): string {
+  switch (status) {
+    case "pending":
+      return "○";
+    case "running":
+      return "▶";
+    case "done":
+      return hitCount !== undefined && hitCount > 0 ? `✓${hitCount}` : "✓";
+    case "error":
+      return "✗";
+    case "skipped":
+      return "−";
+    default:
+      return "?";
+  }
+}
+
+/** ワーキング UI 向け: クエリ×プロバイダの状態一覧 */
+export function formatMultiSearchWorkingDetail(
+  header: string,
+  queries: string[],
+  cells: MultiSearchTaskCell[]
+): string {
+  const finished = cells.filter(
+    (c) =>
+      c.status === "done" ||
+      c.status === "error" ||
+      c.status === "skipped"
+  ).length;
+  const total = cells.length;
+  const lines: string[] = [header, `進捗 ${finished}/${total}`, ""];
+
+  for (let qi = 0; qi < queries.length; qi += 1) {
+    const q = queries[qi] ?? "";
+    const shortQ = q.length > 56 ? `${q.slice(0, 56)}…` : q;
+    lines.push(`Q${qi + 1}: ${shortQ}`);
+    const row = cells
+      .filter((c) => c.queryIndex === qi)
+      .map(
+        (c) =>
+          `${MULTI_SEARCH_PROVIDER_LABEL[c.provider]} ${taskStatusGlyph(c.status, c.hitCount)}`
+      )
+      .join("  ");
+    lines.push(`  ${row}`);
+  }
+
+  return lines.join("\n");
+}
+
+function providerConfigured(
+  env: Env,
+  provider: MultiSearchProvider
+): boolean {
+  switch (provider) {
+    case "serpbase":
+      return isSerpBaseConfigured(env);
+    case "serper":
+      return isSerperConfigured(env);
+    case "brave":
+      return isBraveSearchConfigured(env);
+    case "exa":
+      return isExaConfigured(env);
+    default:
+      return false;
+  }
+}
+
+function buildMultiSearchTaskCells(
+  env: Env,
+  queries: string[]
+): MultiSearchTaskCell[] {
+  const providers: MultiSearchProvider[] = [
+    "serpbase",
+    "serper",
+    "brave",
+    "exa",
+  ];
+  const cells: MultiSearchTaskCell[] = [];
+  for (let qi = 0; qi < queries.length; qi += 1) {
+    const query = queries[qi] ?? "";
+    for (const provider of providers) {
+      cells.push({
+        query,
+        queryIndex: qi,
+        provider,
+        status: providerConfigured(env, provider) ? "pending" : "skipped",
+      });
+    }
+  }
+  return cells;
+}
+
 export interface MultiSearchHit {
   query: string;
   provider: MultiSearchProvider;
@@ -227,10 +344,15 @@ async function fetchProviderHits(
   }
 }
 
+export interface ExecuteMultiSearchBatchOptions {
+  onProgress?: (cells: MultiSearchTaskCell[], queries: string[]) => void;
+}
+
 /** 5 クエリ × 設定済み 4 プロバイダを並列実行 */
 export async function executeMultiSearchBatch(
   env: Env,
-  queries: string[]
+  queries: string[],
+  options?: ExecuteMultiSearchBatchOptions
 ): Promise<MultiSearchHit[]> {
   if (!hasAnyMultiSearchProvider(env)) {
     throw new Error(
@@ -238,23 +360,32 @@ export async function executeMultiSearchBatch(
     );
   }
 
-  const providers: MultiSearchProvider[] = [
-    "serpbase",
-    "serper",
-    "brave",
-    "exa",
-  ];
+  const cells = buildMultiSearchTaskCells(env, queries);
+  const notify = (): void => {
+    options?.onProgress?.(cells, queries);
+  };
+  notify();
 
-  const tasks: Promise<MultiSearchHit[]>[] = [];
-  for (const query of queries) {
-    for (const provider of providers) {
-      tasks.push(
-        fetchProviderHits(env, query, provider).catch(() => [] as MultiSearchHit[])
-      );
+  const runCell = async (cell: MultiSearchTaskCell): Promise<MultiSearchHit[]> => {
+    cell.status = "running";
+    notify();
+    try {
+      const hits = await fetchProviderHits(env, cell.query, cell.provider);
+      cell.status = "done";
+      cell.hitCount = hits.length;
+      notify();
+      return hits;
+    } catch {
+      cell.status = "error";
+      cell.hitCount = 0;
+      notify();
+      return [];
     }
-  }
+  };
 
-  const batches = await Promise.all(tasks);
+  const batches = await Promise.all(
+    cells.filter((c) => c.status === "pending").map((c) => runCell(c))
+  );
   const hits = batches.flat();
   if (!hits.length) {
     throw new Error("マルチ検索で結果を取得できませんでした");
@@ -316,6 +447,8 @@ export interface RunMultiSearchSessionOptions {
   focus?: string;
   planOptions?: PlanMultiSearchOptions;
   skipSynthesize?: boolean;
+  /** Runa ワーキング行の detail を逐次更新 */
+  onWorkingDetail?: (detail: string) => void;
 }
 
 /** 1 回の multi_search（計画 → 並列検索 → 統合回答） */
@@ -340,17 +473,27 @@ export async function runMultiSearchSession(
   };
 
   emit("plan", "検索クエリを 5 件計画中…");
+  options?.onWorkingDetail?.(
+    `マルチ検索「${trimmedTopic}」\n\n検索クエリ ${MULTI_SEARCH_QUERY_COUNT} 件を計画中…`
+  );
   const planOpts: PlanMultiSearchOptions = {
     ...options?.planOptions,
     focus: options?.focus ?? options?.planOptions?.focus,
   };
   const queries = await planMultiSearchQueries(env, trimmedTopic, planOpts);
 
+  const searchHeader = `マルチ検索「${trimmedTopic}」\n5 クエリ × 4 プロバイダを並列実行`;
   emit(
     "search",
     `5 クエリ × 検索プロバイダを並列実行中… (${queries.join(" / ")})`
   );
-  const hits = await executeMultiSearchBatch(env, queries);
+  const hits = await executeMultiSearchBatch(env, queries, {
+    onProgress: (cells, qs) => {
+      options?.onWorkingDetail?.(
+        formatMultiSearchWorkingDetail(searchHeader, qs, cells)
+      );
+    },
+  });
 
   if (options?.skipSynthesize) {
     return { message: "", hits, queries };
