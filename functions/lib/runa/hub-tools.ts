@@ -85,6 +85,7 @@ import {
   searchWebWithExa,
 } from "./exa";
 import {
+  formatMultiSearchHitsForTool,
   hasAnyMultiSearchProvider,
   runMultiSearchSession,
 } from "./multi-search";
@@ -290,7 +291,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "multi_search",
       description:
-        "5 つの検索クエリを AI が決め、SerpBase/Serper/Brave/Exa を並列実行し、結果を統合した回答を返す。1 回の広い Web 調査向け。より深い調査は deep_research",
+        "5 つの検索クエリを AI が決め、SerpBase/Serper/Brave/Exa を並列実行し、検索結果の digest を返す（最終回答は Runa が 1 回書く）。同一ターンで 1 回だけ呼ぶ。深い調査は deep_research",
       parameters: {
         type: "object",
         properties: {
@@ -1034,8 +1035,16 @@ async function runMultiSearchTool(
   try {
     const result = await runMultiSearchSession(env, topic, noopSend, {
       focus: focus || undefined,
+      skipSynthesize: true,
     });
-    return { text: result.message, files: [] };
+    return {
+      text: formatMultiSearchHitsForTool(
+        topic,
+        result.queries,
+        result.hits
+      ),
+      files: [],
+    };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "マルチ検索に失敗しました";

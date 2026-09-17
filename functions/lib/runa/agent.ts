@@ -22,6 +22,7 @@ import {
   executeRunaTool,
   RUNA_TOOL_DEFINITIONS,
   type RunaFileItem,
+  type ToolRunResult,
 } from "./tools";
 import { executeHubTool, HUB_TOOL_DEFINITIONS, isHubTool } from "./hub-tools";
 import {
@@ -682,8 +683,20 @@ export async function runRunaChat(
         tool_calls: completion.toolCalls,
       });
 
+      const toolResultCache = new Map<string, ToolRunResult>();
       for (const call of completion.toolCalls) {
-        await handleToolCall(
+        const cacheKey = toolCallDedupeKey(call);
+        const cached = toolResultCache.get(cacheKey);
+        if (cached) {
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: cached.text,
+          });
+          continue;
+        }
+
+        const result = await handleToolCall(
           env,
           db,
           user,
@@ -693,6 +706,7 @@ export async function runRunaChat(
           send,
           activity
         );
+        toolResultCache.set(cacheKey, result);
       }
 
       if (taskPlan) {
@@ -776,6 +790,10 @@ export async function runRunaChat(
   return { message: fallback, files: collectedFiles };
 }
 
+function toolCallDedupeKey(call: ToolCall): string {
+  return `${call.function.name}\0${call.function.arguments}`;
+}
+
 async function handleToolCall(
   env: Env,
   db: D1Database,
@@ -784,19 +802,24 @@ async function handleToolCall(
   messages: ChatMessage[],
   collectedFiles: RunaFileItem[],
   send: RunaSseSend,
-  activity: RunaActivityLog
-): Promise<void> {
+  activity: RunaActivityLog,
+  options?: { skipUi?: boolean }
+): Promise<ToolRunResult> {
   const name = call.function.name;
   const actionLabel = TOOL_STATUS_LABELS[name] ?? `${name} を実行中…`;
   const argDetail = summarizeToolArgs(name, call.function.arguments);
   const detail = argDetail ? `${actionLabel}\n${argDetail}` : actionLabel;
-  send("status", {
-    label: WORKING_STATUS,
-    tool: name,
-    detail: actionLabel,
-    phase: "working",
-  });
-  const workId = activity.start("working", WORKING_STATUS, detail);
+
+  let workId: string | null = null;
+  if (!options?.skipUi) {
+    send("status", {
+      label: WORKING_STATUS,
+      tool: name,
+      detail: actionLabel,
+      phase: "working",
+    });
+    workId = activity.start("working", WORKING_STATUS, detail);
+  }
 
   const result = isHubTool(name)
     ? await executeHubTool(env, db, user, name, call.function.arguments)
@@ -808,11 +831,13 @@ async function handleToolCall(
         call.function.arguments
       );
 
-  const resultDetail =
-    result.files.length > 0
-      ? `${result.files.length} 件 · ${result.text.slice(0, 120)}`
-      : result.text.slice(0, 200);
-  activity.finish(workId, "working", resultDetail);
+  if (workId) {
+    const resultDetail =
+      result.files.length > 0
+        ? `${result.files.length} 件 · ${result.text.slice(0, 120)}`
+        : result.text.slice(0, 200);
+    activity.finish(workId, "working", resultDetail);
+  }
 
   for (const file of result.files) {
     collectedFiles.push(file);
@@ -831,6 +856,8 @@ async function handleToolCall(
     tool_call_id: call.id,
     content: result.text,
   });
+
+  return result;
 }
 
 function dedupeFiles(files: RunaFileItem[]): RunaFileItem[] {
