@@ -21,7 +21,7 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 - web_image_search — Google 画像検索（SerpBase）。参考画像・ビジュアル確認。結果はチャットにサムネイル表示される
 - serper_image_search — Google 画像検索（Serper）。web_image_search と同種（Serper 経路）
 - brave_image_search — Brave 画像検索。参考画像・ビジュアル確認（Brave 経路）
-- deep_research — 多段階 Web ディープリサーチ（UI のディープリサーチモード推奨）
+- deep_research — 多段階 Web ディープリサーチ（1 ラウンドあたり複数クエリを SerpBase 並列検索、合計最大 10 回。UI のディープリサーチモード推奨）
 
 ## プロジェクト管理
 - pm_list_tasks / pm_create_task / pm_complete_task

@@ -15,9 +15,13 @@ import {
 } from "./serpbase";
 import type { RunaFileItem } from "./tools";
 
+/** 1 セッションあたりの SerpBase API 呼び出し上限 */
+export const DEEP_RESEARCH_MAX_SEARCH_CALLS = 10;
+
 const MIN_PARALLEL_ROUNDS = 3;
-const MAX_PARALLEL_ROUNDS = 5;
-const MAX_QUERIES_PER_ROUND = 4;
+const MAX_PARALLEL_ROUNDS = 10;
+const MAX_QUERIES_PER_ROUND = 5;
+const MIN_QUERIES_PER_PLAN = 2;
 const WEB_RESULTS_PER_QUERY = 5;
 const IMAGE_RESULTS_PER_QUERY = 4;
 
@@ -75,11 +79,14 @@ function emitDeepResearchProgress(
   send: RunaSseSend,
   round: number,
   phase: string,
-  message: string
+  message: string,
+  searchCount: number
 ): void {
   send("deep_research", {
     round,
     maxRounds: MAX_PARALLEL_ROUNDS,
+    searchCount,
+    maxSearches: DEEP_RESEARCH_MAX_SEARCH_CALLS,
     phase,
     message,
   });
@@ -161,14 +168,20 @@ async function planSearchQueries(
   topic: string,
   round: number,
   evidence: DeepResearchEvidence[],
+  remainingSearchCalls: number,
   assessment?: AssessmentResult
 ): Promise<PlannedQuery[]> {
-  const system = `あなたは Runa のディープリサーチ計画担当です。ユーザーの調査テーマに答えるため、次の並列検索クエリを JSON のみで返してください。
+  const planCap = Math.min(MAX_QUERIES_PER_ROUND, Math.max(1, remainingSearchCalls));
+  const minQueries =
+    planCap >= MIN_QUERIES_PER_PLAN ? MIN_QUERIES_PER_PLAN : 1;
+
+  const system = `あなたは Runa のディープリサーチ計画担当です。ユーザーの調査テーマに答えるため、次のラウンドで**同時に（並列で）**実行する検索クエリを JSON のみで返してください。
 
 ルール:
-- queries は 1〜${MAX_QUERIES_PER_ROUND} 件
+- queries は ${minQueries}〜${planCap} 件（可能なら複数。観点・キーワードを分ける）
+- 各 query は 1 回の SerpBase API 呼び出しに対応し、同一ラウンド内で Promise.all により並列実行される
 - type は "web"（通常）または "image"（ビジュアル参考が必要なときのみ）
-- q は Google 向けの短い検索語（日本語可）
+- q は Google 向けの短い検索語（日本語可）。互いに重複しすぎない
 - reason は日本語で 1 行
 - 出力は JSON のみ
 
@@ -178,6 +191,7 @@ async function planSearchQueries(
   const userParts = [
     `調査テーマ: ${topic}`,
     `現在のラウンド: ${round}/${MAX_PARALLEL_ROUNDS}`,
+    `このラウンドで使える検索回数: 最大 ${planCap} 件（セッション残り ${remainingSearchCalls}/${DEEP_RESEARCH_MAX_SEARCH_CALLS}）`,
     `\nこれまでの検索結果:\n${evidenceDigest(evidence)}`,
   ];
   if (assessment?.gaps) {
@@ -188,7 +202,10 @@ async function planSearchQueries(
   }
 
   const data = await llmJsonCompletion(env, system, userParts.join("\n"));
-  const queries = normalizePlannedQueries(data?.queries);
+  let queries = normalizePlannedQueries(data?.queries);
+  if (queries.length > planCap) {
+    queries = queries.slice(0, planCap);
+  }
   if (queries.length) return queries;
 
   return [{ type: "web", q: topic, reason: "テーマに基づく初回検索" }];
@@ -267,6 +284,7 @@ sufficient は、ユーザーの依頼に対して実用的な回答が組み立
 
   const user = `調査テーマ: ${topic}
 完了ラウンド: ${round}/${MAX_PARALLEL_ROUNDS}
+実行済み検索 API 呼び出し: 上限 ${DEEP_RESEARCH_MAX_SEARCH_CALLS} 回の範囲内
 最低 ${MIN_PARALLEL_ROUNDS} ラウンドは実施済み。
 
 収集結果:
@@ -304,6 +322,7 @@ async function generateDeepResearchReport(
 
   const user = `調査テーマ: ${topic}
 実行ラウンド: ${roundsExecuted}
+SerpBase 検索 API 呼び出し: ${queryLog.length} 回（上限 ${DEEP_RESEARCH_MAX_SEARCH_CALLS}）
 実行クエリ:
 ${queryLog.map((q) => `- ${q}`).join("\n")}
 
@@ -345,15 +364,20 @@ export async function runDeepResearchSession(
   let imageFiles: RunaFileItem[] = [];
   const queryLog: string[] = [];
   let roundsExecuted = 0;
+  let totalSearchCalls = 0;
   let lastAssessment: AssessmentResult | undefined;
 
   for (let round = 1; round <= MAX_PARALLEL_ROUNDS; round += 1) {
+    if (totalSearchCalls >= DEEP_RESEARCH_MAX_SEARCH_CALLS) break;
+
+    const remainingCalls = DEEP_RESEARCH_MAX_SEARCH_CALLS - totalSearchCalls;
     roundsExecuted = round;
     emitDeepResearchProgress(
       send,
       round,
       "plan",
-      `ラウンド ${round}/${MAX_PARALLEL_ROUNDS}: 調査計画を作成しています…`
+      `ラウンド ${round}/${MAX_PARALLEL_ROUNDS}: 並列検索クエリを計画中…（${totalSearchCalls}/${DEEP_RESEARCH_MAX_SEARCH_CALLS} 回済）`,
+      totalSearchCalls
     );
 
     const planId = activity.start(
@@ -366,6 +390,7 @@ export async function runDeepResearchSession(
       trimmedTopic,
       round,
       evidence,
+      remainingCalls,
       lastAssessment
     );
     activity.finish(
@@ -382,25 +407,36 @@ export async function runDeepResearchSession(
       send,
       round,
       "search",
-      `ラウンド ${round}/${MAX_PARALLEL_ROUNDS}: ${queries.length} 件を並列検索中…`
+      `ラウンド ${round}: ${queries.length} 件を並列検索中…（合計 ${totalSearchCalls + queries.length}/${DEEP_RESEARCH_MAX_SEARCH_CALLS} 回）`,
+      totalSearchCalls
     );
 
     const workId = activity.start(
       "working",
       "working..",
-      `ラウンド ${round}: 並列検索`
+      `ラウンド ${round}: ${queries.length} 件並列検索`
     );
     const batch = await executeParallelSearches(env, queries, round);
+    totalSearchCalls += queries.length;
     evidence = dedupeEvidence([...evidence, ...batch.evidence]);
     imageFiles = dedupeRunaFiles([...imageFiles, ...batch.imageFiles]);
-    activity.finish(workId, "working", `累計 ${evidence.length} 件`);
+    activity.finish(
+      workId,
+      "working",
+      `累計 ${evidence.length} 件 / 検索 ${totalSearchCalls} 回`
+    );
+
+    if (totalSearchCalls >= DEEP_RESEARCH_MAX_SEARCH_CALLS) {
+      break;
+    }
 
     if (round >= MIN_PARALLEL_ROUNDS) {
       emitDeepResearchProgress(
         send,
         round,
         "assess",
-        `ラウンド ${round}/${MAX_PARALLEL_ROUNDS}: 十分性を評価中…`
+        `ラウンド ${round}/${MAX_PARALLEL_ROUNDS}: 十分性を評価中…`,
+        totalSearchCalls
       );
       const assessId = activity.start(
         "thinking",
@@ -429,7 +465,8 @@ export async function runDeepResearchSession(
     send,
     roundsExecuted,
     "report",
-    "最終レポートを作成しています…"
+    "最終レポートを作成しています…",
+    totalSearchCalls
   );
 
   const writeId = activity.start("writing", "writing..", "レポート生成中");
