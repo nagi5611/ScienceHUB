@@ -12,11 +12,20 @@ import {
 } from "./serpbase";
 import { searchWebWithSerper, isSerperConfigured } from "./serper";
 import type { RunaSseSend } from "./chat-sse";
+import { flushSseYield } from "./sse-flush";
 
 export const MULTI_SEARCH_QUERY_COUNT = 5;
 export const MULTI_SEARCH_RESULTS_PER_PROVIDER = 5;
 
 export type MultiSearchProvider = "serpbase" | "serper" | "brave" | "exa";
+
+export interface MultiSearchHit {
+  query: string;
+  provider: MultiSearchProvider;
+  title: string;
+  url: string;
+  snippet: string;
+}
 
 export type MultiSearchTaskStatus =
   | "pending"
@@ -60,11 +69,13 @@ function taskStatusGlyph(
   }
 }
 
-/** ワーキング UI 向け: クエリ×プロバイダの状態一覧 */
+/** ワーキング UI 向け: クエリ×プロバイダの状態 + 収集中ヒット */
 export function formatMultiSearchWorkingDetail(
   header: string,
   queries: string[],
-  cells: MultiSearchTaskCell[]
+  cells: MultiSearchTaskCell[],
+  hitsSoFar: MultiSearchHit[] = [],
+  options?: { maxHitLines?: number }
 ): string {
   const finished = cells.filter(
     (c) =>
@@ -73,8 +84,17 @@ export function formatMultiSearchWorkingDetail(
       c.status === "skipped"
   ).length;
   const total = cells.length;
-  const lines: string[] = [header, `進捗 ${finished}/${total}`, ""];
+  const lines: string[] = [header, `進捗 ${finished}/${total}`];
 
+  if (queries.length > 0) {
+    lines.push("", `実行クエリ（${queries.length} 件）:`);
+    for (let qi = 0; qi < queries.length; qi += 1) {
+      const q = queries[qi] ?? "";
+      lines.push(`${qi + 1}. ${q}`);
+    }
+  }
+
+  lines.push("");
   for (let qi = 0; qi < queries.length; qi += 1) {
     const q = queries[qi] ?? "";
     const shortQ = q.length > 56 ? `${q.slice(0, 56)}…` : q;
@@ -87,6 +107,12 @@ export function formatMultiSearchWorkingDetail(
       )
       .join("  ");
     lines.push(`  ${row}`);
+  }
+
+  if (hitsSoFar.length > 0) {
+    const maxLines = options?.maxHitLines ?? 48;
+    lines.push("", `収集中（${hitsSoFar.length} 件）:`);
+    lines.push(multiSearchHitsDigest(hitsSoFar, maxLines));
   }
 
   return lines.join("\n");
@@ -110,7 +136,7 @@ function providerConfigured(
   }
 }
 
-function buildMultiSearchTaskCells(
+export function buildMultiSearchTaskCells(
   env: Env,
   queries: string[]
 ): MultiSearchTaskCell[] {
@@ -133,14 +159,6 @@ function buildMultiSearchTaskCells(
     }
   }
   return cells;
-}
-
-export interface MultiSearchHit {
-  query: string;
-  provider: MultiSearchProvider;
-  title: string;
-  url: string;
-  snippet: string;
 }
 
 export interface MultiSearchAssessmentInput {
@@ -345,7 +363,11 @@ async function fetchProviderHits(
 }
 
 export interface ExecuteMultiSearchBatchOptions {
-  onProgress?: (cells: MultiSearchTaskCell[], queries: string[]) => void;
+  onProgress?: (
+    cells: MultiSearchTaskCell[],
+    queries: string[],
+    hitsSoFar: MultiSearchHit[]
+  ) => void | Promise<void>;
   throwIfAborted?: () => void;
 }
 
@@ -354,7 +376,7 @@ export async function executeMultiSearchBatch(
   env: Env,
   queries: string[],
   options?: ExecuteMultiSearchBatchOptions
-): Promise<MultiSearchHit[]> {
+): Promise<{ hits: MultiSearchHit[]; cells: MultiSearchTaskCell[] }> {
   if (!hasAnyMultiSearchProvider(env)) {
     throw new Error(
       "マルチ検索 API キーが未設定です（SERPBASE / SERPER / BRAVESEARCH / EXA のいずれか）"
@@ -362,25 +384,30 @@ export async function executeMultiSearchBatch(
   }
 
   const cells = buildMultiSearchTaskCells(env, queries);
-  const notify = (): void => {
-    options?.onProgress?.(cells, queries);
+  const hitsSoFar: MultiSearchHit[] = [];
+
+  const notify = async (): Promise<void> => {
+    await options?.onProgress?.(cells, queries, hitsSoFar);
+    await flushSseYield();
   };
-  notify();
+
+  await notify();
 
   const runCell = async (cell: MultiSearchTaskCell): Promise<MultiSearchHit[]> => {
     options?.throwIfAborted?.();
     cell.status = "running";
-    notify();
+    await notify();
     try {
       const hits = await fetchProviderHits(env, cell.query, cell.provider);
       cell.status = "done";
       cell.hitCount = hits.length;
-      notify();
+      if (hits.length) hitsSoFar.push(...hits);
+      await notify();
       return hits;
     } catch {
       cell.status = "error";
       cell.hitCount = 0;
-      notify();
+      await notify();
       return [];
     }
   };
@@ -392,7 +419,7 @@ export async function executeMultiSearchBatch(
   if (!hits.length) {
     throw new Error("マルチ検索で結果を取得できませんでした");
   }
-  return hits;
+  return { hits, cells };
 }
 
 export function multiSearchHitsDigest(
@@ -450,7 +477,7 @@ export interface RunMultiSearchSessionOptions {
   planOptions?: PlanMultiSearchOptions;
   skipSynthesize?: boolean;
   /** Runa ワーキング行の detail を逐次更新 */
-  onWorkingDetail?: (detail: string) => void;
+  onWorkingDetail?: (detail: string) => void | Promise<void>;
   throwIfAborted?: () => void;
 }
 
@@ -475,9 +502,14 @@ export async function runMultiSearchSession(
     send?.("multi_search", { phase, message });
   };
 
+  const reportDetail = async (text: string): Promise<void> => {
+    await options?.onWorkingDetail?.(text);
+    await flushSseYield();
+  };
+
   emit("plan", "検索クエリを 5 件計画中…");
   options?.throwIfAborted?.();
-  options?.onWorkingDetail?.(
+  await reportDetail(
     `マルチ検索「${trimmedTopic}」\n\n検索クエリ ${MULTI_SEARCH_QUERY_COUNT} 件を計画中…`
   );
   const planOpts: PlanMultiSearchOptions = {
@@ -488,18 +520,38 @@ export async function runMultiSearchSession(
   options?.throwIfAborted?.();
 
   const searchHeader = `マルチ検索「${trimmedTopic}」\n5 クエリ × 4 プロバイダを並列実行`;
+  const plannedCells = buildMultiSearchTaskCells(env, queries);
+  await reportDetail(
+    formatMultiSearchWorkingDetail(
+      `${searchHeader}\n\nクエリ確定 — 並列検索を開始`,
+      queries,
+      plannedCells,
+      []
+    )
+  );
+
   emit(
     "search",
     `5 クエリ × 検索プロバイダを並列実行中… (${queries.join(" / ")})`
   );
-  const hits = await executeMultiSearchBatch(env, queries, {
+  const { hits, cells: finalCells } = await executeMultiSearchBatch(env, queries, {
     throwIfAborted: options?.throwIfAborted,
-    onProgress: (cells, qs) => {
-      options?.onWorkingDetail?.(
-        formatMultiSearchWorkingDetail(searchHeader, qs, cells)
+    onProgress: async (cells, qs, hitsAccum) => {
+      await reportDetail(
+        formatMultiSearchWorkingDetail(searchHeader, qs, cells, hitsAccum)
       );
     },
   });
+
+  await reportDetail(
+    formatMultiSearchWorkingDetail(
+      `${searchHeader}\n\n✓ 検索完了`,
+      queries,
+      finalCells,
+      hits,
+      { maxHitLines: 60 }
+    )
+  );
 
   if (options?.skipSynthesize) {
     return { message: "", hits, queries };

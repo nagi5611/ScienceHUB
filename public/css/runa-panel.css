@@ -604,7 +604,7 @@
 }
 
 .runa-activity--working.is-active .runa-activity-detail {
-  max-height: 22rem;
+  max-height: min(32rem, 55vh);
 }
 
 .runa-activity-detail.is-streaming::after {

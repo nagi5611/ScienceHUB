@@ -982,22 +982,20 @@ function patchActivityDetailInDom(activityId, detailText) {
 function applySearchProgress(pending, text) {
   if (!text?.trim()) return;
   const trimmed = text.trim();
-  setDeepResearchHint(trimmed.split("\n").slice(0, 3).join("\n"));
-  const active = pending.activities?.find(
+  setDeepResearchHint(trimmed.split("\n").slice(0, 4).join("\n"));
+  let active = pending.activities?.find(
     (a) => a.state !== "done" && a.phase === "working"
   );
+  if (!active) {
+    active = pending.activities?.find((a) => a.state !== "done");
+  }
   if (active) {
     active.detail = trimmed;
     active.open = true;
     patchActivityDetailInDom(active.id, trimmed);
   }
-  const now = Date.now();
-  if (now - lastActivityDetailPaintAt >= 100) {
-    lastActivityDetailPaintAt = now;
-    updatePendingAssistantBubble(pending);
-  } else {
-    schedulePendingBubbleUpdate(pending);
-  }
+  lastActivityDetailPaintAt = Date.now();
+  updatePendingAssistantBubble(pending);
 }
 
 async function ensureUsername() {

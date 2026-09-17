@@ -681,7 +681,7 @@ async function requireApp(
 /** エージェントから Hub ツール実行時に UI へ渡すコールバック */
 export interface HubToolRuntimeHooks {
   /** multi_search / deep_research のワーキング detail 更新 */
-  reportWorkingDetail?: (detail: string) => void;
+  reportWorkingDetail?: (detail: string) => void | Promise<void>;
   throwIfAborted?: () => void;
 }
 

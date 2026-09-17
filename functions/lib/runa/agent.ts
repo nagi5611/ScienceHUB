@@ -59,6 +59,7 @@ import {
 } from "./task-plan";
 import { runDeepResearchSession } from "./deep-research";
 import { RunaRunController } from "./run-control";
+import { flushSseYield } from "./sse-flush";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -834,15 +835,19 @@ async function handleToolCall(
     workId = activity.start("working", WORKING_STATUS, detail);
   }
 
+  let lastWorkingDetail = detail;
+
   let hubHooks: HubToolRuntimeHooks | undefined;
   if (
     workId &&
     (name === "multi_search" || name === "deep_research")
   ) {
     hubHooks = {
-      reportWorkingDetail: (progressDetail) => {
+      reportWorkingDetail: async (progressDetail) => {
+        lastWorkingDetail = progressDetail;
         activity.update(workId!, "working", progressDetail);
         send("search_progress", { text: progressDetail });
+        await flushSseYield();
       },
       throwIfAborted: () => control?.throwIfAborted(),
     };
@@ -870,11 +875,16 @@ async function handleToolCall(
       );
 
   if (workId) {
-    const resultDetail =
-      result.files.length > 0
+    const isSearchTool = name === "multi_search" || name === "deep_research";
+    const resultDetail = isSearchTool
+      ? `${lastWorkingDetail}\n\n✓ ツール完了`
+      : result.files.length > 0
         ? `${result.files.length} 件 · ${result.text.slice(0, 120)}`
         : result.text.slice(0, 200);
     activity.finish(workId, "working", resultDetail);
+    if (isSearchTool) {
+      send("search_progress", { text: resultDetail });
+    }
   }
 
   for (const file of result.files) {
