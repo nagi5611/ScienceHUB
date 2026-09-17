@@ -84,6 +84,10 @@ import {
   isExaConfigured,
   searchWebWithExa,
 } from "./exa";
+import {
+  hasAnyMultiSearchProvider,
+  runMultiSearchSession,
+} from "./multi-search";
 import { runDeepResearchSession } from "./deep-research";
 import type { RunaSseSend } from "./chat-sse";
 
@@ -130,9 +134,9 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "web_search",
+      name: "serpbase_search",
       description:
-        "インターネット（SerpBase / Google 検索結果）を検索する。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
+        "インターネット（SerpBase / Google 検索結果）を検索する。通常の Web 検索の既定。ScienceHUB 内のファイル検索ではなく、一般知識・最新情報・外部サイトの確認に使う",
       parameters: {
         type: "object",
         properties: {
@@ -157,7 +161,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "exa_search",
       description:
-        "Exa の意味検索で Web を調べる。自然言語の質問・最新トピック・論文/技術記事の探索向け。Google の検索結果一覧が欲しいときは web_search を使う",
+        "Exa の意味検索で Web を調べる。自然言語の質問・最新トピック・論文/技術記事の探索向け。Google の検索結果一覧が欲しいときは serpbase_search を使う",
       parameters: {
         type: "object",
         properties: {
@@ -177,9 +181,9 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "web_image_search",
+      name: "serpbase_image_search",
       description:
-        "Google 画像検索（SerpBase）で参考画像を探す。ユーザーが画像・ビジュアル・見た目の参考を求めたとき、または web_search では足りない視覚情報が必要なときに使う。結果はチャットにサムネイル表示される",
+        "Google 画像検索（SerpBase）。通常の画像検索の既定。参考画像・ビジュアル確認。結果はチャットにサムネイル表示される",
       parameters: {
         type: "object",
         properties: {
@@ -198,7 +202,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "serper_search",
       description:
-        "Google Web 検索（Serper API）。一般知識・最新情報の確認。期間絞り込み（tbs）は Serper 経由で有効。SerpBase 経路は web_search",
+        "Google Web 検索（Serper API）。一般知識・最新情報の確認。期間絞り込み（tbs）は Serper 経由で有効。SerpBase 既定は serpbase_search",
       parameters: {
         type: "object",
         properties: {
@@ -223,7 +227,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "serper_image_search",
       description:
-        "Google 画像検索（Serper）。参考画像・ビジュアル確認。SerpBase 経路は web_image_search。結果はチャットにサムネイル表示",
+        "Google 画像検索（Serper）。参考画像・ビジュアル確認。SerpBase 既定は serpbase_image_search。結果はチャットにサムネイル表示",
       parameters: {
         type: "object",
         properties: {
@@ -242,7 +246,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "brave_search",
       description:
-        "Brave Web Search。一般知識・最新情報。期間絞り込み（tbs）は Brave freshness に変換して送信。Google は serper_search、SerpBase は web_search",
+        "Brave Web Search。一般知識・最新情報。期間絞り込み（tbs）は Brave freshness に変換して送信。Google は serper_search、SerpBase 既定は serpbase_search",
       parameters: {
         type: "object",
         properties: {
@@ -267,7 +271,7 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: "brave_image_search",
       description:
-        "Brave 画像検索。参考画像・ビジュアル確認。Google/SerpBase 経路は serper_image_search / web_image_search。結果はチャットにサムネイル表示",
+        "Brave 画像検索。参考画像・ビジュアル確認。Google/SerpBase 既定は serper_image_search / serpbase_image_search。結果はチャットにサムネイル表示",
       parameters: {
         type: "object",
         properties: {
@@ -284,9 +288,31 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "multi_search",
+      description:
+        "5 つの検索クエリを AI が決め、SerpBase/Serper/Brave/Exa を並列実行し、結果を統合した回答を返す。1 回の広い Web 調査向け。より深い調査は deep_research",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: {
+            type: "string",
+            description: "調査テーマ・ユーザーの質問",
+          },
+          focus: {
+            type: "string",
+            description: "追加の調査指示（任意）",
+          },
+        },
+        required: ["topic"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "deep_research",
       description:
-        "テーマについて多段階の Web ディープリサーチを実行する。各ラウンドで複数クエリを計画し SerpBase を並列呼び出し（セッション上限 10 回）。時間がかかる。UI のディープリサーチモードが推奨",
+        "multi_search（5 クエリ × 4 プロバイダ並列）を最大 10 ラウンド繰り返し、ラウンド間に十分性・信頼・網羅を評価してから最終レポートを返す。UI のディープリサーチモード推奨",
       parameters: {
         type: "object",
         properties: {
@@ -668,12 +694,12 @@ export async function executeHubTool(
         return await runHubAnnouncements(db, user);
       case "hub_search_users":
         return await runHubSearchUsers(db, user, args);
-      case "web_search":
-        return await runWebSearch(env, args);
+      case "serpbase_search":
+        return await runSerpBaseSearch(env, args);
       case "exa_search":
         return await runExaSearch(env, args);
-      case "web_image_search":
-        return await runWebImageSearch(env, args);
+      case "serpbase_image_search":
+        return await runSerpBaseImageSearch(env, args);
       case "serper_search":
         return await runSerperSearch(env, args);
       case "serper_image_search":
@@ -682,6 +708,8 @@ export async function executeHubTool(
         return await runBraveSearch(env, args);
       case "brave_image_search":
         return await runBraveImageSearch(env, args);
+      case "multi_search":
+        return await runMultiSearchTool(env, args);
       case "deep_research":
         return await runDeepResearchTool(env, db, user, args);
       case "hub_list_schedule":
@@ -760,7 +788,7 @@ async function runHubListApps(
   return { text: lines.join("\n"), files: [] };
 }
 
-async function runWebSearch(
+async function runSerpBaseSearch(
   env: Env,
   args: Record<string, unknown>
 ): Promise<ToolRunResult> {
@@ -819,7 +847,7 @@ async function runExaSearch(
   };
 }
 
-async function runWebImageSearch(
+async function runSerpBaseImageSearch(
   env: Env,
   args: Record<string, unknown>
 ): Promise<ToolRunResult> {
@@ -982,6 +1010,37 @@ async function runBraveImageSearch(
     text: formatBraveImageResultsForRuna(payload),
     files,
   };
+}
+
+async function runMultiSearchTool(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  if (!hasAnyMultiSearchProvider(env)) {
+    return {
+      text: "マルチ検索は現在利用できません（検索 API キーが未設定）",
+      files: [],
+    };
+  }
+
+  const topic = strArg(args, "topic");
+  if (!topic) {
+    return { text: "topic を指定してください", files: [] };
+  }
+
+  const focus = strArg(args, "focus");
+  const noopSend: RunaSseSend = () => {};
+
+  try {
+    const result = await runMultiSearchSession(env, topic, noopSend, {
+      focus: focus || undefined,
+    });
+    return { text: result.message, files: [] };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "マルチ検索に失敗しました";
+    return { text: message, files: [] };
+  }
 }
 
 async function runDeepResearchTool(

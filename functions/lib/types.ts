@@ -119,7 +119,7 @@ export interface Env {
   RUNA_CONTEXT_WINDOW_TOKENS?: string;
   RUNA_CONTEXT_SUMMARIZE_THRESHOLD?: string;
   RUNA_CONTEXT_ACCURACY_WARNING?: string;
-  /** SerpBase API キー（Runa web_search） */
+  /** SerpBase API キー（Runa serpbase_search / serpbase_image_search / multi_search） */
   SERPBASE_APIKEY?: string;
   /** Serper API キー（Runa serper_search / serper_image_search） */
   SERPER_APIKEY?: string;

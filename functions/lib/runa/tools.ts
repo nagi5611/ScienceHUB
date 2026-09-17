@@ -44,7 +44,7 @@ export interface RunaFileItem {
   createdBy?: string | null;
   updatedBy?: string | null;
   location?: string;
-  /** 外部画像のサムネイル URL（web_image_search 等） */
+  /** 外部画像のサムネイル URL（serpbase_image_search 等） */
   previewUrl?: string | null;
   /** 外部画像の原寸 URL（ライトボックス用） */
   imageUrl?: string | null;

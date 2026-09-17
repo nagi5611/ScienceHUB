@@ -52,7 +52,7 @@ caveats are captured below.
   still works. All other external integrations (Google/Microsoft OAuth, Google Calendar, AWS
   FDS simulation, Gemini, Discord, Firebase SMS, R2 presigned URLs) are optional and
   feature-gated — the core app runs without any of their secrets. Runa search keys are likewise
-  optional: `SERPBASE_APIKEY` (web_search / deep research / images), `EXA_API_KEY` (exa_search),
+  optional: `SERPBASE_APIKEY` (serpbase_* / multi_search / deep research), `EXA_API_KEY` (exa_search),
   `SERPER_APIKEY`, `BRAVESEARCH_APIKEY`.
 
 ### Smoke test
