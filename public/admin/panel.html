@@ -52,6 +52,11 @@
           <span class="cf-nav-icon" data-icon="bell" aria-hidden="true"></span>
           お知らせ
         </button>
+        <p class="cf-nav-label">Runa</p>
+        <button type="button" class="cf-nav-item" data-view="runa">
+          <span class="cf-nav-icon" data-icon="app" aria-hidden="true"></span>
+          Runa
+        </button>
       </nav>
 
       <div class="cf-sidebar-footer">
@@ -266,6 +271,55 @@
               <tr><td colspan="5" class="cf-empty">読み込み中…</td></tr>
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- Runa -->
+      <section class="cf-view" id="view-runa">
+        <header class="cf-page-header">
+          <div>
+            <h1>Runa</h1>
+            <p>ユーザーのチャットタブ（会話）ログの閲覧と、Web 検索プロバイダの有効化設定です。</p>
+          </div>
+        </header>
+
+        <div class="cf-runa-settings card">
+          <h2 class="cf-section-title">検索プロバイダ</h2>
+          <p class="cf-field-hint">API キーが設定されているプロバイダのみ実際に呼び出されます。OFF にするとその経路はスキップされます。</p>
+          <div class="cf-runa-settings-grid">
+            <div>
+              <h3>並列検索（multi_search）</h3>
+              <div class="cf-runa-toggle-group" id="runa-providers-multi"></div>
+            </div>
+            <div>
+              <h3>ディープリサーチ</h3>
+              <div class="cf-runa-toggle-group" id="runa-providers-deep"></div>
+            </div>
+          </div>
+          <footer class="cf-runa-settings-actions">
+            <p id="runa-settings-status" class="cf-form-success" hidden>保存しました</p>
+            <button type="button" class="cf-btn cf-btn-primary" id="runa-settings-save">設定を保存</button>
+          </footer>
+        </div>
+
+        <div class="cf-runa-chat card">
+          <div class="cf-runa-chat-toolbar">
+            <h2 class="cf-section-title">チャットログ</h2>
+            <label class="cf-search cf-runa-user-search">
+              <span class="cf-search-icon" data-icon="search" aria-hidden="true"></span>
+              <input type="search" id="runa-user-filter" placeholder="ユーザー名・メール・タイトルで絞り込み" autocomplete="off">
+            </label>
+            <input type="hidden" id="runa-user-id-filter" value="">
+            <button type="button" class="cf-btn cf-btn-ghost cf-btn-sm" id="runa-conversations-refresh">再読み込み</button>
+          </div>
+          <div class="cf-runa-chat-layout">
+            <div class="cf-runa-conv-list" id="runa-conversation-list">
+              <p class="cf-empty">読み込み中…</p>
+            </div>
+            <div class="cf-runa-message-log" id="runa-message-log">
+              <p class="cf-empty">左の会話タブを選択してください</p>
+            </div>
+          </div>
         </div>
       </section>
     </main>

@@ -30,6 +30,7 @@ import {
   loadStorageRoots,
   renderStorageRoots,
 } from "./admin-storage.js";
+import { bindRunaEvents, initRunaAdmin } from "./admin-runa.js";
 
 let roles = [];
 let users = [];
@@ -364,6 +365,9 @@ function bindEvents() {
         await loadStorageRoots(api);
         renderStorageRoots(escapeHtml);
       }
+      if (btn.dataset.view === "runa") {
+        await initRunaAdmin(api, escapeHtml);
+      }
     });
   });
 
@@ -616,6 +620,7 @@ async function init() {
   bindAnnouncementEvents({ api, escapeHtml, getGroups });
   bindGoogleCalendarEvents({ api });
   bindStorageEvents({ api, escapeHtml });
+  bindRunaEvents({ api });
   await loadRoles();
   await loadGroups(api);
   renderGroups("", escapeHtml);

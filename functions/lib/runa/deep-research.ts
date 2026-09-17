@@ -19,6 +19,7 @@ import {
   type MultiSearchHit,
 } from "./multi-search";
 import { curateMultiSearchHitsForRuna } from "./multi-search-curate";
+import { getRunaSearchProviderFlags } from "./site-settings";
 import type { RunaFileItem } from "./tools";
 import type { RunaRunController } from "./run-control";
 import { flushSseYield } from "./sse-flush";
@@ -231,9 +232,10 @@ export async function runDeepResearchSession(
   if (!trimmedTopic) {
     throw new Error("調査テーマを入力してください");
   }
-  if (!hasAnyMultiSearchProvider(env)) {
+  const deepSearchFlags = await getRunaSearchProviderFlags(db, "deep_research");
+  if (!hasAnyMultiSearchProvider(env, deepSearchFlags)) {
     throw new Error(
-      "ディープリサーチには検索 API キー（SERPBASE / SERPER / BRAVESEARCH / EXA のいずれか）が必要です"
+      "ディープリサーチの検索が無効です（API キー未設定、または管理画面で OFF）"
     );
   }
 
@@ -295,7 +297,7 @@ export async function runDeepResearchSession(
       await options?.reportWorkingDetail?.(detail);
       await flushSseYield();
     };
-    const plannedCells = buildMultiSearchTaskCells(env, queries);
+    const plannedCells = buildMultiSearchTaskCells(env, queries, deepSearchFlags);
     await reportWorking(
       formatMultiSearchWorkingDetail(
         `${searchHeader}\n\nクエリ確定 — 並列検索を開始`,
@@ -308,6 +310,7 @@ export async function runDeepResearchSession(
       env,
       queries,
       {
+        providerFlags: deepSearchFlags,
         throwIfAborted,
         onProgress: async (cells, qs, hitsAccum) => {
           await reportWorking(

@@ -2482,3 +2482,204 @@ body.cf-admin-login {
   }
 }
 
+/* Runa admin */
+.cf-runa-settings.card,
+.cf-runa-chat.card {
+  background: var(--cf-surface);
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-lg);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.cf-section-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
+.cf-runa-settings-grid {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+@media (min-width: 768px) {
+  .cf-runa-settings-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.cf-runa-settings-grid h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+}
+
+.cf-runa-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.cf-runa-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.cf-runa-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.cf-form-success {
+  color: #15803d;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.cf-runa-chat-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.cf-runa-chat-toolbar .cf-section-title {
+  margin: 0;
+  flex: 1 1 100%;
+}
+
+@media (min-width: 768px) {
+  .cf-runa-chat-toolbar .cf-section-title {
+    flex: 1 1 auto;
+  }
+}
+
+.cf-runa-user-search {
+  flex: 1 1 16rem;
+  max-width: 24rem;
+}
+
+.cf-runa-chat-layout {
+  display: grid;
+  gap: 1rem;
+  min-height: 420px;
+}
+
+@media (min-width: 900px) {
+  .cf-runa-chat-layout {
+    grid-template-columns: minmax(240px, 320px) 1fr;
+  }
+}
+
+.cf-runa-conv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 480px;
+  overflow-y: auto;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-md);
+  padding: 0.35rem;
+  background: var(--cf-bg);
+}
+
+.cf-runa-conv-item {
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--cf-radius-md);
+  padding: 0.55rem 0.65rem;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+}
+
+.cf-runa-conv-item:hover {
+  background: var(--cf-surface-hover, #f8fafc);
+}
+
+.cf-runa-conv-item.is-active {
+  border-color: var(--cf-orange);
+  background: #fff7ed;
+}
+
+.cf-runa-conv-title {
+  display: block;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.cf-runa-conv-meta {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--cf-muted);
+  margin-top: 0.2rem;
+}
+
+.cf-runa-active-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--cf-orange);
+  border: 1px solid #fdba74;
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  margin-left: 0.25rem;
+}
+
+.cf-runa-message-log {
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-md);
+  padding: 0.75rem;
+  max-height: 480px;
+  overflow-y: auto;
+  background: var(--cf-bg);
+}
+
+.cf-runa-msg {
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--cf-border);
+}
+
+.cf-runa-msg:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.cf-runa-msg header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--cf-muted);
+  margin-bottom: 0.35rem;
+}
+
+.cf-runa-msg-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.cf-runa-msg-user .cf-runa-msg-body {
+  background: #f1f5f9;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--cf-radius-md);
+}
+
+.cf-runa-msg-assistant .cf-runa-msg-body {
+  background: #fff7ed;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--cf-radius-md);
+}
+

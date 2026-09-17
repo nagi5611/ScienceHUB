@@ -3,6 +3,7 @@
  */
 
 import type { Env } from "../types";
+import type { RunaSearchProviderFlags } from "./site-settings";
 import { searchWebWithBrave, isBraveSearchConfigured } from "./brave-search";
 import { searchWebWithExa, isExaConfigured } from "./exa";
 import { runaChatCompletion, type ChatMessage } from "./openai";
@@ -13,6 +14,7 @@ import {
 import { searchWebWithSerper, isSerperConfigured } from "./serper";
 import type { RunaSseSend } from "./chat-sse";
 import { flushSseYield } from "./sse-flush";
+import { getRunaSearchProviderFlags } from "./site-settings";
 import {
   curateMultiSearchHitsForRuna,
   curatedMultiSearchDigest,
@@ -124,8 +126,10 @@ export function formatMultiSearchWorkingDetail(
 
 function providerConfigured(
   env: Env,
-  provider: MultiSearchProvider
+  provider: MultiSearchProvider,
+  flags: RunaSearchProviderFlags
 ): boolean {
+  if (!flags[provider]) return false;
   switch (provider) {
     case "serpbase":
       return isSerpBaseConfigured(env);
@@ -142,7 +146,8 @@ function providerConfigured(
 
 export function buildMultiSearchTaskCells(
   env: Env,
-  queries: string[]
+  queries: string[],
+  flags: RunaSearchProviderFlags
 ): MultiSearchTaskCell[] {
   const providers: MultiSearchProvider[] = [
     "serpbase",
@@ -158,7 +163,7 @@ export function buildMultiSearchTaskCells(
         query,
         queryIndex: qi,
         provider,
-        status: providerConfigured(env, provider) ? "pending" : "skipped",
+        status: providerConfigured(env, provider, flags) ? "pending" : "skipped",
       });
     }
   }
@@ -299,14 +304,18 @@ export async function planMultiSearch(
   return { queries, informationNeeds };
 }
 
-/** いずれかの Web 検索プロバイダが利用可能か */
-export function hasAnyMultiSearchProvider(env: Env): boolean {
-  return (
-    isSerpBaseConfigured(env) ||
-    isSerperConfigured(env) ||
-    isBraveSearchConfigured(env) ||
-    isExaConfigured(env)
-  );
+/** いずれかの Web 検索プロバイダが利用可能か（API キー + 管理トグル） */
+export function hasAnyMultiSearchProvider(
+  env: Env,
+  flags: RunaSearchProviderFlags
+): boolean {
+  const providers: MultiSearchProvider[] = [
+    "serpbase",
+    "serper",
+    "brave",
+    "exa",
+  ];
+  return providers.some((p) => providerConfigured(env, p, flags));
 }
 
 function normalizeQueryStrings(raw: unknown): string[] {
@@ -416,21 +425,23 @@ export interface ExecuteMultiSearchBatchOptions {
     hitsSoFar: MultiSearchHit[]
   ) => void | Promise<void>;
   throwIfAborted?: () => void;
+  providerFlags: RunaSearchProviderFlags;
 }
 
 /** 5 クエリ × 設定済み 4 プロバイダを並列実行 */
 export async function executeMultiSearchBatch(
   env: Env,
   queries: string[],
-  options?: ExecuteMultiSearchBatchOptions
+  options: ExecuteMultiSearchBatchOptions
 ): Promise<{ hits: MultiSearchHit[]; cells: MultiSearchTaskCell[] }> {
-  if (!hasAnyMultiSearchProvider(env)) {
+  const flags = options.providerFlags;
+  if (!hasAnyMultiSearchProvider(env, flags)) {
     throw new Error(
       "マルチ検索 API キーが未設定です（SERPBASE / SERPER / BRAVESEARCH / EXA のいずれか）"
     );
   }
 
-  const cells = buildMultiSearchTaskCells(env, queries);
+  const cells = buildMultiSearchTaskCells(env, queries, flags);
   const hitsSoFar: MultiSearchHit[] = [];
 
   const notify = async (): Promise<void> => {
@@ -441,7 +452,7 @@ export async function executeMultiSearchBatch(
   await notify();
 
   const runCell = async (cell: MultiSearchTaskCell): Promise<MultiSearchHit[]> => {
-    options?.throwIfAborted?.();
+    options.throwIfAborted?.();
     cell.status = "running";
     await notify();
     try {
@@ -531,6 +542,7 @@ export interface RunMultiSearchSessionOptions {
 /** 1 回の multi_search（計画 → 並列検索 → キュレーション → 統合回答） */
 export async function runMultiSearchSession(
   env: Env,
+  db: D1Database,
   topic: string,
   send?: RunaSseSend,
   options?: RunMultiSearchSessionOptions
@@ -544,9 +556,10 @@ export async function runMultiSearchSession(
   if (!trimmedTopic) {
     throw new Error("調査テーマを入力してください");
   }
-  if (!hasAnyMultiSearchProvider(env)) {
+  const providerFlags = await getRunaSearchProviderFlags(db, "multi_search");
+  if (!hasAnyMultiSearchProvider(env, providerFlags)) {
     throw new Error(
-      "マルチ検索 API キーが未設定です（SERPBASE / SERPER / BRAVESEARCH / EXA のいずれか）"
+      "マルチ検索が無効です（API キー未設定、または管理画面でプロバイダが OFF）"
     );
   }
 
@@ -574,7 +587,7 @@ export async function runMultiSearchSession(
   options?.throwIfAborted?.();
 
   const searchHeader = `マルチ検索「${trimmedTopic}」\n5 クエリ × 4 プロバイダを並列実行`;
-  const plannedCells = buildMultiSearchTaskCells(env, queries);
+  const plannedCells = buildMultiSearchTaskCells(env, queries, providerFlags);
   await reportDetail(
     formatMultiSearchWorkingDetail(
       `${searchHeader}\n\nクエリ確定 — 並列検索を開始`,
@@ -589,6 +602,7 @@ export async function runMultiSearchSession(
     `5 クエリ × 検索プロバイダを並列実行中… (${queries.join(" / ")})`
   );
   const { hits, cells: finalCells } = await executeMultiSearchBatch(env, queries, {
+    providerFlags,
     throwIfAborted: options?.throwIfAborted,
     onProgress: async (cells, qs, hitsAccum) => {
       await reportDetail(

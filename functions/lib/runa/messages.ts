@@ -4,6 +4,11 @@
 
 import { createId, now, type Env } from "../types";
 import { runaMaxDailyTurns } from "./env";
+import {
+  ensureActiveRunaConversation,
+  startNewRunaConversation,
+  touchRunaConversation,
+} from "./conversations";
 import type { RunaFileItem } from "./tools";
 
 const DEFAULT_MAX_DAILY_TURNS = 50;
@@ -62,24 +67,27 @@ export async function incrementRunaDailyTurn(
     .run();
 }
 
-/** 直近メッセージを取得（時系列昇順） */
+/** 直近メッセージを取得（アクティブ会話・時系列昇順） */
 export async function listRunaMessages(
   db: D1Database,
   userId: string,
-  limit = 50
+  limit = 50,
+  conversationId?: string
 ): Promise<RunaMessageRow[]> {
   const capped = Math.min(100, Math.max(1, limit));
+  const convId =
+    conversationId ?? (await ensureActiveRunaConversation(db, userId));
   const result = await db
     .prepare(
       `SELECT id, role, content, files_json, created_at FROM (
          SELECT id, role, content, files_json, created_at
          FROM runa_messages
-         WHERE user_id = ?
+         WHERE user_id = ? AND conversation_id = ?
          ORDER BY created_at DESC
          LIMIT ?
        ) ORDER BY created_at ASC`
     )
-    .bind(userId, capped)
+    .bind(userId, convId, capped)
     .all<{
       id: string;
       role: string;
@@ -97,30 +105,72 @@ export async function listRunaMessages(
   }));
 }
 
-/** メッセージを保存 */
+/** 管理画面: 指定会話のメッセージ */
+export async function listRunaMessagesForConversation(
+  db: D1Database,
+  conversationId: string,
+  limit = 200
+): Promise<RunaMessageRow[]> {
+  const capped = Math.min(500, Math.max(1, limit));
+  const result = await db
+    .prepare(
+      `SELECT id, role, content, files_json, created_at FROM (
+         SELECT id, role, content, files_json, created_at
+         FROM runa_messages
+         WHERE conversation_id = ?
+         ORDER BY created_at DESC
+         LIMIT ?
+       ) ORDER BY created_at ASC`
+    )
+    .bind(conversationId, capped)
+    .all<{
+      id: string;
+      role: string;
+      content: string;
+      files_json: string | null;
+      created_at: number;
+    }>();
+
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    role: row.role === "assistant" ? "assistant" : "user",
+    content: row.content,
+    files: row.files_json ? (JSON.parse(row.files_json) as RunaFileItem[]) : null,
+    created_at: row.created_at,
+  }));
+}
+
+/** メッセージを保存（アクティブ会話） */
 export async function insertRunaMessage(
   db: D1Database,
   userId: string,
   role: "user" | "assistant",
   content: string,
   files: RunaFileItem[] | null = null,
-  createdAt?: number
+  createdAt?: number,
+  conversationId?: string
 ): Promise<string> {
+  const convId =
+    conversationId ?? (await ensureActiveRunaConversation(db, userId));
   const id = createId("runa");
   await db
     .prepare(
-      `INSERT INTO runa_messages (id, user_id, role, content, files_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO runa_messages (id, user_id, conversation_id, role, content, files_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
       userId,
+      convId,
       role,
       content,
       files?.length ? JSON.stringify(files) : null,
       createdAt ?? now()
     )
     .run();
+  await touchRunaConversation(db, convId, {
+    userMessage: role === "user" ? content : undefined,
+  });
   return id;
 }
 
@@ -140,15 +190,12 @@ export async function deleteRunaMessagesByIds(
     .run();
 }
 
-/** ユーザーの Runa チャット履歴をすべて削除 */
+/** 新規チャット（履歴は会話タブとして D1 に残す） */
 export async function clearRunaMessages(
   db: D1Database,
   userId: string
 ): Promise<void> {
-  await db
-    .prepare(`DELETE FROM runa_messages WHERE user_id = ?`)
-    .bind(userId)
-    .run();
+  await startNewRunaConversation(db, userId);
 }
 
 /** 会話履歴を OpenAI メッセージ形式に変換（直近 N 件） */
