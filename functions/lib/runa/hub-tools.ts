@@ -681,7 +681,8 @@ async function requireApp(
 /** エージェントから Hub ツール実行時に UI へ渡すコールバック */
 export interface HubToolRuntimeHooks {
   /** multi_search / deep_research のワーキング detail 更新 */
-  reportWorkingDetail?: (detail: string) => void;
+  reportWorkingDetail?: (detail: string) => void | Promise<void>;
+  throwIfAborted?: () => void;
 }
 
 /** ハブ／アプリツールを実行 */
@@ -1045,6 +1046,7 @@ async function runMultiSearchTool(
       focus: focus || undefined,
       skipSynthesize: true,
       onWorkingDetail: hooks?.reportWorkingDetail,
+      throwIfAborted: hooks?.throwIfAborted,
     });
     return {
       text: formatMultiSearchHitsForTool(
@@ -1084,6 +1086,7 @@ async function runDeepResearchTool(
       {
         persistAssistantMessage: false,
         reportWorkingDetail: hooks?.reportWorkingDetail,
+        throwIfAborted: hooks?.throwIfAborted,
       }
     );
     return { text: result.message, files: result.files };

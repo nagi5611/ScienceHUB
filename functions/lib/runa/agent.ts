@@ -58,6 +58,8 @@ import {
   type RunaTaskPlan,
 } from "./task-plan";
 import { runDeepResearchSession } from "./deep-research";
+import { RunaRunController } from "./run-control";
+import { flushSseYield } from "./sse-flush";
 
 const ALL_RUNA_TOOLS = [...RUNA_TOOL_DEFINITIONS, ...HUB_TOOL_DEFINITIONS];
 
@@ -458,8 +460,13 @@ export async function runRunaChat(
   message: string,
   send: RunaSseSend,
   attachments: RunaChatAttachment[] = [],
-  context?: RunaChatContext
+  context?: RunaChatContext,
+  control?: RunaRunController
 ): Promise<RunaChatResult> {
+  const throwIfAborted = (): void => {
+    control?.throwIfAborted();
+  };
+  throwIfAborted();
   const trimmed = message.trim();
   if (!trimmed && !attachments.length) {
     throw new Error("メッセージを入力してください");
@@ -503,7 +510,10 @@ export async function runRunaChat(
     if (!trimmed) {
       throw new Error("ディープリサーチには調査テーマを入力してください");
     }
-    return await runDeepResearchSession(env, db, user, trimmed, send);
+    return await runDeepResearchSession(env, db, user, trimmed, send, {
+      control,
+      throwIfAborted,
+    });
   }
 
   const activity = new RunaActivityLog(send);
@@ -600,6 +610,7 @@ export async function runRunaChat(
   /** ツール完了直後に先行開始した thinking（無音ギャップ防止） */
   let prefetchedThinkId: string | null = null;
   for (let round = 0; round < maxRounds; round++) {
+    throwIfAborted();
     let streamedReply = false;
     let thinkId: string | null = prefetchedThinkId;
     prefetchedThinkId = null;
@@ -704,7 +715,9 @@ export async function runRunaChat(
           messages,
           collectedFiles,
           send,
-          activity
+          activity,
+          control,
+          { skipUi: false }
         );
         toolResultCache.set(cacheKey, result);
       }
@@ -803,6 +816,7 @@ async function handleToolCall(
   collectedFiles: RunaFileItem[],
   send: RunaSseSend,
   activity: RunaActivityLog,
+  control?: RunaRunController,
   options?: { skipUi?: boolean }
 ): Promise<ToolRunResult> {
   const name = call.function.name;
@@ -821,15 +835,25 @@ async function handleToolCall(
     workId = activity.start("working", WORKING_STATUS, detail);
   }
 
+  let lastWorkingDetail = detail;
+
   let hubHooks: HubToolRuntimeHooks | undefined;
   if (
     workId &&
     (name === "multi_search" || name === "deep_research")
   ) {
     hubHooks = {
-      reportWorkingDetail: (progressDetail) => {
+      reportWorkingDetail: async (progressDetail) => {
+        lastWorkingDetail = progressDetail;
         activity.update(workId!, "working", progressDetail);
+        send("search_progress", { text: progressDetail });
+        await flushSseYield();
       },
+      throwIfAborted: () => control?.throwIfAborted(),
+    };
+  } else if (control) {
+    hubHooks = {
+      throwIfAborted: () => control.throwIfAborted(),
     };
   }
 
@@ -851,11 +875,16 @@ async function handleToolCall(
       );
 
   if (workId) {
-    const resultDetail =
-      result.files.length > 0
+    const isSearchTool = name === "multi_search" || name === "deep_research";
+    const resultDetail = isSearchTool
+      ? `${lastWorkingDetail}\n\n✓ ツール完了`
+      : result.files.length > 0
         ? `${result.files.length} 件 · ${result.text.slice(0, 120)}`
         : result.text.slice(0, 200);
     activity.finish(workId, "working", resultDetail);
+    if (isSearchTool) {
+      send("search_progress", { text: resultDetail });
+    }
   }
 
   for (const file of result.files) {

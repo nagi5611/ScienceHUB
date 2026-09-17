@@ -14,10 +14,13 @@ import {
   hasAnyMultiSearchProvider,
   multiSearchHitsDigest,
   planMultiSearchQueries,
+  buildMultiSearchTaskCells,
   type MultiSearchAssessmentInput,
   type MultiSearchHit,
 } from "./multi-search";
 import type { RunaFileItem } from "./tools";
+import type { RunaRunController } from "./run-control";
+import { flushSseYield } from "./sse-flush";
 
 /** 1 セッションあたりの multi_search ラウンド上限 */
 export const DEEP_RESEARCH_MAX_MULTI_ROUNDS = 10;
@@ -215,8 +218,14 @@ export async function runDeepResearchSession(
   options?: {
     persistAssistantMessage?: boolean;
     reportWorkingDetail?: (detail: string) => void;
+    throwIfAborted?: () => void;
+    control?: RunaRunController;
   }
 ): Promise<{ message: string; files: RunaFileItem[] }> {
+  const throwIfAborted = (): void => {
+    options?.throwIfAborted?.();
+    options?.control?.throwIfAborted();
+  };
   const trimmedTopic = topic.trim();
   if (!trimmedTopic) {
     throw new Error("調査テーマを入力してください");
@@ -236,6 +245,7 @@ export async function runDeepResearchSession(
   let lastAssessment: DeepResearchAssessment | undefined;
 
   for (let round = 1; round <= DEEP_RESEARCH_MAX_MULTI_ROUNDS; round += 1) {
+    throwIfAborted();
     roundsExecuted = round;
     emitDeepResearchProgress(
       send,
@@ -277,17 +287,48 @@ export async function runDeepResearchSession(
       `ラウンド ${round}: マルチ検索実行`
     );
     const searchHeader = `ディープリサーチ「${trimmedTopic}」\nラウンド ${round}/${DEEP_RESEARCH_MAX_MULTI_ROUNDS}: 5×4 並列検索`;
-    const reportWorking = (detail: string): void => {
+    const reportWorking = async (detail: string): Promise<void> => {
       activity.update(workId, "working", detail);
-      options?.reportWorkingDetail?.(detail);
+      send("search_progress", { text: detail });
+      await options?.reportWorkingDetail?.(detail);
+      await flushSseYield();
     };
-    const batchHits = await executeMultiSearchBatch(env, queries, {
-      onProgress: (cells, qs) => {
-        reportWorking(formatMultiSearchWorkingDetail(searchHeader, qs, cells));
-      },
-    });
+    const plannedCells = buildMultiSearchTaskCells(env, queries);
+    await reportWorking(
+      formatMultiSearchWorkingDetail(
+        `${searchHeader}\n\nクエリ確定 — 並列検索を開始`,
+        queries,
+        plannedCells,
+        []
+      )
+    );
+    const { hits: batchHits, cells: finalCells } = await executeMultiSearchBatch(
+      env,
+      queries,
+      {
+        throwIfAborted,
+        onProgress: async (cells, qs, hitsAccum) => {
+          await reportWorking(
+            formatMultiSearchWorkingDetail(searchHeader, qs, cells, hitsAccum)
+          );
+        },
+      }
+    );
     allHits = dedupeMultiSearchHits([...allHits, ...batchHits]);
-    activity.finish(workId, "working", `累計 ${allHits.length} 件`);
+    await reportWorking(
+      formatMultiSearchWorkingDetail(
+        `${searchHeader}\n\n✓ ラウンド ${round} 検索完了`,
+        queries,
+        finalCells,
+        batchHits,
+        { maxHitLines: 40 }
+      )
+    );
+    activity.finish(
+      workId,
+      "working",
+      `ラウンド ${round} 完了 · 累計 ${allHits.length} 件`
+    );
 
     emitDeepResearchProgress(
       send,

@@ -603,6 +603,10 @@
   overflow: auto;
 }
 
+.runa-activity--working.is-active .runa-activity-detail {
+  max-height: min(32rem, 55vh);
+}
+
 .runa-activity-detail.is-streaming::after {
   content: "▍";
   display: inline-block;
@@ -1370,6 +1374,21 @@ body.runa-lightbox-open {
 .runa-send:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.runa-stop {
+  border: 1px solid rgba(220, 38, 38, 0.45);
+  border-radius: var(--cf-radius, 8px);
+  padding: 0.65rem 0.85rem;
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.runa-stop:hover {
+  background: rgba(220, 38, 38, 0.2);
 }
 
 .runa-files,
