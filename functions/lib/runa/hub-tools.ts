@@ -678,13 +678,20 @@ async function requireApp(
   }
 }
 
+/** エージェントから Hub ツール実行時に UI へ渡すコールバック */
+export interface HubToolRuntimeHooks {
+  /** multi_search / deep_research のワーキング detail 更新 */
+  reportWorkingDetail?: (detail: string) => void;
+}
+
 /** ハブ／アプリツールを実行 */
 export async function executeHubTool(
   env: Env,
   db: D1Database,
   user: SessionUser,
   toolName: string,
-  argsJson: string
+  argsJson: string,
+  hooks?: HubToolRuntimeHooks
 ): Promise<ToolRunResult> {
   const args = parseArgs(argsJson);
   try {
@@ -710,9 +717,9 @@ export async function executeHubTool(
       case "brave_image_search":
         return await runBraveImageSearch(env, args);
       case "multi_search":
-        return await runMultiSearchTool(env, args);
+        return await runMultiSearchTool(env, args, hooks);
       case "deep_research":
-        return await runDeepResearchTool(env, db, user, args);
+        return await runDeepResearchTool(env, db, user, args, hooks);
       case "hub_list_schedule":
         return await runHubListSchedule(env, db, user, args);
       case "hub_create_schedule":
@@ -1015,7 +1022,8 @@ async function runBraveImageSearch(
 
 async function runMultiSearchTool(
   env: Env,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  hooks?: HubToolRuntimeHooks
 ): Promise<ToolRunResult> {
   if (!hasAnyMultiSearchProvider(env)) {
     return {
@@ -1036,6 +1044,7 @@ async function runMultiSearchTool(
     const result = await runMultiSearchSession(env, topic, noopSend, {
       focus: focus || undefined,
       skipSynthesize: true,
+      onWorkingDetail: hooks?.reportWorkingDetail,
     });
     return {
       text: formatMultiSearchHitsForTool(
@@ -1056,7 +1065,8 @@ async function runDeepResearchTool(
   env: Env,
   db: D1Database,
   user: SessionUser,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  hooks?: HubToolRuntimeHooks
 ): Promise<ToolRunResult> {
   const topic = strArg(args, "topic");
   if (!topic) {
@@ -1071,7 +1081,10 @@ async function runDeepResearchTool(
       user,
       topic,
       noopSend,
-      { persistAssistantMessage: false }
+      {
+        persistAssistantMessage: false,
+        reportWorkingDetail: hooks?.reportWorkingDetail,
+      }
     );
     return { text: result.message, files: result.files };
   } catch (error) {

@@ -10,6 +10,7 @@ import { insertRunaMessage } from "./messages";
 import {
   dedupeMultiSearchHits,
   executeMultiSearchBatch,
+  formatMultiSearchWorkingDetail,
   hasAnyMultiSearchProvider,
   multiSearchHitsDigest,
   planMultiSearchQueries,
@@ -211,7 +212,10 @@ export async function runDeepResearchSession(
   user: SessionUser,
   topic: string,
   send: RunaSseSend,
-  options?: { persistAssistantMessage?: boolean }
+  options?: {
+    persistAssistantMessage?: boolean;
+    reportWorkingDetail?: (detail: string) => void;
+  }
 ): Promise<{ message: string; files: RunaFileItem[] }> {
   const trimmedTopic = topic.trim();
   if (!trimmedTopic) {
@@ -272,7 +276,16 @@ export async function runDeepResearchSession(
       "working..",
       `ラウンド ${round}: マルチ検索実行`
     );
-    const batchHits = await executeMultiSearchBatch(env, queries);
+    const searchHeader = `ディープリサーチ「${trimmedTopic}」\nラウンド ${round}/${DEEP_RESEARCH_MAX_MULTI_ROUNDS}: 5×4 並列検索`;
+    const reportWorking = (detail: string): void => {
+      activity.update(workId, "working", detail);
+      options?.reportWorkingDetail?.(detail);
+    };
+    const batchHits = await executeMultiSearchBatch(env, queries, {
+      onProgress: (cells, qs) => {
+        reportWorking(formatMultiSearchWorkingDetail(searchHeader, qs, cells));
+      },
+    });
     allHits = dedupeMultiSearchHits([...allHits, ...batchHits]);
     activity.finish(workId, "working", `累計 ${allHits.length} 件`);
 
