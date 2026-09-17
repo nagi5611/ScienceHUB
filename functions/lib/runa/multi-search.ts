@@ -360,3 +360,20 @@ export async function runMultiSearchSession(
   const message = await synthesizeMultiSearchAnswer(env, trimmedTopic, hits);
   return { message, hits, queries };
 }
+
+/** Hub ツール向け: 検索結果 digest（統合 LLM はエージェント側で 1 回） */
+export function formatMultiSearchHitsForTool(
+  topic: string,
+  queries: string[],
+  hits: MultiSearchHit[]
+): string {
+  const lines: string[] = [
+    `マルチ検索「${topic}」`,
+    `\n実行クエリ（${queries.length} 件）:`,
+    ...queries.map((q, i) => `${i + 1}. ${q}`),
+    `\n収集結果（${hits.length} 件）:`,
+    multiSearchHitsDigest(hits, 120),
+    "\n上記を踏まえ、ユーザーへの最終回答を Markdown で書いてください（出典 URL をリンクで示す）。",
+  ];
+  return lines.join("\n");
+}
