@@ -111,6 +111,8 @@ export interface Env {
   RUNA_OPENAI_API_KEY?: string;
   RUNA_OPENAI_BASE_URL?: string;
   RUNA_MODEL?: string;
+  /** マルチ検索後の重複除去・キュレーション用 Workers AI モデル（Chat Completions） */
+  RUNA_MULTI_SEARCH_SUMMARIZE_MODEL?: string;
   /** AI Gateway ID（Workers AI や third-party モデル用。既定 default） */
   RUNA_AI_GATEWAY_ID?: string;
   RUNA_MAX_DAILY_TURNS?: string;

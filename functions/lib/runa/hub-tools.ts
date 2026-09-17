@@ -1052,7 +1052,8 @@ async function runMultiSearchTool(
       text: formatMultiSearchHitsForTool(
         topic,
         result.queries,
-        result.hits
+        result.hits,
+        result.informationNeeds
       ),
       files: [],
     };

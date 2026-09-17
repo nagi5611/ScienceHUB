@@ -32,6 +32,14 @@ export function runaModel(env: Env): string | undefined {
   return e.RUNA_MODEL?.trim() || e.LUNA_MODEL?.trim();
 }
 
+/** マルチ検索ヒットのキュレーション（重複・無関係除去）用モデル */
+export function runaMultiSearchSummarizeModel(env: Env): string {
+  return (
+    env.RUNA_MULTI_SEARCH_SUMMARIZE_MODEL?.trim() ||
+    "@cf/qwen/qwen3-30b-a3b-fp8"
+  );
+}
+
 export function runaAiGatewayId(env: Env): string | undefined {
   const e = legacy(env);
   return e.RUNA_AI_GATEWAY_ID?.trim() || e.LUNA_AI_GATEWAY_ID?.trim();
