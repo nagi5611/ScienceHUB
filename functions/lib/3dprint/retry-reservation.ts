@@ -169,6 +169,8 @@ export async function retryFailedReservation(
     print_video_filename: null,
     print_video_size_bytes: null,
     user_id: userId,
+    source: failedReservation.source ?? 'standard',
+    schedule_type: failedReservation.schedule_type ?? null,
     created_at: new Date().toISOString(),
   };
 

@@ -29,8 +29,12 @@ export interface Reservation {
   print_video_filename: string | null;
   print_video_size_bytes: number | null;
   user_id: string;
+  source: 'standard' | 'contest';
+  schedule_type: 'full_time' | 'part_time' | null;
   created_at: string;
 }
+
+export type ReservationSource = Reservation['source'];
 
 export interface Member {
   id: string;
@@ -132,14 +136,17 @@ export async function getReservationsByDateAndPrinter(
 export async function getReservationsInRange(
   db: D1Database,
   startDate: string,
-  endDate: string
+  endDate: string,
+  source?: ReservationSource | null
 ): Promise<Reservation[]> {
-  const result = await db
-    .prepare(
-      `SELECT * FROM print_reservations WHERE desired_date >= ? AND desired_date <= ? AND status != 'cancelled' ORDER BY desired_date, created_at`
-    )
-    .bind(startDate, endDate)
-    .all<Reservation>();
+  let sql = `SELECT * FROM print_reservations WHERE desired_date >= ? AND desired_date <= ? AND status != 'cancelled'`;
+  const binds: string[] = [startDate, endDate];
+  if (source) {
+    sql += ` AND source = ?`;
+    binds.push(source);
+  }
+  sql += ` ORDER BY desired_date, created_at`;
+  const result = await db.prepare(sql).bind(...binds).all<Reservation>();
   return result.results ?? [];
 }
 
@@ -250,10 +257,22 @@ export async function getReservationById(db: D1Database, id: string): Promise<Re
 }
 
 /** Fetches all reservations ordered by date. */
-export async function getAllReservations(db: D1Database): Promise<Reservation[]> {
-  const result = await db
-    .prepare(`SELECT * FROM print_reservations ORDER BY desired_date DESC, created_at DESC`)
-    .all<Reservation>();
+export async function getAllReservations(
+  db: D1Database,
+  source?: ReservationSource | null
+): Promise<Reservation[]> {
+  let sql = `SELECT * FROM print_reservations`;
+  const binds: string[] = [];
+  if (source) {
+    sql += ` WHERE source = ?`;
+    binds.push(source);
+  }
+  sql += ` ORDER BY desired_date DESC, created_at DESC`;
+  const statement = db.prepare(sql);
+  const result =
+    binds.length > 0
+      ? await statement.bind(...binds).all<Reservation>()
+      : await statement.all<Reservation>();
   return result.results ?? [];
 }
 
@@ -265,9 +284,10 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
         id, grade, homeroom, student_number, student_name, title,
         purpose, purpose_other, summary, print_notes, print_scale, printer_id, desired_date,
         stl_r2_key, stl_filename, stl_size_bytes, status,
+        print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
-        user_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        user_id, source, schedule_type, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -287,11 +307,14 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.stl_filename,
       data.stl_size_bytes,
       data.status,
+      data.print_staff_member_id ?? null,
       data.request_print_video ? 1 : 0,
       data.print_video_storage_path ?? null,
       data.print_video_filename ?? null,
       data.print_video_size_bytes ?? null,
       data.user_id,
+      data.source ?? 'standard',
+      data.schedule_type ?? null,
       data.created_at
     )
     .run();
