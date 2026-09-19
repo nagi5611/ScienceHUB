@@ -31,6 +31,7 @@ RUNA_MAX_TOOL_ROUNDS=12
 # PRINT_3D_EMAIL_FROM=noreply@yourdomain.com
 # PRINT_3D_EMAIL_FROM_NAME=ScienceHUB 3D印刷
 # PRINT_3D_EMAIL_REPLY_TO=developer@yourdomain.com
+# PRINT_CONTEST_EMAIL_STAFF_NAME=自然科学部 造形物担当
 # DEV_EMAIL_TEST_SECRET=local-dev-email-test-only
 
 FIREBASE_PROJECT_ID=

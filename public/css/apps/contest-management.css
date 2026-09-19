@@ -1,0 +1,39 @@
+/* public/css/apps/contest-management.css — contest admin-only UI */
+
+.contest-admin-email-compose {
+  margin-top: 1.5rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 48%);
+}
+
+.contest-admin-email-heading {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.contest-admin-email-compose input[readonly] {
+  background: #f3f4f6;
+  color: #374151;
+  cursor: not-allowed;
+  font-weight: 600;
+}
+
+.contest-admin-email-compose textarea {
+  width: 100%;
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.contest-email-send-ok {
+  color: #15803d;
+  font-size: 0.875rem;
+}
+
+.contest-email-send-err {
+  color: #b91c1c;
+  font-size: 0.875rem;
+}

@@ -6,6 +6,7 @@
 
 - 送信に必須: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `PRINT_3D_EMAIL_FROM`
 - 任意: `PRINT_3D_EMAIL_FROM_NAME`, `PRINT_3D_EMAIL_REPLY_TO`, `PRINT_CONTEST_EMAIL_FROM_NAME`（未設定時は表示名「ScienceHUB 造形物コンテスト」）
+- 任意: **`PRINT_CONTEST_EMAIL_STAFF_NAME`** — 依頼者向けメール本文・管理画面の「メール担当者名」（未設定時は「造形物コンテスト担当」）。管理画面では変更不可の固定表示。
 
 未設定時は送信をスキップし、API は成功のままです。
 
@@ -23,6 +24,12 @@
 | `accepted` | 管理画面で承認（担当者が決まりました） |
 | `status_changed` | 管理画面でステータス変更（例: 印刷中・印刷済み・失敗） |
 | `rescheduled` | 管理画面で印刷日変更（ドラッグリスケ含む） |
+
+## 管理画面からの個別送信
+
+依頼詳細モーダル → **依頼者へメール**。入力できるのは **送信内容のみ** です。メール担当者名は `PRINT_CONTEST_EMAIL_STAFF_NAME` で固定され、UI では読み取り専用です。
+
+`POST /api/contest/admin/reservations/:id/custom-email` — body: `{ "message": "..." }`
 
 ## テスト送信
 

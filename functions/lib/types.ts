@@ -42,6 +42,8 @@ export interface Env {
   PRINT_3D_EMAIL_REPLY_TO?: string;
   /** 造形物コンテストメールの表示名（未設定時は既定文言） */
   PRINT_CONTEST_EMAIL_FROM_NAME?: string;
+  /** 造形物コンテスト依頼者向けメールに固定表示する担当者名（管理画面・本文に使用） */
+  PRINT_CONTEST_EMAIL_STAFF_NAME?: string;
   /** ローカルのみ: /api/dev/test-print-email 用（本番未設定で無効） */
   DEV_EMAIL_TEST_SECRET?: string;
   /** 3D印刷 Discord 通知 */
