@@ -138,7 +138,13 @@
           <div class="calendar-grid-wrap">
             <div class="calendar-grid" id="calendar-grid"></div>
           </div>
-          <p class="hint contest-calendar-hint">個人名は表示されません。自分の予約は強調表示されます。</p>
+          <p class="hint contest-calendar-hint">自分の印刷予定だけが表示されます。色は申請中・受領済み・印刷中・印刷完了を表します。</p>
+          <ul class="contest-calendar-legend" aria-label="ステータスの色">
+            <li><span class="contest-legend-swatch status-applied"></span>申請中</li>
+            <li><span class="contest-legend-swatch status-accepted"></span>受領済み</li>
+            <li><span class="contest-legend-swatch status-printing"></span>印刷中</li>
+            <li><span class="contest-legend-swatch status-delivered"></span>印刷完了</li>
+          </ul>
         </section>
       </aside>
     </div>

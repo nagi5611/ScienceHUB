@@ -197,6 +197,14 @@ function resolvePrintStaffLabel(
   return member ? formatMemberLabel(member) : null;
 }
 
+/** Statuses shown on the contest entry personal calendar. */
+const CONTEST_ENTRY_CALENDAR_STATUSES: Reservation["status"][] = [
+  "applied",
+  "accepted",
+  "printing",
+  "delivered",
+];
+
 /** Formats reservation for public calendar API. */
 function publicCalendarReservation(
   r: Reservation,
@@ -941,7 +949,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!year || !month) return error("year と month が必要です");
 
       const { start, end } = getMonthRange(year, month);
-      const reservations = await getReservationsInRange(db, start, end, 'contest');
+      const allInRange = await getReservationsInRange(db, start, end, "contest");
+      const reservations = allInRange.filter(
+        (r) =>
+          r.user_id === userId &&
+          CONTEST_ENTRY_CALENDAR_STATUSES.includes(r.status)
+      );
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       const shiftAvailability = await getAvailabilityInRange(db, start, end);
@@ -964,7 +977,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         printerCountByDate,
         reservations: reservations.map((r) => ({
           ...publicCalendarReservation(r, memberMap, printerMap),
-          owned: r.user_id === userId,
+          owned: true,
         })),
       });
     }

@@ -52,9 +52,64 @@
   cursor: default;
 }
 
-.calendar-slot--owned {
-  outline: 2px solid var(--accent, #f38020);
-  outline-offset: 1px;
+#calendar-section .calendar-slot.status-applied {
+  background: #e5e7eb !important;
+  color: #4b5563 !important;
+}
+
+#calendar-section .calendar-slot.status-accepted {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
+#calendar-section .calendar-slot.status-printing {
+  background: #fef3c7 !important;
+  color: #a16207 !important;
+}
+
+#calendar-section .calendar-slot.status-delivered {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+.contest-calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+  color: #4b5563;
+}
+
+.contest-calendar-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.contest-legend-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.contest-legend-swatch.status-applied {
+  background: #e5e7eb;
+}
+
+.contest-legend-swatch.status-accepted {
+  background: #dbeafe;
+}
+
+.contest-legend-swatch.status-printing {
+  background: #fef3c7;
+}
+
+.contest-legend-swatch.status-delivered {
+  background: #dcfce7;
 }
 
 .contest-entry-form .radio-label {

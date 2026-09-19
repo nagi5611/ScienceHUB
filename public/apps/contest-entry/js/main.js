@@ -10,8 +10,14 @@ import {
   saveContestDraft,
 } from './entry-draft.js';
 
-const SCALE_SHORT = { small: 'S', medium: 'M', large: 'L' };
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
+const STATUS_LABELS = {
+  applied: '申請中',
+  accepted: '受領済み',
+  printing: '印刷中',
+  delivered: '印刷完了',
+};
 
 let currentYear;
 let currentMonth;
@@ -116,7 +122,7 @@ function updateSubmitState() {
 async function loadCalendar() {
   const data = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
   calendarReservations = (data.reservations ?? []).filter((r) =>
-    ['accepted', 'printing', 'delivered', 'applied'].includes(r.status)
+    CALENDAR_STATUSES.includes(r.status)
   );
   renderCalendar();
 }
@@ -209,11 +215,12 @@ function createDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
     slotsWrap.className = 'calendar-slots';
     for (const r of dayRes) {
       const slot = document.createElement('div');
-      slot.className = `calendar-slot calendar-slot--readonly ${r.print_scale ?? 'small'}`;
-      if (r.owned) slot.classList.add('calendar-slot--owned');
-      const label = `${SCALE_SHORT[r.print_scale] ?? 'S'} ${truncateForCell(r.title ?? '', 4)}`;
+      const statusClass = CALENDAR_STATUSES.includes(r.status) ? r.status : 'applied';
+      slot.className = `calendar-slot calendar-slot--readonly status-${statusClass}`;
+      const statusLabel = STATUS_LABELS[statusClass] ?? statusClass;
+      const label = `${statusLabel} ${truncateForCell(r.title ?? '', 4)}`;
       slot.innerHTML = `<span class="calendar-slot-compact-label">${escapeHtml(label)}</span>`;
-      slot.title = r.title ?? '';
+      slot.title = `${statusLabel} — ${r.title ?? ''}`;
       slotsWrap.appendChild(slot);
     }
     cell.appendChild(slotsWrap);
