@@ -67,6 +67,7 @@ import {
   buildContestEntryAppUrl,
   notifyContestApplicantEmail,
   sendContestAdminTestEmail,
+  type ContestReservationStatus,
 } from "../../lib/contest/contest-email";
 import { submitContestEntry } from "../../lib/contest/submit-entry";
 import { getOAuthRedirectBase } from "../../lib/oauth";
@@ -288,20 +289,40 @@ function assertContestReservation(r: Reservation | null): r is Reservation {
   return !!r && r.source === "contest";
 }
 
-async function sendContestStatusEmail(
+async function sendContestStatusChangeEmail(
   env: Env,
   db: D1Database,
   request: Request,
   reservation: Reservation,
-  kind: "delivered" | "failed"
+  previousStatus: Reservation['status'],
+  newStatus: Reservation['status']
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
   const memberMap = await buildMemberMap(db);
-  await notifyContestApplicantEmail(env, db, reservation.user_id, kind, {
+  const entryUrl = buildContestEntryAppUrl(getOAuthRedirectBase(request, env));
+  await notifyContestApplicantEmail(env, db, reservation.user_id, 'status_changed', {
     reservation,
     printerName: resolvePrinterLabel(reservation, printerMap),
     printStaffLabel: resolvePrintStaffLabel(reservation, memberMap),
     statusComment: reservation.status_comment,
+    previousStatus: previousStatus as ContestReservationStatus,
+    newStatus: newStatus as ContestReservationStatus,
+    entryAppUrl: entryUrl,
+  });
+}
+
+async function sendContestAcceptedEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  reservation: Reservation
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  const memberMap = await buildMemberMap(db);
+  await notifyContestApplicantEmail(env, db, reservation.user_id, 'accepted', {
+    reservation,
+    printerName: resolvePrinterLabel(reservation, printerMap),
+    printStaffLabel: resolvePrintStaffLabel(reservation, memberMap),
     entryAppUrl: buildContestEntryAppUrl(getOAuthRedirectBase(request, env)),
   });
 }
@@ -629,7 +650,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return json(
           {
             id: result.reservation.id,
-            message: "登録を受け付けました",
+            message: "印刷依頼を受け付けました",
             reservation: enrichReservationForAdmin(
               result.reservation,
               memberMap,
@@ -1440,11 +1461,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const printerMap = await buildPrinterMap(db);
 
       if (updated && body.status && body.status !== previousStatus) {
-        if (body.status === "delivered") {
-          context.waitUntil(sendContestStatusEmail(env, db, request, updated, "delivered"));
-        } else if (body.status === "failed") {
-          context.waitUntil(sendContestStatusEmail(env, db, request, updated, "failed"));
-        }
+        context.waitUntil(
+          sendContestStatusChangeEmail(
+            env,
+            db,
+            request,
+            updated,
+            previousStatus,
+            body.status as Reservation['status']
+          )
+        );
       }
 
       return json({
@@ -1516,7 +1542,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const existing = await getReservationById(db, segments[2]);
-      if (!existing) return error("予約が見つかりません", 404);
+      if (!assertContestReservation(existing)) return error("予約が見つかりません", 404);
       if (existing.status !== "applied") {
         return error("申請中の予約のみ受領できます", 400);
       }
@@ -1555,6 +1581,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       const finalReservation = await getReservationById(db, segments[2]);
       const printerMap = await buildPrinterMap(db);
+
+      if (finalReservation) {
+        context.waitUntil(sendContestAcceptedEmail(env, db, request, finalReservation));
+      }
 
       return json({
         reservation: finalReservation

@@ -8,15 +8,34 @@ const DEFAULT_FROM_NAME = 'ScienceHUB 造形物コンテスト';
 
 export type ContestEmailKind =
   | 'submitted'
-  | 'rescheduled'
+  | 'accepted'
+  | 'status_changed'
+  | 'rescheduled';
+
+export type ContestReservationStatus =
+  | 'applied'
+  | 'accepted'
+  | 'printing'
   | 'delivered'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
+
+const STATUS_LABELS: Record<ContestReservationStatus, string> = {
+  applied: '申請中',
+  accepted: '承認済み',
+  printing: '印刷中',
+  delivered: '印刷済み',
+  failed: '印刷失敗',
+  cancelled: 'キャンセル',
+};
 
 interface ContestEmailContext {
   reservation: Pick<Reservation, 'id' | 'title' | 'desired_date' | 'print_scale'>;
   printerName?: string | null;
   printStaffLabel?: string | null;
   previousDate?: string;
+  previousStatus?: ContestReservationStatus;
+  newStatus?: ContestReservationStatus;
   statusComment?: string | null;
   entryAppUrl: string;
 }
@@ -37,6 +56,11 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function statusLabel(status: ContestReservationStatus | undefined): string {
+  if (!status) return '—';
+  return STATUS_LABELS[status] ?? status;
+}
+
 function buildMessage(kind: ContestEmailKind, ctx: ContestEmailContext): {
   subject: string;
   html: string;
@@ -44,31 +68,75 @@ function buildMessage(kind: ContestEmailKind, ctx: ContestEmailContext): {
 } {
   const base = `作品: ${ctx.reservation.title}
 印刷予定日: ${ctx.reservation.desired_date}
-${ctx.printerName ? `プリンター: ${ctx.printerName}\n` : ''}${ctx.printStaffLabel ? `印刷担当: ${ctx.printStaffLabel}\n` : ''}登録ID: ${ctx.reservation.id}
+${ctx.printerName ? `プリンター: ${ctx.printerName}\n` : ''}${ctx.printStaffLabel ? `印刷担当: ${ctx.printStaffLabel}\n` : ''}依頼ID: ${ctx.reservation.id}
 `;
 
   switch (kind) {
     case 'submitted': {
-      const subject = '【ScienceHUB】造形物コンテストの登録を受け付けました';
+      const subject = '【ScienceHUB】印刷依頼を受け付けました';
       const text = `${subject}
 
-造形物コンテストへの登録を受け付け、印刷日を確定しました。
+印刷依頼を受け付けました。印刷予定日は自動で ${ctx.reservation.desired_date} に設定されています。
+担当者の承認後、別途メールでご連絡します。承認までお待ちください。
 
 ${base}
 詳細: ${ctx.entryAppUrl}`;
-      const html = `<p>造形物コンテストへの登録を受け付け、<strong>印刷日を確定</strong>しました。</p>
+      const html = `<p>印刷依頼を受け付けました。印刷予定日は自動で <strong>${escapeHtml(ctx.reservation.desired_date)}</strong> に設定されています。</p>
+<p>担当者の<strong>承認後</strong>、別途メールでご連絡します。それまでお待ちください。</p>
 <ul>
 <li>作品: ${escapeHtml(ctx.reservation.title)}</li>
 <li>印刷予定日: ${escapeHtml(ctx.reservation.desired_date)}</li>
 ${ctx.printerName ? `<li>プリンター: ${escapeHtml(ctx.printerName)}</li>` : ''}
-${ctx.printStaffLabel ? `<li>印刷担当: ${escapeHtml(ctx.printStaffLabel)}</li>` : ''}
-<li>登録ID: ${escapeHtml(ctx.reservation.id)}</li>
+<li>依頼ID: ${escapeHtml(ctx.reservation.id)}</li>
 </ul>
 <p><a href="${escapeHtml(ctx.entryAppUrl)}">造形物コンテスト</a></p>`;
       return { subject, html, text };
     }
+    case 'accepted': {
+      const subject = '【ScienceHUB】印刷依頼が承認されました（担当者が決まりました）';
+      const staffLine = ctx.printStaffLabel
+        ? `印刷担当: ${ctx.printStaffLabel} が承認され、担当者が決まりました。`
+        : '印刷依頼が承認されました。';
+      const text = `${subject}
+
+${staffLine}
+印刷完了までお待ちください。
+
+${base}`;
+      const html = `<p>印刷依頼が<strong>承認</strong>され、<strong>担当者が決まりました</strong>。</p>
+${ctx.printStaffLabel ? `<p>印刷担当: <strong>${escapeHtml(ctx.printStaffLabel)}</strong></p>` : ''}
+<p>印刷が完了するまでお待ちください。進捗はメールでお知らせします。</p>
+<ul>
+<li>作品: ${escapeHtml(ctx.reservation.title)}</li>
+<li>印刷予定日: ${escapeHtml(ctx.reservation.desired_date)}</li>
+<li>依頼ID: ${escapeHtml(ctx.reservation.id)}</li>
+</ul>
+<p><a href="${escapeHtml(ctx.entryAppUrl)}">造形物コンテスト</a></p>`;
+      return { subject, html, text };
+    }
+    case 'status_changed': {
+      const prev = statusLabel(ctx.previousStatus);
+      const next = statusLabel(ctx.newStatus);
+      const subject = '【ScienceHUB】印刷依頼のステータスが更新されました';
+      const comment = ctx.statusComment?.trim();
+      const text = `${subject}
+
+ステータス: ${prev} → ${next}
+
+${base}${comment ? `コメント: ${comment}\n` : ''}`;
+      const html = `<p>印刷依頼の<strong>ステータスが更新</strong>されました。</p>
+<p>${escapeHtml(prev)} → <strong>${escapeHtml(next)}</strong></p>
+<ul>
+<li>作品: ${escapeHtml(ctx.reservation.title)}</li>
+<li>印刷予定日: ${escapeHtml(ctx.reservation.desired_date)}</li>
+<li>依頼ID: ${escapeHtml(ctx.reservation.id)}</li>
+</ul>
+${comment ? `<p>コメント: ${escapeHtml(comment)}</p>` : ''}
+<p><a href="${escapeHtml(ctx.entryAppUrl)}">造形物コンテスト</a></p>`;
+      return { subject, html, text };
+    }
     case 'rescheduled': {
-      const subject = '【ScienceHUB】造形物コンテストの印刷日が変更されました';
+      const subject = '【ScienceHUB】印刷依頼の印刷日が変更されました';
       const prev = ctx.previousDate ?? '—';
       const text = `${subject}
 
@@ -77,37 +145,13 @@ ${ctx.printStaffLabel ? `<li>印刷担当: ${escapeHtml(ctx.printStaffLabel)}</l
 変更後: ${ctx.reservation.desired_date}
 
 ${base}`;
-      const html = `<p>造形物コンテストの<strong>印刷予定日が変更</strong>されました。</p>
+      const html = `<p>印刷依頼の<strong>印刷予定日が変更</strong>されました。</p>
 <p>変更前: ${escapeHtml(prev)} → 変更後: ${escapeHtml(ctx.reservation.desired_date)}</p>
 <ul>
 <li>作品: ${escapeHtml(ctx.reservation.title)}</li>
-<li>登録ID: ${escapeHtml(ctx.reservation.id)}</li>
-</ul>`;
-      return { subject, html, text };
-    }
-    case 'delivered': {
-      const subject = '【ScienceHUB】造形物コンテストの印刷が完了しました';
-      const text = `${subject}
-
-${base}`;
-      const html = `<p>造形物コンテストの作品の<strong>印刷が完了</strong>しました。</p>
-<ul>
-<li>作品: ${escapeHtml(ctx.reservation.title)}</li>
-<li>印刷予定日: ${escapeHtml(ctx.reservation.desired_date)}</li>
-</ul>`;
-      return { subject, html, text };
-    }
-    case 'failed': {
-      const subject = '【ScienceHUB】造形物コンテストの印刷に失敗しました';
-      const comment = ctx.statusComment?.trim();
-      const text = `${subject}
-
-${base}${comment ? `コメント: ${comment}\n` : ''}`;
-      const html = `<p>造形物コンテストの作品の<strong>印刷に失敗</strong>しました。担当者にお問い合わせください。</p>
-<ul>
-<li>作品: ${escapeHtml(ctx.reservation.title)}</li>
+<li>依頼ID: ${escapeHtml(ctx.reservation.id)}</li>
 </ul>
-${comment ? `<p>コメント: ${escapeHtml(comment)}</p>` : ''}`;
+<p><a href="${escapeHtml(ctx.entryAppUrl)}">造形物コンテスト</a></p>`;
       return { subject, html, text };
     }
   }

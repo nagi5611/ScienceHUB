@@ -290,7 +290,7 @@ async function handleSubmit(e) {
       body: JSON.stringify(payload),
     });
     saveContestDraft(extractContestDraft(form, homeroom));
-    showToast(data.message || '登録しました', 'success');
+    showToast(data.message || '印刷依頼を受け付けました。担当者の承認をお待ちください', 'success');
     uploadResult = null;
     document.getElementById('selected-file-name').textContent = '';
     document.getElementById('upload-progress').classList.add('hidden');

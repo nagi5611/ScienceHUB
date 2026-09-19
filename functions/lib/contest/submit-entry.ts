@@ -5,16 +5,9 @@ import {
   notifyContestApplicantEmail,
 } from './contest-email';
 import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
-import {
-  createCalendarEventForReservation,
-} from '../3dprint/google-calendar';
 import { gradeFromHomeroom, isValidHomeroom } from '../3dprint/homeroom';
 import {
   createReservation,
-  formatMemberLabel,
-  getAllMembers,
-  getMemberById,
-  setGoogleEventId,
   type Reservation,
 } from '../3dprint/reservations';
 import { getPrinterById } from '../3dprint/printers';
@@ -56,7 +49,7 @@ function validateClass(scheduleType: ContestScheduleType, homeroom: string): str
   return null;
 }
 
-/** Creates an auto-scheduled, auto-accepted contest reservation. */
+/** Creates an auto-scheduled print request (applied — manager must accept). */
 export async function submitContestEntry(
   env: Env,
   request: Request,
@@ -95,7 +88,7 @@ export async function submitContestEntry(
     student_name: studentName,
     title: titleFromFilename(input.stl_filename),
     purpose: 'other',
-    purpose_other: '造形物コンテスト',
+    purpose_other: '印刷依頼',
     summary: null,
     print_notes: null,
     print_scale: 'small',
@@ -104,10 +97,10 @@ export async function submitContestEntry(
     stl_r2_key: input.stl_r2_key,
     stl_filename: input.stl_filename,
     stl_size_bytes: input.stl_size_bytes,
-    status: 'accepted',
+    status: 'applied',
     status_comment: null,
     print_staff: null,
-    print_staff_member_id: slot.print_staff_member_id,
+    print_staff_member_id: null,
     delivery_staff: null,
     google_event_id: null,
     request_print_video: 0,
@@ -122,22 +115,7 @@ export async function submitContestEntry(
 
   await createReservation(db, reservation);
 
-  const memberMap = new Map((await getAllMembers(db)).map((m) => [m.id, m]));
   const printer = await getPrinterById(db, slot.printer_id);
-  const staffMember = await getMemberById(db, slot.print_staff_member_id);
-  const staffLabel = staffMember ? formatMemberLabel(staffMember) : null;
-
-  let calendar: { ok: boolean; error?: string } = { ok: false, error: 'カレンダー未連携' };
-  const calendarResult = await createCalendarEventForReservation(env, reservation, memberMap);
-  if (calendarResult.ok && calendarResult.eventId) {
-    await setGoogleEventId(db, reservation.id, calendarResult.eventId);
-    calendar = { ok: true };
-  } else {
-    calendar = {
-      ok: false,
-      error: calendarResult.error ?? 'カレンダーへの追加に失敗しました',
-    };
-  }
 
   const baseUrl = getOAuthRedirectBase(request, env);
   const adminUrl = build3dPrintAdminUrl(baseUrl);
@@ -151,9 +129,11 @@ export async function submitContestEntry(
   await notifyContestApplicantEmail(env, db, userId, 'submitted', {
     reservation,
     printerName: printer?.name ?? null,
-    printStaffLabel: staffLabel,
     entryAppUrl: entryUrl,
   });
 
-  return { reservation, calendar };
+  return {
+    reservation,
+    calendar: { ok: false, error: '担当者承認後にカレンダーへ反映されます' },
+  };
 }

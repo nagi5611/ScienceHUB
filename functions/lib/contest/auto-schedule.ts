@@ -10,10 +10,9 @@ const MAX_LOOKAHEAD_DAYS = 60;
 export interface AutoScheduleResult {
   desired_date: string;
   printer_id: string;
-  print_staff_member_id: string;
 }
 
-/** Picks the earliest bookable date, printer, and staff member for a contest entry. */
+/** Picks the earliest bookable date and printer (担当は管理側の承認時に割当). */
 export async function findAutoScheduleSlot(
   db: D1Database
 ): Promise<AutoScheduleResult | null> {
@@ -25,9 +24,6 @@ export async function findAutoScheduleSlot(
     const date = addDays(startDate, offset);
     const staffIds = await getAvailableMemberIdsOnDate(db, date);
     if (!staffIds.length) continue;
-
-    const staffId = await pickStaffMemberId(db, date, staffIds);
-    if (!staffId) continue;
 
     const dayAvailability = await getDateAvailability(db, date, {
       scale: CONTEST_SCALE,
@@ -52,35 +48,9 @@ export async function findAutoScheduleSlot(
       return {
         desired_date: date,
         printer_id: printer.id,
-        print_staff_member_id: staffId,
       };
     }
   }
 
   return null;
-}
-
-/** Chooses staff with the fewest assignments on the given date. */
-async function pickStaffMemberId(
-  db: D1Database,
-  date: string,
-  staffIds: string[]
-): Promise<string | null> {
-  if (!staffIds.length) return null;
-
-  const counts = await Promise.all(
-    staffIds.map(async (id) => {
-      const row = await db
-        .prepare(
-          `SELECT COUNT(*) AS c FROM print_reservations
-           WHERE desired_date = ? AND print_staff_member_id = ? AND status != 'cancelled'`
-        )
-        .bind(date, id)
-        .first<{ c: number }>();
-      return { id, count: row?.c ?? 0 };
-    })
-  );
-
-  counts.sort((a, b) => a.count - b.count || a.id.localeCompare(b.id));
-  return counts[0]?.id ?? null;
 }

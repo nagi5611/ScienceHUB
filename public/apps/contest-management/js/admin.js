@@ -122,7 +122,7 @@ async function init() {
   });
 
   saveBtn.addEventListener('click', saveReservation);
-  acceptBtn?.classList.add('hidden');
+  acceptBtn?.addEventListener('click', acceptReservation);
   deleteBtn.addEventListener('click', deleteReservation);
   document.getElementById('edit-content-btn').addEventListener('click', () => {
     if (!currentReservationData) return;
@@ -1248,7 +1248,7 @@ async function openDetail(id) {
       handleDeletePrintVideo(r.id)
     );
 
-    document.getElementById('accept-btn').classList.add('hidden');
+    document.getElementById('accept-btn').classList.toggle('hidden', !isApplication);
     document.getElementById('save-btn').classList.toggle('hidden', isApplication);
     document.getElementById('edit-content-btn').classList.toggle('hidden', r.status === 'cancelled');
 
