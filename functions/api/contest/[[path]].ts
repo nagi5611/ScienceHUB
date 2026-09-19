@@ -65,8 +65,10 @@ import {
 } from "../../lib/3dprint/discord";
 import {
   buildContestEntryAppUrl,
+  getContestEmailComposeSettings,
   notifyContestApplicantEmail,
   sendContestAdminTestEmail,
+  sendContestCustomEmailToApplicant,
   type ContestReservationStatus,
 } from "../../lib/contest/contest-email";
 import { submitContestEntry } from "../../lib/contest/submit-entry";
@@ -1313,6 +1315,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
     }
 
+    // GET /api/contest/admin/settings/email-compose
+    if (
+      method === "GET" &&
+      segments[1] === "settings" &&
+      segments[2] === "email-compose" &&
+      segments.length === 3
+    ) {
+      return json(getContestEmailComposeSettings(env));
+    }
+
     // POST /api/3dprint/admin/settings/test-email
     if (
       method === "POST" &&
@@ -1418,7 +1430,51 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({
         reservation: enrichReservationForAdmin(reservation, memberMap, printerMap),
         available_staff,
+        email_compose: getContestEmailComposeSettings(env),
       });
+    }
+
+    // POST /api/contest/admin/reservations/:id/custom-email
+    if (
+      method === "POST" &&
+      segments[1] === "reservations" &&
+      segments.length === 4 &&
+      segments[3] === "custom-email"
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!assertContestReservation(reservation)) {
+        return error("予約が見つかりません", 404);
+      }
+      if (reservation.status === "cancelled") {
+        return error("キャンセル済みの依頼にはメールを送れません", 400);
+      }
+
+      const body = await request.json<{ message?: string }>();
+      const message = body.message?.trim() ?? "";
+      if (!message) return error("送信内容を入力してください");
+      if (message.length > 4000) {
+        return error("送信内容は4000文字以内で入力してください");
+      }
+
+      const printerMap = await buildPrinterMap(db);
+      const memberMap = await buildMemberMap(db);
+      const entryUrl = buildContestEntryAppUrl(getOAuthRedirectBase(request, env));
+      const result = await sendContestCustomEmailToApplicant(
+        env,
+        db,
+        reservation.user_id,
+        {
+          reservation,
+          printerName: resolvePrinterLabel(reservation, printerMap),
+          printStaffLabel: resolvePrintStaffLabel(reservation, memberMap),
+          entryAppUrl: entryUrl,
+        },
+        message
+      );
+      if (!result.ok) {
+        return error(result.error ?? "送信に失敗しました", result.error?.includes("設定") ? 503 : 502);
+      }
+      return json({ ok: true });
     }
 
     // PATCH /api/3dprint/admin/reservations/:id

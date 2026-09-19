@@ -64,6 +64,11 @@ let currentMonth;
 let activePanel = 'dashboard';
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 let draggedReservationId = null;
+let emailComposeSettings = {
+  staff_name: '造形物コンテスト担当',
+  staff_name_locked: true,
+  email_configured: false,
+};
 
 /** Returns whether the compact mobile admin layout is active. */
 function isMobileAdminView() {
@@ -189,7 +194,10 @@ async function init() {
   }
   }
 
-  if (authed) refreshAll();
+  if (authed) {
+    loadEmailComposeSettings();
+    refreshAll();
+  }
 }
 
 /** Switches admin panel. */
@@ -210,6 +218,15 @@ function switchPanel(panel) {
   }
   if (panel === 'shifts') renderShiftPanel();
   updateAdminStickyOffsets();
+}
+
+/** Loads fixed email staff name settings for compose UI. */
+async function loadEmailComposeSettings() {
+  try {
+    emailComposeSettings = await apiRequest('admin/settings/email-compose');
+  } catch {
+    // keep defaults
+  }
 }
 
 /** Refreshes dashboard data. */
@@ -1162,6 +1179,42 @@ function bindDetailButtons(container) {
   });
 }
 
+/** Sends a custom email to the applicant from the detail modal. */
+async function sendCustomEmailToApplicant(reservationId) {
+  const messageEl = document.getElementById('contest-email-message');
+  const statusEl = document.getElementById('contest-email-send-status');
+  const btn = document.getElementById('contest-send-custom-email-btn');
+  if (!messageEl || !statusEl || !btn) return;
+
+  const message = messageEl.value.trim();
+  if (!message) {
+    statusEl.textContent = '送信内容を入力してください';
+    statusEl.className = 'hint contest-email-send-err';
+    statusEl.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = '送信中…';
+  statusEl.className = 'hint';
+  statusEl.classList.remove('hidden');
+
+  try {
+    await apiRequest(`admin/reservations/${reservationId}/custom-email`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+    statusEl.textContent = 'メールを送信しました';
+    statusEl.className = 'hint contest-email-send-ok';
+    messageEl.value = '';
+  } catch (err) {
+    statusEl.textContent = err.message || '送信に失敗しました';
+    statusEl.className = 'hint contest-email-send-err';
+  } finally {
+    btn.disabled = !emailComposeSettings.email_configured;
+  }
+}
+
 /** Opens the reservation detail modal. */
 async function openDetail(id) {
   currentReservationId = id;
@@ -1171,6 +1224,7 @@ async function openDetail(id) {
   try {
     const data = await apiRequest(`admin/reservations/${id}`);
     const r = data.reservation;
+    const compose = data.email_compose ?? emailComposeSettings;
     currentReservationData = r.status === 'cancelled' ? null : r;
     const availableStaff = data.available_staff ?? allMembers;
 
@@ -1238,6 +1292,21 @@ async function openDetail(id) {
         <p class="hint">mp4 / mov / webm など（最大500MB）。保存先はプリンター管理の「印刷動画の保存先」で設定します。</p>
         <p class="hint hidden" id="print-video-upload-status"></p>
       </div>
+      <div class="contest-admin-email-compose">
+        <h3 class="contest-admin-email-heading">依頼者へメール</h3>
+        <p class="hint">送信内容のみ入力します。担当者名は固定でメール本文に含まれます。</p>
+        <div class="form-group">
+          <label for="contest-email-staff-name">メール担当者名</label>
+          <input type="text" id="contest-email-staff-name" readonly value="${escapeHtml(compose.staff_name)}" aria-readonly="true" />
+        </div>
+        <div class="form-group">
+          <label for="contest-email-message">送信内容</label>
+          <textarea id="contest-email-message" rows="5" maxlength="4000" placeholder="依頼者へのメッセージを入力してください" ${r.status === 'cancelled' || !compose.email_configured ? 'disabled' : ''}></textarea>
+          ${!compose.email_configured ? '<p class="hint contest-email-send-err">メール送信が未設定のため送信できません（PRINT_3D_EMAIL_FROM 等）。</p>' : ''}
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="contest-send-custom-email-btn" ${r.status === 'cancelled' || !compose.email_configured ? 'disabled' : ''}>依頼者にメールを送信</button>
+        <p class="hint hidden" id="contest-email-send-status" role="status"></p>
+      </div>
       <a href="/api/contest/admin/stl/${r.id}" class="btn btn-secondary btn-sm" download>ファイルをダウンロード</a>
     `;
 
@@ -1246,6 +1315,9 @@ async function openDetail(id) {
     );
     document.getElementById('delete-print-video-btn')?.addEventListener('click', () =>
       handleDeletePrintVideo(r.id)
+    );
+    document.getElementById('contest-send-custom-email-btn')?.addEventListener('click', () =>
+      sendCustomEmailToApplicant(r.id)
     );
 
     document.getElementById('accept-btn').classList.toggle('hidden', !isApplication);

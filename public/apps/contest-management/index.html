@@ -16,6 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/apps/3dprint-management.css" />
+  <link rel="stylesheet" href="/css/apps/contest-management.css" />
 </head>
 <body>
   <section id="admin-section">
@@ -209,7 +210,8 @@
 
           <section class="card" style="margin-top:1.5rem">
             <h2 class="section-heading">予約者向けメール</h2>
-            <p class="hint">予約申請・受領時に送るメールと同じ設定で、指定アドレスへテスト送信します。</p>
+            <p class="hint">依頼詳細から個別送信できます。メール担当者名は環境変数 <code>PRINT_CONTEST_EMAIL_STAFF_NAME</code> で固定され、送信画面では変更できません。</p>
+            <p class="hint">下のテスト送信は、自動通知と同じ経路で指定アドレスへ送ります。</p>
             <div class="form-group">
               <label for="email-test-to">送信先メールアドレス</label>
               <input type="email" id="email-test-to" autocomplete="email" placeholder="example@example.com" />
