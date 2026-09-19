@@ -75,6 +75,46 @@
   min-width: 160px;
 }
 
+.contest-advanced-settings {
+  margin: 1rem 0 1.25rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem 0.75rem;
+  background: var(--surface-muted, #f9fafb);
+}
+
+.contest-advanced-settings > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.35rem 0;
+  list-style: none;
+}
+
+.contest-advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.contest-advanced-settings > summary::before {
+  content: '▸ ';
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.contest-advanced-settings[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.contest-advanced-settings-body {
+  padding-top: 0.5rem;
+}
+
+.contest-advanced-settings-body textarea {
+  width: 100%;
+  min-height: 4rem;
+  resize: vertical;
+}
+
 .page-toast--success {
   background: #ecfdf5;
   color: #065f46;

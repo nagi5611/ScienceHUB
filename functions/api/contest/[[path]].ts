@@ -633,6 +633,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
+        title?: string | null;
+        summary?: string | null;
+        print_notes?: string | null;
       }>();
 
       try {
@@ -644,6 +647,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           stl_r2_key: String(body.stl_r2_key ?? ""),
           stl_filename: String(body.stl_filename ?? ""),
           stl_size_bytes: Number(body.stl_size_bytes),
+          title: body.title ?? null,
+          summary: body.summary ?? null,
+          print_notes: body.print_notes ?? null,
         });
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
