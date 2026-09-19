@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Env } from "../types.js";
 import {
   buildRunaPublicWebUrl,
   resolveRunaPublicOrigin,

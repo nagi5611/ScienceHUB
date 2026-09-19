@@ -25,6 +25,15 @@ RUNA_MAX_TOOL_ROUNDS=12
 # Runa Web 検索（Exa Search API — exa_search）
 # EXA_API_KEY=
 
+# 3D印刷 予約者向けメール（Email Service REST API — Pages では binding 不可）
+# ドメイン: `npx wrangler email sending enable yourdomain.com`
+# API トークンに Email Sending 権限が必要（CLOUDFLARE_ACCOUNT_ID は Runa 用と共通可）
+# PRINT_3D_EMAIL_FROM=noreply@yourdomain.com
+# PRINT_3D_EMAIL_FROM_NAME=ScienceHUB 3D印刷
+# PRINT_3D_EMAIL_REPLY_TO=developer@yourdomain.com
+# ローカル疎通のみ（本番に設定しない）: POST /api/dev/test-print-email
+# DEV_EMAIL_TEST_SECRET=local-dev-email-test-only
+
 FIREBASE_PROJECT_ID=
 FIREBASE_WEB_API_KEY=
 FIREBASE_APP_ID=
