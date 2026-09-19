@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#f38020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ScienceHUB">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <title>造形物コンテスト — ScienceHUB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/apps/3dprint-reservation.css" />
+  <link rel="stylesheet" href="/css/dashboard.css" />
+  <link rel="stylesheet" href="/css/apps/contest-entry.css" />
+</head>
+<body class="contest-entry-page">
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="/" class="site-title">ScienceHUB <span>造形物コンテスト</span></a>
+      <div class="header-actions">
+        <button type="button" class="auth-header-btn auth-header-btn-muted" id="auth-dashboard-btn">ダッシュボード</button>
+        <span class="auth-user-label" id="auth-user-label"></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="contest-entry-main">
+    <div id="page-toast" class="page-toast hidden" role="status"></div>
+
+    <h1 class="page-heading">造形物コンテスト</h1>
+    <p class="page-subheading">STL ファイルを登録すると、印刷可能な直近の日付に自動で割り当てられます（ScienceHUB ログインが必要です）。</p>
+
+    <div class="contest-entry-layout">
+      <section class="card contest-entry-form-card">
+        <h2 class="contest-section-title">作品を登録</h2>
+
+        <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
+          <p class="upload-zone-title">STL / Gコードをドロップ</p>
+          <p class="hint">またはクリックしてファイルを選択（.stl .gcode .gco .nc）</p>
+          <input type="file" id="file-input" accept=".stl,.gcode,.gco,.nc" hidden />
+        </div>
+        <p class="selected-file-name" id="selected-file-name"></p>
+        <div class="upload-progress hidden" id="upload-progress">
+          <div class="upload-progress-bar" id="upload-progress-bar"></div>
+        </div>
+        <p class="hint" id="upload-status"></p>
+
+        <form id="entry-form" class="contest-entry-form">
+          <fieldset class="form-group">
+            <legend>在籍区分</legend>
+            <label class="radio-label">
+              <input type="radio" name="schedule_type" value="full_time" checked />
+              全日制
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="schedule_type" value="part_time" />
+              定時制
+            </label>
+          </fieldset>
+
+          <div class="form-group" id="homeroom-fulltime-group">
+            <label for="homeroom">クラス（ホームルーム）</label>
+            <div class="combobox-wrap">
+              <input type="text" id="homeroom" name="homeroom" autocomplete="off" placeholder="例: 101" maxlength="3" />
+              <ul class="combobox-list hidden" id="homeroom-list" role="listbox"></ul>
+            </div>
+          </div>
+
+          <div class="form-group hidden" id="homeroom-parttime-group">
+            <label for="class_free">クラス</label>
+            <input type="text" id="class_free" name="class_free" maxlength="20" placeholder="クラス名を入力" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="student_number">出席番号</label>
+              <input type="number" id="student_number" name="student_number" min="1" max="99" required />
+            </div>
+            <div class="form-group form-group-grow">
+              <label for="student_name">名前</label>
+              <input type="text" id="student_name" name="student_name" maxlength="50" required />
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block" id="submit-btn" disabled>登録</button>
+        </form>
+      </section>
+
+      <aside class="contest-calendar-aside" aria-label="印刷予定（読み取り専用）">
+        <section class="hub-calendar-card contest-readonly-calendar" id="calendar-section" aria-readonly="true">
+          <h2 class="contest-section-title">印刷予定</h2>
+          <div class="calendar-sticky-header">
+            <div class="calendar-toolbar">
+              <div class="calendar-header calendar-header-desktop">
+                <button class="btn btn-secondary btn-sm" id="prev-month" type="button">← 前月</button>
+                <span class="calendar-month-label" id="calendar-month-label"></span>
+                <button class="btn btn-secondary btn-sm" id="next-month" type="button">翌月 →</button>
+              </div>
+              <div class="calendar-header-mobile">
+                <button class="calendar-nav-btn" id="prev-month-mobile" type="button" aria-label="前月">‹</button>
+                <span id="calendar-month-label-mobile-text"></span>
+                <button class="calendar-nav-btn" id="next-month-mobile" type="button" aria-label="翌月">›</button>
+                <button class="calendar-today-btn" id="go-today-btn" type="button" aria-label="今月へ">今日</button>
+              </div>
+            </div>
+            <div class="calendar-weekdays-row" id="calendar-weekdays-row"></div>
+          </div>
+          <div class="calendar-grid-wrap">
+            <div class="calendar-grid" id="calendar-grid"></div>
+          </div>
+          <p class="hint contest-calendar-hint">個人名は表示されません。自分の予約は強調表示されます。</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script type="module" src="/apps/contest-entry/js/main.js"></script>
+</body>
+</html>
