@@ -26,11 +26,12 @@ let uploadResult = null;
 let homeroomField = null;
 let scheduleType = 'full_time';
 
-const FREE_CLASS_SCHEDULE_TYPES = new Set(['part_time', 'hekibunko']);
+const FREE_CLASS_SCHEDULE_TYPES = new Set(['part_time', 'towa_branch']);
 
 /** Parses schedule_type radio value. */
 function parseScheduleType(value) {
-  if (value === 'part_time' || value === 'hekibunko') return value;
+  if (value === 'part_time' || value === 'towa_branch') return value;
+  if (value === 'hekibunko') return 'towa_branch';
   return 'full_time';
 }
 

@@ -634,7 +634,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // POST /api/contest/entries
     if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
       const body = await request.json<{
-        schedule_type: "full_time" | "part_time" | "hekibunko";
+        schedule_type: "full_time" | "part_time" | "towa_branch";
         homeroom: string;
         student_number: number;
         student_name: string;

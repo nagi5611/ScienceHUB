@@ -25,7 +25,8 @@ export function loadContestDraft() {
 
 /** Normalizes stored schedule_type for draft restore. */
 function normalizeDraftScheduleType(value) {
-  if (value === 'part_time' || value === 'hekibunko') return value;
+  if (value === 'part_time' || value === 'towa_branch') return value;
+  if (value === 'hekibunko') return 'towa_branch';
   return 'full_time';
 }
 
