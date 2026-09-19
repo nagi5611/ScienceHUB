@@ -61,7 +61,8 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  margin-right: 1rem;
+  margin-right: 0.75rem;
+  margin-bottom: 0.35rem;
 }
 
 .contest-entry-form .form-row {

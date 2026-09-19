@@ -30,7 +30,7 @@ export interface Reservation {
   print_video_size_bytes: number | null;
   user_id: string;
   source: 'standard' | 'contest';
-  schedule_type: 'full_time' | 'part_time' | null;
+  schedule_type: 'full_time' | 'part_time' | 'hekibunko' | null;
   created_at: string;
 }
 

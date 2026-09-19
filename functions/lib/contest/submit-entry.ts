@@ -15,17 +15,17 @@ import { verifyR2Key } from '../3dprint/upload';
 import { getOAuthRedirectBase } from '../oauth';
 import type { Env } from '../types';
 
-export type ContestScheduleType = 'full_time' | 'part_time';
+export type ContestScheduleType = 'full_time' | 'part_time' | 'hekibunko';
 
 export interface SubmitContestEntryInput {
   schedule_type: ContestScheduleType;
   homeroom: string;
   student_number: number;
   student_name: string;
+  title: string;
   stl_r2_key: string;
   stl_filename: string;
   stl_size_bytes: number;
-  title?: string | null;
   summary?: string | null;
   print_notes?: string | null;
 }
@@ -39,23 +39,15 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
 }
 
 function resolveContestTitle(input: SubmitContestEntryInput): string {
-  const custom = normalizeOptionalText(input.title);
-  if (custom) {
-    if (custom.length > 40) throw new Error('タイトルは40文字以内で入力してください');
-    return custom;
-  }
-  return titleFromFilename(input.stl_filename);
+  const title = normalizeOptionalText(input.title);
+  if (!title) throw new Error('タイトルを入力してください');
+  if (title.length > 40) throw new Error('タイトルは40文字以内で入力してください');
+  return title;
 }
 
 export interface SubmitContestEntryResult {
   reservation: Reservation;
   calendar: { ok: boolean; error?: string };
-}
-
-function titleFromFilename(filename: string): string {
-  const base = filename.replace(/^.*[/\\]/, '').trim();
-  const dot = base.lastIndexOf('.');
-  return (dot > 0 ? base.slice(0, dot) : base).slice(0, 40) || '造形物';
 }
 
 function validateClass(scheduleType: ContestScheduleType, homeroom: string): string | null {
@@ -65,8 +57,11 @@ function validateClass(scheduleType: ContestScheduleType, homeroom: string): str
     if (!isValidHomeroom(trimmed)) return 'ホームルームの形式が不正です（例: 301）';
     return null;
   }
-  if (trimmed.length > 20) return 'クラスは20文字以内で入力してください';
-  return null;
+  if (scheduleType === 'part_time' || scheduleType === 'hekibunko') {
+    if (trimmed.length > 20) return 'クラスは20文字以内で入力してください';
+    return null;
+  }
+  return '在籍区分が不正です';
 }
 
 /** Creates an auto-scheduled print request (applied — manager must accept). */
@@ -83,6 +78,10 @@ export async function submitContestEntry(
 
   if (!Number.isInteger(input.student_number) || input.student_number < 1 || input.student_number > 50) {
     throw new Error('出席番号が不正です');
+  }
+
+  if (!['full_time', 'part_time', 'hekibunko'].includes(input.schedule_type)) {
+    throw new Error('在籍区分が不正です');
   }
 
   const studentName = input.student_name.trim();

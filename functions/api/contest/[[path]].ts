@@ -626,14 +626,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // POST /api/contest/entries
     if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
       const body = await request.json<{
-        schedule_type: "full_time" | "part_time";
+        schedule_type: "full_time" | "part_time" | "hekibunko";
         homeroom: string;
         student_number: number;
         student_name: string;
+        title: string;
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
-        title?: string | null;
         summary?: string | null;
         print_notes?: string | null;
       }>();
@@ -644,10 +644,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           homeroom: String(body.homeroom ?? ""),
           student_number: Number(body.student_number),
           student_name: String(body.student_name ?? ""),
+          title: String(body.title ?? ""),
           stl_r2_key: String(body.stl_r2_key ?? ""),
           stl_filename: String(body.stl_filename ?? ""),
           stl_size_bytes: Number(body.stl_size_bytes),
-          title: body.title ?? null,
           summary: body.summary ?? null,
           print_notes: body.print_notes ?? null,
         });
