@@ -15,7 +15,7 @@ import { verifyR2Key } from '../3dprint/upload';
 import { getOAuthRedirectBase } from '../oauth';
 import type { Env } from '../types';
 
-export type ContestScheduleType = 'full_time' | 'part_time' | 'hekibunko';
+export type ContestScheduleType = 'full_time' | 'part_time' | 'towa_branch';
 
 export interface SubmitContestEntryInput {
   schedule_type: ContestScheduleType;
@@ -57,7 +57,7 @@ function validateClass(scheduleType: ContestScheduleType, homeroom: string): str
     if (!isValidHomeroom(trimmed)) return 'ホームルームの形式が不正です（例: 301）';
     return null;
   }
-  if (scheduleType === 'part_time' || scheduleType === 'hekibunko') {
+  if (scheduleType === 'part_time' || scheduleType === 'towa_branch') {
     if (trimmed.length > 20) return 'クラスは20文字以内で入力してください';
     return null;
   }
@@ -80,7 +80,7 @@ export async function submitContestEntry(
     throw new Error('出席番号が不正です');
   }
 
-  if (!['full_time', 'part_time', 'hekibunko'].includes(input.schedule_type)) {
+  if (!['full_time', 'part_time', 'towa_branch'].includes(input.schedule_type)) {
     throw new Error('在籍区分が不正です');
   }
 
