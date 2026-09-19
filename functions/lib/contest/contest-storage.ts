@@ -12,8 +12,9 @@ import {
   sanitizeFilename,
   toR2Key,
 } from '../storage/keys';
-import { createStorageDirectory, deleteStoragePath } from '../storage/operations';
+import { deleteStoragePath } from '../storage/operations';
 import { ensureGroupStorageRoot } from '../storage/roots';
+import { createFolderMeta, writeMetaJson } from '../storage/meta';
 import {
   initiateStorageUpload,
   listExistingFilenames,
@@ -76,11 +77,23 @@ async function folderExists(
   return head !== null;
 }
 
+async function ensureFolderMeta(
+  env: Env,
+  groupSlug: string,
+  relativeDir: string,
+  createdByUsername: string
+): Promise<void> {
+  if (await folderExists(env, groupSlug, relativeDir)) return;
+  const bucket = getFiles(env);
+  const meta = createFolderMeta(createdByUsername, 'group');
+  await writeMetaJson(bucket, folderMetaKey('group', groupSlug, relativeDir), meta);
+}
+
 /** 集約用ディレクトリツリーを作成（既存はスキップ） */
 export async function ensureContestStorageDirectories(
   env: Env,
   db: D1Database,
-  user: SessionUser,
+  _user: SessionUser,
   groupSlug: string
 ): Promise<void> {
   const group = await db
@@ -89,30 +102,16 @@ export async function ensureContestStorageDirectories(
     .first<{ id: string; slug: string }>();
   if (!group) throw new Error('グループが見つかりません');
 
-  await ensureGroupStorageRoot(env, db, group.id, group.slug, user.username);
+  const metaUser = _user.username || 'contest-sync';
+  await ensureGroupStorageRoot(env, db, group.id, group.slug, metaUser);
 
-  const groupParsed = parseLogicalPath(buildLogicalPath('group', groupSlug));
-  if (!groupParsed) throw new Error('パス形式が不正です');
-
-  if (!(await folderExists(env, groupSlug, CONTEST_STORAGE_ROOT_FOLDER))) {
-    await createStorageDirectory(env, db, user, groupParsed, CONTEST_STORAGE_ROOT_FOLDER);
-  }
-
-  const rootParsed = parseLogicalPath(
-    buildLogicalPath('group', groupSlug, CONTEST_STORAGE_ROOT_FOLDER)
+  await ensureFolderMeta(env, groupSlug, CONTEST_STORAGE_ROOT_FOLDER, metaUser);
+  await ensureFolderMeta(
+    env,
+    groupSlug,
+    `${CONTEST_STORAGE_ROOT_FOLDER}/${CONTEST_STORAGE_SUBMISSIONS_FOLDER}`,
+    metaUser
   );
-  if (!rootParsed) throw new Error('パス形式が不正です');
-
-  const submissionsRel = `${CONTEST_STORAGE_ROOT_FOLDER}/${CONTEST_STORAGE_SUBMISSIONS_FOLDER}`;
-  if (!(await folderExists(env, groupSlug, submissionsRel))) {
-    await createStorageDirectory(
-      env,
-      db,
-      user,
-      rootParsed,
-      CONTEST_STORAGE_SUBMISSIONS_FOLDER
-    );
-  }
 }
 
 /** 上書きまたは (1)(2) 付きで保存ファイル名を決定 */
@@ -234,7 +233,7 @@ export async function syncContestSubmissionToStorage(
     relativeDir,
     desiredFilename,
     body.byteLength,
-    { forcedResolvedFilename: resolvedFilename }
+    { forcedResolvedFilename: resolvedFilename, contestGroupSubmissionSync: true }
   );
 
   if (initiated.mode !== 'simple') {
