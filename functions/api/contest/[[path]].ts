@@ -69,6 +69,7 @@ import {
   notifyContestApplicantEmail,
   sendContestAdminTestEmail,
   sendContestCustomEmailToApplicant,
+  resolveContestEmailStaffName,
   type ContestReservationStatus,
 } from "../../lib/contest/contest-email";
 import { submitContestEntry } from "../../lib/contest/submit-entry";
@@ -1509,7 +1510,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({
         reservation: enrichReservationForAdmin(reservation, memberMap, printerMap),
         available_staff,
-        email_compose: getContestEmailComposeSettings(env),
+        email_compose: {
+          ...getContestEmailComposeSettings(env),
+          staff_name: await resolveContestEmailStaffName(
+            db,
+            env,
+            reservation.print_staff_member_id
+          ),
+          staff_name_locked: true,
+        },
       });
     }
 
@@ -1528,11 +1537,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("キャンセル済みの依頼にはメールを送れません", 400);
       }
 
-      const body = await request.json<{ message?: string }>();
+      const body = await request.json<{ message?: string; print_staff_member_id?: string | null }>();
       const message = body.message?.trim() ?? "";
       if (!message) return error("送信内容を入力してください");
       if (message.length > 4000) {
         return error("送信内容は4000文字以内で入力してください");
+      }
+
+      let staffMemberIdForEmail = reservation.print_staff_member_id;
+      if (body.print_staff_member_id) {
+        const member = await getMemberById(db, body.print_staff_member_id);
+        if (!member) return error("指定された印刷担当者が見つかりません");
+        staffMemberIdForEmail = body.print_staff_member_id;
       }
 
       const printerMap = await buildPrinterMap(db);
@@ -1548,7 +1564,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           printStaffLabel: resolvePrintStaffLabel(reservation, memberMap),
           entryAppUrl: entryUrl,
         },
-        message
+        message,
+        { printStaffMemberId: staffMemberIdForEmail }
       );
       if (!result.ok) {
         return error(result.error ?? "送信に失敗しました", result.error?.includes("設定") ? 503 : 502);

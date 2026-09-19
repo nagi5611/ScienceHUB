@@ -6,7 +6,7 @@
 
 - 送信に必須: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `PRINT_3D_EMAIL_FROM`
 - 任意: `PRINT_3D_EMAIL_FROM_NAME`, `PRINT_3D_EMAIL_REPLY_TO`, `PRINT_CONTEST_EMAIL_FROM_NAME`（未設定時は表示名「ScienceHUB 造形物コンテスト」）
-- 任意: **`PRINT_CONTEST_EMAIL_STAFF_NAME`** — 依頼者向けメール本文・管理画面の「メール担当者名」（未設定時は「造形物コンテスト担当」）。管理画面では変更不可の固定表示。
+- 任意: **`PRINT_CONTEST_EMAIL_STAFF_NAME`** — 印刷担当メンバーが未割り当てのときだけ、メール署名に使うフォールバック（未設定時は「担当者」）。通常は **メンバー登録の印刷担当者の名前** が使われます。
 
 未設定時は送信をスキップし、API は成功のままです。
 
@@ -27,9 +27,9 @@
 
 ## 管理画面からの個別送信
 
-依頼詳細モーダル → **依頼者へメール**。入力できるのは **送信内容のみ** です。メール担当者名は `PRINT_CONTEST_EMAIL_STAFF_NAME` で固定され、UI では読み取り専用です。
+依頼詳細モーダル → **依頼者へメール**。入力できるのは **送信内容のみ** です。メール担当者名は **印刷担当で選んだ登録メンバーの名前**（依頼詳細の「印刷担当は」と連動）が読み取り専用で表示されます。
 
-`POST /api/contest/admin/reservations/:id/custom-email` — body: `{ "message": "..." }`
+`POST /api/contest/admin/reservations/:id/custom-email` — body: `{ "message": "...", "print_staff_member_id": "任意（申請中で未受領のとき、選択中の担当者ID）" }`
 
 ## テスト送信
 

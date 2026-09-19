@@ -68,8 +68,6 @@ let activePanel = 'dashboard';
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 let draggedReservationId = null;
 let emailComposeSettings = {
-  staff_name: '造形物コンテスト担当',
-  staff_name_locked: true,
   email_configured: false,
 };
 
@@ -1206,9 +1204,13 @@ async function sendCustomEmailToApplicant(reservationId) {
   statusEl.classList.remove('hidden');
 
   try {
+    const staffId = document.getElementById('edit-print-staff')?.value?.trim() || null;
     await apiRequest(`admin/reservations/${reservationId}/custom-email`, {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message,
+        ...(staffId ? { print_staff_member_id: staffId } : {}),
+      }),
     });
     statusEl.textContent = 'メールを送信しました';
     statusEl.className = 'hint contest-email-send-ok';
@@ -1300,10 +1302,10 @@ async function openDetail(id) {
       </div>
       <div class="contest-admin-email-compose">
         <h3 class="contest-admin-email-heading">依頼者へメール</h3>
-        <p class="hint">送信内容のみ入力します。担当者名は固定でメール本文に含まれます。</p>
+        <p class="hint">送信内容のみ入力します。メール担当者名は「印刷担当」で選んだ登録メンバーの名前が使われます（未選択時は「担当者」）。</p>
         <div class="form-group">
           <label for="contest-email-staff-name">メール担当者名</label>
-          <input type="text" id="contest-email-staff-name" readonly value="${escapeHtml(compose.staff_name)}" aria-readonly="true" />
+          <input type="text" id="contest-email-staff-name" readonly value="${escapeHtml(compose.staff_name ?? '担当者')}" aria-readonly="true" />
         </div>
         <div class="form-group">
           <label for="contest-email-message">送信内容</label>
@@ -1325,6 +1327,22 @@ async function openDetail(id) {
     document.getElementById('contest-send-custom-email-btn')?.addEventListener('click', () =>
       sendCustomEmailToApplicant(r.id)
     );
+
+    const staffSelect = document.getElementById('edit-print-staff');
+    const staffNameInput = document.getElementById('contest-email-staff-name');
+    const fallbackStaffName = compose.staff_name ?? '担当者';
+    const syncEmailStaffNameFromSelect = () => {
+      if (!staffNameInput || !staffSelect) return;
+      const id = staffSelect.value?.trim();
+      if (!id) {
+        staffNameInput.value = fallbackStaffName;
+        return;
+      }
+      const member = allMembers.find((m) => m.id === id);
+      staffNameInput.value = member?.name ?? fallbackStaffName;
+    };
+    staffSelect?.addEventListener('change', syncEmailStaffNameFromSelect);
+    syncEmailStaffNameFromSelect();
 
     document.getElementById('accept-btn').classList.toggle('hidden', !isApplication);
     document.getElementById('save-btn').classList.toggle('hidden', isApplication);

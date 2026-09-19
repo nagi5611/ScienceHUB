@@ -1,12 +1,13 @@
 // functions/lib/contest/contest-email.ts
 import type { Reservation } from '../3dprint/reservations';
+import { getMemberById } from '../3dprint/reservations';
 import type { PrintScale } from '../3dprint/slots';
 import type { Env } from '../types';
 import { isEmailSendingConfigured, sendTransactionalEmail } from '../email/cloudflare-email';
 import { getUserEmailById } from '../3dprint/reservation-email';
 
 const DEFAULT_FROM_NAME = 'ScienceHUB 造形物コンテスト';
-const DEFAULT_STAFF_NAME = '造形物コンテスト担当';
+const DEFAULT_STAFF_NAME = '担当者';
 
 const SCALE_LABELS: Record<PrintScale, string> = {
   small: 'スモール',
@@ -50,7 +51,10 @@ const STATUS_BADGE_STYLES: Record<
 };
 
 export interface ContestEmailContext {
-  reservation: Pick<Reservation, 'id' | 'title' | 'desired_date' | 'print_scale'>;
+  reservation: Pick<
+    Reservation,
+    'id' | 'title' | 'desired_date' | 'print_scale' | 'print_staff_member_id'
+  >;
   printerName?: string | null;
   printStaffLabel?: string | null;
   previousDate?: string;
@@ -68,21 +72,30 @@ function getFromName(env: Env): string {
   return env.PRINT_CONTEST_EMAIL_FROM_NAME?.trim() || DEFAULT_FROM_NAME;
 }
 
-/** Fixed staff name shown in admin UI and embedded in applicant emails. */
-export function getContestEmailStaffName(env: Env): string {
+/** Env-only fallback when no print member is assigned. */
+function getContestEmailStaffNameFromEnv(env: Env): string {
   return env.PRINT_CONTEST_EMAIL_STAFF_NAME?.trim() || DEFAULT_STAFF_NAME;
 }
 
-/** Settings for the admin custom-email compose form. */
+/** メール署名・フッターの担当者名（登録メンバーの名前を優先） */
+export async function resolveContestEmailStaffName(
+  db: D1Database,
+  env: Env,
+  printStaffMemberId: string | null | undefined
+): Promise<string> {
+  if (printStaffMemberId) {
+    const member = await getMemberById(db, printStaffMemberId);
+    if (member) return member.name;
+  }
+  return getContestEmailStaffNameFromEnv(env);
+}
+
+/** Settings for the admin custom-email compose form (global flags only). */
 export function getContestEmailComposeSettings(env: Env): {
-  staff_name: string;
-  staff_name_locked: true;
   email_configured: boolean;
 } {
   const from = getFromAddress(env);
   return {
-    staff_name: getContestEmailStaffName(env),
-    staff_name_locked: true,
     email_configured: isEmailSendingConfigured(env, from),
   };
 }
@@ -327,7 +340,11 @@ export async function notifyContestApplicantEmail(
     return;
   }
 
-  const staffName = getContestEmailStaffName(env);
+  const staffName = await resolveContestEmailStaffName(
+    db,
+    env,
+    ctx.reservation.print_staff_member_id
+  );
   const { subject, html, text } = buildMessage(kind, ctx, staffName);
   await sendTransactionalEmail(env, {
     to,
@@ -345,7 +362,8 @@ export async function sendContestCustomEmailToApplicant(
   db: D1Database,
   userId: string,
   ctx: ContestEmailContext,
-  messageBody: string
+  messageBody: string,
+  options?: { printStaffMemberId?: string | null }
 ): Promise<{ ok: boolean; error?: string }> {
   const from = getFromAddress(env);
   if (!isEmailSendingConfigured(env, from)) {
@@ -369,7 +387,9 @@ export async function sendContestCustomEmailToApplicant(
     return { ok: false, error: '依頼者のメールアドレスが登録されていません' };
   }
 
-  const staffName = getContestEmailStaffName(env);
+  const staffMemberId =
+    options?.printStaffMemberId ?? ctx.reservation.print_staff_member_id;
+  const staffName = await resolveContestEmailStaffName(db, env, staffMemberId);
   const { subject, html, text } = buildCustomMessage(ctx, staffName, trimmed);
   const sent = await sendTransactionalEmail(env, {
     to,
@@ -416,7 +436,7 @@ export async function sendContestAdminTestEmail(
     return { ok: false, error: 'メールアドレスを入力してください' };
   }
 
-  const staffName = getContestEmailStaffName(env);
+  const staffName = getContestEmailStaffNameFromEnv(env);
   const sent = await sendTransactionalEmail(env, {
     to: recipient,
     from: { email: from!, name: getFromName(env) },
@@ -432,6 +452,7 @@ export async function sendContestAdminTestEmail(
           title: 'サンプル作品',
           desired_date: '2099-01-01',
           print_scale: 'small',
+          print_staff_member_id: null,
         },
         entryAppUrl: 'https://example.com/apps/contest-entry/',
       },

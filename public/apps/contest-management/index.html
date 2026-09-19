@@ -210,7 +210,7 @@
 
           <section class="card" style="margin-top:1.5rem">
             <h2 class="section-heading">予約者向けメール</h2>
-            <p class="hint">依頼詳細から個別送信できます。メール担当者名は環境変数 <code>PRINT_CONTEST_EMAIL_STAFF_NAME</code> で固定され、送信画面では変更できません。</p>
+            <p class="hint">依頼詳細から個別送信できます。メールの担当者名は、依頼に割り当てた（または「印刷担当」で選んだ）<strong>登録メンバーの名前</strong>が使われます。未割り当て時のみ環境変数 <code>PRINT_CONTEST_EMAIL_STAFF_NAME</code>（未設定時は「担当者」）。</p>
             <p class="hint">下のテスト送信は、自動通知と同じ経路で指定アドレスへ送ります。</p>
             <div class="form-group">
               <label for="email-test-to">送信先メールアドレス</label>
