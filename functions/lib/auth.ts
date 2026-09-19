@@ -123,6 +123,55 @@ export async function getSessionUser(
   };
 }
 
+/** ユーザー ID から SessionUser を構築（バックグラウンド処理用） */
+export async function getSessionUserById(
+  env: Env,
+  db: D1Database,
+  userId: string
+): Promise<SessionUser | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, username, email, display_name, role_slug, avatar_url, updated_at
+       FROM users WHERE id = ?`
+    )
+    .bind(userId)
+    .first<{
+      id: string;
+      username: string;
+      email: string;
+      display_name: string;
+      role_slug: string;
+      avatar_url: string | null;
+      updated_at: number;
+    }>();
+
+  if (!row) return null;
+
+  const roles = await getUserRoles(db, row.id);
+  const isAdmin = await userHasAdminRole(db, row.id);
+  const avatar_url = await resolveUserAvatarUrl(env, {
+    username: row.username,
+    avatar_url: row.avatar_url,
+    updated_at: row.updated_at,
+  });
+
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    display_name: row.display_name,
+    role_slug: row.role_slug,
+    avatar_url,
+    roles: roles.map((role) => ({
+      slug: role.slug,
+      display_name: role.display_name,
+      color: role.color,
+      is_admin: role.is_admin,
+    })),
+    is_admin: isAdmin,
+  };
+}
+
 /** ログイン済みユーザーを要求する */
 export async function requireUser(
   request: Request,

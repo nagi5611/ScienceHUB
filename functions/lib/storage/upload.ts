@@ -231,6 +231,11 @@ export async function resolveUniqueFolderName(
 }
 
 /** アップロードを初期化 */
+export interface InitiateStorageUploadOptions {
+  /** 自動リネームをせずこのファイル名で保存（呼び出し側で衝突解決） */
+  forcedResolvedFilename?: string;
+}
+
 export async function initiateStorageUpload(
   env: Env,
   db: D1Database,
@@ -239,7 +244,8 @@ export async function initiateStorageUpload(
   rootKey: string,
   relativeDir: string,
   filename: string,
-  size: number
+  size: number,
+  options?: InitiateStorageUploadOptions
 ): Promise<
   | {
       mode: "simple";
@@ -278,13 +284,9 @@ export async function initiateStorageUpload(
     throw new Error("割り当て領域を超えるためアップロードできません");
   }
 
-  const resolvedFilename = await resolveUniqueFilename(
-    env,
-    rootType,
-    rootKey,
-    relativeDir,
-    filename
-  );
+  const resolvedFilename = options?.forcedResolvedFilename
+    ? sanitizeFilename(options.forcedResolvedFilename)
+    : await resolveUniqueFilename(env, rootType, rootKey, relativeDir, filename);
 
   const relativeFilePath = relativeDir
     ? `${relativeDir}/${resolvedFilename}`

@@ -31,6 +31,8 @@ export interface Reservation {
   user_id: string;
   source: 'standard' | 'contest';
   schedule_type: 'full_time' | 'part_time' | 'towa_branch' | null;
+  contest_storage_path?: string | null;
+  contest_storage_filename?: string | null;
   created_at: string;
 }
 
@@ -286,8 +288,8 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
         stl_r2_key, stl_filename, stl_size_bytes, status,
         print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
-        user_id, source, schedule_type, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        user_id, source, schedule_type, contest_storage_path, contest_storage_filename, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -315,8 +317,27 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.user_id,
       data.source ?? 'standard',
       data.schedule_type ?? null,
+      data.contest_storage_path ?? null,
+      data.contest_storage_filename ?? null,
       data.created_at
     )
+    .run();
+}
+
+/** 造形物コンテスト提出ファイルのクラウドストレージパスを更新 */
+export async function updateReservationContestStorage(
+  db: D1Database,
+  id: string,
+  data: { contest_storage_path: string; contest_storage_filename: string }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE print_reservations SET
+        contest_storage_path = ?,
+        contest_storage_filename = ?
+       WHERE id = ?`
+    )
+    .bind(data.contest_storage_path, data.contest_storage_filename, id)
     .run();
 }
 
