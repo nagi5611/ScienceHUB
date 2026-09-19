@@ -61,6 +61,10 @@
               <input type="radio" name="schedule_type" value="part_time" />
               定時制
             </label>
+            <label class="radio-label">
+              <input type="radio" name="schedule_type" value="hekibunko" />
+              壁文庫
+            </label>
           </fieldset>
 
           <div class="form-group" id="homeroom-fulltime-group">
@@ -83,22 +87,24 @@
             </div>
             <div class="form-group form-group-grow">
               <label for="student_name">名前</label>
-              <input type="text" id="student_name" name="student_name" maxlength="50" required />
+              <input type="text" id="student_name" name="student_name" maxlength="50" placeholder="松山太郎" required />
             </div>
+          </div>
+
+          <div class="form-group">
+            <label for="title">タイトル</label>
+            <input type="text" id="title" name="title" maxlength="40" required placeholder="歯車班_球場歯車" />
+            <p class="hint">カレンダーに表示される名前です</p>
+          </div>
+
+          <div class="form-group">
+            <label for="summary">概要（任意）</label>
+            <textarea id="summary" name="summary" rows="3" placeholder="印刷物の概要や用途を記入できます"></textarea>
           </div>
 
           <details class="contest-advanced-settings">
             <summary>高度な設定</summary>
             <div class="contest-advanced-settings-body">
-              <div class="form-group">
-                <label for="title">タイトル（任意）</label>
-                <input type="text" id="title" name="title" maxlength="40" placeholder="未入力の場合はファイル名が使われます" />
-                <p class="hint">カレンダーに表示される名前です</p>
-              </div>
-              <div class="form-group">
-                <label for="summary">概要（任意）</label>
-                <textarea id="summary" name="summary" rows="3" placeholder="印刷物の概要や用途を記入できます"></textarea>
-              </div>
               <div class="form-group">
                 <label for="print_notes">印刷時の注意点（任意）</label>
                 <textarea id="print_notes" name="print_notes" rows="4" placeholder="高さ20cm未満&#10;長辺25cmに合わせる&#10;サポーター有・tree&#10;充填率60%"></textarea>
@@ -132,7 +138,13 @@
           <div class="calendar-grid-wrap">
             <div class="calendar-grid" id="calendar-grid"></div>
           </div>
-          <p class="hint contest-calendar-hint">個人名は表示されません。自分の予約は強調表示されます。</p>
+          <p class="hint contest-calendar-hint">自分の印刷予定だけが表示されます。色は申請中・受領済み・印刷中・印刷完了を表します。</p>
+          <ul class="contest-calendar-legend" aria-label="ステータスの色">
+            <li><span class="contest-legend-swatch status-applied"></span>申請中</li>
+            <li><span class="contest-legend-swatch status-accepted"></span>受領済み</li>
+            <li><span class="contest-legend-swatch status-printing"></span>印刷中</li>
+            <li><span class="contest-legend-swatch status-delivered"></span>印刷完了</li>
+          </ul>
         </section>
       </aside>
     </div>

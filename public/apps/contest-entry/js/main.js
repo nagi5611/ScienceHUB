@@ -10,8 +10,14 @@ import {
   saveContestDraft,
 } from './entry-draft.js';
 
-const SCALE_SHORT = { small: 'S', medium: 'M', large: 'L' };
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
+const STATUS_LABELS = {
+  applied: '申請中',
+  accepted: '受領済み',
+  printing: '印刷中',
+  delivered: '印刷完了',
+};
 
 let currentYear;
 let currentMonth;
@@ -19,6 +25,18 @@ let calendarReservations = [];
 let uploadResult = null;
 let homeroomField = null;
 let scheduleType = 'full_time';
+
+const FREE_CLASS_SCHEDULE_TYPES = new Set(['part_time', 'hekibunko']);
+
+/** Parses schedule_type radio value. */
+function parseScheduleType(value) {
+  if (value === 'part_time' || value === 'hekibunko') return value;
+  return 'full_time';
+}
+
+function usesFreeClassInput(type) {
+  return FREE_CLASS_SCHEDULE_TYPES.has(type);
+}
 
 /** Returns today's date in JST (YYYY-MM-DD). */
 function todayJst() {
@@ -65,7 +83,7 @@ function updateScheduleTypeUi() {
 }
 
 function getHomeroomValue() {
-  if (scheduleType === 'part_time') {
+  if (usesFreeClassInput(scheduleType)) {
     return document.getElementById('class_free')?.value.trim() ?? '';
   }
   return homeroomField?.getValue?.() ?? document.getElementById('homeroom')?.value.trim() ?? '';
@@ -83,6 +101,7 @@ function updateSubmitState() {
   const formData = new FormData(form);
   const studentNumber = String(formData.get('student_number') ?? '').trim();
   const studentName = String(formData.get('student_name') ?? '').trim();
+  const title = String(formData.get('title') ?? '').trim();
   const homeroom = getHomeroomValue();
 
   let homeroomOk = false;
@@ -94,15 +113,16 @@ function updateSubmitState() {
 
   const numOk = /^\d+$/.test(studentNumber) && Number(studentNumber) >= 1 && Number(studentNumber) <= 99;
   const nameOk = studentName.length >= 1 && studentName.length <= 50;
+  const titleOk = title.length >= 1 && title.length <= 40;
   const fileOk = Boolean(uploadResult?.r2Key);
 
-  btn.disabled = !(homeroomOk && numOk && nameOk && fileOk);
+  btn.disabled = !(homeroomOk && numOk && nameOk && titleOk && fileOk);
 }
 
 async function loadCalendar() {
   const data = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
   calendarReservations = (data.reservations ?? []).filter((r) =>
-    ['accepted', 'printing', 'delivered', 'applied'].includes(r.status)
+    CALENDAR_STATUSES.includes(r.status)
   );
   renderCalendar();
 }
@@ -195,11 +215,12 @@ function createDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
     slotsWrap.className = 'calendar-slots';
     for (const r of dayRes) {
       const slot = document.createElement('div');
-      slot.className = `calendar-slot calendar-slot--readonly ${r.print_scale ?? 'small'}`;
-      if (r.owned) slot.classList.add('calendar-slot--owned');
-      const label = `${SCALE_SHORT[r.print_scale] ?? 'S'} ${truncateForCell(r.title ?? '', 4)}`;
+      const statusClass = CALENDAR_STATUSES.includes(r.status) ? r.status : 'applied';
+      slot.className = `calendar-slot calendar-slot--readonly status-${statusClass}`;
+      const statusLabel = STATUS_LABELS[statusClass] ?? statusClass;
+      const label = `${statusLabel} ${truncateForCell(r.title ?? '', 4)}`;
       slot.innerHTML = `<span class="calendar-slot-compact-label">${escapeHtml(label)}</span>`;
-      slot.title = r.title ?? '';
+      slot.title = `${statusLabel} — ${r.title ?? ''}`;
       slotsWrap.appendChild(slot);
     }
     cell.appendChild(slotsWrap);
@@ -269,6 +290,11 @@ async function handleSubmit(e) {
     showToast('クラスは 101〜109、201〜209、301〜309 から選択してください', 'error');
     return;
   }
+  const title = String(formData.get('title') ?? '').trim();
+  if (!title || title.length > 40) {
+    showToast('タイトルを入力してください（40文字以内）', 'error');
+    return;
+  }
   if (!uploadResult?.r2Key) {
     showToast('ファイルをアップロードしてください', 'error');
     return;
@@ -284,10 +310,10 @@ async function handleSubmit(e) {
       homeroom,
       student_number: Number(formData.get('student_number')),
       student_name: String(formData.get('student_name')).trim(),
+      title: titleRaw,
       stl_r2_key: uploadResult.r2Key,
       stl_filename: uploadResult.filename,
       stl_size_bytes: uploadResult.size,
-      ...(titleRaw ? { title: titleRaw } : {}),
       ...(summaryRaw ? { summary: summaryRaw } : {}),
       ...(printNotesRaw ? { print_notes: printNotesRaw } : {}),
     };
@@ -326,7 +352,7 @@ async function init() {
 
   document.querySelectorAll('input[name="schedule_type"]').forEach((input) => {
     input.addEventListener('change', () => {
-      scheduleType = input.value === 'part_time' ? 'part_time' : 'full_time';
+      scheduleType = parseScheduleType(input.value);
       updateScheduleTypeUi();
       persistDraftFromForm();
     });
@@ -345,7 +371,7 @@ async function init() {
   const draft = loadContestDraft();
   if (draft) {
     applyContestDraft(form, draft);
-    scheduleType = draft.schedule_type === 'part_time' ? 'part_time' : 'full_time';
+    scheduleType = parseScheduleType(draft.schedule_type);
   }
   updateScheduleTypeUi();
 

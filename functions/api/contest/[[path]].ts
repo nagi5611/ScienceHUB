@@ -197,6 +197,14 @@ function resolvePrintStaffLabel(
   return member ? formatMemberLabel(member) : null;
 }
 
+/** Statuses shown on the contest entry personal calendar. */
+const CONTEST_ENTRY_CALENDAR_STATUSES: Reservation["status"][] = [
+  "applied",
+  "accepted",
+  "printing",
+  "delivered",
+];
+
 /** Formats reservation for public calendar API. */
 function publicCalendarReservation(
   r: Reservation,
@@ -626,14 +634,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // POST /api/contest/entries
     if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
       const body = await request.json<{
-        schedule_type: "full_time" | "part_time";
+        schedule_type: "full_time" | "part_time" | "hekibunko";
         homeroom: string;
         student_number: number;
         student_name: string;
+        title: string;
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
-        title?: string | null;
         summary?: string | null;
         print_notes?: string | null;
       }>();
@@ -644,10 +652,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           homeroom: String(body.homeroom ?? ""),
           student_number: Number(body.student_number),
           student_name: String(body.student_name ?? ""),
+          title: String(body.title ?? ""),
           stl_r2_key: String(body.stl_r2_key ?? ""),
           stl_filename: String(body.stl_filename ?? ""),
           stl_size_bytes: Number(body.stl_size_bytes),
-          title: body.title ?? null,
           summary: body.summary ?? null,
           print_notes: body.print_notes ?? null,
         });
@@ -941,7 +949,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!year || !month) return error("year と month が必要です");
 
       const { start, end } = getMonthRange(year, month);
-      const reservations = await getReservationsInRange(db, start, end, 'contest');
+      const allInRange = await getReservationsInRange(db, start, end, "contest");
+      const reservations = allInRange.filter(
+        (r) =>
+          r.user_id === userId &&
+          CONTEST_ENTRY_CALENDAR_STATUSES.includes(r.status)
+      );
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       const shiftAvailability = await getAvailabilityInRange(db, start, end);
@@ -964,7 +977,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         printerCountByDate,
         reservations: reservations.map((r) => ({
           ...publicCalendarReservation(r, memberMap, printerMap),
-          owned: r.user_id === userId,
+          owned: true,
         })),
       });
     }

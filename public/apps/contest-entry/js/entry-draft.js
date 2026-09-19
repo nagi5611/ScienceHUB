@@ -23,11 +23,17 @@ export function loadContestDraft() {
   }
 }
 
+/** Normalizes stored schedule_type for draft restore. */
+function normalizeDraftScheduleType(value) {
+  if (value === 'part_time' || value === 'hekibunko') return value;
+  return 'full_time';
+}
+
 /** Applies draft to form controls. */
 export function applyContestDraft(form, draft) {
   if (!draft) return;
 
-  const scheduleType = draft.schedule_type === 'part_time' ? 'part_time' : 'full_time';
+  const scheduleType = normalizeDraftScheduleType(draft.schedule_type);
   const radio = form.querySelector(`input[name="schedule_type"][value="${scheduleType}"]`);
   if (radio) radio.checked = true;
 
@@ -52,7 +58,7 @@ export function applyContestDraft(form, draft) {
 /** Extracts draft fields from the form. */
 export function extractContestDraft(form, homeroomValue) {
   const formData = new FormData(form);
-  const scheduleType = formData.get('schedule_type') === 'part_time' ? 'part_time' : 'full_time';
+  const scheduleType = normalizeDraftScheduleType(formData.get('schedule_type'));
   return {
     schedule_type: scheduleType,
     homeroom: homeroomValue,
