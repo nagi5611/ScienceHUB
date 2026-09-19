@@ -25,6 +25,9 @@ import {
 } from './print-video-folder-picker.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
+let contestStorageGroupSlug = '';
+let contestStorageGroupRoots = [];
+let contestStorageSubmissionsPath = '';
 
 const STATUS_LABELS = {
   applied: '申請中',
@@ -162,6 +165,7 @@ async function init() {
       if (activePanel === 'members') renderMembers();
       if (activePanel === 'printers') {
         renderPrinters();
+        loadContestStorageSettings();
         loadPrintVideoSettings();
       }
       if (activePanel === 'shifts') renderShiftPanel();
@@ -176,6 +180,7 @@ async function init() {
   document.getElementById('printer-add-form').addEventListener('submit', handleAddPrinter);
   setupPrinterEditModal();
   setupPrintVideoSettings();
+  setupContestStorageSettings();
   document.getElementById('calendar-test-btn')?.addEventListener('click', testGoogleCalendar);
   document.getElementById('email-test-send-btn')?.addEventListener('click', sendReservationTestEmail);
   setupAdminFormModal();
@@ -214,6 +219,7 @@ function switchPanel(panel) {
   if (panel === 'members') renderMembers();
   if (panel === 'printers') {
     renderPrinters();
+    loadContestStorageSettings();
     loadPrintVideoSettings();
   }
   if (panel === 'shifts') renderShiftPanel();
@@ -1481,6 +1487,99 @@ function updatePrintVideoPathDisplay() {
     input.value = printVideoStoragePath;
   }
   input.title = printVideoStoragePath;
+}
+
+/** 提出ファイル集約先（クラウドストレージ）設定 */
+function setupContestStorageSettings() {
+  document.getElementById('contest-storage-settings-save')?.addEventListener('click', saveContestStorageSettings);
+  document.getElementById('contest-storage-group-slug')?.addEventListener('change', (e) => {
+    contestStorageGroupSlug = e.target.value;
+    updateContestStoragePathHint();
+  });
+}
+
+function updateContestStorageGroupSelect() {
+  const select = document.getElementById('contest-storage-group-slug');
+  if (!select) return;
+
+  if (!contestStorageGroupRoots.length) {
+    select.innerHTML = '<option value="">利用可能なチームがありません</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  const options = [
+    '<option value="">未設定</option>',
+    ...contestStorageGroupRoots.map(
+      (root) =>
+        `<option value="${escapeHtml(root.key)}"${
+          root.key === contestStorageGroupSlug ? ' selected' : ''
+        }>${escapeHtml(root.label)}</option>`
+    ),
+  ];
+  select.innerHTML = options.join('');
+}
+
+function updateContestStoragePathHint() {
+  const hint = document.getElementById('contest-storage-path-hint');
+  if (!hint) return;
+  if (!contestStorageGroupSlug) {
+    hint.textContent = '未設定の間は提出ファイルはクラウドストレージへコピーされません。';
+    return;
+  }
+  const path =
+    contestStorageSubmissionsPath ||
+    `g/${contestStorageGroupSlug}/.造形物コンテスト/提出ファイル`;
+  hint.textContent = `保存先: ${path}`;
+}
+
+async function loadContestStorageSettings() {
+  const alertEl = document.getElementById('contest-storage-settings-alert');
+  if (!document.getElementById('contest-storage-group-slug')) return;
+
+  try {
+    const data = await apiRequest('admin/settings/contest-storage');
+    contestStorageGroupRoots = data.group_roots ?? [];
+    contestStorageGroupSlug = data.group_slug ?? '';
+    contestStorageSubmissionsPath = data.submissions_path ?? '';
+    if (alertEl) alertEl.innerHTML = '';
+    updateContestStorageGroupSelect();
+    updateContestStoragePathHint();
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+async function saveContestStorageSettings() {
+  const alertEl = document.getElementById('contest-storage-settings-alert');
+  const select = document.getElementById('contest-storage-group-slug');
+  if (!select) return;
+
+  const slug = select.value.trim();
+  if (!slug) {
+    alert('集約先のチームを選択してください');
+    return;
+  }
+
+  try {
+    const data = await apiRequest('admin/settings/contest-storage', {
+      method: 'PATCH',
+      body: JSON.stringify({ group_slug: slug }),
+    });
+    contestStorageGroupSlug = data.group_slug ?? slug;
+    contestStorageSubmissionsPath = data.submissions_path ?? '';
+    if (alertEl) {
+      alertEl.innerHTML = '<p class="alert alert-success">提出ファイルの集約先を保存しました</p>';
+    }
+    updateContestStoragePathHint();
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+    }
+  }
 }
 
 /** 印刷動画の保存先設定を読み込む */

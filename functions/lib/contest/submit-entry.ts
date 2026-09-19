@@ -4,6 +4,7 @@ import {
   buildContestEntryAppUrl,
   notifyContestApplicantEmail,
 } from './contest-email';
+import { syncContestSubmissionToStorage } from './contest-storage';
 import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
 import { gradeFromHomeroom, isValidHomeroom } from '../3dprint/homeroom';
 import {
@@ -138,10 +139,22 @@ export async function submitContestEntry(
     user_id: userId,
     source: 'contest',
     schedule_type: input.schedule_type,
+    contest_storage_path: null,
+    contest_storage_filename: null,
     created_at: new Date().toISOString(),
   };
 
   await createReservation(db, reservation);
+
+  try {
+    const synced = await syncContestSubmissionToStorage(env, db, reservation);
+    if (synced) {
+      reservation.contest_storage_path = synced.path;
+      reservation.contest_storage_filename = synced.filename;
+    }
+  } catch (err) {
+    console.error('contest storage sync failed on submit:', err);
+  }
 
   const printer = await getPrinterById(db, slot.printer_id);
 

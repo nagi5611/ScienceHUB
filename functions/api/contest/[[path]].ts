@@ -72,6 +72,17 @@ import {
   type ContestReservationStatus,
 } from "../../lib/contest/contest-email";
 import { submitContestEntry } from "../../lib/contest/submit-entry";
+import {
+  getContestStorageGroupSlug,
+  setContestStorageGroupSlug,
+  getContestManagementAccessibleGroupRoots,
+  validateContestStorageGroupForUser,
+} from "../../lib/contest/contest-app-settings";
+import {
+  buildContestSubmissionsLogicalDir,
+  ensureContestStorageDirectories,
+  syncContestSubmissionToStorage,
+} from "../../lib/contest/contest-storage";
 import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
@@ -513,6 +524,13 @@ async function applyReservationContentEdit(
   );
 
   const updated = await getReservationById(db, reservation.id);
+  if (updated?.source === "contest") {
+    try {
+      await syncContestSubmissionToStorage(env, db, updated);
+    } catch (syncErr) {
+      console.error("contest storage sync failed on update:", syncErr);
+    }
+  }
   const memberMap = await buildMemberMap(db);
   const printerMap = await buildPrinterMap(db);
   return json({
@@ -834,10 +852,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         user_id: userId,
         source: 'contest',
         schedule_type: null,
+        contest_storage_path: null,
+        contest_storage_filename: null,
         created_at: new Date().toISOString(),
       };
 
       await createReservation(db, reservation);
+
+      try {
+        await syncContestSubmissionToStorage(env, db, reservation);
+      } catch (syncErr) {
+        console.error("contest storage sync failed on user create:", syncErr);
+      }
 
       context.waitUntil(
         notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
@@ -1294,10 +1320,22 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         user_id: targetUserId,
         source: 'contest',
         schedule_type: null,
+        contest_storage_path: null,
+        contest_storage_filename: null,
         created_at: new Date().toISOString(),
       };
 
       await createReservation(db, reservation);
+
+      try {
+        const synced = await syncContestSubmissionToStorage(env, db, reservation);
+        if (synced) {
+          reservation.contest_storage_path = synced.path;
+          reservation.contest_storage_filename = synced.filename;
+        }
+      } catch (syncErr) {
+        console.error("contest storage sync failed on admin create:", syncErr);
+      }
 
       context.waitUntil(
         notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
@@ -1351,7 +1389,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ storage_path, group_roots });
     }
 
-    // PATCH /api/3dprint/admin/settings/print-video
+    // PATCH /api/contest/admin/settings/print-video
     if (method === "PATCH" && segments[1] === "settings" && segments[2] === "print-video") {
       const body = await request.json<{ storage_path?: string }>();
       const storagePath = body.storage_path?.trim() ?? "";
@@ -1364,6 +1402,47 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (pathError) return error(pathError);
       await setPrintVideoStoragePath(db, storagePath.replace(/^\/+|\/+$/g, ""));
       return json({ storage_path: storagePath.replace(/^\/+|\/+$/g, "") });
+    }
+
+    // GET /api/contest/admin/settings/contest-storage
+    if (
+      method === "GET" &&
+      segments[1] === "settings" &&
+      segments[2] === "contest-storage"
+    ) {
+      const group_slug = await getContestStorageGroupSlug(db);
+      const group_roots = await getContestManagementAccessibleGroupRoots(
+        db,
+        authUser.id,
+        authUser.is_admin
+      );
+      const submissions_path = group_slug
+        ? buildContestSubmissionsLogicalDir(group_slug)
+        : null;
+      return json({ group_slug, group_roots, submissions_path });
+    }
+
+    // PATCH /api/contest/admin/settings/contest-storage
+    if (
+      method === "PATCH" &&
+      segments[1] === "settings" &&
+      segments[2] === "contest-storage"
+    ) {
+      const body = await request.json<{ group_slug?: string }>();
+      const groupSlug = body.group_slug?.trim().toLowerCase() ?? "";
+      const slugError = await validateContestStorageGroupForUser(
+        db,
+        authUser.id,
+        authUser.is_admin,
+        groupSlug
+      );
+      if (slugError) return error(slugError);
+      await setContestStorageGroupSlug(db, groupSlug);
+      await ensureContestStorageDirectories(env, db, authUser, groupSlug);
+      return json({
+        group_slug: groupSlug,
+        submissions_path: buildContestSubmissionsLogicalDir(groupSlug),
+      });
     }
 
     // GET /api/3dprint/admin/settings/storage-list

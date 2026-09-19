@@ -231,6 +231,13 @@ export async function resolveUniqueFolderName(
 }
 
 /** アップロードを初期化 */
+export interface InitiateStorageUploadOptions {
+  /** 自動リネームをせずこのファイル名で保存（呼び出し側で衝突解決） */
+  forcedResolvedFilename?: string;
+  /** 造形物コンテスト提出フォルダへのサーバー同期（メンバーでない依頼者でも可） */
+  contestGroupSubmissionSync?: boolean;
+}
+
 export async function initiateStorageUpload(
   env: Env,
   db: D1Database,
@@ -239,7 +246,8 @@ export async function initiateStorageUpload(
   rootKey: string,
   relativeDir: string,
   filename: string,
-  size: number
+  size: number,
+  options?: InitiateStorageUploadOptions
 ): Promise<
   | {
       mode: "simple";
@@ -261,14 +269,12 @@ export async function initiateStorageUpload(
 > {
   if (size <= 0) throw new Error("ファイルサイズが不正です");
 
-  const canWrite = await authorizeWriteDir(
-    env,
-    db,
-    user,
-    rootType,
-    rootKey,
-    relativeDir
-  );
+  const canWrite =
+    options?.contestGroupSubmissionSync === true &&
+    rootType === "group" &&
+    relativeDir.replace(/^\/+|\/+$/g, "") === ".造形物コンテスト/提出ファイル"
+      ? true
+      : await authorizeWriteDir(env, db, user, rootType, rootKey, relativeDir);
   if (!canWrite) throw new Error("アップロードする権限がありません");
 
   const root = await resolveRootForPath(db, rootType, rootKey);
@@ -278,13 +284,9 @@ export async function initiateStorageUpload(
     throw new Error("割り当て領域を超えるためアップロードできません");
   }
 
-  const resolvedFilename = await resolveUniqueFilename(
-    env,
-    rootType,
-    rootKey,
-    relativeDir,
-    filename
-  );
+  const resolvedFilename = options?.forcedResolvedFilename
+    ? sanitizeFilename(options.forcedResolvedFilename)
+    : await resolveUniqueFilename(env, rootType, rootKey, relativeDir, filename);
 
   const relativeFilePath = relativeDir
     ? `${relativeDir}/${resolvedFilename}`
