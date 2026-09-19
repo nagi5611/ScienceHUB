@@ -171,6 +171,7 @@ async function init() {
   setupPrinterEditModal();
   setupPrintVideoSettings();
   document.getElementById('calendar-test-btn')?.addEventListener('click', testGoogleCalendar);
+  document.getElementById('email-test-send-btn')?.addEventListener('click', sendReservationTestEmail);
   setupAdminFormModal();
   initShiftPanel();
 
@@ -996,6 +997,33 @@ function buildPrintStaffOptions(selectedId, staffList, { placeholder = '未割�
     options.push(`<option value="${m.id}"${selected}>${escapeHtml(label)}</option>`);
   }
   return options.join('');
+}
+
+/** Sends a test reservation notification email to the address entered in admin. */
+async function sendReservationTestEmail() {
+  const resultEl = document.getElementById('email-test-result');
+  const input = document.getElementById('email-test-to');
+  const to = input?.value?.trim() ?? '';
+  if (!to) {
+    resultEl.innerHTML = '<div class="alert alert-error">送信先メールアドレスを入力してください</div>';
+    return;
+  }
+
+  resultEl.innerHTML = '<p class="hint">送信中...</p>';
+  const btn = document.getElementById('email-test-send-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const data = await apiRequest('admin/settings/test-email', {
+      method: 'POST',
+      body: JSON.stringify({ to }),
+    });
+    resultEl.innerHTML = `<div class="alert alert-success">送信しました（${escapeHtml(data.to)}）</div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 /** Tests Google Calendar API connection from admin panel. */

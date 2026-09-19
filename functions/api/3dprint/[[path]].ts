@@ -63,6 +63,11 @@ import {
   notifyReservationApplication,
   notifyReservationModified,
 } from "../../lib/3dprint/discord";
+import {
+  build3dPrintReservationAppUrl,
+  notifyApplicantPrintReservationEmail,
+  sendPrintReservationAdminTestEmail,
+} from "../../lib/3dprint/reservation-email";
 import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
@@ -275,6 +280,52 @@ function resolvePrinterLabel(
 async function buildMemberMap(db: D1Database): Promise<Map<string, Member>> {
   const members = await getAllMembers(db);
   return new Map(members.map((m) => [m.id, m]));
+}
+
+/** Sends「予約申請受付」email to the applicant (non-blocking). */
+async function sendApplicantAppliedEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  applicantUserId: string,
+  reservation: Reservation
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
+    kind: "applied",
+    reservation: {
+      id: reservation.id,
+      title: reservation.title,
+      desired_date: reservation.desired_date,
+      print_scale: reservation.print_scale,
+    },
+    printerName: resolvePrinterLabel(reservation, printerMap),
+    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+  });
+}
+
+/** Sends「予約確定」email to the applicant (non-blocking). */
+async function sendApplicantAcceptedEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  applicantUserId: string,
+  reservation: Reservation,
+  printStaffLabel: string
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
+    kind: "accepted",
+    reservation: {
+      id: reservation.id,
+      title: reservation.title,
+      desired_date: reservation.desired_date,
+      print_scale: reservation.print_scale,
+    },
+    printerName: resolvePrinterLabel(reservation, printerMap),
+    printStaffLabel,
+    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+  });
 }
 
 /** Returns 409 when shift removal is blocked by existing reservations. */
@@ -727,11 +778,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-          title: reservation.title,
-          desired_date: reservation.desired_date,
-          print_scale: reservation.print_scale,
-        })
+        (async () => {
+          await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
+            title: reservation.title,
+            desired_date: reservation.desired_date,
+            print_scale: reservation.print_scale,
+          });
+          await sendApplicantAppliedEmail(
+            env,
+            db,
+            context.request,
+            userId,
+            reservation
+          );
+        })()
       );
 
       return json({ id: reservation.id, message: "予約申請を受け付けました" }, 201);
@@ -988,11 +1048,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const printerMap = await buildPrinterMap(db);
 
         context.waitUntil(
-          notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-            title: created.title,
-            desired_date: created.desired_date,
-            print_scale: created.print_scale,
-          })
+          (async () => {
+            await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
+              title: created.title,
+              desired_date: created.desired_date,
+              print_scale: created.print_scale,
+            });
+            await sendApplicantAppliedEmail(
+              env,
+              db,
+              context.request,
+              userId,
+              created
+            );
+          })()
         );
 
         return json({
@@ -1178,11 +1247,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-          title: reservation.title,
-          desired_date: reservation.desired_date,
-          print_scale: reservation.print_scale,
-        })
+        (async () => {
+          await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
+            title: reservation.title,
+            desired_date: reservation.desired_date,
+            print_scale: reservation.print_scale,
+          });
+          await sendApplicantAppliedEmail(
+            env,
+            db,
+            context.request,
+            targetUserId,
+            reservation
+          );
+        })()
       );
 
       const memberMap = await buildMemberMap(db);
@@ -1191,6 +1269,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         { id: reservation.id, reservation: enrichReservationForAdmin(reservation, memberMap, printerMap) },
         201
       );
+    }
+
+    // POST /api/3dprint/admin/settings/test-email
+    if (
+      method === "POST" &&
+      segments[1] === "settings" &&
+      segments[2] === "test-email" &&
+      segments.length === 3
+    ) {
+      const body = await request.json<{ to?: string }>();
+      const to = body.to?.trim() ?? "";
+      if (!to) return error("送信先メールアドレスを入力してください");
+      const result = await sendPrintReservationAdminTestEmail(env, to);
+      if (!result.ok) return error(result.error ?? "送信に失敗しました", 502);
+      return json({ ok: true, to: to.trim().toLowerCase() });
     }
 
     // GET /api/3dprint/admin/settings/print-video
@@ -1434,6 +1527,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       const finalReservation = await getReservationById(db, segments[2]);
       const printerMap = await buildPrinterMap(db);
+
+      if (finalReservation) {
+        context.waitUntil(
+          sendApplicantAcceptedEmail(
+            env,
+            db,
+            context.request,
+            finalReservation.user_id,
+            finalReservation,
+            formatMemberLabel(member)
+          )
+        );
+      }
+
       return json({
         reservation: finalReservation
           ? enrichReservationForAdmin(finalReservation, memberMap, printerMap)

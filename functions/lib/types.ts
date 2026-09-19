@@ -36,6 +36,12 @@ export interface Env {
   GOOGLE_SIMULATION_CALENDAR_ID?: string;
   GOOGLE_SIMULATION_SERVICE_ACCOUNT_EMAIL?: string;
   GOOGLE_SIMULATION_PRIVATE_KEY?: string;
+  /** 3D印刷 予約者向けメールの From（Email Sending で認証済みドメイン） */
+  PRINT_3D_EMAIL_FROM?: string;
+  PRINT_3D_EMAIL_FROM_NAME?: string;
+  PRINT_3D_EMAIL_REPLY_TO?: string;
+  /** ローカルのみ: /api/dev/test-print-email 用（本番未設定で無効） */
+  DEV_EMAIL_TEST_SECRET?: string;
   /** 3D印刷 Discord 通知 */
   DISCORD_WEBHOOK_URL?: string;
   /** シミュレーション Discord 通知 */
