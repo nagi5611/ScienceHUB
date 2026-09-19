@@ -40,6 +40,13 @@ export function applyContestDraft(form, draft) {
   };
   setField('student_number', draft.student_number);
   setField('student_name', draft.student_name);
+  setField('title', draft.title);
+  setField('summary', draft.summary);
+  setField('print_notes', draft.print_notes);
+
+  if (draft.class_free && form.querySelector('[name="class_free"]')) {
+    form.querySelector('[name="class_free"]').value = draft.class_free;
+  }
 }
 
 /** Extracts draft fields from the form. */
@@ -49,7 +56,11 @@ export function extractContestDraft(form, homeroomValue) {
   return {
     schedule_type: scheduleType,
     homeroom: homeroomValue,
+    class_free: String(formData.get('class_free') ?? ''),
     student_number: String(formData.get('student_number') ?? ''),
     student_name: String(formData.get('student_name') ?? ''),
+    title: String(formData.get('title') ?? ''),
+    summary: String(formData.get('summary') ?? ''),
+    print_notes: String(formData.get('print_notes') ?? ''),
   };
 }

@@ -25,6 +25,26 @@ export interface SubmitContestEntryInput {
   stl_r2_key: string;
   stl_filename: string;
   stl_size_bytes: number;
+  title?: string | null;
+  summary?: string | null;
+  print_notes?: string | null;
+}
+
+const MAX_TEXT_FIELD_LEN = 8000;
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveContestTitle(input: SubmitContestEntryInput): string {
+  const custom = normalizeOptionalText(input.title);
+  if (custom) {
+    if (custom.length > 40) throw new Error('タイトルは40文字以内で入力してください');
+    return custom;
+  }
+  return titleFromFilename(input.stl_filename);
 }
 
 export interface SubmitContestEntryResult {
@@ -71,6 +91,15 @@ export async function submitContestEntry(
   const keyExists = await verifyR2Key(env.FILES, input.stl_r2_key);
   if (!keyExists) throw new Error('ファイルが見つかりません。再度アップロードしてください');
 
+  const summary = normalizeOptionalText(input.summary);
+  const printNotes = normalizeOptionalText(input.print_notes);
+  if (summary && summary.length > MAX_TEXT_FIELD_LEN) {
+    throw new Error('概要が長すぎます');
+  }
+  if (printNotes && printNotes.length > MAX_TEXT_FIELD_LEN) {
+    throw new Error('印刷時の注意点が長すぎます');
+  }
+
   const slot = await findAutoScheduleSlot(db);
   if (!slot) {
     throw new Error('現在、自動で割り当てられる印刷日がありません。しばらくしてから再度お試しください');
@@ -86,11 +115,11 @@ export async function submitContestEntry(
     homeroom,
     student_number: input.student_number,
     student_name: studentName,
-    title: titleFromFilename(input.stl_filename),
+    title: resolveContestTitle(input),
     purpose: 'other',
     purpose_other: '印刷依頼',
-    summary: null,
-    print_notes: null,
+    summary,
+    print_notes: printNotes,
     print_scale: 'small',
     printer_id: slot.printer_id,
     desired_date: slot.desired_date,

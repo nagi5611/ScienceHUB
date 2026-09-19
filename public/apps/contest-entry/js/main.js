@@ -276,6 +276,9 @@ async function handleSubmit(e) {
 
   btn.disabled = true;
   try {
+    const titleRaw = String(formData.get('title') ?? '').trim();
+    const summaryRaw = String(formData.get('summary') ?? '').trim();
+    const printNotesRaw = String(formData.get('print_notes') ?? '').trim();
     const payload = {
       schedule_type: scheduleType,
       homeroom,
@@ -284,6 +287,9 @@ async function handleSubmit(e) {
       stl_r2_key: uploadResult.r2Key,
       stl_filename: uploadResult.filename,
       stl_size_bytes: uploadResult.size,
+      ...(titleRaw ? { title: titleRaw } : {}),
+      ...(summaryRaw ? { summary: summaryRaw } : {}),
+      ...(printNotesRaw ? { print_notes: printNotesRaw } : {}),
     };
     const data = await apiRequest('entries', {
       method: 'POST',
