@@ -1,0 +1,93 @@
+/* public/css/apps/contest-entry.css */
+
+.contest-entry-page .contest-entry-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.contest-entry-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .contest-entry-layout {
+    grid-template-columns: 1fr min(380px, 42%);
+  }
+
+  .contest-calendar-aside {
+    order: 2;
+  }
+
+  .contest-entry-form-card {
+    order: 1;
+  }
+}
+
+.contest-section-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
+
+.contest-readonly-calendar {
+  pointer-events: none;
+}
+
+.contest-readonly-calendar .calendar-nav-btn,
+.contest-readonly-calendar .btn,
+.contest-readonly-calendar #go-today-btn {
+  pointer-events: auto;
+}
+
+.contest-calendar-hint {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.calendar-slot--readonly {
+  cursor: default;
+}
+
+.calendar-slot--owned {
+  outline: 2px solid var(--accent, #f38020);
+  outline-offset: 1px;
+}
+
+.contest-entry-form .radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 1rem;
+}
+
+.contest-entry-form .form-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.contest-entry-form .form-group-grow {
+  flex: 1;
+  min-width: 160px;
+}
+
+.page-toast--success {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
+.page-toast--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.btn-block {
+  width: 100%;
+  margin-top: 0.5rem;
+}

@@ -1,5 +1,5 @@
 /**
- * 3D印刷 API ルーター（予約・管理）
+ * 造形物コンテスト API
  */
 
 import type { Env } from "../../lib/types";
@@ -64,10 +64,11 @@ import {
   notifyReservationModified,
 } from "../../lib/3dprint/discord";
 import {
-  build3dPrintReservationAppUrl,
-  notifyApplicantPrintReservationEmail,
-  sendPrintReservationAdminTestEmail,
-} from "../../lib/3dprint/reservation-email";
+  buildContestEntryAppUrl,
+  notifyContestApplicantEmail,
+  sendContestAdminTestEmail,
+} from "../../lib/contest/contest-email";
+import { submitContestEntry } from "../../lib/contest/submit-entry";
 import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
@@ -150,8 +151,8 @@ import { streamStorageFile } from "../../lib/storage/operations";
 import { listDirectory } from "../../lib/storage/list";
 import { authorizeStoragePath } from "../../lib/storage/permissions";
 
-const RESERVATION_APP = "3dprint-reservation";
-const MANAGEMENT_APP = "3dprint-management";
+const RESERVATION_APP = "contest-entry";
+const MANAGEMENT_APP = "contest-management";
 
 /** Parses route segments from the catch-all path param. */
 function parsePath(path: string | string[] | undefined): string[] {
@@ -282,49 +283,26 @@ async function buildMemberMap(db: D1Database): Promise<Map<string, Member>> {
   return new Map(members.map((m) => [m.id, m]));
 }
 
-/** Sends「予約申請受付」email to the applicant (non-blocking). */
-async function sendApplicantAppliedEmail(
-  env: Env,
-  db: D1Database,
-  request: Request,
-  applicantUserId: string,
-  reservation: Reservation
-): Promise<void> {
-  const printerMap = await buildPrinterMap(db);
-  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
-    kind: "applied",
-    reservation: {
-      id: reservation.id,
-      title: reservation.title,
-      desired_date: reservation.desired_date,
-      print_scale: reservation.print_scale,
-    },
-    printerName: resolvePrinterLabel(reservation, printerMap),
-    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
-  });
+/** Ensures a reservation belongs to the contest app. */
+function assertContestReservation(r: Reservation | null): r is Reservation {
+  return !!r && r.source === "contest";
 }
 
-/** Sends「予約確定」email to the applicant (non-blocking). */
-async function sendApplicantAcceptedEmail(
+async function sendContestStatusEmail(
   env: Env,
   db: D1Database,
   request: Request,
-  applicantUserId: string,
   reservation: Reservation,
-  printStaffLabel: string
+  kind: "delivered" | "failed"
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
-  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
-    kind: "accepted",
-    reservation: {
-      id: reservation.id,
-      title: reservation.title,
-      desired_date: reservation.desired_date,
-      print_scale: reservation.print_scale,
-    },
+  const memberMap = await buildMemberMap(db);
+  await notifyContestApplicantEmail(env, db, reservation.user_id, kind, {
+    reservation,
     printerName: resolvePrinterLabel(reservation, printerMap),
-    printStaffLabel,
-    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    printStaffLabel: resolvePrintStaffLabel(reservation, memberMap),
+    statusComment: reservation.status_comment,
+    entryAppUrl: buildContestEntryAppUrl(getOAuthRedirectBase(request, env)),
   });
 }
 
@@ -570,6 +548,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (mgmtAccess instanceof Response) return mgmtAccess;
     } else if (
       segments[0] === "calendar" ||
+      segments[0] === "entries" ||
       segments[0] === "reservations" ||
       segments[0] === "printers" ||
       segments[0] === "print-videos" ||
@@ -621,6 +600,50 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!body.sessionId) return error("sessionId が必要です");
       await abortUpload(env, body.sessionId);
       return json({ ok: true });
+    }
+
+    // POST /api/contest/entries
+    if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
+      const body = await request.json<{
+        schedule_type: "full_time" | "part_time";
+        homeroom: string;
+        student_number: number;
+        student_name: string;
+        stl_r2_key: string;
+        stl_filename: string;
+        stl_size_bytes: number;
+      }>();
+
+      try {
+        const result = await submitContestEntry(env, request, userId, {
+          schedule_type: body.schedule_type,
+          homeroom: String(body.homeroom ?? ""),
+          student_number: Number(body.student_number),
+          student_name: String(body.student_name ?? ""),
+          stl_r2_key: String(body.stl_r2_key ?? ""),
+          stl_filename: String(body.stl_filename ?? ""),
+          stl_size_bytes: Number(body.stl_size_bytes),
+        });
+        const memberMap = await buildMemberMap(db);
+        const printerMap = await buildPrinterMap(db);
+        return json(
+          {
+            id: result.reservation.id,
+            message: "登録を受け付けました",
+            reservation: enrichReservationForAdmin(
+              result.reservation,
+              memberMap,
+              printerMap
+            ),
+            calendar: result.calendar,
+          },
+          201
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "登録に失敗しました";
+        const status = message.includes("自動で割り当て") ? 409 : 400;
+        return error(message, status);
+      }
     }
 
     // GET /api/3dprint/printers
@@ -772,7 +795,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         print_video_filename: null,
         print_video_size_bytes: null,
         user_id: userId,
-        source: 'standard',
+        source: 'contest',
         schedule_type: null,
         created_at: new Date().toISOString(),
       };
@@ -780,20 +803,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        (async () => {
-          await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-            title: reservation.title,
-            desired_date: reservation.desired_date,
-            print_scale: reservation.print_scale,
-          });
-          await sendApplicantAppliedEmail(
-            env,
-            db,
-            context.request,
-            userId,
-            reservation
-          );
-        })()
+        notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
+          title: reservation.title,
+          desired_date: reservation.desired_date,
+          print_scale: reservation.print_scale,
+        })
       );
 
       return json({ id: reservation.id, message: "予約申請を受け付けました" }, 201);
@@ -900,7 +914,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!year || !month) return error("year と month が必要です");
 
       const { start, end } = getMonthRange(year, month);
-      const reservations = await getReservationsInRange(db, start, end);
+      const reservations = await getReservationsInRange(db, start, end, 'contest');
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       const shiftAvailability = await getAvailabilityInRange(db, start, end);
@@ -1056,13 +1070,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               desired_date: created.desired_date,
               print_scale: created.print_scale,
             });
-            await sendApplicantAppliedEmail(
-              env,
-              db,
-              context.request,
-              userId,
-              created
-            );
           })()
         );
 
@@ -1243,7 +1250,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         print_video_filename: null,
         print_video_size_bytes: null,
         user_id: targetUserId,
-        source: 'standard',
+        source: 'contest',
         schedule_type: null,
         created_at: new Date().toISOString(),
       };
@@ -1251,20 +1258,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        (async () => {
-          await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-            title: reservation.title,
-            desired_date: reservation.desired_date,
-            print_scale: reservation.print_scale,
-          });
-          await sendApplicantAppliedEmail(
-            env,
-            db,
-            context.request,
-            targetUserId,
-            reservation
-          );
-        })()
+        notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
+          title: reservation.title,
+          desired_date: reservation.desired_date,
+          print_scale: reservation.print_scale,
+        })
       );
 
       const memberMap = await buildMemberMap(db);
@@ -1285,7 +1283,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const body = await request.json<{ to?: string }>();
       const to = body.to?.trim() ?? "";
       if (!to) return error("送信先メールアドレスを入力してください");
-      const result = await sendPrintReservationAdminTestEmail(env, to);
+      const result = await sendContestAdminTestEmail(env, to);
       if (!result.ok) return error(result.error ?? "送信に失敗しました", 502);
       return json({ ok: true, to: to.trim().toLowerCase() });
     }
@@ -1357,7 +1355,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // GET /api/3dprint/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
-      const reservations = await getAllReservations(db);
+      const reservations = await getAllReservations(db, 'contest');
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
@@ -1413,7 +1411,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const existing = await getReservationById(db, segments[2]);
-      if (!existing) return error("予約が見つかりません", 404);
+      if (!assertContestReservation(existing)) return error("予約が見つかりません", 404);
+
+      const previousStatus = existing.status;
 
       if (body.status === "accepted" && existing.status === "applied") {
         return error("申請中の予約は「予約を受領」ボタンから受領してください", 400);
@@ -1438,6 +1438,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const updated = await getReservationById(db, segments[2]);
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
+
+      if (updated && body.status && body.status !== previousStatus) {
+        if (body.status === "delivered") {
+          context.waitUntil(sendContestStatusEmail(env, db, request, updated, "delivered"));
+        } else if (body.status === "failed") {
+          context.waitUntil(sendContestStatusEmail(env, db, request, updated, "failed"));
+        }
+      }
+
       return json({
         reservation: updated ? enrichReservationForAdmin(updated, memberMap, printerMap) : null,
       });
@@ -1469,10 +1478,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("desired_date が不正です");
       }
 
+      const before = await getReservationById(db, segments[2]);
+      if (!assertContestReservation(before)) return error("予約が見つかりません", 404);
+      const previousDate = before.desired_date;
+
       try {
         const updated = await adminRescheduleReservation(env, segments[2], body.desired_date);
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
+        if (previousDate !== updated.desired_date) {
+          context.waitUntil(
+            notifyContestApplicantEmail(env, db, updated.user_id, "rescheduled", {
+              reservation: updated,
+              printerName: resolvePrinterLabel(updated, printerMap),
+              printStaffLabel: resolvePrintStaffLabel(updated, memberMap),
+              previousDate,
+              entryAppUrl: buildContestEntryAppUrl(getOAuthRedirectBase(request, env)),
+            })
+          );
+        }
         return json({ reservation: enrichReservationForAdmin(updated, memberMap, printerMap) });
       } catch (err) {
         return error(err instanceof Error ? err.message : "リスケに失敗しました");
@@ -1531,19 +1555,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       const finalReservation = await getReservationById(db, segments[2]);
       const printerMap = await buildPrinterMap(db);
-
-      if (finalReservation) {
-        context.waitUntil(
-          sendApplicantAcceptedEmail(
-            env,
-            db,
-            context.request,
-            finalReservation.user_id,
-            finalReservation,
-            formatMemberLabel(member)
-          )
-        );
-      }
 
       return json({
         reservation: finalReservation
