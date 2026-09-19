@@ -62,6 +62,18 @@ export function initShiftPanel() {
   document.addEventListener('click', closeColorMenuOnOutsideClick);
 }
 
+/** Closes the member color picker when clicking outside it. */
+function closeColorMenuOnOutsideClick(event) {
+  if (!openColorMenuMemberId) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest('.shift-color-menu-bar') || target.closest('.shift-color-card')) {
+    return;
+  }
+  openColorMenuMemberId = null;
+  renderShiftToolbar();
+}
+
 /** Closes the shift reschedule modal. */
 function closeShiftRescheduleModal() {
   document.getElementById('shift-reschedule-modal')?.classList.add('hidden');
