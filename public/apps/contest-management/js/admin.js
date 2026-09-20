@@ -974,9 +974,13 @@ function renderContestApplications() {
             })
             .join('、')
         : '—';
-    const reservationLine = app.reservation
-      ? `予約 ${escapeHtml(app.reservation.id.slice(0, 8))}… · ${STATUS_LABELS[app.reservation.status] ?? app.reservation.status} · ${escapeHtml(app.reservation.desired_date)}`
-      : 'STL 未提出';
+    const reservationLine = app.self_print
+      ? app.stl_submitted_at
+        ? `自己印刷 · STL 提出済み（${escapeHtml(app.stl_filename ?? '')}）`
+        : '自己印刷 · STL 未提出'
+      : app.reservation
+        ? `予約 ${escapeHtml(app.reservation.id.slice(0, 8))}… · ${STATUS_LABELS[app.reservation.status] ?? app.reservation.status} · ${escapeHtml(app.reservation.desired_date)}`
+        : 'STL 未提出';
     const impressions = app.impressions
       ? `<p class="hint contest-admin-impressions">${escapeHtml(app.impressions)}</p>`
       : '';

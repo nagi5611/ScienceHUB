@@ -677,6 +677,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         student_number?: number;
         student_name?: string;
         members?: unknown;
+        self_print?: boolean;
       }>();
       try {
         const application = await createContestApplication(env, request, userId, {
@@ -690,6 +691,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           student_name:
             body.student_name !== undefined ? String(body.student_name) : undefined,
           members: body.members,
+          self_print: Boolean(body.self_print),
         });
         return json({ application }, 201);
       } catch (err) {
@@ -746,14 +748,26 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           stl_size_bytes: Number(body.stl_size_bytes),
           print_notes: body.print_notes ?? null,
         });
+        if (result.self_print) {
+          return json(
+            {
+              self_print: true,
+              message: "STL を提出しました（自己印刷）",
+              application: result.application,
+              calendar: result.calendar,
+            },
+            201
+          );
+        }
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
         return json(
           {
-            id: result.reservation.id,
+            self_print: false,
+            id: result.reservation!.id,
             message: "印刷依頼を受け付けました",
             reservation: enrichReservationForAdmin(
-              result.reservation,
+              result.reservation!,
               memberMap,
               printerMap
             ),

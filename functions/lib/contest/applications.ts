@@ -18,6 +18,19 @@ import {
 } from './contest-email';
 import { getOAuthRedirectBase } from '../oauth';
 
+const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
+  title, impressions, status, self_print, stl_r2_key, stl_filename, stl_size_bytes, stl_print_notes,
+  stl_submitted_at, contest_storage_path, contest_storage_filename, created_at, updated_at`;
+
+type ContestApplicationRow = Omit<ContestApplication, 'self_print'> & { self_print: number };
+
+function mapContestApplicationRow(row: ContestApplicationRow): ContestApplication {
+  return {
+    ...row,
+    self_print: row.self_print === 1,
+  };
+}
+
 export interface ContestApplication {
   id: string;
   user_id: string;
@@ -28,6 +41,14 @@ export interface ContestApplication {
   title: string;
   impressions: string | null;
   status: 'approved' | 'withdrawn';
+  self_print: boolean;
+  stl_r2_key: string | null;
+  stl_filename: string | null;
+  stl_size_bytes: number | null;
+  stl_print_notes: string | null;
+  stl_submitted_at: string | null;
+  contest_storage_path: string | null;
+  contest_storage_filename: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +85,7 @@ export interface CreateContestApplicationInput {
   student_number?: number;
   student_name?: string;
   members?: unknown;
+  self_print?: boolean;
 }
 
 export interface PatchContestApplicationInput {
@@ -145,11 +167,15 @@ function enrichApplication(
   reservation: ContestApplicationReservationSummary | null,
   active: Reservation | null
 ): ContestApplicationWithDetails {
+  const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   return {
     ...app,
     members,
     reservation,
-    can_submit_stl: app.status === 'approved' && !active,
+    can_submit_stl:
+      app.status === 'approved' &&
+      !active &&
+      !selfPrintSubmitted,
   };
 }
 
@@ -245,13 +271,14 @@ export async function createContestApplication(
 
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
+  const selfPrint = input.self_print ? 1 : 0;
 
   await db
     .prepare(
       `INSERT INTO contest_applications (
         id, user_id, schedule_type, homeroom, student_number, student_name,
-        title, impressions, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)`
+        title, impressions, status, self_print, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?)`
     )
     .bind(
       id,
@@ -262,6 +289,7 @@ export async function createContestApplication(
       parsed.student_name,
       parsed.title,
       parsed.impressions,
+      selfPrint,
       now,
       now
     )
@@ -278,6 +306,14 @@ export async function createContestApplication(
     title: parsed.title,
     impressions: parsed.impressions,
     status: 'approved',
+    self_print: selfPrint === 1,
+    stl_r2_key: null,
+    stl_filename: null,
+    stl_size_bytes: null,
+    stl_print_notes: null,
+    stl_submitted_at: null,
+    contest_storage_path: null,
+    contest_storage_filename: null,
     created_at: now,
     updated_at: now,
   };
@@ -298,16 +334,15 @@ export async function listContestApplicationsForUser(
 ): Promise<ContestApplicationWithDetails[]> {
   const result = await db
     .prepare(
-      `SELECT id, user_id, schedule_type, homeroom, student_number, student_name,
-              title, impressions, status, created_at, updated_at
+      `SELECT ${CONTEST_APPLICATION_SELECT}
        FROM contest_applications
        WHERE user_id = ?
        ORDER BY created_at DESC`
     )
     .bind(userId)
-    .all<ContestApplication>();
+    .all<ContestApplicationRow>();
 
-  const apps = result.results ?? [];
+  const apps = (result.results ?? []).map(mapContestApplicationRow);
   const enriched: ContestApplicationWithDetails[] = [];
   for (const app of apps) {
     const members = await fetchMembersForApplication(db, app.id);
@@ -322,14 +357,11 @@ async function getApplicationRow(
   db: D1Database,
   id: string
 ): Promise<ContestApplication | null> {
-  return db
-    .prepare(
-      `SELECT id, user_id, schedule_type, homeroom, student_number, student_name,
-              title, impressions, status, created_at, updated_at
-       FROM contest_applications WHERE id = ?`
-    )
+  const row = await db
+    .prepare(`SELECT ${CONTEST_APPLICATION_SELECT} FROM contest_applications WHERE id = ?`)
     .bind(id)
-    .first<ContestApplication>();
+    .first<ContestApplicationRow>();
+  return row ? mapContestApplicationRow(row) : null;
 }
 
 /** Loads one application if owned by the user. */
@@ -408,7 +440,7 @@ export async function patchContestApplicationForUser(
     .bind(title, impressions, now, applicationId)
     .run();
 
-  if (title !== app.title) {
+  if (title !== app.title && !app.self_print) {
     await db
       .prepare(
         `UPDATE print_reservations SET title = ?
@@ -436,6 +468,61 @@ export async function patchContestApplicationForUser(
   return enrichApplication(updated, members, reservation, active);
 }
 
+/** Records STL submission for self-print applications (no print reservation). */
+export async function updateContestApplicationSelfPrintStl(
+  db: D1Database,
+  applicationId: string,
+  data: {
+    stl_r2_key: string;
+    stl_filename: string;
+    stl_size_bytes: number;
+    stl_print_notes: string | null;
+    contest_storage_path?: string | null;
+    contest_storage_filename?: string | null;
+  }
+): Promise<ContestApplication> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE contest_applications SET
+        stl_r2_key = ?, stl_filename = ?, stl_size_bytes = ?, stl_print_notes = ?,
+        stl_submitted_at = ?, contest_storage_path = ?, contest_storage_filename = ?,
+        updated_at = ?
+       WHERE id = ?`
+    )
+    .bind(
+      data.stl_r2_key,
+      data.stl_filename,
+      data.stl_size_bytes,
+      data.stl_print_notes,
+      now,
+      data.contest_storage_path ?? null,
+      data.contest_storage_filename ?? null,
+      now,
+      applicationId
+    )
+    .run();
+
+  const app = await getApplicationRow(db, applicationId);
+  if (!app) throw new Error('参加申請が見つかりません');
+  return app;
+}
+
+/** Updates contest cloud storage path on a self-print application. */
+export async function updateContestApplicationContestStorage(
+  db: D1Database,
+  applicationId: string,
+  data: { contest_storage_path: string; contest_storage_filename: string }
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE contest_applications SET contest_storage_path = ?, contest_storage_filename = ?, updated_at = ? WHERE id = ?`
+    )
+    .bind(data.contest_storage_path, data.contest_storage_filename, now, applicationId)
+    .run();
+}
+
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
   applicant_email: string | null;
 }
@@ -449,8 +536,10 @@ export async function listContestApplicationsAdmin(
   const result = await db
     .prepare(
       `SELECT ca.id, ca.user_id, ca.schedule_type, ca.homeroom, ca.student_number,
-              ca.student_name, ca.title, ca.impressions, ca.status, ca.created_at,
-              ca.updated_at, u.email AS applicant_email
+              ca.student_name, ca.title, ca.impressions, ca.status, ca.self_print,
+              ca.stl_r2_key, ca.stl_filename, ca.stl_size_bytes, ca.stl_print_notes,
+              ca.stl_submitted_at, ca.contest_storage_path, ca.contest_storage_filename,
+              ca.created_at, ca.updated_at, u.email AS applicant_email
        FROM contest_applications ca
        LEFT JOIN users u ON u.id = ca.user_id
        ORDER BY ca.created_at DESC
@@ -458,7 +547,7 @@ export async function listContestApplicationsAdmin(
     )
     .bind(limit)
     .all<
-      ContestApplication & {
+      ContestApplicationRow & {
         applicant_email: string | null;
       }
     >();
@@ -466,7 +555,8 @@ export async function listContestApplicationsAdmin(
   const rows = result.results ?? [];
   const enriched: ContestApplicationAdminRow[] = [];
   for (const row of rows) {
-    const { applicant_email, ...app } = row;
+    const { applicant_email, ...rawApp } = row;
+    const app = mapContestApplicationRow(rawApp);
     const members = await fetchMembersForApplication(db, app.id);
     const reservation = await fetchLatestReservationForApplication(db, app.id);
     const active = await getActiveContestReservationForApplication(db, app.id);

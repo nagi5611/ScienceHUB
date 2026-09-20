@@ -38,12 +38,45 @@ export function buildContestSubmissionStorageFilename(reservation: Reservation):
   const ext = extMatch ? extMatch[1].toLowerCase() : '.stl';
 
   const datePart = sanitizeContestFilenamePart(reservation.desired_date);
-  const classPart = sanitizeContestFilenamePart(reservation.homeroom);
-  const numberPart = sanitizeContestFilenamePart(String(reservation.student_number));
-  const namePart = sanitizeContestFilenamePart(reservation.student_name);
-  const titlePart = sanitizeContestFilenamePart(reservation.title);
+  return buildContestSubmissionStorageFilenameParts(
+    datePart,
+    reservation.homeroom,
+    reservation.student_number,
+    reservation.student_name,
+    reservation.title,
+    ext
+  );
+}
 
-  let base = [datePart, classPart, numberPart, namePart, titlePart].filter(Boolean).join(' ');
+export interface ContestSelfPrintStorageSource {
+  id: string;
+  user_id: string;
+  homeroom: string;
+  student_number: number;
+  student_name: string;
+  title: string;
+  stl_filename: string;
+  stl_r2_key: string;
+  stl_submitted_at: string;
+  contest_storage_path: string | null;
+  contest_storage_filename: string | null;
+}
+
+function buildContestSubmissionStorageFilenameParts(
+  datePart: string,
+  homeroom: string,
+  studentNumber: number,
+  studentName: string,
+  title: string,
+  ext: string
+): string {
+  const classPart = sanitizeContestFilenamePart(homeroom);
+  const numberPart = sanitizeContestFilenamePart(String(studentNumber));
+  const namePart = sanitizeContestFilenamePart(studentName);
+  const titlePart = sanitizeContestFilenamePart(title);
+  const safeDate = sanitizeContestFilenamePart(datePart);
+
+  let base = [safeDate, classPart, numberPart, namePart, titlePart].filter(Boolean).join(' ');
   if (!base) base = '提出';
   const maxBaseLen = Math.max(1, 255 - ext.length);
   if (base.length > maxBaseLen) {
@@ -51,6 +84,85 @@ export function buildContestSubmissionStorageFilename(reservation: Reservation):
   }
 
   return sanitizeFilename(`${base}${ext}`);
+}
+
+/** 自己印刷の STL を contest ストレージへ同期（print_reservations なし） */
+export async function syncContestSelfPrintSubmissionToStorage(
+  env: Env,
+  db: D1Database,
+  app: ContestSelfPrintStorageSource
+): Promise<{ path: string; filename: string } | null> {
+  const groupSlug = await getContestStorageGroupSlug(db);
+  if (!groupSlug) return null;
+
+  const user = await getSessionUserById(env, db, app.user_id);
+  if (!user) {
+    console.error('contest storage sync: user not found', app.user_id);
+    return null;
+  }
+
+  await ensureContestStorageDirectories(env, db, user, groupSlug);
+
+  const stlObject = await env.FILES.get(app.stl_r2_key);
+  if (!stlObject) {
+    console.error('contest storage sync: stl missing', app.stl_r2_key);
+    return null;
+  }
+
+  const body = await stlObject.arrayBuffer();
+  const extMatch = app.stl_filename.match(/(\.[a-zA-Z0-9]+)$/);
+  const ext = extMatch ? extMatch[1].toLowerCase() : '.stl';
+  const datePart = app.stl_submitted_at.slice(0, 10);
+  const desiredFilename = buildContestSubmissionStorageFilenameParts(
+    datePart,
+    app.homeroom,
+    app.student_number,
+    app.student_name,
+    app.title,
+    ext
+  );
+  const resolvedFilename = await resolveContestSubmissionFilename(
+    env,
+    groupSlug,
+    desiredFilename,
+    app.contest_storage_path ?? null
+  );
+
+  const relativeDir = submissionsRelativeDir();
+  const targetLogical = buildLogicalPath(
+    'group',
+    groupSlug,
+    `${relativeDir}/${resolvedFilename}`
+  );
+
+  if (app.contest_storage_path && app.contest_storage_path !== targetLogical) {
+    await removeStorageFileIfExists(env, db, app.contest_storage_path);
+  }
+
+  const targetParsed = parseLogicalPath(targetLogical);
+  if (targetParsed) {
+    await removeStorageFileIfExists(env, db, targetLogical);
+  }
+
+  const initiated = await initiateStorageUpload(
+    env,
+    db,
+    user,
+    'group',
+    groupSlug,
+    relativeDir,
+    desiredFilename,
+    body.byteLength,
+    { forcedResolvedFilename: resolvedFilename, contestGroupSubmissionSync: true }
+  );
+
+  if (initiated.mode !== 'simple') {
+    throw new Error('提出ファイルのサイズは現在の設定では同期できません');
+  }
+
+  const uploaded = await simpleStorageUpload(env, db, user, initiated.sessionId, body);
+
+  return { path: uploaded.path, filename: resolvedFilename };
 }
 
 /** グループ配下の提出用ディレクトリ（論理パス） */
