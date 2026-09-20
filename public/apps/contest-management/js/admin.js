@@ -57,7 +57,7 @@ const CONTEST_SCHEDULE_LABELS = {
   part_time: '定時制',
 };
 
-let contestApplications = [];
+let contestApplicationGroups = [];
 
 let currentReservationId = null;
 let allReservations = [];
@@ -250,12 +250,12 @@ async function refreshAll() {
       apiRequest('admin/reservations'),
       apiRequest('admin/members'),
       apiRequest('admin/printers'),
-      apiRequest('admin/applications?limit=200').catch(() => ({ applications: [] })),
+      apiRequest('admin/applications?limit=500').catch(() => ({ groups: [] })),
     ]);
     allReservations = resData.reservations.filter((r) => r.status !== 'cancelled');
     allMembers = membersData.members;
     allPrinters = printersData.printers;
-    contestApplications = appsData.applications ?? [];
+    contestApplicationGroups = appsData.groups ?? [];
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
@@ -950,53 +950,94 @@ function renderTodayTasks() {
   bindDetailButtons(mount);
 }
 
-/** Renders contest participation applications list. */
+/** Maps admin submission status code to badge CSS class. */
+function contestSubmissionStatusBadgeClass(code) {
+  if (!code) return 'contest-submission-status--default';
+  if (code === 'stl_pending') return 'contest-submission-status--pending';
+  if (code === 'self_print_submitted') return 'contest-submission-status--self';
+  if (code.startsWith('print_')) return `contest-submission-status--${code.replace('print_', '')}`;
+  return 'contest-submission-status--default';
+}
+
+function formatContestSubmissionStatusBadge(app) {
+  const status = app.submission_status;
+  if (!status) return '—';
+  const cls = contestSubmissionStatusBadgeClass(status.code);
+  const detail = status.detail ? `<span class="contest-submission-detail">${escapeHtml(status.detail)}</span>` : '';
+  return `<span class="contest-submission-status ${cls}">${escapeHtml(status.label)}</span>${detail}`;
+}
+
+/** Renders contest participation applications grouped by hub group. */
 function renderContestApplications() {
   const mount = document.getElementById('applications-mount');
   if (!mount) return;
 
-  if (!contestApplications.length) {
-    mount.innerHTML = '<p class="hint admin-list-empty">参加申請はありません</p>';
+  if (!contestApplicationGroups.length) {
+    mount.innerHTML =
+      '<p class="hint admin-list-empty">表示できるグループがありません（造形物コンテスト依頼アプリが有効なグループがありません）</p>';
     return;
   }
 
-  const rows = contestApplications.map((app) => {
-    const members =
-      app.members?.length > 0
-        ? app.members
-            .map((m) => {
-              const parts = [
-                m.homeroom ? escapeHtml(m.homeroom) : null,
-                m.student_number != null ? `${m.student_number}番` : null,
-                escapeHtml(m.member_name),
-              ].filter(Boolean);
-              return parts.join(' ');
-            })
-            .join('、')
-        : '—';
-    const reservationLine = app.self_print
-      ? app.stl_submitted_at
-        ? `自己印刷 · STL 提出済み（${escapeHtml(app.stl_filename ?? '')}）`
-        : '自己印刷 · STL 未提出'
-      : app.reservation
-        ? `予約 ${escapeHtml(app.reservation.id.slice(0, 8))}… · ${STATUS_LABELS[app.reservation.status] ?? app.reservation.status} · ${escapeHtml(app.reservation.desired_date)}`
-        : 'STL 未提出';
-    const impressions = app.impressions
-      ? `<p class="hint contest-admin-impressions">${escapeHtml(app.impressions)}</p>`
-      : '';
-    return `
-      <article class="contest-admin-application card" style="margin-bottom:1rem;padding:1rem">
-        <h3 class="section-heading" style="margin-top:0">${escapeHtml(app.title)}</h3>
-        <p class="hint">${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(String(app.student_number))}番 · ${escapeHtml(app.student_name)}</p>
-        <p class="hint">申請者: ${escapeHtml(app.applicant_email ?? '—')}</p>
-        <p class="hint">参加者: ${members}</p>
-        ${impressions}
-        <p class="hint"><strong>提出:</strong> ${reservationLine}</p>
+  const sections = contestApplicationGroups
+    .map((group) => {
+      const apps = group.applications ?? [];
+      const rows =
+        apps.length === 0
+          ? '<p class="hint admin-list-empty">このグループの参加申請はありません</p>'
+          : apps
+              .map((app) => {
+          const members =
+            app.members?.length > 0
+              ? app.members
+                  .map((m) => {
+                    const parts = [
+                      m.homeroom ? escapeHtml(m.homeroom) : null,
+                      m.student_number != null ? `${m.student_number}番` : null,
+                      escapeHtml(m.member_name),
+                    ].filter(Boolean);
+                    return parts.join(' ');
+                  })
+                  .join('、')
+              : '—';
+          const impressions = app.impressions
+            ? `<p class="hint contest-admin-impressions">${escapeHtml(app.impressions)}</p>`
+            : '';
+          const selfPrintHint = app.self_print
+            ? '<p class="hint">印刷: 自己印刷</p>'
+            : '';
+          return `
+      <article class="contest-admin-application card contest-admin-application-row">
+        <div class="contest-admin-application-main">
+          <h4 class="contest-admin-application-title">${escapeHtml(app.title)}</h4>
+          <p class="hint">${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(String(app.student_number))}番 · ${escapeHtml(app.student_name)}</p>
+          <p class="hint">申請者: ${escapeHtml(app.applicant_email ?? '—')}</p>
+          <p class="hint">参加者: ${members}</p>
+          ${selfPrintHint}
+          ${impressions}
+        </div>
+        <div class="contest-admin-application-status">
+          ${formatContestSubmissionStatusBadge(app)}
+          ${
+            app.submission_status?.desired_date
+              ? `<p class="hint contest-submission-date">希望日 ${escapeHtml(app.submission_status.desired_date)}</p>`
+              : ''
+          }
+        </div>
       </article>
     `;
-  });
+              })
+              .join('');
 
-  mount.innerHTML = rows.join('');
+      return `
+      <section class="contest-admin-group-section">
+        <h2 class="section-heading contest-admin-group-heading">${escapeHtml(group.group_display_name)} <span class="hint">(${apps.length}件)</span></h2>
+        <div class="contest-admin-application-list">${rows}</div>
+      </section>
+    `;
+    })
+    .join('');
+
+  mount.innerHTML = sections;
 }
 
 /** Renders print history table. */
