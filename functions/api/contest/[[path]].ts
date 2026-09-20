@@ -79,6 +79,7 @@ import {
   listContestApplicationsAdmin,
   listContestApplicationsForUser,
   patchContestApplicationForUser,
+  withdrawContestApplicationForUser,
 } from "../../lib/contest/applications";
 import {
   getContestStorageGroupSlug,
@@ -725,6 +726,28 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return json({ application });
       } catch (err) {
         const message = err instanceof Error ? err.message : "更新に失敗しました";
+        const status = message.includes("見つかりません") ? 404 : 400;
+        return error(message, status);
+      }
+    }
+
+    // POST /api/contest/applications/:id/withdraw
+    if (
+      method === "POST" &&
+      segments[0] === "applications" &&
+      segments.length === 3 &&
+      segments[2] === "withdraw"
+    ) {
+      try {
+        const application = await withdrawContestApplicationForUser(
+          env,
+          db,
+          userId,
+          segments[1]
+        );
+        return json({ ok: true, message: "参加を取り消しました", application });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "取り消しに失敗しました";
         const status = message.includes("見つかりません") ? 404 : 400;
         return error(message, status);
       }

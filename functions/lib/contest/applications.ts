@@ -3,6 +3,7 @@ import type { Env } from '../types';
 import type { Reservation } from '../3dprint/reservations';
 import {
   getActiveContestReservationForApplication,
+  deleteReservation,
   type Reservation as PrintReservation,
 } from '../3dprint/reservations';
 import {
@@ -17,6 +18,7 @@ import {
   notifyContestParticipationRegisteredEmail,
 } from './contest-email';
 import { getOAuthRedirectBase } from '../oauth';
+import { deleteCalendarEvent } from '../3dprint/google-calendar';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
   title, impressions, status, self_print, stl_r2_key, stl_filename, stl_size_bytes, stl_print_notes,
@@ -73,6 +75,7 @@ export interface ContestApplicationWithDetails extends ContestApplication {
   members: ContestApplicationMember[];
   reservation: ContestApplicationReservationSummary | null;
   can_submit_stl: boolean;
+  can_withdraw: boolean;
 }
 
 export interface CreateContestApplicationInput {
@@ -161,11 +164,28 @@ async function fetchLatestReservationForApplication(
   return row ?? null;
 }
 
+async function hasBlockingReservationForWithdraw(
+  db: D1Database,
+  applicationId: string
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM print_reservations
+       WHERE contest_application_id = ? AND source = 'contest'
+         AND status IN ('printing', 'delivered')
+       LIMIT 1`
+    )
+    .bind(applicationId)
+    .first();
+  return row != null;
+}
+
 function enrichApplication(
   app: ContestApplication,
   members: ContestApplicationMember[],
   reservation: ContestApplicationReservationSummary | null,
-  active: Reservation | null
+  active: Reservation | null,
+  canWithdraw: boolean
 ): ContestApplicationWithDetails {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   return {
@@ -176,6 +196,7 @@ function enrichApplication(
       app.status === 'approved' &&
       !active &&
       !selfPrintSubmitted,
+    can_withdraw: canWithdraw,
   };
 }
 
@@ -324,7 +345,7 @@ export async function createContestApplication(
     entryAppUrl: entryUrl,
   });
 
-  return enrichApplication(application, members, null, null);
+  return enrichApplication(application, members, null, null, true);
 }
 
 /** Lists the user's contest applications newest first. */
@@ -348,7 +369,10 @@ export async function listContestApplicationsForUser(
     const members = await fetchMembersForApplication(db, app.id);
     const reservation = await fetchLatestReservationForApplication(db, app.id);
     const active = await getActiveContestReservationForApplication(db, app.id);
-    enriched.push(enrichApplication(app, members, reservation, active));
+    const canWithdraw =
+      app.status === 'approved' &&
+      !(await hasBlockingReservationForWithdraw(db, app.id));
+    enriched.push(enrichApplication(app, members, reservation, active, canWithdraw));
   }
   return enriched;
 }
@@ -375,7 +399,10 @@ export async function getContestApplicationForUser(
   const members = await fetchMembersForApplication(db, app.id);
   const reservation = await fetchLatestReservationForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
-  return enrichApplication(app, members, reservation, active);
+  const canWithdraw =
+    app.status === 'approved' &&
+    !(await hasBlockingReservationForWithdraw(db, app.id));
+  return enrichApplication(app, members, reservation, active, canWithdraw);
 }
 
 /** Loads application for STL submit (must be approved and owned). */
@@ -465,7 +492,10 @@ export async function patchContestApplicationForUser(
     updated_at: now,
   };
   const reservation = await fetchLatestReservationForApplication(db, applicationId);
-  return enrichApplication(updated, members, reservation, active);
+  const canWithdraw =
+    updated.status === 'approved' &&
+    !(await hasBlockingReservationForWithdraw(db, applicationId));
+  return enrichApplication(updated, members, reservation, active, canWithdraw);
 }
 
 /** Records STL submission for self-print applications (no print reservation). */
@@ -523,6 +553,79 @@ export async function updateContestApplicationContestStorage(
     .run();
 }
 
+type ContestReservationCancelRow = {
+  id: string;
+  google_event_id: string | null;
+  stl_r2_key: string;
+  status: PrintReservation['status'];
+};
+
+async function cancelOpenContestReservationsForApplication(
+  env: Env,
+  db: D1Database,
+  applicationId: string
+): Promise<void> {
+  const result = await db
+    .prepare(
+      `SELECT id, google_event_id, stl_r2_key, status FROM print_reservations
+       WHERE contest_application_id = ? AND source = 'contest' AND status != 'cancelled'`
+    )
+    .bind(applicationId)
+    .all<ContestReservationCancelRow>();
+
+  const rows = result.results ?? [];
+  for (const row of rows) {
+    if (row.status === 'printing' || row.status === 'delivered') {
+      throw new Error('印刷が進行中または完了しているため、参加を取り消せません');
+    }
+  }
+
+  for (const row of rows) {
+    await deleteCalendarEvent(env, row.google_event_id);
+    try {
+      await env.FILES.delete(row.stl_r2_key);
+    } catch (err) {
+      console.error('contest withdraw: failed to delete reservation stl', row.id, err);
+    }
+    await deleteReservation(db, row.id);
+  }
+}
+
+/** Marks participation as withdrawn and cancels cancellable print reservations. */
+export async function withdrawContestApplicationForUser(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  applicationId: string
+): Promise<ContestApplicationWithDetails> {
+  const app = await getApplicationRow(db, applicationId);
+  if (!app || app.user_id !== userId) {
+    throw new Error('参加申請が見つかりません');
+  }
+  if (app.status === 'withdrawn') {
+    throw new Error('すでに参加を取り消しています');
+  }
+  if (app.status !== 'approved') {
+    throw new Error('この参加申請は取り消せません');
+  }
+
+  await cancelOpenContestReservationsForApplication(env, db, applicationId);
+
+  const now = new Date().toISOString();
+  await db
+    .prepare(`UPDATE contest_applications SET status = 'withdrawn', updated_at = ? WHERE id = ?`)
+    .bind(now, applicationId)
+    .run();
+
+  const updated = await getApplicationRow(db, applicationId);
+  if (!updated) throw new Error('参加申請が見つかりません');
+
+  const members = await fetchMembersForApplication(db, applicationId);
+  const reservation = await fetchLatestReservationForApplication(db, applicationId);
+  const active = await getActiveContestReservationForApplication(db, applicationId);
+  return enrichApplication(updated, members, reservation, active, false);
+}
+
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
   applicant_email: string | null;
 }
@@ -560,8 +663,11 @@ export async function listContestApplicationsAdmin(
     const members = await fetchMembersForApplication(db, app.id);
     const reservation = await fetchLatestReservationForApplication(db, app.id);
     const active = await getActiveContestReservationForApplication(db, app.id);
+    const canWithdraw =
+      app.status === 'approved' &&
+      !(await hasBlockingReservationForWithdraw(db, app.id));
     enriched.push({
-      ...enrichApplication(app, members, reservation, active),
+      ...enrichApplication(app, members, reservation, active, canWithdraw),
       applicant_email,
     });
   }
