@@ -284,7 +284,7 @@ async function handleApplicationSubmit(e) {
   const formData = new FormData(form);
 
   if (!participants.every((row) => isParticipantRowValid(row))) {
-    showToast('参加者のクラス・出席番号・名前をすべて入力してください', 'error');
+    showToast('メンバーのクラス・出席番号・名前をすべて入力してください', 'error');
     return;
   }
 
