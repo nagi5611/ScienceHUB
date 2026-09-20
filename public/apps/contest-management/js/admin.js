@@ -967,6 +967,64 @@ function formatContestSubmissionStatusBadge(app) {
   return `<span class="contest-submission-status ${cls}">${escapeHtml(status.label)}</span>${detail}`;
 }
 
+/** Short label for member list in compact admin table. */
+function formatContestMembersCompact(members, maxShown = 2) {
+  if (!members?.length) return '—';
+  const parts = members.slice(0, maxShown).map((m) => {
+    const bits = [
+      m.homeroom ? escapeHtml(m.homeroom) : null,
+      m.student_number != null ? `${m.student_number}番` : null,
+      escapeHtml(m.member_name),
+    ].filter(Boolean);
+    return bits.join(' ');
+  });
+  const rest = members.length - maxShown;
+  const suffix = rest > 0 ? ` 他${rest}名` : '';
+  return `${parts.join('、')}${suffix}`;
+}
+
+function contestAdminApplicationMembersTitle(members) {
+  if (!members?.length) return '';
+  return members
+    .map((m) => {
+      const bits = [
+        m.homeroom ?? '',
+        m.student_number != null ? `${m.student_number}番` : '',
+        m.member_name,
+      ].filter(Boolean);
+      return bits.join(' ');
+    })
+    .join('\n');
+}
+
+function contestAdminApplicationDeleteCell(app) {
+  const title = escapeHtml(app.title);
+  return `<button type="button" class="btn btn-secondary btn-sm contest-admin-app-delete" data-app-id="${escapeHtml(app.id)}" data-app-title="${title}">削除</button>`;
+}
+
+/** Binds delete buttons on the participation applications panel. */
+function bindContestApplicationDeleteButtons(container) {
+  container.querySelectorAll('.contest-admin-app-delete').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteContestApplication(btn.dataset.appId, btn.dataset.appTitle);
+    });
+  });
+}
+
+/** Admin: delete a participation application and refresh lists. */
+async function handleDeleteContestApplication(applicationId, title) {
+  const label = title ? `「${title}」` : 'この参加申請';
+  if (!confirm(`${label}を削除しますか？\n予約・提出ファイルも削除されます。`)) return;
+
+  try {
+    await apiRequest(`admin/applications/${applicationId}`, { method: 'DELETE' });
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
 /** Renders contest participation applications grouped by hub group. */
 function renderContestApplications() {
   const mount = document.getElementById('applications-mount');
@@ -981,63 +1039,78 @@ function renderContestApplications() {
   const sections = contestApplicationGroups
     .map((group) => {
       const apps = group.applications ?? [];
-      const rows =
-        apps.length === 0
-          ? '<p class="hint admin-list-empty">このグループの参加申請はありません</p>'
-          : apps
-              .map((app) => {
-          const members =
-            app.members?.length > 0
-              ? app.members
-                  .map((m) => {
-                    const parts = [
-                      m.homeroom ? escapeHtml(m.homeroom) : null,
-                      m.student_number != null ? `${m.student_number}番` : null,
-                      escapeHtml(m.member_name),
-                    ].filter(Boolean);
-                    return parts.join(' ');
-                  })
-                  .join('、')
-              : '—';
-          const impressions = app.impressions
-            ? `<p class="hint contest-admin-impressions">${escapeHtml(app.impressions)}</p>`
-            : '';
-          const selfPrintHint = app.self_print
-            ? '<p class="hint">印刷: 自己印刷</p>'
-            : '';
-          return `
-      <article class="contest-admin-application card contest-admin-application-row">
-        <div class="contest-admin-application-main">
-          <h4 class="contest-admin-application-title">${escapeHtml(app.title)}</h4>
-          <p class="hint">${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(String(app.student_number))}番 · ${escapeHtml(app.student_name)}</p>
-          <p class="hint">申請者: ${escapeHtml(app.applicant_email ?? '—')}</p>
-          <p class="hint">参加者: ${members}</p>
-          ${selfPrintHint}
+      if (apps.length === 0) {
+        return `
+      <section class="contest-admin-group-section">
+        <h2 class="section-heading contest-admin-group-heading">${escapeHtml(group.group_display_name)} <span class="hint">(0件)</span></h2>
+        <p class="hint admin-list-empty">このグループの参加申請はありません</p>
+      </section>`;
+      }
+
+      let body;
+      if (isMobileAdminView()) {
+        body = `<div class="contest-admin-application-compact-list">${apps
+          .map((app) => {
+            const membersTitle = contestAdminApplicationMembersTitle(app.members);
+            const impressions = app.impressions
+              ? `<p class="hint contest-admin-impressions-truncate">${escapeHtml(app.impressions)}</p>`
+              : '';
+            return `
+        <article class="contest-admin-application-compact card">
+          <div class="contest-admin-application-compact-head">
+            <strong>${escapeHtml(app.title)}</strong>
+            ${formatContestSubmissionStatusBadge(app)}
+          </div>
+          <p class="hint contest-admin-application-compact-meta">
+            ${escapeHtml(app.homeroom)} · ${escapeHtml(String(app.student_number))}番 · ${escapeHtml(app.student_name)}
+            · ${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)}
+            ${app.self_print ? ' · 自己印刷' : ''}
+          </p>
+          <p class="hint" title="${escapeHtml(membersTitle)}">参加者: ${formatContestMembersCompact(app.members)}</p>
           ${impressions}
-        </div>
-        <div class="contest-admin-application-status">
-          ${formatContestSubmissionStatusBadge(app)}
-          ${
-            app.submission_status?.desired_date
-              ? `<p class="hint contest-submission-date">希望日 ${escapeHtml(app.submission_status.desired_date)}</p>`
-              : ''
-          }
-        </div>
-      </article>
-    `;
-              })
-              .join('');
+          <div class="contest-admin-application-compact-actions">${contestAdminApplicationDeleteCell(app)}</div>
+        </article>`;
+          })
+          .join('')}</div>`;
+      } else {
+        body = adminReservationTableHtml(apps, [
+          { label: 'HR', cell: (app) => escapeHtml(app.homeroom) },
+          { label: '番', cell: (app) => escapeHtml(String(app.student_number)) },
+          { label: '代表', cell: (app) => escapeHtml(app.student_name) },
+          { label: 'タイトル', cell: (app) => escapeHtml(app.title) },
+          { label: '区分', cell: (app) => escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type) },
+          {
+            label: '参加者',
+            cell: (app) => {
+              const title = contestAdminApplicationMembersTitle(app.members);
+              return `<span class="contest-admin-members-compact" title="${escapeHtml(title)}">${formatContestMembersCompact(app.members, 1)}</span>`;
+            },
+          },
+          {
+            label: 'ステータス',
+            cell: (app) => {
+              const date =
+                app.submission_status?.desired_date != null
+                  ? `<span class="contest-submission-date-inline">${escapeHtml(app.submission_status.desired_date)}</span>`
+                  : '';
+              return `<div class="contest-admin-status-cell">${formatContestSubmissionStatusBadge(app)}${date}</div>`;
+            },
+          },
+          { label: '申請者', cell: (app) => escapeHtml(app.applicant_email ?? '—') },
+          { label: '', cell: (app) => contestAdminApplicationDeleteCell(app) },
+        ]);
+      }
 
       return `
       <section class="contest-admin-group-section">
         <h2 class="section-heading contest-admin-group-heading">${escapeHtml(group.group_display_name)} <span class="hint">(${apps.length}件)</span></h2>
-        <div class="contest-admin-application-list">${rows}</div>
-      </section>
-    `;
+        ${body}
+      </section>`;
     })
     .join('');
 
   mount.innerHTML = sections;
+  bindContestApplicationDeleteButtons(mount);
 }
 
 /** Renders print history table. */
