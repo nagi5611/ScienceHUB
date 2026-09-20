@@ -241,6 +241,7 @@ function resetApplicationFormForCreate() {
 }
 
 function submissionStatusLabel(app) {
+  if (app.status === 'withdrawn') return '参加取り消し済み';
   if (app.self_print) {
     if (app.stl_submitted_at) return '提出済み（自己印刷）';
     return 'STL 未提出';
@@ -262,6 +263,7 @@ function renderApplicationsList() {
   for (const app of applications) {
     const li = document.createElement('li');
     li.className = 'contest-application-card';
+    if (app.status === 'withdrawn') li.classList.add('contest-application-card--withdrawn');
     const memberCount = app.members?.length ?? 0;
     const memberLine =
       memberCount > 0
@@ -273,7 +275,13 @@ function renderApplicationsList() {
     const submitBtn = app.can_submit_stl
       ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
       : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
-    const editBtn = `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`;
+    const editBtn =
+      app.status === 'approved'
+        ? `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`
+        : '';
+    const withdrawBtn = app.can_withdraw
+      ? `<button type="button" class="btn btn-secondary btn-sm contest-card-withdraw" data-id="${escapeHtml(app.id)}">参加取り消し</button>`
+      : '';
 
     li.innerHTML = `
       <div class="contest-application-card-body">
@@ -285,6 +293,7 @@ function renderApplicationsList() {
       </div>
       <div class="contest-application-card-actions">
         ${editBtn}
+        ${withdrawBtn}
         ${submitBtn}
       </div>
     `;
@@ -297,6 +306,30 @@ function renderApplicationsList() {
   listEl.querySelectorAll('.contest-card-edit').forEach((btn) => {
     btn.addEventListener('click', () => openEditView(btn.dataset.id));
   });
+  listEl.querySelectorAll('.contest-card-withdraw').forEach((btn) => {
+    btn.addEventListener('click', () => handleWithdrawApplication(btn.dataset.id));
+  });
+}
+
+async function handleWithdrawApplication(applicationId) {
+  const app = applications.find((a) => a.id === applicationId);
+  if (!app?.can_withdraw) {
+    showToast('この作品は参加取り消しできません', 'error');
+    return;
+  }
+  const message = app.reservation
+    ? 'この作品の参加を取り消しますか？関連する印刷予約も取り消されます。'
+    : 'この作品の参加を取り消しますか？';
+  if (!window.confirm(message)) return;
+
+  try {
+    await apiRequest(`applications/${applicationId}/withdraw`, { method: 'POST' });
+    showToast('参加を取り消しました', 'success');
+    await loadApplications();
+    await loadCalendar();
+  } catch (err) {
+    showToast(err.message || '参加取り消しに失敗しました', 'error');
+  }
 }
 
 async function loadApplications() {
@@ -316,6 +349,10 @@ function openEditView(applicationId) {
   const app = applications.find((a) => a.id === applicationId);
   if (!app) {
     showToast('参加申請が見つかりません', 'error');
+    return;
+  }
+  if (app.status === 'withdrawn') {
+    showToast('取り消済みの参加申請は編集できません', 'error');
     return;
   }
   editingApplicationId = applicationId;
