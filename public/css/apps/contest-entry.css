@@ -248,6 +248,85 @@
   margin: 0 0 1rem;
 }
 
+.contest-participant-table-wrap {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.contest-participant-table-head,
+.contest-participant-row {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 1fr) minmax(4rem, 5.5rem) minmax(6rem, 1.4fr) 2.5rem;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0.65rem;
+}
+
+.contest-participant-table-head {
+  background: var(--surface-muted, #f3f4f6);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.contest-participant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.contest-participant-row {
+  border-top: 1px solid var(--border, #e5e7eb);
+}
+
+.contest-participant-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.participant-remove-placeholder {
+  display: block;
+  width: 2.25rem;
+}
+
+.contest-add-participant-btn {
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  .contest-participant-table-head {
+    display: none;
+  }
+
+  .contest-participant-row {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'class class'
+      'num name'
+      'remove remove';
+  }
+
+  .contest-participant-row .participant-homeroom {
+    grid-area: class;
+  }
+
+  .contest-participant-row .participant-number {
+    grid-area: num;
+  }
+
+  .contest-participant-row .participant-name {
+    grid-area: name;
+  }
+
+  .contest-participant-row .participant-remove,
+  .contest-participant-row .participant-remove-placeholder {
+    grid-area: remove;
+    justify-self: end;
+  }
+}
+
 .contest-member-list {
   list-style: none;
   margin: 0 0 0.5rem;

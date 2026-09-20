@@ -1,5 +1,5 @@
 // public/apps/contest-entry/js/entry-draft.js
-const DRAFT_KEY = 'sciencehub_contest_application_draft_v1';
+const DRAFT_KEY = 'sciencehub_contest_application_draft_v2';
 
 /** Parses schedule_type from stored draft. */
 function parseScheduleType(value) {
@@ -28,16 +28,17 @@ export function saveContestDraft(draft) {
 }
 
 /** Builds draft object from application form fields. */
-export function extractContestDraft(form, homeroomValue, memberNames) {
+export function extractContestDraft(form, participants) {
   const formData = new FormData(form);
   return {
     schedule_type: parseScheduleType(formData.get('schedule_type')),
-    homeroom: homeroomValue,
-    student_number: String(formData.get('student_number') ?? ''),
-    student_name: String(formData.get('student_name') ?? ''),
+    participants: participants.map((p) => ({
+      homeroom: p.homeroom ?? '',
+      student_number: p.student_number ?? '',
+      student_name: p.student_name ?? '',
+    })),
     title: String(formData.get('title') ?? ''),
     impressions: String(formData.get('impressions') ?? ''),
-    members: memberNames,
   };
 }
 
@@ -48,19 +49,10 @@ export function applyContestDraft(form, draft) {
   const radio = form.querySelector(`input[name="schedule_type"][value="${schedule}"]`);
   if (radio) radio.checked = true;
 
-  if (schedule === 'full_time') {
-    const homeroom = form.querySelector('#homeroom');
-    if (homeroom) homeroom.value = draft.homeroom ?? '';
-  } else {
-    const classFree = form.querySelector('#class_free');
-    if (classFree) classFree.value = draft.homeroom ?? draft.class_free ?? '';
-  }
-
-  const fields = ['student_number', 'student_name', 'title', 'impressions'];
-  for (const name of fields) {
-    const el = form.querySelector(`[name="${name}"]`);
-    if (el && draft[name] != null) el.value = draft[name];
-  }
+  const title = form.querySelector('[name="title"]');
+  if (title && draft.title != null) title.value = draft.title;
+  const impressions = form.querySelector('[name="impressions"]');
+  if (impressions && draft.impressions != null) impressions.value = draft.impressions;
 }
 
 export { parseScheduleType };

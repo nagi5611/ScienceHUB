@@ -113,3 +113,53 @@ export function parseContestMemberNames(raw: unknown): string[] {
   if (names.length > 20) throw new Error('メンバーは20人までです');
   return names;
 }
+
+export interface ContestParticipantFields {
+  homeroom: string;
+  student_number: number;
+  student_name: string;
+}
+
+function parseParticipantRow(
+  scheduleType: ContestScheduleType,
+  item: unknown,
+  index: number
+): ContestParticipantFields {
+  if (typeof item !== 'object' || item === null) {
+    throw new Error(`参加者${index + 1}の形式が不正です`);
+  }
+  const row = item as Record<string, unknown>;
+  const homeroom = String(row.homeroom ?? row.class ?? '').trim();
+  const studentNumber = Number(row.student_number);
+  const studentName = String(row.student_name ?? row.name ?? '').trim();
+
+  const classError = validateContestClass(scheduleType, homeroom);
+  if (classError) {
+    throw new Error(`参加者${index + 1}: ${classError}`);
+  }
+  if (!Number.isInteger(studentNumber) || studentNumber < 1 || studentNumber > 50) {
+    throw new Error(`参加者${index + 1}: 出席番号が不正です`);
+  }
+  if (!studentName) throw new Error(`参加者${index + 1}: 名前を入力してください`);
+  if (studentName.length > CONTEST_STUDENT_NAME_MAX_LEN) {
+    throw new Error(`参加者${index + 1}: 名前が長すぎます`);
+  }
+
+  return {
+    homeroom,
+    student_number: studentNumber,
+    student_name: studentName,
+  };
+}
+
+/** Validates participant list (class, number, name per row). */
+export function parseContestParticipants(
+  scheduleType: ContestScheduleType,
+  raw: unknown
+): ContestParticipantFields[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('参加者を1人以上追加してください');
+  }
+  if (raw.length > 20) throw new Error('参加者は20人までです');
+  return raw.map((item, index) => parseParticipantRow(scheduleType, item, index));
+}

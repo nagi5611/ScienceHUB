@@ -8,6 +8,8 @@ import {
 import {
   parseContestApplicationFields,
   parseContestMemberNames,
+  parseContestParticipants,
+  type ContestParticipantFields,
   type ContestScheduleType,
 } from './contest-validation';
 import {
@@ -34,6 +36,8 @@ export interface ContestApplicationMember {
   id: string;
   application_id: string;
   member_name: string;
+  homeroom: string | null;
+  student_number: number | null;
   sort_order: number;
 }
 
@@ -52,16 +56,19 @@ export interface ContestApplicationWithDetails extends ContestApplication {
 
 export interface CreateContestApplicationInput {
   schedule_type: ContestScheduleType;
-  homeroom: string;
-  student_number: number;
-  student_name: string;
   title: string;
   impressions?: string | null;
+  participants?: unknown;
+  /** @deprecated 後方互換 */
+  homeroom?: string;
+  student_number?: number;
+  student_name?: string;
   members?: unknown;
 }
 
 export interface PatchContestApplicationInput {
   impressions?: string | null;
+  participants?: unknown;
   members?: unknown;
 }
 
@@ -71,7 +78,7 @@ async function fetchMembersForApplication(
 ): Promise<ContestApplicationMember[]> {
   const result = await db
     .prepare(
-      `SELECT id, application_id, member_name, sort_order
+      `SELECT id, application_id, member_name, homeroom, student_number, sort_order
        FROM contest_application_members
        WHERE application_id = ?
        ORDER BY sort_order ASC, id ASC`
@@ -112,26 +119,30 @@ function enrichApplication(
   };
 }
 
-/** Inserts member rows for an application (replaces none — use replaceMembers). */
+/** Inserts participant rows for an application. */
 async function insertMembers(
   db: D1Database,
   applicationId: string,
-  memberNames: string[]
+  participants: ContestParticipantFields[]
 ): Promise<ContestApplicationMember[]> {
   const members: ContestApplicationMember[] = [];
-  for (let i = 0; i < memberNames.length; i += 1) {
+  for (let i = 0; i < participants.length; i += 1) {
+    const row = participants[i];
     const id = crypto.randomUUID();
     await db
       .prepare(
-        `INSERT INTO contest_application_members (id, application_id, member_name, sort_order)
-         VALUES (?, ?, ?, ?)`
+        `INSERT INTO contest_application_members (
+          id, application_id, member_name, homeroom, student_number, sort_order
+        ) VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .bind(id, applicationId, memberNames[i], i)
+      .bind(id, applicationId, row.student_name, row.homeroom, row.student_number, i)
       .run();
     members.push({
       id,
       application_id: applicationId,
-      member_name: memberNames[i],
+      member_name: row.student_name,
+      homeroom: row.homeroom,
+      student_number: row.student_number,
       sort_order: i,
     });
   }
@@ -141,13 +152,42 @@ async function insertMembers(
 async function replaceMembers(
   db: D1Database,
   applicationId: string,
-  memberNames: string[]
+  participants: ContestParticipantFields[]
 ): Promise<ContestApplicationMember[]> {
   await db
     .prepare(`DELETE FROM contest_application_members WHERE application_id = ?`)
     .bind(applicationId)
     .run();
-  return insertMembers(db, applicationId, memberNames);
+  return insertMembers(db, applicationId, participants);
+}
+
+function resolveParticipantsForCreate(
+  input: CreateContestApplicationInput
+): ContestParticipantFields[] {
+  if (Array.isArray(input.participants) && input.participants.length > 0) {
+    return parseContestParticipants(input.schedule_type, input.participants);
+  }
+
+  const homeroom = String(input.homeroom ?? '').trim();
+  const studentName = String(input.student_name ?? '').trim();
+  const studentNumber = Number(input.student_number);
+  const primary = parseContestParticipants(input.schedule_type, [
+    {
+      homeroom,
+      student_number: studentNumber,
+      student_name: studentName,
+    },
+  ])[0];
+
+  const extraNames = parseContestMemberNames(input.members ?? []);
+  return [
+    primary,
+    ...extraNames.map((name) => ({
+      homeroom: primary.homeroom,
+      student_number: primary.student_number,
+      student_name: name,
+    })),
+  ];
 }
 
 /** Creates an auto-approved contest participation application. */
@@ -158,8 +198,16 @@ export async function createContestApplication(
   input: CreateContestApplicationInput
 ): Promise<ContestApplicationWithDetails> {
   const db = env.DB;
-  const parsed = parseContestApplicationFields(input);
-  const memberNames = parseContestMemberNames(input.members ?? []);
+  const participants = resolveParticipantsForCreate(input);
+  const first = participants[0];
+  const parsed = parseContestApplicationFields({
+    schedule_type: input.schedule_type,
+    homeroom: first.homeroom,
+    student_number: first.student_number,
+    student_name: first.student_name,
+    title: input.title,
+    impressions: input.impressions ?? null,
+  });
 
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -185,7 +233,7 @@ export async function createContestApplication(
     )
     .run();
 
-  const members = await insertMembers(db, id, memberNames);
+  const members = await insertMembers(db, id, participants);
   const application: ContestApplication = {
     id,
     user_id: userId,
@@ -315,9 +363,10 @@ export async function patchContestApplicationForUser(
     .run();
 
   let members = await fetchMembersForApplication(db, applicationId);
-  if (input.members !== undefined) {
-    const memberNames = parseContestMemberNames(input.members);
-    members = await replaceMembers(db, applicationId, memberNames);
+  if (input.members !== undefined || input.participants !== undefined) {
+    const raw = input.participants ?? input.members;
+    const participants = parseContestParticipants(app.schedule_type, raw);
+    members = await replaceMembers(db, applicationId, participants);
   }
 
   const updated: ContestApplication = {

@@ -1,7 +1,7 @@
 // public/apps/contest-entry/js/main.js
 import { apiRequest } from './api.js';
 import { uploadPrintFile } from './upload/simple.js';
-import { setupHomeroomCombobox, HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
+import { HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
 import { checkAppAccess, initAuth } from './contest-auth.js';
 import {
   applyContestDraft,
@@ -29,15 +29,19 @@ let currentYear;
 let currentMonth;
 let calendarReservations = [];
 let uploadResult = null;
-let homeroomField = null;
 let scheduleType = 'full_time';
 let applications = [];
 let selectedApplicationId = null;
-let memberNames = [];
 
-function usesFreeClassInput(type) {
-  return type === 'part_time';
+/** @typedef {{ homeroom: string, student_number: string, student_name: string }} ParticipantRow */
+
+/** @returns {ParticipantRow} */
+function createEmptyParticipant() {
+  return { homeroom: '', student_number: '', student_name: '' };
 }
+
+/** @type {ParticipantRow[]} */
+let participants = [createEmptyParticipant()];
 
 function todayJst() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
@@ -73,30 +77,102 @@ function showView(view) {
   document.getElementById('view-submit')?.classList.toggle('hidden', view !== 'submit');
 }
 
-function getHomeroomValue() {
-  if (usesFreeClassInput(scheduleType)) {
-    return document.getElementById('class_free')?.value.trim() ?? '';
-  }
-  return homeroomField?.getValue?.() ?? document.getElementById('homeroom')?.value.trim() ?? '';
+function populateHomeroomDatalist() {
+  const datalist = document.getElementById('homeroom-datalist');
+  if (!datalist) return;
+  datalist.innerHTML = HOMEROOMS.map((h) => `<option value="${escapeHtml(h)}"></option>`).join('');
 }
 
-function isValidHomeroom(value) {
-  return HOMEROOMS.includes(value);
+function syncParticipantsFromDom() {
+  const list = document.getElementById('participant-list');
+  if (!list) return;
+  list.querySelectorAll('.contest-participant-row').forEach((row, index) => {
+    if (!participants[index]) participants[index] = createEmptyParticipant();
+    participants[index].homeroom =
+      row.querySelector('.participant-homeroom')?.value.trim() ?? '';
+    participants[index].student_number =
+      row.querySelector('.participant-number')?.value.trim() ?? '';
+    participants[index].student_name =
+      row.querySelector('.participant-name')?.value.trim() ?? '';
+  });
+}
+
+function isParticipantRowValid(row) {
+  const homeroom = row.homeroom.trim();
+  const num = row.student_number.trim();
+  const name = row.student_name.trim();
+  let homeroomOk = false;
+  if (scheduleType === 'full_time') {
+    homeroomOk = homeroom.length > 0 && HOMEROOMS.includes(homeroom);
+  } else {
+    homeroomOk = homeroom.length >= 1 && homeroom.length <= 20;
+  }
+  const numOk = /^\d+$/.test(num) && Number(num) >= 1 && Number(num) <= 99;
+  const nameOk = name.length >= 1 && name.length <= 50;
+  return homeroomOk && numOk && nameOk;
+}
+
+function renderParticipantList() {
+  const list = document.getElementById('participant-list');
+  if (!list) return;
+
+  list.innerHTML = '';
+  const isFull = scheduleType === 'full_time';
+
+  participants.forEach((row, index) => {
+    const li = document.createElement('li');
+    li.className = 'contest-participant-row';
+    const homeroomAttrs = isFull
+      ? 'list="homeroom-datalist" maxlength="3" placeholder="101"'
+      : 'maxlength="20" placeholder="クラス"';
+    const removeBtn =
+      participants.length > 1
+        ? `<button type="button" class="btn btn-secondary btn-sm participant-remove" data-index="${index}" aria-label="削除">×</button>`
+        : '<span class="participant-remove-placeholder" aria-hidden="true"></span>';
+
+    li.innerHTML = `
+      <input type="text" class="participant-homeroom" ${homeroomAttrs} value="${escapeHtml(row.homeroom)}" autocomplete="off" />
+      <input type="number" class="participant-number" min="1" max="99" placeholder="番号" value="${escapeHtml(row.student_number)}" />
+      <input type="text" class="participant-name" maxlength="50" placeholder="名前" value="${escapeHtml(row.student_name)}" />
+      ${removeBtn}
+    `;
+    list.appendChild(li);
+  });
+
+  list.querySelectorAll('input').forEach((input) => {
+    input.addEventListener('input', () => {
+      syncParticipantsFromDom();
+      persistApplicationDraft();
+      updateApplicationSubmitState();
+    });
+  });
+  list.querySelectorAll('.participant-remove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.index);
+      participants.splice(idx, 1);
+      if (participants.length === 0) participants.push(createEmptyParticipant());
+      renderParticipantList();
+      persistApplicationDraft();
+      updateApplicationSubmitState();
+    });
+  });
 }
 
 function updateScheduleTypeUi() {
-  const fullGroup = document.getElementById('homeroom-fulltime-group');
-  const partGroup = document.getElementById('homeroom-parttime-group');
-  const homeroomInput = document.getElementById('homeroom');
-  const classInput = document.getElementById('class_free');
-  if (!fullGroup || !partGroup) return;
-
-  const isFull = scheduleType === 'full_time';
-  fullGroup.classList.toggle('hidden', !isFull);
-  partGroup.classList.toggle('hidden', isFull);
-  if (homeroomInput) homeroomInput.required = isFull;
-  if (classInput) classInput.required = !isFull;
+  renderParticipantList();
   updateApplicationSubmitState();
+}
+
+function formatParticipantSummary(members) {
+  if (!members?.length) return '';
+  return members
+    .map((m) => {
+      const cls = m.homeroom ?? '';
+      const num = m.student_number != null ? `${m.student_number}番` : '';
+      const name = m.member_name ?? '';
+      return [cls, num, name].filter(Boolean).join(' ');
+    })
+    .join('、');
 }
 
 function submissionStatusLabel(app) {
@@ -104,37 +180,6 @@ function submissionStatusLabel(app) {
   const status = app.reservation.status;
   if (status === 'delivered') return '印刷完了';
   return STATUS_LABELS[status] ?? status;
-}
-
-function renderMemberInputs() {
-  const list = document.getElementById('member-list');
-  if (!list) return;
-  list.innerHTML = '';
-  memberNames.forEach((name, index) => {
-    const li = document.createElement('li');
-    li.className = 'contest-member-row';
-    li.innerHTML = `
-      <input type="text" class="contest-member-input" data-index="${index}" value="${escapeHtml(name)}" maxlength="50" placeholder="メンバー名" />
-      <button type="button" class="btn btn-secondary btn-sm contest-member-remove" data-index="${index}" aria-label="削除">×</button>
-    `;
-    list.appendChild(li);
-  });
-
-  list.querySelectorAll('.contest-member-input').forEach((input) => {
-    input.addEventListener('input', () => {
-      const idx = Number(input.dataset.index);
-      memberNames[idx] = input.value;
-      persistApplicationDraft();
-    });
-  });
-  list.querySelectorAll('.contest-member-remove').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = Number(btn.dataset.index);
-      memberNames.splice(idx, 1);
-      renderMemberInputs();
-      persistApplicationDraft();
-    });
-  });
 }
 
 function renderApplicationsList() {
@@ -151,7 +196,7 @@ function renderApplicationsList() {
     const memberCount = app.members?.length ?? 0;
     const memberLine =
       memberCount > 0
-        ? `<p class="hint">制作者: ${escapeHtml(app.members.map((m) => m.member_name).join('、'))}</p>`
+        ? `<p class="hint">参加者: ${escapeHtml(formatParticipantSummary(app.members))}</p>`
         : '';
     const submitBtn = app.can_submit_stl
       ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
@@ -182,9 +227,9 @@ async function loadApplications() {
 
 function openApplyView() {
   showView('apply');
-  memberNames = [];
-  renderMemberInputs();
-  updateScheduleTypeUi();
+  participants = [createEmptyParticipant()];
+  renderParticipantList();
+  updateApplicationSubmitState();
 }
 
 function openSubmitView(applicationId) {
@@ -206,7 +251,8 @@ function openSubmitView(applicationId) {
 function persistApplicationDraft() {
   const form = document.getElementById('application-form');
   if (!form) return;
-  saveContestDraft(extractContestDraft(form, getHomeroomValue(), memberNames));
+  syncParticipantsFromDom();
+  saveContestDraft(extractContestDraft(form, participants));
 }
 
 function updateApplicationSubmitState() {
@@ -214,24 +260,14 @@ function updateApplicationSubmitState() {
   const form = document.getElementById('application-form');
   if (!btn || !form) return;
 
+  syncParticipantsFromDom();
   const formData = new FormData(form);
-  const homeroom = getHomeroomValue();
-  const studentNumber = String(formData.get('student_number') ?? '').trim();
-  const studentName = String(formData.get('student_name') ?? '').trim();
   const title = String(formData.get('title') ?? '').trim();
-
-  let homeroomOk = false;
-  if (scheduleType === 'full_time') {
-    homeroomOk = homeroom.length > 0 && isValidHomeroom(homeroom);
-  } else {
-    homeroomOk = homeroom.length >= 1 && homeroom.length <= 20;
-  }
-
-  const numOk = /^\d+$/.test(studentNumber) && Number(studentNumber) >= 1 && Number(studentNumber) <= 99;
-  const nameOk = studentName.length >= 1 && studentName.length <= 50;
   const titleOk = title.length >= 1 && title.length <= 40;
+  const participantsOk =
+    participants.length > 0 && participants.every((row) => isParticipantRowValid(row));
 
-  btn.disabled = !(homeroomOk && numOk && nameOk && titleOk);
+  btn.disabled = !(participantsOk && titleOk);
 }
 
 function updateSubmitState() {
@@ -244,27 +280,29 @@ async function handleApplicationSubmit(e) {
   e.preventDefault();
   const form = document.getElementById('application-form');
   const btn = document.getElementById('application-submit-btn');
-  const homeroom = getHomeroomValue();
+  syncParticipantsFromDom();
   const formData = new FormData(form);
 
-  if (scheduleType === 'full_time' && !isValidHomeroom(homeroom)) {
-    showToast('クラスは 101〜109、201〜209、301〜309 から選択してください', 'error');
+  if (!participants.every((row) => isParticipantRowValid(row))) {
+    showToast('参加者のクラス・出席番号・名前をすべて入力してください', 'error');
     return;
   }
 
-  const members = memberNames.map((n) => n.trim()).filter(Boolean);
+  const payloadParticipants = participants.map((row) => ({
+    homeroom: row.homeroom.trim(),
+    student_number: Number(row.student_number),
+    student_name: row.student_name.trim(),
+  }));
+
   btn.disabled = true;
   try {
     await apiRequest('applications', {
       method: 'POST',
       body: JSON.stringify({
         schedule_type: scheduleType,
-        homeroom,
-        student_number: Number(formData.get('student_number')),
-        student_name: String(formData.get('student_name')).trim(),
         title: String(formData.get('title')).trim(),
         impressions: String(formData.get('impressions') ?? '').trim() || null,
-        members,
+        participants: payloadParticipants,
       }),
     });
     persistApplicationDraft();
@@ -472,7 +510,7 @@ async function init() {
   const allowed = await checkAppAccess();
   if (!allowed) return;
 
-  homeroomField = setupHomeroomCombobox('homeroom', 'homeroom-list');
+  populateHomeroomDatalist();
   const now = new Date();
   currentYear = now.getFullYear();
   currentMonth = now.getMonth() + 1;
@@ -490,11 +528,13 @@ async function init() {
     showView('list');
   });
 
-  document.getElementById('btn-add-member')?.addEventListener('click', () => {
-    memberNames.push('');
-    renderMemberInputs();
-    const inputs = document.querySelectorAll('.contest-member-input');
-    inputs[inputs.length - 1]?.focus();
+  document.getElementById('btn-add-participant')?.addEventListener('click', () => {
+    syncParticipantsFromDom();
+    participants.push(createEmptyParticipant());
+    renderParticipantList();
+    persistApplicationDraft();
+    const rows = document.querySelectorAll('.contest-participant-row');
+    rows[rows.length - 1]?.querySelector('.participant-homeroom')?.focus();
   });
 
   document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
@@ -521,8 +561,15 @@ async function init() {
   if (draft && applicationForm) {
     applyContestDraft(applicationForm, draft);
     scheduleType = parseScheduleType(draft.schedule_type);
-    memberNames = Array.isArray(draft.members) ? [...draft.members] : [];
-    renderMemberInputs();
+    if (Array.isArray(draft.participants) && draft.participants.length > 0) {
+      participants = draft.participants.map((p) => ({
+        homeroom: String(p.homeroom ?? ''),
+        student_number: String(p.student_number ?? ''),
+        student_name: String(p.student_name ?? p.name ?? ''),
+      }));
+    } else {
+      participants = [createEmptyParticipant()];
+    }
   }
   updateScheduleTypeUi();
 

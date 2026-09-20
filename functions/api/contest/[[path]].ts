@@ -670,21 +670,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "POST" && segments[0] === "applications" && segments.length === 1) {
       const body = await request.json<{
         schedule_type?: "full_time" | "part_time";
+        title?: string;
+        impressions?: string | null;
+        participants?: unknown;
         homeroom?: string;
         student_number?: number;
         student_name?: string;
-        title?: string;
-        impressions?: string | null;
         members?: unknown;
       }>();
       try {
         const application = await createContestApplication(env, request, userId, {
           schedule_type: body.schedule_type ?? "full_time",
-          homeroom: String(body.homeroom ?? ""),
-          student_number: Number(body.student_number),
-          student_name: String(body.student_name ?? ""),
           title: String(body.title ?? ""),
           impressions: body.impressions ?? null,
+          participants: body.participants,
+          homeroom: body.homeroom !== undefined ? String(body.homeroom) : undefined,
+          student_number:
+            body.student_number !== undefined ? Number(body.student_number) : undefined,
+          student_name:
+            body.student_name !== undefined ? String(body.student_name) : undefined,
           members: body.members,
         });
         return json({ application }, 201);

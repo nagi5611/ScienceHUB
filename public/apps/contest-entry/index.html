@@ -62,28 +62,22 @@
               </label>
             </fieldset>
 
-            <div class="form-group" id="homeroom-fulltime-group">
-              <label for="homeroom">クラス（ホームルーム）</label>
-              <div class="combobox-wrap">
-                <input type="text" id="homeroom" name="homeroom" autocomplete="off" placeholder="例: 101" maxlength="3" />
-                <ul class="combobox-list hidden" id="homeroom-list" role="listbox"></ul>
+            <div class="form-group">
+              <label>参加者（クラス・出席番号・名前）</label>
+              <p class="hint">1行目が印刷依頼の代表者として使われます</p>
+              <div class="contest-participant-table-wrap">
+                <div class="contest-participant-table-head" aria-hidden="true">
+                  <span>クラス</span>
+                  <span>出席番号</span>
+                  <span>名前</span>
+                  <span></span>
+                </div>
+                <ul class="contest-participant-list" id="participant-list"></ul>
               </div>
-            </div>
-
-            <div class="form-group hidden" id="homeroom-parttime-group">
-              <label for="class_free">クラス</label>
-              <input type="text" id="class_free" name="class_free" maxlength="20" placeholder="クラス名を入力" />
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="student_number">出席番号</label>
-                <input type="number" id="student_number" name="student_number" min="1" max="99" required />
-              </div>
-              <div class="form-group form-group-grow">
-                <label for="student_name">名前</label>
-                <input type="text" id="student_name" name="student_name" maxlength="50" placeholder="松山太郎" required />
-              </div>
+              <button type="button" class="btn btn-secondary btn-sm contest-add-participant-btn" id="btn-add-participant">
+                ＋ クラス・出席番号・名前を追加
+              </button>
+              <datalist id="homeroom-datalist"></datalist>
             </div>
 
             <div class="form-group">
@@ -95,12 +89,6 @@
             <div class="form-group">
               <label for="impressions">感想</label>
               <textarea id="impressions" name="impressions" rows="4" placeholder="作品への思いや制作のポイントなど"></textarea>
-            </div>
-
-            <div class="form-group">
-              <label>制作者メンバー（任意）</label>
-              <ul class="contest-member-list" id="member-list"></ul>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-add-member">メンバーを追加</button>
             </div>
 
             <button type="submit" class="btn btn-primary btn-block" id="application-submit-btn">参加申請する</button>

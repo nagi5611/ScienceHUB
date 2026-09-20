@@ -963,7 +963,16 @@ function renderContestApplications() {
   const rows = contestApplications.map((app) => {
     const members =
       app.members?.length > 0
-        ? app.members.map((m) => escapeHtml(m.member_name)).join('、')
+        ? app.members
+            .map((m) => {
+              const parts = [
+                m.homeroom ? escapeHtml(m.homeroom) : null,
+                m.student_number != null ? `${m.student_number}番` : null,
+                escapeHtml(m.member_name),
+              ].filter(Boolean);
+              return parts.join(' ');
+            })
+            .join('、')
         : '—';
     const reservationLine = app.reservation
       ? `予約 ${escapeHtml(app.reservation.id.slice(0, 8))}… · ${STATUS_LABELS[app.reservation.status] ?? app.reservation.status} · ${escapeHtml(app.reservation.desired_date)}`
@@ -976,7 +985,7 @@ function renderContestApplications() {
         <h3 class="section-heading" style="margin-top:0">${escapeHtml(app.title)}</h3>
         <p class="hint">${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(String(app.student_number))}番 · ${escapeHtml(app.student_name)}</p>
         <p class="hint">申請者: ${escapeHtml(app.applicant_email ?? '—')}</p>
-        <p class="hint">制作者: ${members}</p>
+        <p class="hint">参加者: ${members}</p>
         ${impressions}
         <p class="hint"><strong>提出:</strong> ${reservationLine}</p>
       </article>
