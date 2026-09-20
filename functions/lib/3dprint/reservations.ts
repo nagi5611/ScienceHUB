@@ -30,9 +30,10 @@ export interface Reservation {
   print_video_size_bytes: number | null;
   user_id: string;
   source: 'standard' | 'contest';
-  schedule_type: 'full_time' | 'part_time' | 'towa_branch' | null;
+  schedule_type: 'full_time' | 'part_time' | null;
   contest_storage_path?: string | null;
   contest_storage_filename?: string | null;
+  contest_application_id?: string | null;
   created_at: string;
 }
 
@@ -288,8 +289,9 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
         stl_r2_key, stl_filename, stl_size_bytes, status,
         print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
-        user_id, source, schedule_type, contest_storage_path, contest_storage_filename, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        user_id, source, schedule_type, contest_storage_path, contest_storage_filename,
+        contest_application_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -319,9 +321,31 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.schedule_type ?? null,
       data.contest_storage_path ?? null,
       data.contest_storage_filename ?? null,
+      data.contest_application_id ?? null,
       data.created_at
     )
     .run();
+}
+
+const ACTIVE_CONTEST_RESERVATION_STATUSES = ['applied', 'accepted', 'printing'] as const;
+
+/** Returns an in-progress contest reservation for the application, if any. */
+export async function getActiveContestReservationForApplication(
+  db: D1Database,
+  contestApplicationId: string
+): Promise<Reservation | null> {
+  const placeholders = ACTIVE_CONTEST_RESERVATION_STATUSES.map(() => '?').join(', ');
+  const row = await db
+    .prepare(
+      `SELECT * FROM print_reservations
+       WHERE contest_application_id = ? AND source = 'contest'
+         AND status IN (${placeholders})
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .bind(contestApplicationId, ...ACTIVE_CONTEST_RESERVATION_STATUSES)
+    .first<Reservation>();
+  return row ?? null;
 }
 
 /** 造形物コンテスト提出ファイルのクラウドストレージパスを更新 */

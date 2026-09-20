@@ -74,6 +74,13 @@ import {
 } from "../../lib/contest/contest-email";
 import { submitContestEntry } from "../../lib/contest/submit-entry";
 import {
+  createContestApplication,
+  getContestApplicationForUser,
+  listContestApplicationsAdmin,
+  listContestApplicationsForUser,
+  patchContestApplicationForUser,
+} from "../../lib/contest/applications";
+import {
   getContestStorageGroupSlug,
   setContestStorageGroupSlug,
   getContestManagementAccessibleGroupRoots,
@@ -598,6 +605,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (mgmtAccess instanceof Response) return mgmtAccess;
     } else if (
       segments[0] === "calendar" ||
+      segments[0] === "applications" ||
       segments[0] === "entries" ||
       segments[0] === "reservations" ||
       segments[0] === "printers" ||
@@ -652,32 +660,84 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: true });
     }
 
+    // GET /api/contest/applications
+    if (method === "GET" && segments[0] === "applications" && segments.length === 1) {
+      const applications = await listContestApplicationsForUser(db, userId);
+      return json({ applications });
+    }
+
+    // POST /api/contest/applications
+    if (method === "POST" && segments[0] === "applications" && segments.length === 1) {
+      const body = await request.json<{
+        schedule_type?: "full_time" | "part_time";
+        homeroom?: string;
+        student_number?: number;
+        student_name?: string;
+        title?: string;
+        impressions?: string | null;
+        members?: unknown;
+      }>();
+      try {
+        const application = await createContestApplication(env, request, userId, {
+          schedule_type: body.schedule_type ?? "full_time",
+          homeroom: String(body.homeroom ?? ""),
+          student_number: Number(body.student_number),
+          student_name: String(body.student_name ?? ""),
+          title: String(body.title ?? ""),
+          impressions: body.impressions ?? null,
+          members: body.members,
+        });
+        return json({ application }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "参加申請に失敗しました";
+        return error(message, 400);
+      }
+    }
+
+    // GET /api/contest/applications/:id
+    if (method === "GET" && segments[0] === "applications" && segments.length === 2) {
+      const application = await getContestApplicationForUser(db, userId, segments[1]);
+      if (!application) return error("参加申請が見つかりません", 404);
+      return json({ application });
+    }
+
+    // PATCH /api/contest/applications/:id
+    if (method === "PATCH" && segments[0] === "applications" && segments.length === 2) {
+      const body = await request.json<{
+        impressions?: string | null;
+        members?: unknown;
+      }>();
+      try {
+        const application = await patchContestApplicationForUser(
+          db,
+          userId,
+          segments[1],
+          body
+        );
+        return json({ application });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "更新に失敗しました";
+        const status = message.includes("見つかりません") ? 404 : 400;
+        return error(message, status);
+      }
+    }
+
     // POST /api/contest/entries
     if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
       const body = await request.json<{
-        schedule_type: "full_time" | "part_time" | "towa_branch";
-        homeroom: string;
-        student_number: number;
-        student_name: string;
-        title: string;
+        contest_application_id: string;
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
-        summary?: string | null;
         print_notes?: string | null;
       }>();
 
       try {
         const result = await submitContestEntry(env, request, userId, {
-          schedule_type: body.schedule_type,
-          homeroom: String(body.homeroom ?? ""),
-          student_number: Number(body.student_number),
-          student_name: String(body.student_name ?? ""),
-          title: String(body.title ?? ""),
+          contest_application_id: String(body.contest_application_id ?? ""),
           stl_r2_key: String(body.stl_r2_key ?? ""),
           stl_filename: String(body.stl_filename ?? ""),
           stl_size_bytes: Number(body.stl_size_bytes),
-          summary: body.summary ?? null,
           print_notes: body.print_notes ?? null,
         });
         const memberMap = await buildMemberMap(db);
@@ -697,7 +757,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "登録に失敗しました";
-        const status = message.includes("自動で割り当て") ? 409 : 400;
+        let status = 400;
+        if (message.includes("自動で割り当て")) status = 409;
+        if (message.includes("進行中")) status = 409;
         return error(message, status);
       }
     }
@@ -1352,6 +1414,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         { id: reservation.id, reservation: enrichReservationForAdmin(reservation, memberMap, printerMap) },
         201
       );
+    }
+
+    // GET /api/contest/admin/applications
+    if (method === "GET" && segments[1] === "applications" && segments.length === 2) {
+      const limitParam = url.searchParams.get("limit");
+      const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+      const applications = await listContestApplicationsAdmin(db, {
+        limit: Number.isFinite(limit) ? limit : undefined,
+      });
+      return json({ applications });
     }
 
     // GET /api/contest/admin/settings/email-compose

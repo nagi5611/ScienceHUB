@@ -1,33 +1,28 @@
 // functions/lib/contest/submit-entry.ts
 import { findAutoScheduleSlot } from './auto-schedule';
+import { getContestApplicationForSubmit } from './applications';
 import {
   buildContestEntryAppUrl,
   notifyContestApplicantEmail,
 } from './contest-email';
 import { syncContestSubmissionToStorage } from './contest-storage';
-import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
-import { gradeFromHomeroom, isValidHomeroom } from '../3dprint/homeroom';
+import { gradeFromHomeroom } from '../3dprint/homeroom';
 import {
   createReservation,
+  getActiveContestReservationForApplication,
   type Reservation,
 } from '../3dprint/reservations';
 import { getPrinterById } from '../3dprint/printers';
 import { verifyR2Key } from '../3dprint/upload';
 import { getOAuthRedirectBase } from '../oauth';
+import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
 import type { Env } from '../types';
 
-export type ContestScheduleType = 'full_time' | 'part_time' | 'towa_branch';
-
 export interface SubmitContestEntryInput {
-  schedule_type: ContestScheduleType;
-  homeroom: string;
-  student_number: number;
-  student_name: string;
-  title: string;
+  contest_application_id: string;
   stl_r2_key: string;
   stl_filename: string;
   stl_size_bytes: number;
-  summary?: string | null;
   print_notes?: string | null;
 }
 
@@ -39,33 +34,12 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveContestTitle(input: SubmitContestEntryInput): string {
-  const title = normalizeOptionalText(input.title);
-  if (!title) throw new Error('タイトルを入力してください');
-  if (title.length > 40) throw new Error('タイトルは40文字以内で入力してください');
-  return title;
-}
-
 export interface SubmitContestEntryResult {
   reservation: Reservation;
   calendar: { ok: boolean; error?: string };
 }
 
-function validateClass(scheduleType: ContestScheduleType, homeroom: string): string | null {
-  const trimmed = homeroom.trim();
-  if (!trimmed) return 'クラスを入力してください';
-  if (scheduleType === 'full_time') {
-    if (!isValidHomeroom(trimmed)) return 'ホームルームの形式が不正です（例: 301）';
-    return null;
-  }
-  if (scheduleType === 'part_time' || scheduleType === 'towa_branch') {
-    if (trimmed.length > 20) return 'クラスは20文字以内で入力してください';
-    return null;
-  }
-  return '在籍区分が不正です';
-}
-
-/** Creates an auto-scheduled print request (applied — manager must accept). */
+/** Creates an auto-scheduled print request linked to an approved participation application. */
 export async function submitContestEntry(
   env: Env,
   request: Request,
@@ -74,28 +48,25 @@ export async function submitContestEntry(
 ): Promise<SubmitContestEntryResult> {
   const db = env.DB;
 
-  const classError = validateClass(input.schedule_type, input.homeroom);
-  if (classError) throw new Error(classError);
-
-  if (!Number.isInteger(input.student_number) || input.student_number < 1 || input.student_number > 50) {
-    throw new Error('出席番号が不正です');
+  const applicationId = input.contest_application_id?.trim();
+  if (!applicationId) {
+    throw new Error('参加申請を選択してください');
   }
 
-  if (!['full_time', 'part_time', 'towa_branch'].includes(input.schedule_type)) {
-    throw new Error('在籍区分が不正です');
+  const application = await getContestApplicationForSubmit(db, userId, applicationId);
+  if (!application) {
+    throw new Error('参加申請が見つからないか、提出できない状態です');
   }
 
-  const studentName = input.student_name.trim();
-  if (!studentName) throw new Error('名前を入力してください');
+  const active = await getActiveContestReservationForApplication(db, applicationId);
+  if (active) {
+    throw new Error('この作品はすでに印刷依頼が進行中です');
+  }
 
   const keyExists = await verifyR2Key(env.FILES, input.stl_r2_key);
   if (!keyExists) throw new Error('ファイルが見つかりません。再度アップロードしてください');
 
-  const summary = normalizeOptionalText(input.summary);
   const printNotes = normalizeOptionalText(input.print_notes);
-  if (summary && summary.length > MAX_TEXT_FIELD_LEN) {
-    throw new Error('概要が長すぎます');
-  }
   if (printNotes && printNotes.length > MAX_TEXT_FIELD_LEN) {
     throw new Error('印刷時の注意点が長すぎます');
   }
@@ -105,20 +76,21 @@ export async function submitContestEntry(
     throw new Error('現在、自動で割り当てられる印刷日がありません。しばらくしてから再度お試しください');
   }
 
-  const homeroom = input.homeroom.trim();
   const grade =
-    input.schedule_type === 'full_time' ? gradeFromHomeroom(homeroom) : 0;
+    application.schedule_type === 'full_time'
+      ? gradeFromHomeroom(application.homeroom)
+      : 0;
 
   const reservation: Reservation = {
     id: crypto.randomUUID(),
     grade,
-    homeroom,
-    student_number: input.student_number,
-    student_name: studentName,
-    title: resolveContestTitle(input),
+    homeroom: application.homeroom,
+    student_number: application.student_number,
+    student_name: application.student_name,
+    title: application.title,
     purpose: 'other',
     purpose_other: '印刷依頼',
-    summary,
+    summary: application.impressions,
     print_notes: printNotes,
     print_scale: 'small',
     printer_id: slot.printer_id,
@@ -138,9 +110,10 @@ export async function submitContestEntry(
     print_video_size_bytes: null,
     user_id: userId,
     source: 'contest',
-    schedule_type: input.schedule_type,
+    schedule_type: application.schedule_type,
     contest_storage_path: null,
     contest_storage_filename: null,
+    contest_application_id: application.id,
     created_at: new Date().toISOString(),
   };
 

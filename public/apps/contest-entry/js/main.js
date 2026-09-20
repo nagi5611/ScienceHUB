@@ -7,6 +7,7 @@ import {
   applyContestDraft,
   extractContestDraft,
   loadContestDraft,
+  parseScheduleType,
   saveContestDraft,
 } from './entry-draft.js';
 
@@ -19,27 +20,25 @@ const STATUS_LABELS = {
   delivered: '印刷完了',
 };
 
+const SCHEDULE_LABELS = {
+  full_time: '全日制',
+  part_time: '平日制',
+};
+
 let currentYear;
 let currentMonth;
 let calendarReservations = [];
 let uploadResult = null;
 let homeroomField = null;
 let scheduleType = 'full_time';
-
-const FREE_CLASS_SCHEDULE_TYPES = new Set(['part_time', 'towa_branch']);
-
-/** Parses schedule_type radio value. */
-function parseScheduleType(value) {
-  if (value === 'part_time' || value === 'towa_branch') return value;
-  if (value === 'hekibunko') return 'towa_branch';
-  return 'full_time';
-}
+let applications = [];
+let selectedApplicationId = null;
+let memberNames = [];
 
 function usesFreeClassInput(type) {
-  return FREE_CLASS_SCHEDULE_TYPES.has(type);
+  return type === 'part_time';
 }
 
-/** Returns today's date in JST (YYYY-MM-DD). */
 function todayJst() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
 }
@@ -68,19 +67,10 @@ function showToast(message, type = 'info') {
   showToast._timer = setTimeout(() => el.classList.add('hidden'), 5000);
 }
 
-function updateScheduleTypeUi() {
-  const fullGroup = document.getElementById('homeroom-fulltime-group');
-  const partGroup = document.getElementById('homeroom-parttime-group');
-  const homeroomInput = document.getElementById('homeroom');
-  const classInput = document.getElementById('class_free');
-  if (!fullGroup || !partGroup) return;
-
-  const isFull = scheduleType === 'full_time';
-  fullGroup.classList.toggle('hidden', !isFull);
-  partGroup.classList.toggle('hidden', isFull);
-  if (homeroomInput) homeroomInput.required = isFull;
-  if (classInput) classInput.required = !isFull;
-  updateSubmitState();
+function showView(view) {
+  document.getElementById('view-list')?.classList.toggle('hidden', view !== 'list');
+  document.getElementById('view-apply')?.classList.toggle('hidden', view !== 'apply');
+  document.getElementById('view-submit')?.classList.toggle('hidden', view !== 'submit');
 }
 
 function getHomeroomValue() {
@@ -94,16 +84,141 @@ function isValidHomeroom(value) {
   return HOMEROOMS.includes(value);
 }
 
-function updateSubmitState() {
-  const btn = document.getElementById('submit-btn');
-  const form = document.getElementById('entry-form');
+function updateScheduleTypeUi() {
+  const fullGroup = document.getElementById('homeroom-fulltime-group');
+  const partGroup = document.getElementById('homeroom-parttime-group');
+  const homeroomInput = document.getElementById('homeroom');
+  const classInput = document.getElementById('class_free');
+  if (!fullGroup || !partGroup) return;
+
+  const isFull = scheduleType === 'full_time';
+  fullGroup.classList.toggle('hidden', !isFull);
+  partGroup.classList.toggle('hidden', isFull);
+  if (homeroomInput) homeroomInput.required = isFull;
+  if (classInput) classInput.required = !isFull;
+  updateApplicationSubmitState();
+}
+
+function submissionStatusLabel(app) {
+  if (!app.reservation) return 'STL 未提出';
+  const status = app.reservation.status;
+  if (status === 'delivered') return '印刷完了';
+  return STATUS_LABELS[status] ?? status;
+}
+
+function renderMemberInputs() {
+  const list = document.getElementById('member-list');
+  if (!list) return;
+  list.innerHTML = '';
+  memberNames.forEach((name, index) => {
+    const li = document.createElement('li');
+    li.className = 'contest-member-row';
+    li.innerHTML = `
+      <input type="text" class="contest-member-input" data-index="${index}" value="${escapeHtml(name)}" maxlength="50" placeholder="メンバー名" />
+      <button type="button" class="btn btn-secondary btn-sm contest-member-remove" data-index="${index}" aria-label="削除">×</button>
+    `;
+    list.appendChild(li);
+  });
+
+  list.querySelectorAll('.contest-member-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      const idx = Number(input.dataset.index);
+      memberNames[idx] = input.value;
+      persistApplicationDraft();
+    });
+  });
+  list.querySelectorAll('.contest-member-remove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.index);
+      memberNames.splice(idx, 1);
+      renderMemberInputs();
+      persistApplicationDraft();
+    });
+  });
+}
+
+function renderApplicationsList() {
+  const listEl = document.getElementById('applications-list');
+  const emptyEl = document.getElementById('applications-empty');
+  if (!listEl) return;
+
+  listEl.innerHTML = '';
+  emptyEl?.classList.toggle('hidden', applications.length > 0);
+
+  for (const app of applications) {
+    const li = document.createElement('li');
+    li.className = 'contest-application-card';
+    const memberCount = app.members?.length ?? 0;
+    const memberLine =
+      memberCount > 0
+        ? `<p class="hint">制作者: ${escapeHtml(app.members.map((m) => m.member_name).join('、'))}</p>`
+        : '';
+    const submitBtn = app.can_submit_stl
+      ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
+      : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
+
+    li.innerHTML = `
+      <div class="contest-application-card-body">
+        <h3 class="contest-application-title">${escapeHtml(app.title)}</h3>
+        <p class="hint">${escapeHtml(SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(app.student_name)}</p>
+        ${memberLine}
+        <p class="contest-application-submission">${escapeHtml(submissionStatusLabel(app))}</p>
+      </div>
+      <div class="contest-application-card-actions">${submitBtn}</div>
+    `;
+    listEl.appendChild(li);
+  }
+
+  listEl.querySelectorAll('.contest-card-submit').forEach((btn) => {
+    btn.addEventListener('click', () => openSubmitView(btn.dataset.id));
+  });
+}
+
+async function loadApplications() {
+  const data = await apiRequest('applications');
+  applications = data.applications ?? [];
+  renderApplicationsList();
+}
+
+function openApplyView() {
+  showView('apply');
+  memberNames = [];
+  renderMemberInputs();
+  updateScheduleTypeUi();
+}
+
+function openSubmitView(applicationId) {
+  const app = applications.find((a) => a.id === applicationId);
+  if (!app || !app.can_submit_stl) {
+    showToast('この作品には提出できません', 'error');
+    return;
+  }
+  selectedApplicationId = applicationId;
+  uploadResult = null;
+  document.getElementById('selected-file-name').textContent = '';
+  document.getElementById('upload-progress')?.classList.add('hidden');
+  document.getElementById('upload-status').textContent = '';
+  document.getElementById('submit-target-label').textContent = `提出先: ${app.title}`;
+  showView('submit');
+  updateSubmitState();
+}
+
+function persistApplicationDraft() {
+  const form = document.getElementById('application-form');
+  if (!form) return;
+  saveContestDraft(extractContestDraft(form, getHomeroomValue(), memberNames));
+}
+
+function updateApplicationSubmitState() {
+  const btn = document.getElementById('application-submit-btn');
+  const form = document.getElementById('application-form');
   if (!btn || !form) return;
 
   const formData = new FormData(form);
+  const homeroom = getHomeroomValue();
   const studentNumber = String(formData.get('student_number') ?? '').trim();
   const studentName = String(formData.get('student_name') ?? '').trim();
   const title = String(formData.get('title') ?? '').trim();
-  const homeroom = getHomeroomValue();
 
   let homeroomOk = false;
   if (scheduleType === 'full_time') {
@@ -115,9 +230,52 @@ function updateSubmitState() {
   const numOk = /^\d+$/.test(studentNumber) && Number(studentNumber) >= 1 && Number(studentNumber) <= 99;
   const nameOk = studentName.length >= 1 && studentName.length <= 50;
   const titleOk = title.length >= 1 && title.length <= 40;
-  const fileOk = Boolean(uploadResult?.r2Key);
 
-  btn.disabled = !(homeroomOk && numOk && nameOk && titleOk && fileOk);
+  btn.disabled = !(homeroomOk && numOk && nameOk && titleOk);
+}
+
+function updateSubmitState() {
+  const btn = document.getElementById('submit-btn');
+  if (!btn) return;
+  btn.disabled = !uploadResult?.r2Key || !selectedApplicationId;
+}
+
+async function handleApplicationSubmit(e) {
+  e.preventDefault();
+  const form = document.getElementById('application-form');
+  const btn = document.getElementById('application-submit-btn');
+  const homeroom = getHomeroomValue();
+  const formData = new FormData(form);
+
+  if (scheduleType === 'full_time' && !isValidHomeroom(homeroom)) {
+    showToast('クラスは 101〜109、201〜209、301〜309 から選択してください', 'error');
+    return;
+  }
+
+  const members = memberNames.map((n) => n.trim()).filter(Boolean);
+  btn.disabled = true;
+  try {
+    await apiRequest('applications', {
+      method: 'POST',
+      body: JSON.stringify({
+        schedule_type: scheduleType,
+        homeroom,
+        student_number: Number(formData.get('student_number')),
+        student_name: String(formData.get('student_name')).trim(),
+        title: String(formData.get('title')).trim(),
+        impressions: String(formData.get('impressions') ?? '').trim() || null,
+        members,
+      }),
+    });
+    persistApplicationDraft();
+    showToast('参加申請を受け付けました。STL を提出してください', 'success');
+    showView('list');
+    await loadApplications();
+  } catch (err) {
+    showToast(err.message || '参加申請に失敗しました', 'error');
+  } finally {
+    updateApplicationSubmitState();
+  }
 }
 
 async function loadCalendar() {
@@ -237,6 +395,7 @@ function setupUploadZone() {
   const progress = document.getElementById('upload-progress');
   const progressBar = document.getElementById('upload-progress-bar');
   const statusEl = document.getElementById('upload-status');
+  if (!zone || !input) return;
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -275,63 +434,36 @@ function setupUploadZone() {
   });
 }
 
-function persistDraftFromForm() {
-  const form = document.getElementById('entry-form');
-  saveContestDraft(extractContestDraft(form, getHomeroomValue()));
-}
-
-async function handleSubmit(e) {
+async function handleStlSubmit(e) {
   e.preventDefault();
-  const form = document.getElementById('entry-form');
   const btn = document.getElementById('submit-btn');
-  const homeroom = getHomeroomValue();
-  const formData = new FormData(form);
-
-  if (scheduleType === 'full_time' && !isValidHomeroom(homeroom)) {
-    showToast('クラスは 101〜109、201〜209、301〜309 から選択してください', 'error');
-    return;
-  }
-  const title = String(formData.get('title') ?? '').trim();
-  if (!title || title.length > 40) {
-    showToast('タイトルを入力してください（40文字以内）', 'error');
-    return;
-  }
-  if (!uploadResult?.r2Key) {
+  const form = document.getElementById('submit-form');
+  if (!uploadResult?.r2Key || !selectedApplicationId) {
     showToast('ファイルをアップロードしてください', 'error');
     return;
   }
 
+  const printNotesRaw = String(new FormData(form).get('print_notes') ?? '').trim();
   btn.disabled = true;
   try {
-    const titleRaw = String(formData.get('title') ?? '').trim();
-    const summaryRaw = String(formData.get('summary') ?? '').trim();
-    const printNotesRaw = String(formData.get('print_notes') ?? '').trim();
-    const payload = {
-      schedule_type: scheduleType,
-      homeroom,
-      student_number: Number(formData.get('student_number')),
-      student_name: String(formData.get('student_name')).trim(),
-      title: titleRaw,
-      stl_r2_key: uploadResult.r2Key,
-      stl_filename: uploadResult.filename,
-      stl_size_bytes: uploadResult.size,
-      ...(summaryRaw ? { summary: summaryRaw } : {}),
-      ...(printNotesRaw ? { print_notes: printNotesRaw } : {}),
-    };
     const data = await apiRequest('entries', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        contest_application_id: selectedApplicationId,
+        stl_r2_key: uploadResult.r2Key,
+        stl_filename: uploadResult.filename,
+        stl_size_bytes: uploadResult.size,
+        ...(printNotesRaw ? { print_notes: printNotesRaw } : {}),
+      }),
     });
-    saveContestDraft(extractContestDraft(form, homeroom));
-    showToast(data.message || '印刷依頼を受け付けました。担当者の承認をお待ちください', 'success');
-    uploadResult = null;
-    document.getElementById('selected-file-name').textContent = '';
-    document.getElementById('upload-progress').classList.add('hidden');
-    document.getElementById('upload-status').textContent = '';
+    showToast(data.message || '印刷依頼を受け付けました', 'success');
+    selectedApplicationId = null;
+    showView('list');
+    await loadApplications();
     await loadCalendar();
-    updateSubmitState();
   } catch (err) {
-    showToast(err.message || '登録に失敗しました', 'error');
+    showToast(err.message || '提出に失敗しました', 'error');
+  } finally {
     updateSubmitState();
   }
 }
@@ -351,37 +483,56 @@ async function init() {
   document.getElementById('next-month-mobile')?.addEventListener('click', () => changeMonth(1));
   document.getElementById('go-today-btn')?.addEventListener('click', goToToday);
 
-  document.querySelectorAll('input[name="schedule_type"]').forEach((input) => {
+  document.getElementById('btn-new-application')?.addEventListener('click', openApplyView);
+  document.getElementById('btn-back-from-apply')?.addEventListener('click', () => showView('list'));
+  document.getElementById('btn-back-from-submit')?.addEventListener('click', () => {
+    selectedApplicationId = null;
+    showView('list');
+  });
+
+  document.getElementById('btn-add-member')?.addEventListener('click', () => {
+    memberNames.push('');
+    renderMemberInputs();
+    const inputs = document.querySelectorAll('.contest-member-input');
+    inputs[inputs.length - 1]?.focus();
+  });
+
+  document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
     input.addEventListener('change', () => {
       scheduleType = parseScheduleType(input.value);
       updateScheduleTypeUi();
-      persistDraftFromForm();
+      persistApplicationDraft();
     });
   });
 
-  const form = document.getElementById('entry-form');
-  form.addEventListener('input', () => {
-    persistDraftFromForm();
-    updateSubmitState();
+  const applicationForm = document.getElementById('application-form');
+  applicationForm?.addEventListener('input', () => {
+    persistApplicationDraft();
+    updateApplicationSubmitState();
   });
-  form.addEventListener('submit', handleSubmit);
+  applicationForm?.addEventListener('submit', handleApplicationSubmit);
+
+  document.getElementById('submit-form')?.addEventListener('submit', handleStlSubmit);
 
   setupUploadZone();
   await initAuth();
 
   const draft = loadContestDraft();
-  if (draft) {
-    applyContestDraft(form, draft);
+  if (draft && applicationForm) {
+    applyContestDraft(applicationForm, draft);
     scheduleType = parseScheduleType(draft.schedule_type);
+    memberNames = Array.isArray(draft.members) ? [...draft.members] : [];
+    renderMemberInputs();
   }
   updateScheduleTypeUi();
 
   try {
+    await loadApplications();
     await loadCalendar();
   } catch (err) {
     showToast(err.message, 'error');
   }
-  updateSubmitState();
+  showView('list');
 }
 
 init();

@@ -44,6 +44,15 @@
         </span>
         <span>履歴</span>
       </button>
+      <button class="admin-mobile-nav-item" data-panel="applications" type="button">
+        <span class="admin-mobile-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+          </svg>
+        </span>
+        <span>参加申請</span>
+      </button>
       <button class="admin-mobile-nav-item" data-panel="members" type="button">
         <span class="admin-mobile-nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -84,6 +93,7 @@
         <nav class="admin-menu">
           <button class="admin-menu-item active" data-panel="dashboard" type="button">カレンダー</button>
           <button class="admin-menu-item" data-panel="history" type="button">印刷履歴</button>
+          <button class="admin-menu-item" data-panel="applications" type="button">参加申請</button>
           <button class="admin-menu-item" data-panel="members" type="button">メンバー一覧</button>
           <button class="admin-menu-item" data-panel="printers" type="button">プリンター管理</button>
           <button class="admin-menu-item" data-panel="shifts" type="button">シフト管理表</button>
@@ -165,6 +175,16 @@
 
           <div class="card admin-list-section">
             <div id="history-mount">
+              <p class="hint">読み込み中...</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-panel hidden" id="panel-applications">
+          <h1 class="page-heading">参加申請</h1>
+          <p class="page-subheading">依頼者の参加申請（作品タイトル・感想・制作者メンバー）を確認できます。</p>
+          <div class="card admin-list-section">
+            <div id="applications-mount">
               <p class="hint">読み込み中...</p>
             </div>
           </div>

@@ -33,88 +33,110 @@
     <div id="page-toast" class="page-toast hidden" role="status"></div>
 
     <h1 class="page-heading">造形物コンテスト</h1>
-    <p class="page-subheading">STL ファイルで印刷依頼を出すと、印刷可能な直近の日付が自動で設定されます。担当者の承認後、メールでお知らせします（ScienceHUB ログインが必要です）。</p>
+    <p class="page-subheading">まず参加申請を出し、作品ごとに STL ファイルを提出してください。印刷日は提出後に自動で設定され、担当者の承認後にメールでお知らせします。</p>
 
     <div class="contest-entry-layout">
-      <section class="card contest-entry-form-card">
-        <h2 class="contest-section-title">印刷依頼</h2>
-
-        <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
-          <p class="upload-zone-title">STL / Gコードをドロップ</p>
-          <p class="hint">またはクリックしてファイルを選択（.stl .gcode .gco .nc）</p>
-          <input type="file" id="file-input" accept=".stl,.gcode,.gco,.nc" hidden />
-        </div>
-        <p class="selected-file-name" id="selected-file-name"></p>
-        <div class="upload-progress hidden" id="upload-progress">
-          <div class="upload-progress-bar" id="upload-progress-bar"></div>
-        </div>
-        <p class="hint" id="upload-status"></p>
-
-        <form id="entry-form" class="contest-entry-form">
-          <fieldset class="form-group">
-            <legend>在籍区分</legend>
-            <label class="radio-label">
-              <input type="radio" name="schedule_type" value="full_time" checked />
-              全日制
-            </label>
-            <label class="radio-label">
-              <input type="radio" name="schedule_type" value="part_time" />
-              定時制
-            </label>
-            <label class="radio-label">
-              <input type="radio" name="schedule_type" value="towa_branch" />
-              砥部分校
-            </label>
-          </fieldset>
-
-          <div class="form-group" id="homeroom-fulltime-group">
-            <label for="homeroom">クラス（ホームルーム）</label>
-            <div class="combobox-wrap">
-              <input type="text" id="homeroom" name="homeroom" autocomplete="off" placeholder="例: 101" maxlength="3" />
-              <ul class="combobox-list hidden" id="homeroom-list" role="listbox"></ul>
-            </div>
+      <div class="contest-entry-primary">
+        <section class="card contest-list-card" id="view-list">
+          <div class="contest-list-header">
+            <h2 class="contest-section-title">参加中の作品</h2>
+            <button type="button" class="btn btn-primary" id="btn-new-application">造形物コンテストに参加する</button>
           </div>
+          <p class="hint contest-list-empty hidden" id="applications-empty">まだ参加申請がありません。上のボタンから申請してください。</p>
+          <ul class="contest-application-list" id="applications-list" aria-label="参加申請一覧"></ul>
+        </section>
 
-          <div class="form-group hidden" id="homeroom-parttime-group">
-            <label for="class_free">クラス</label>
-            <input type="text" id="class_free" name="class_free" maxlength="20" placeholder="クラス名を入力" />
-          </div>
+        <section class="card contest-entry-form-card hidden" id="view-apply" aria-labelledby="apply-heading">
+          <button type="button" class="btn btn-secondary btn-sm contest-back-btn" id="btn-back-from-apply">← 一覧に戻る</button>
+          <h2 class="contest-section-title" id="apply-heading">参加申請</h2>
+          <form id="application-form" class="contest-entry-form">
+            <fieldset class="form-group">
+              <legend>在籍区分</legend>
+              <label class="radio-label">
+                <input type="radio" name="schedule_type" value="full_time" checked />
+                全日制
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="schedule_type" value="part_time" />
+                平日制
+              </label>
+            </fieldset>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label for="student_number">出席番号</label>
-              <input type="number" id="student_number" name="student_number" min="1" max="99" required />
-            </div>
-            <div class="form-group form-group-grow">
-              <label for="student_name">名前</label>
-              <input type="text" id="student_name" name="student_name" maxlength="50" placeholder="松山太郎" required />
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="title">タイトル</label>
-            <input type="text" id="title" name="title" maxlength="40" required placeholder="歯車班_球場歯車" />
-            <p class="hint">カレンダーに表示される名前です</p>
-          </div>
-
-          <div class="form-group">
-            <label for="summary">概要（任意）</label>
-            <textarea id="summary" name="summary" rows="3" placeholder="印刷物の概要や用途を記入できます"></textarea>
-          </div>
-
-          <details class="contest-advanced-settings">
-            <summary>高度な設定</summary>
-            <div class="contest-advanced-settings-body">
-              <div class="form-group">
-                <label for="print_notes">印刷時の注意点（任意）</label>
-                <textarea id="print_notes" name="print_notes" rows="4" placeholder="高さ20cm未満&#10;長辺25cmに合わせる&#10;サポーター有・tree&#10;充填率60%"></textarea>
+            <div class="form-group" id="homeroom-fulltime-group">
+              <label for="homeroom">クラス（ホームルーム）</label>
+              <div class="combobox-wrap">
+                <input type="text" id="homeroom" name="homeroom" autocomplete="off" placeholder="例: 101" maxlength="3" />
+                <ul class="combobox-list hidden" id="homeroom-list" role="listbox"></ul>
               </div>
             </div>
-          </details>
 
-          <button type="submit" class="btn btn-primary btn-block" id="submit-btn" disabled>印刷依頼する</button>
-        </form>
-      </section>
+            <div class="form-group hidden" id="homeroom-parttime-group">
+              <label for="class_free">クラス</label>
+              <input type="text" id="class_free" name="class_free" maxlength="20" placeholder="クラス名を入力" />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="student_number">出席番号</label>
+                <input type="number" id="student_number" name="student_number" min="1" max="99" required />
+              </div>
+              <div class="form-group form-group-grow">
+                <label for="student_name">名前</label>
+                <input type="text" id="student_name" name="student_name" maxlength="50" placeholder="松山太郎" required />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="title">タイトル</label>
+              <input type="text" id="title" name="title" maxlength="40" required placeholder="歯車班_球場歯車" />
+              <p class="hint">作品ごとに別のタイトルで申請できます</p>
+            </div>
+
+            <div class="form-group">
+              <label for="impressions">感想</label>
+              <textarea id="impressions" name="impressions" rows="4" placeholder="作品への思いや制作のポイントなど"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>制作者メンバー（任意）</label>
+              <ul class="contest-member-list" id="member-list"></ul>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-add-member">メンバーを追加</button>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block" id="application-submit-btn">参加申請する</button>
+          </form>
+        </section>
+
+        <section class="card contest-entry-form-card hidden" id="view-submit" aria-labelledby="submit-heading">
+          <button type="button" class="btn btn-secondary btn-sm contest-back-btn" id="btn-back-from-submit">← 一覧に戻る</button>
+          <h2 class="contest-section-title" id="submit-heading">STL 提出</h2>
+          <p class="contest-submit-target" id="submit-target-label"></p>
+
+          <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
+            <p class="upload-zone-title">STL / Gコードをドロップ</p>
+            <p class="hint">またはクリックしてファイルを選択（.stl .gcode .gco .nc）</p>
+            <input type="file" id="file-input" accept=".stl,.gcode,.gco,.nc" hidden />
+          </div>
+          <p class="selected-file-name" id="selected-file-name"></p>
+          <div class="upload-progress hidden" id="upload-progress">
+            <div class="upload-progress-bar" id="upload-progress-bar"></div>
+          </div>
+          <p class="hint" id="upload-status"></p>
+
+          <form id="submit-form" class="contest-entry-form">
+            <details class="contest-advanced-settings">
+              <summary>高度な設定</summary>
+              <div class="contest-advanced-settings-body">
+                <div class="form-group">
+                  <label for="print_notes">印刷時の注意点（任意）</label>
+                  <textarea id="print_notes" name="print_notes" rows="4" placeholder="サポーター・充填率など"></textarea>
+                </div>
+              </div>
+            </details>
+            <button type="submit" class="btn btn-primary btn-block" id="submit-btn" disabled>STL を提出する</button>
+          </form>
+        </section>
+      </div>
 
       <aside class="contest-calendar-aside" aria-label="印刷予定（読み取り専用）">
         <section class="hub-calendar-card contest-readonly-calendar" id="calendar-section" aria-readonly="true">
