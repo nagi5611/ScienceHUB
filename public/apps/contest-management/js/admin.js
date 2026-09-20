@@ -54,7 +54,7 @@ const ADMIN_PANEL_TITLES = {
 
 const CONTEST_SCHEDULE_LABELS = {
   full_time: '全日制',
-  part_time: '平日制',
+  part_time: '定時制',
 };
 
 let contestApplications = [];
