@@ -67,9 +67,43 @@ export interface CreateContestApplicationInput {
 }
 
 export interface PatchContestApplicationInput {
+  title?: string;
   impressions?: string | null;
   participants?: unknown;
   members?: unknown;
+}
+
+function primaryParticipantFromApplication(
+  app: ContestApplication
+): ContestParticipantFields {
+  return {
+    homeroom: app.homeroom,
+    student_number: app.student_number,
+    student_name: app.student_name,
+  };
+}
+
+/** Keeps the application owner as row 0; only additional members may change. */
+function mergeParticipantsForPatch(
+  app: ContestApplication,
+  raw: unknown
+): ContestParticipantFields[] {
+  const primary = primaryParticipantFromApplication(app);
+  if (!Array.isArray(raw)) {
+    throw new Error('参加者の形式が不正です');
+  }
+  if (raw.length === 0) {
+    return [primary];
+  }
+  const extraRows = raw.length > 1 ? raw.slice(1) : [];
+  const extras =
+    extraRows.length > 0
+      ? parseContestParticipants(app.schedule_type, extraRows)
+      : [];
+  if (extras.length > 20) {
+    throw new Error('メンバーは20人までです');
+  }
+  return [primary, ...extras];
 }
 
 async function fetchMembersForApplication(
@@ -324,7 +358,7 @@ export async function getContestApplicationForSubmit(
   return app;
 }
 
-/** Updates impressions and/or member list (not while active reservation exists). */
+/** Updates title, impressions, and/or additional members (primary row is fixed). */
 export async function patchContestApplicationForUser(
   db: D1Database,
   userId: string,
@@ -335,21 +369,33 @@ export async function patchContestApplicationForUser(
   if (!app || app.user_id !== userId) {
     throw new Error('参加申請が見つかりません');
   }
-
-  const active = await getActiveContestReservationForApplication(db, applicationId);
-  if (active) {
-    throw new Error('印刷依頼が進行中のため、参加申請は編集できません');
+  if (app.status !== 'approved') {
+    throw new Error('この参加申請は編集できません');
   }
 
   const now = new Date().toISOString();
+  let title = app.title;
   let impressions = app.impressions;
+
+  if (input.title !== undefined) {
+    const parsedTitle = parseContestApplicationFields({
+      schedule_type: app.schedule_type,
+      homeroom: app.homeroom,
+      student_number: app.student_number,
+      student_name: app.student_name,
+      title: input.title,
+      impressions: impressions ?? null,
+    });
+    title = parsedTitle.title;
+  }
+
   if (input.impressions !== undefined) {
     const parsed = parseContestApplicationFields({
       schedule_type: app.schedule_type,
       homeroom: app.homeroom,
       student_number: app.student_number,
       student_name: app.student_name,
-      title: app.title,
+      title,
       impressions: input.impressions,
     });
     impressions = parsed.impressions;
@@ -357,25 +403,37 @@ export async function patchContestApplicationForUser(
 
   await db
     .prepare(
-      `UPDATE contest_applications SET impressions = ?, updated_at = ? WHERE id = ?`
+      `UPDATE contest_applications SET title = ?, impressions = ?, updated_at = ? WHERE id = ?`
     )
-    .bind(impressions, now, applicationId)
+    .bind(title, impressions, now, applicationId)
     .run();
+
+  if (title !== app.title) {
+    await db
+      .prepare(
+        `UPDATE print_reservations SET title = ?
+         WHERE contest_application_id = ? AND source = 'contest'`
+      )
+      .bind(title, applicationId)
+      .run();
+  }
 
   let members = await fetchMembersForApplication(db, applicationId);
   if (input.members !== undefined || input.participants !== undefined) {
     const raw = input.participants ?? input.members;
-    const participants = parseContestParticipants(app.schedule_type, raw);
+    const participants = mergeParticipantsForPatch(app, raw);
     members = await replaceMembers(db, applicationId, participants);
   }
 
+  const active = await getActiveContestReservationForApplication(db, applicationId);
   const updated: ContestApplication = {
     ...app,
+    title,
     impressions,
     updated_at: now,
   };
   const reservation = await fetchLatestReservationForApplication(db, applicationId);
-  return enrichApplication(updated, members, reservation, null);
+  return enrichApplication(updated, members, reservation, active);
 }
 
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {

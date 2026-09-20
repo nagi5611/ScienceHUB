@@ -32,6 +32,9 @@ let uploadResult = null;
 let scheduleType = 'full_time';
 let applications = [];
 let selectedApplicationId = null;
+/** @type {'create' | 'edit'} */
+let applicationFormMode = 'create';
+let editingApplicationId = null;
 
 /** @typedef {{ homeroom: string, student_number: string, student_name: string }} ParticipantRow */
 
@@ -118,22 +121,25 @@ function renderParticipantList() {
 
   list.innerHTML = '';
   const isFull = scheduleType === 'full_time';
+  const lockPrimary = applicationFormMode === 'edit';
 
   participants.forEach((row, index) => {
     const li = document.createElement('li');
     li.className = 'contest-participant-row';
+    if (lockPrimary && index === 0) li.classList.add('contest-participant-row--locked');
     const homeroomAttrs = isFull
       ? 'list="homeroom-datalist" maxlength="3" placeholder="101"'
       : 'maxlength="20" placeholder="クラス"';
-    const removeBtn =
-      participants.length > 1
-        ? `<button type="button" class="btn btn-secondary btn-sm participant-remove" data-index="${index}" aria-label="削除">×</button>`
-        : '<span class="participant-remove-placeholder" aria-hidden="true"></span>';
+    const lockAttrs = lockPrimary && index === 0 ? ' readonly disabled' : '';
+    let removeBtn = '<span class="participant-remove-placeholder" aria-hidden="true"></span>';
+    if (!(lockPrimary && index === 0) && participants.length > 1) {
+      removeBtn = `<button type="button" class="btn btn-secondary btn-sm participant-remove" data-index="${index}" aria-label="削除">×</button>`;
+    }
 
     li.innerHTML = `
-      <input type="text" class="participant-homeroom" ${homeroomAttrs} value="${escapeHtml(row.homeroom)}" autocomplete="off" />
-      <input type="number" class="participant-number" min="1" max="99" placeholder="番号" value="${escapeHtml(row.student_number)}" />
-      <input type="text" class="participant-name" maxlength="50" placeholder="名前" value="${escapeHtml(row.student_name)}" />
+      <input type="text" class="participant-homeroom" ${homeroomAttrs}${lockAttrs} value="${escapeHtml(row.homeroom)}" autocomplete="off" />
+      <input type="number" class="participant-number" min="1" max="99" placeholder="番号"${lockAttrs} value="${escapeHtml(row.student_number)}" />
+      <input type="text" class="participant-name" maxlength="50" placeholder="名前"${lockAttrs} value="${escapeHtml(row.student_name)}" />
       ${removeBtn}
     `;
     list.appendChild(li);
@@ -175,6 +181,60 @@ function formatParticipantSummary(members) {
     .join('、');
 }
 
+function participantsFromApplication(app) {
+  if (app.members?.length) {
+    return app.members.map((m) => ({
+      homeroom: String(m.homeroom ?? app.homeroom ?? ''),
+      student_number: String(m.student_number ?? app.student_number ?? ''),
+      student_name: String(m.member_name ?? ''),
+    }));
+  }
+  return [
+    {
+      homeroom: String(app.homeroom ?? ''),
+      student_number: String(app.student_number ?? ''),
+      student_name: String(app.student_name ?? ''),
+    },
+  ];
+}
+
+function setApplicationFormMode(mode) {
+  applicationFormMode = mode;
+  const heading = document.getElementById('apply-heading');
+  const submitBtn = document.getElementById('application-submit-btn');
+  const hint = document.getElementById('participant-hint');
+  const scheduleFieldset = document.querySelector('#application-form fieldset');
+  if (mode === 'edit') {
+    if (heading) heading.textContent = '参加申請の編集';
+    if (submitBtn) submitBtn.textContent = '変更を保存';
+    if (hint) {
+      hint.textContent =
+        '1行目（代表者）は変更できません。タイトル・感想と、2行目以降のメンバーを編集できます';
+    }
+    scheduleFieldset?.classList.add('contest-fieldset-readonly');
+  } else {
+    if (heading) heading.textContent = '参加申請';
+    if (submitBtn) submitBtn.textContent = '参加申請する';
+    if (hint) hint.textContent = 'クラス・出席番号・名前。1行目が印刷依頼の代表者です';
+    scheduleFieldset?.classList.remove('contest-fieldset-readonly');
+  }
+  document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
+    input.disabled = mode === 'edit';
+  });
+}
+
+function resetApplicationFormForCreate() {
+  editingApplicationId = null;
+  setApplicationFormMode('create');
+  scheduleType = 'full_time';
+  document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
+    input.checked = input.value === 'full_time';
+  });
+  const form = document.getElementById('application-form');
+  form?.reset();
+  participants = [createEmptyParticipant()];
+}
+
 function submissionStatusLabel(app) {
   if (!app.reservation) return 'STL 未提出';
   const status = app.reservation.status;
@@ -201,6 +261,7 @@ function renderApplicationsList() {
     const submitBtn = app.can_submit_stl
       ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
       : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
+    const editBtn = `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`;
 
     li.innerHTML = `
       <div class="contest-application-card-body">
@@ -209,13 +270,19 @@ function renderApplicationsList() {
         ${memberLine}
         <p class="contest-application-submission">${escapeHtml(submissionStatusLabel(app))}</p>
       </div>
-      <div class="contest-application-card-actions">${submitBtn}</div>
+      <div class="contest-application-card-actions">
+        ${editBtn}
+        ${submitBtn}
+      </div>
     `;
     listEl.appendChild(li);
   }
 
   listEl.querySelectorAll('.contest-card-submit').forEach((btn) => {
     btn.addEventListener('click', () => openSubmitView(btn.dataset.id));
+  });
+  listEl.querySelectorAll('.contest-card-edit').forEach((btn) => {
+    btn.addEventListener('click', () => openEditView(btn.dataset.id));
   });
 }
 
@@ -226,8 +293,31 @@ async function loadApplications() {
 }
 
 function openApplyView() {
+  resetApplicationFormForCreate();
   showView('apply');
-  participants = [createEmptyParticipant()];
+  renderParticipantList();
+  updateApplicationSubmitState();
+}
+
+function openEditView(applicationId) {
+  const app = applications.find((a) => a.id === applicationId);
+  if (!app) {
+    showToast('参加申請が見つかりません', 'error');
+    return;
+  }
+  editingApplicationId = applicationId;
+  scheduleType = app.schedule_type === 'part_time' ? 'part_time' : 'full_time';
+  setApplicationFormMode('edit');
+  document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
+    input.checked = input.value === scheduleType;
+  });
+  const form = document.getElementById('application-form');
+  if (form) {
+    form.title.value = app.title ?? '';
+    form.impressions.value = app.impressions ?? '';
+  }
+  participants = participantsFromApplication(app);
+  showView('apply');
   renderParticipantList();
   updateApplicationSubmitState();
 }
@@ -249,6 +339,7 @@ function openSubmitView(applicationId) {
 }
 
 function persistApplicationDraft() {
+  if (applicationFormMode === 'edit') return;
   const form = document.getElementById('application-form');
   if (!form) return;
   syncParticipantsFromDom();
@@ -264,8 +355,12 @@ function updateApplicationSubmitState() {
   const formData = new FormData(form);
   const title = String(formData.get('title') ?? '').trim();
   const titleOk = title.length >= 1 && title.length <= 40;
+  const rowsToValidate =
+    applicationFormMode === 'edit' ? participants.slice(1) : participants;
   const participantsOk =
-    participants.length > 0 && participants.every((row) => isParticipantRowValid(row));
+    participants.length > 0 &&
+    (applicationFormMode === 'edit' || participants.every((row) => isParticipantRowValid(row))) &&
+    rowsToValidate.every((row) => isParticipantRowValid(row));
 
   btn.disabled = !(participantsOk && titleOk);
 }
@@ -283,8 +378,13 @@ async function handleApplicationSubmit(e) {
   syncParticipantsFromDom();
   const formData = new FormData(form);
 
-  if (!participants.every((row) => isParticipantRowValid(row))) {
-    showToast('メンバーのクラス・出席番号・名前をすべて入力してください', 'error');
+  if (applicationFormMode === 'create') {
+    if (!participants.every((row) => isParticipantRowValid(row))) {
+      showToast('メンバーのクラス・出席番号・名前をすべて入力してください', 'error');
+      return;
+    }
+  } else if (participants.slice(1).some((row) => !isParticipantRowValid(row))) {
+    showToast('追加メンバーのクラス・出席番号・名前をすべて入力してください', 'error');
     return;
   }
 
@@ -296,17 +396,29 @@ async function handleApplicationSubmit(e) {
 
   btn.disabled = true;
   try {
-    await apiRequest('applications', {
-      method: 'POST',
-      body: JSON.stringify({
-        schedule_type: scheduleType,
-        title: String(formData.get('title')).trim(),
-        impressions: String(formData.get('impressions') ?? '').trim() || null,
-        participants: payloadParticipants,
-      }),
-    });
-    persistApplicationDraft();
-    showToast('参加申請を受け付けました。STL を提出してください', 'success');
+    if (applicationFormMode === 'edit' && editingApplicationId) {
+      await apiRequest(`applications/${editingApplicationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: String(formData.get('title')).trim(),
+          impressions: String(formData.get('impressions') ?? '').trim() || null,
+          participants: payloadParticipants,
+        }),
+      });
+      showToast('参加申請を更新しました', 'success');
+    } else {
+      await apiRequest('applications', {
+        method: 'POST',
+        body: JSON.stringify({
+          schedule_type: scheduleType,
+          title: String(formData.get('title')).trim(),
+          impressions: String(formData.get('impressions') ?? '').trim() || null,
+          participants: payloadParticipants,
+        }),
+      });
+      persistApplicationDraft();
+      showToast('参加申請を受け付けました。STL を提出してください', 'success');
+    }
     showView('list');
     await loadApplications();
   } catch (err) {
@@ -522,7 +634,10 @@ async function init() {
   document.getElementById('go-today-btn')?.addEventListener('click', goToToday);
 
   document.getElementById('btn-new-application')?.addEventListener('click', openApplyView);
-  document.getElementById('btn-back-from-apply')?.addEventListener('click', () => showView('list'));
+  document.getElementById('btn-back-from-apply')?.addEventListener('click', () => {
+    resetApplicationFormForCreate();
+    showView('list');
+  });
   document.getElementById('btn-back-from-submit')?.addEventListener('click', () => {
     selectedApplicationId = null;
     showView('list');

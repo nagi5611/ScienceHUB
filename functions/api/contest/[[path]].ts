@@ -708,7 +708,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // PATCH /api/contest/applications/:id
     if (method === "PATCH" && segments[0] === "applications" && segments.length === 2) {
       const body = await request.json<{
+        title?: string;
         impressions?: string | null;
+        participants?: unknown;
         members?: unknown;
       }>();
       try {
