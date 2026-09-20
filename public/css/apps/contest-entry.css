@@ -263,16 +263,6 @@
   color: #6b7280;
 }
 
-.contest-application-card--withdrawn {
-  opacity: 0.72;
-  background: #f3f4f6;
-}
-
-.contest-application-card--withdrawn .contest-application-title {
-  text-decoration: line-through;
-  text-decoration-color: #9ca3af;
-}
-
 .contest-application-card-actions {
   display: flex;
   flex-wrap: wrap;

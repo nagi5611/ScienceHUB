@@ -241,7 +241,6 @@ function resetApplicationFormForCreate() {
 }
 
 function submissionStatusLabel(app) {
-  if (app.status === 'withdrawn') return '参加取り消し済み';
   if (app.self_print) {
     if (app.stl_submitted_at) return '提出済み（自己印刷）';
     return 'STL 未提出';
@@ -263,7 +262,6 @@ function renderApplicationsList() {
   for (const app of applications) {
     const li = document.createElement('li');
     li.className = 'contest-application-card';
-    if (app.status === 'withdrawn') li.classList.add('contest-application-card--withdrawn');
     const memberCount = app.members?.length ?? 0;
     const memberLine =
       memberCount > 0
@@ -349,10 +347,6 @@ function openEditView(applicationId) {
   const app = applications.find((a) => a.id === applicationId);
   if (!app) {
     showToast('参加申請が見つかりません', 'error');
-    return;
-  }
-  if (app.status === 'withdrawn') {
-    showToast('取り消済みの参加申請は編集できません', 'error');
     return;
   }
   editingApplicationId = applicationId;

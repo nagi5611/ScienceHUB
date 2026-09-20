@@ -974,10 +974,7 @@ function renderContestApplications() {
             })
             .join('、')
         : '—';
-    const reservationLine =
-      app.status === 'withdrawn'
-        ? '参加取り消し済み'
-        : app.self_print
+    const reservationLine = app.self_print
       ? app.stl_submitted_at
         ? `自己印刷 · STL 提出済み（${escapeHtml(app.stl_filename ?? '')}）`
         : '自己印刷 · STL 未提出'

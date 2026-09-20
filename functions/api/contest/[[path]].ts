@@ -739,13 +739,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[2] === "withdraw"
     ) {
       try {
-        const application = await withdrawContestApplicationForUser(
-          env,
-          db,
-          userId,
-          segments[1]
-        );
-        return json({ ok: true, message: "参加を取り消しました", application });
+        await withdrawContestApplicationForUser(env, db, userId, segments[1]);
+        return json({ ok: true, message: "参加を取り消しました" });
       } catch (err) {
         const message = err instanceof Error ? err.message : "取り消しに失敗しました";
         const status = message.includes("見つかりません") ? 404 : 400;
