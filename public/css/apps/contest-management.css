@@ -37,3 +37,120 @@
   color: #b91c1c;
   font-size: 0.875rem;
 }
+
+.contest-admin-group-section {
+  margin-bottom: 2rem;
+}
+
+.contest-admin-group-section:last-child {
+  margin-bottom: 0;
+}
+
+.contest-admin-group-heading {
+  margin-top: 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.contest-admin-application-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.contest-admin-application-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  margin: 0;
+}
+
+.contest-admin-application-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.contest-admin-application-status {
+  min-width: 8.5rem;
+  text-align: right;
+}
+
+.contest-submission-status {
+  display: inline-block;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.contest-submission-detail {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.contest-submission-date {
+  margin: 0.35rem 0 0;
+}
+
+.contest-submission-status--pending {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+.contest-submission-status--self {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.contest-submission-status--applied {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.contest-submission-status--accepted {
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #c7d2fe;
+}
+
+.contest-submission-status--printing {
+  background: #fffbeb;
+  color: #a16207;
+  border-color: #fde68a;
+}
+
+.contest-submission-status--delivered {
+  background: #ecfdf5;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+
+.contest-submission-status--failed,
+.contest-submission-status--cancelled {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.contest-submission-status--default {
+  background: #f9fafb;
+  color: #4b5563;
+  border-color: #e5e7eb;
+}
+
+@media (max-width: 640px) {
+  .contest-admin-application-status {
+    width: 100%;
+    text-align: left;
+  }
+}

@@ -6,6 +6,98 @@ import type { StorageRootEntry } from '../storage/list';
 
 export const CONTEST_STORAGE_GROUP_SLUG_KEY = 'contest_storage_group_slug';
 const CONTEST_MANAGEMENT_APP_SLUG = 'contest-management';
+const CONTEST_ENTRY_APP_SLUG = 'contest-entry';
+
+type GroupMemberAccessRow = {
+  user_id: string;
+  group_id: string;
+  group_slug: string;
+  group_display_name: string;
+  group_color: string;
+  group_role_id: string;
+  group_role_slug: string;
+  group_role_display_name: string;
+  group_role_color: string;
+  group_role_position: number;
+  group_role_weight: number;
+};
+
+/** 指定グループで造形物コンテスト（依頼）アプリを使えるユーザー ID 一覧 */
+export async function listContestEntryUserIdsForGroup(
+  db: D1Database,
+  groupSlug: string
+): Promise<Set<string>> {
+  const entryApp = await getAppBySlug(db, CONTEST_ENTRY_APP_SLUG);
+  if (!entryApp) return new Set();
+
+  const normalizedSlug = groupSlug.trim().toLowerCase();
+  const group = await db
+    .prepare(`SELECT id FROM hub_groups WHERE slug = ?`)
+    .bind(normalizedSlug)
+    .first<{ id: string }>();
+  if (!group) return new Set();
+
+  const { enabledGroupIds, roleRestrictions } = await loadAppAccessMeta(db, entryApp.id);
+  if (!enabledGroupIds.has(group.id)) return new Set();
+
+  const result = await db
+    .prepare(
+      `SELECT
+         ugm.user_id,
+         g.id AS group_id,
+         g.slug AS group_slug,
+         g.display_name AS group_display_name,
+         g.color AS group_color,
+         gr.id AS group_role_id,
+         gr.slug AS group_role_slug,
+         gr.display_name AS group_role_display_name,
+         gr.color AS group_role_color,
+         gr.position AS group_role_position,
+         gr.weight AS group_role_weight
+       FROM user_group_memberships ugm
+       JOIN hub_groups g ON g.id = ugm.group_id
+       JOIN group_roles gr ON gr.id = ugm.group_role_id
+       WHERE g.slug = ?`
+    )
+    .bind(normalizedSlug)
+    .all<GroupMemberAccessRow>();
+
+  const ids = new Set<string>();
+  for (const row of result.results ?? []) {
+    const membership = {
+      group_id: row.group_id,
+      group_slug: row.group_slug,
+      group_display_name: row.group_display_name,
+      group_color: row.group_color,
+      group_role_id: row.group_role_id,
+      group_role_slug: row.group_role_slug,
+      group_role_display_name: row.group_role_display_name,
+      group_role_color: row.group_role_color,
+      group_role_position: row.group_role_position,
+      group_role_weight: row.group_role_weight,
+    };
+    if (membershipCanAccessApp(membership, enabledGroupIds, roleRestrictions)) {
+      ids.add(row.user_id);
+    }
+  }
+  return ids;
+}
+
+/** 造形物コンテスト依頼アプリが有効なグループ slug か */
+export async function isContestEntryEnabledForGroupSlug(
+  db: D1Database,
+  groupSlug: string
+): Promise<boolean> {
+  const entryApp = await getAppBySlug(db, CONTEST_ENTRY_APP_SLUG);
+  if (!entryApp) return false;
+  const group = await db
+    .prepare(`SELECT id FROM hub_groups WHERE slug = ?`)
+    .bind(groupSlug.trim().toLowerCase())
+    .first<{ id: string }>();
+  if (!group) return false;
+  const { enabledGroupIds } = await loadAppAccessMeta(db, entryApp.id);
+  return enabledGroupIds.has(group.id);
+}
 
 /** 提出ファイル集約先のグループ slug（未設定なら null） */
 export async function getContestStorageGroupSlug(db: D1Database): Promise<string | null> {

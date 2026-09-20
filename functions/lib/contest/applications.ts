@@ -18,6 +18,11 @@ import {
   notifyContestParticipationRegisteredEmail,
 } from './contest-email';
 import { cleanupContestApplicationSubmissionFiles } from './contest-storage';
+import {
+  getContestManagementAccessibleGroupRoots,
+  isContestEntryEnabledForGroupSlug,
+  listContestEntryUserIdsForGroup,
+} from './contest-app-settings';
 import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 
@@ -617,48 +622,162 @@ export async function withdrawContestApplicationForUser(
 
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
   applicant_email: string | null;
+  submission_status: ContestAdminSubmissionStatus;
 }
 
-/** Admin list of contest applications (newest first, optional limit). */
+export interface ContestAdminSubmissionStatus {
+  code: string;
+  label: string;
+  detail: string | null;
+  desired_date: string | null;
+}
+
+export interface ContestApplicationAdminGroupSection {
+  group_slug: string;
+  group_display_name: string;
+  applications: ContestApplicationAdminRow[];
+}
+
+/** Admin UI 用の提出・印刷ステータス */
+export function computeContestAdminSubmissionStatus(
+  app: ContestApplication,
+  reservation: ContestApplicationReservationSummary | null
+): ContestAdminSubmissionStatus {
+  if (app.self_print) {
+    if (app.stl_submitted_at) {
+      return {
+        code: 'self_print_submitted',
+        label: 'STL提出済み',
+        detail: '自己印刷',
+        desired_date: null,
+      };
+    }
+    return {
+      code: 'stl_pending',
+      label: 'STL未提出',
+      detail: '自己印刷',
+      desired_date: null,
+    };
+  }
+
+  if (!reservation) {
+    return {
+      code: 'stl_pending',
+      label: 'STL未提出',
+      detail: null,
+      desired_date: null,
+    };
+  }
+
+  const labels: Record<ContestApplicationReservationSummary['status'], string> = {
+    applied: '印刷希望・申請中',
+    accepted: '受領済み',
+    printing: '印刷中',
+    delivered: '印刷完了',
+    failed: '印刷失敗',
+    cancelled: 'キャンセル',
+  };
+
+  const label = labels[reservation.status] ?? reservation.status;
+  const detail =
+    reservation.desired_date != null ? `印刷希望日 ${reservation.desired_date}` : null;
+
+  return {
+    code: `print_${reservation.status}`,
+    label,
+    detail,
+    desired_date: reservation.desired_date,
+  };
+}
+
+async function enrichContestApplicationAdminRow(
+  db: D1Database,
+  rawApp: ContestApplicationRow & { applicant_email: string | null }
+): Promise<ContestApplicationAdminRow> {
+  const { applicant_email, ...appFields } = rawApp;
+  const app = mapContestApplicationRow(appFields);
+  const members = await fetchMembersForApplication(db, app.id);
+  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const active = await getActiveContestReservationForApplication(db, app.id);
+  const canWithdraw =
+    app.status === 'approved' && !(await hasBlockingReservationForWithdraw(db, app.id));
+  return {
+    ...enrichApplication(app, members, reservation, active, canWithdraw),
+    applicant_email,
+    submission_status: computeContestAdminSubmissionStatus(app, reservation),
+  };
+}
+
+async function fetchAllApprovedApplicationsForAdmin(
+  db: D1Database,
+  limit: number
+): Promise<Array<ContestApplicationRow & { applicant_email: string | null }>> {
+  const selectCa = CONTEST_APPLICATION_SELECT.split(',')
+    .map((part) => `ca.${part.trim()}`)
+    .join(', ');
+  const result = await db
+    .prepare(
+      `SELECT ${selectCa}, u.email AS applicant_email
+       FROM contest_applications ca
+       LEFT JOIN users u ON u.id = ca.user_id
+       WHERE ca.status = 'approved'
+       ORDER BY ca.created_at DESC
+       LIMIT ?`
+    )
+    .bind(limit)
+    .all<ContestApplicationRow & { applicant_email: string | null }>();
+  return result.results ?? [];
+}
+
+/** 管理画面: アクセス可能なグループごとに参加申請を返す */
+export async function listContestApplicationsAdminGrouped(
+  db: D1Database,
+  viewerUserId: string,
+  isAdmin: boolean,
+  options?: { applicationLimit?: number }
+): Promise<ContestApplicationAdminGroupSection[]> {
+  const applicationLimit = Math.min(Math.max(options?.applicationLimit ?? 500, 1), 2000);
+  const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
+  const rawApps = await fetchAllApprovedApplicationsForAdmin(db, applicationLimit);
+
+  const enrichedRows: ContestApplicationAdminRow[] = [];
+  for (const raw of rawApps) {
+    enrichedRows.push(await enrichContestApplicationAdminRow(db, raw));
+  }
+
+  const sections: ContestApplicationAdminGroupSection[] = [];
+
+  for (const root of groupRoots) {
+    const slug = root.key;
+    if (!(await isContestEntryEnabledForGroupSlug(db, slug))) {
+      continue;
+    }
+
+    const userIds = await listContestEntryUserIdsForGroup(db, slug);
+    const applications = enrichedRows
+      .filter((app) => userIds.has(app.user_id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    sections.push({
+      group_slug: slug,
+      group_display_name: root.label,
+      applications,
+    });
+  }
+
+  return sections;
+}
+
+/** @deprecated Prefer listContestApplicationsAdminGrouped */
 export async function listContestApplicationsAdmin(
   db: D1Database,
   options?: { limit?: number }
 ): Promise<ContestApplicationAdminRow[]> {
   const limit = Math.min(Math.max(options?.limit ?? 200, 1), 500);
-  const result = await db
-    .prepare(
-      `SELECT ca.id, ca.user_id, ca.schedule_type, ca.homeroom, ca.student_number,
-              ca.student_name, ca.title, ca.impressions, ca.status, ca.self_print,
-              ca.stl_r2_key, ca.stl_filename, ca.stl_size_bytes, ca.stl_print_notes,
-              ca.stl_submitted_at, ca.contest_storage_path, ca.contest_storage_filename,
-              ca.created_at, ca.updated_at, u.email AS applicant_email
-       FROM contest_applications ca
-       LEFT JOIN users u ON u.id = ca.user_id
-       ORDER BY ca.created_at DESC
-       LIMIT ?`
-    )
-    .bind(limit)
-    .all<
-      ContestApplicationRow & {
-        applicant_email: string | null;
-      }
-    >();
-
-  const rows = result.results ?? [];
+  const rawApps = await fetchAllApprovedApplicationsForAdmin(db, limit);
   const enriched: ContestApplicationAdminRow[] = [];
-  for (const row of rows) {
-    const { applicant_email, ...rawApp } = row;
-    const app = mapContestApplicationRow(rawApp);
-    const members = await fetchMembersForApplication(db, app.id);
-    const reservation = await fetchLatestReservationForApplication(db, app.id);
-    const active = await getActiveContestReservationForApplication(db, app.id);
-    const canWithdraw =
-      app.status === 'approved' &&
-      !(await hasBlockingReservationForWithdraw(db, app.id));
-    enriched.push({
-      ...enrichApplication(app, members, reservation, active, canWithdraw),
-      applicant_email,
-    });
+  for (const raw of rawApps) {
+    enriched.push(await enrichContestApplicationAdminRow(db, raw));
   }
   return enriched;
 }

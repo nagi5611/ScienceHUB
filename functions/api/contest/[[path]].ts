@@ -76,8 +76,8 @@ import { submitContestEntry } from "../../lib/contest/submit-entry";
 import {
   createContestApplication,
   getContestApplicationForUser,
-  listContestApplicationsAdmin,
   listContestApplicationsForUser,
+  listContestApplicationsAdminGrouped,
   patchContestApplicationForUser,
   withdrawContestApplicationForUser,
 } from "../../lib/contest/applications";
@@ -1458,10 +1458,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[1] === "applications" && segments.length === 2) {
       const limitParam = url.searchParams.get("limit");
       const limit = limitParam ? parseInt(limitParam, 10) : undefined;
-      const applications = await listContestApplicationsAdmin(db, {
-        limit: Number.isFinite(limit) ? limit : undefined,
+      const groups = await listContestApplicationsAdminGrouped(db, authUser.id, authUser.is_admin, {
+        applicationLimit: Number.isFinite(limit) ? limit : undefined,
       });
-      return json({ applications });
+      return json({ groups });
     }
 
     // GET /api/contest/admin/settings/email-compose
