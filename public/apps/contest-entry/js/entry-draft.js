@@ -39,6 +39,7 @@ export function extractContestDraft(form, participants) {
     })),
     title: String(formData.get('title') ?? ''),
     impressions: String(formData.get('impressions') ?? ''),
+    self_print: form.querySelector('#self_print')?.checked === true,
   };
 }
 
@@ -53,6 +54,10 @@ export function applyContestDraft(form, draft) {
   if (title && draft.title != null) title.value = draft.title;
   const impressions = form.querySelector('[name="impressions"]');
   if (impressions && draft.impressions != null) impressions.value = draft.impressions;
+  const selfPrint = form.querySelector('#self_print');
+  if (selfPrint instanceof HTMLInputElement) {
+    selfPrint.checked = Boolean(draft.self_print);
+  }
 }
 
 export { parseScheduleType };

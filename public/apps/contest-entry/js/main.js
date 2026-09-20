@@ -212,11 +212,14 @@ function setApplicationFormMode(mode) {
         '1行目（代表者）は変更できません。タイトル・感想と、2行目以降のメンバーを編集できます';
     }
     scheduleFieldset?.classList.add('contest-fieldset-readonly');
+    document.getElementById('self-print-field')?.classList.add('hidden');
   } else {
     if (heading) heading.textContent = '参加申請';
     if (submitBtn) submitBtn.textContent = '参加申請する';
     if (hint) hint.textContent = 'クラス・出席番号・名前。1行目が印刷依頼の代表者です';
     scheduleFieldset?.classList.remove('contest-fieldset-readonly');
+    document.getElementById('self-print-field')?.classList.remove('hidden');
+    document.getElementById('self-print-readonly-hint')?.classList.add('hidden');
   }
   document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
     input.disabled = mode === 'edit';
@@ -232,10 +235,16 @@ function resetApplicationFormForCreate() {
   });
   const form = document.getElementById('application-form');
   form?.reset();
+  const selfPrint = document.getElementById('self_print');
+  if (selfPrint instanceof HTMLInputElement) selfPrint.checked = false;
   participants = [createEmptyParticipant()];
 }
 
 function submissionStatusLabel(app) {
+  if (app.self_print) {
+    if (app.stl_submitted_at) return '提出済み（自己印刷）';
+    return 'STL 未提出';
+  }
   if (!app.reservation) return 'STL 未提出';
   const status = app.reservation.status;
   if (status === 'delivered') return '印刷完了';
@@ -258,6 +267,9 @@ function renderApplicationsList() {
       memberCount > 0
         ? `<p class="hint">参加者: ${escapeHtml(formatParticipantSummary(app.members))}</p>`
         : '';
+    const selfPrintLine = app.self_print
+      ? '<p class="hint">印刷: 自分で行う（学校プリンター予約なし）</p>'
+      : '';
     const submitBtn = app.can_submit_stl
       ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
       : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
@@ -268,6 +280,7 @@ function renderApplicationsList() {
         <h3 class="contest-application-title">${escapeHtml(app.title)}</h3>
         <p class="hint">${escapeHtml(SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(app.student_name)}</p>
         ${memberLine}
+        ${selfPrintLine}
         <p class="contest-application-submission">${escapeHtml(submissionStatusLabel(app))}</p>
       </div>
       <div class="contest-application-card-actions">
@@ -316,6 +329,7 @@ function openEditView(applicationId) {
     form.title.value = app.title ?? '';
     form.impressions.value = app.impressions ?? '';
   }
+  document.getElementById('self-print-readonly-hint')?.classList.toggle('hidden', !app.self_print);
   participants = participantsFromApplication(app);
   showView('apply');
   renderParticipantList();
@@ -333,7 +347,9 @@ function openSubmitView(applicationId) {
   document.getElementById('selected-file-name').textContent = '';
   document.getElementById('upload-progress')?.classList.add('hidden');
   document.getElementById('upload-status').textContent = '';
-  document.getElementById('submit-target-label').textContent = `提出先: ${app.title}`;
+  document.getElementById('submit-target-label').textContent = app.self_print
+    ? `提出先: ${app.title}（自己印刷・予約なし）`
+    : `提出先: ${app.title}`;
   showView('submit');
   updateSubmitState();
 }
@@ -414,6 +430,7 @@ async function handleApplicationSubmit(e) {
           title: String(formData.get('title')).trim(),
           impressions: String(formData.get('impressions') ?? '').trim() || null,
           participants: payloadParticipants,
+          self_print: form.querySelector('#self_print')?.checked === true,
         }),
       });
       persistApplicationDraft();
@@ -606,7 +623,7 @@ async function handleStlSubmit(e) {
         ...(printNotesRaw ? { print_notes: printNotesRaw } : {}),
       }),
     });
-    showToast(data.message || '印刷依頼を受け付けました', 'success');
+    showToast(data.message || (data.self_print ? 'STL を提出しました' : '印刷依頼を受け付けました'), 'success');
     selectedApplicationId = null;
     showView('list');
     await loadApplications();
