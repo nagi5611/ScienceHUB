@@ -22,7 +22,7 @@ const STATUS_LABELS = {
 
 const SCHEDULE_LABELS = {
   full_time: '全日制',
-  part_time: '平日制',
+  part_time: '定時制',
 };
 
 let currentYear;
