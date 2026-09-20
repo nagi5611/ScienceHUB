@@ -271,6 +271,32 @@ export async function resolveContestSubmissionFilename(
   throw new Error('同名ファイルが多すぎます');
 }
 
+/** Deletes self-print upload R2 object and synced contest storage file for an application. */
+export async function cleanupContestApplicationSubmissionFiles(
+  env: Env,
+  db: D1Database,
+  app: {
+    stl_r2_key: string | null;
+    contest_storage_path: string | null;
+  }
+): Promise<void> {
+  const stlKey = app.stl_r2_key?.trim();
+  if (stlKey) {
+    try {
+      await env.FILES.delete(stlKey);
+    } catch (err) {
+      console.error('contest withdraw: failed to delete self-print stl', err);
+    }
+  }
+  if (app.contest_storage_path) {
+    try {
+      await removeStorageFileIfExists(env, db, app.contest_storage_path);
+    } catch (err) {
+      console.error('contest withdraw: failed to delete contest storage file', err);
+    }
+  }
+}
+
 async function removeStorageFileIfExists(
   env: Env,
   db: D1Database,

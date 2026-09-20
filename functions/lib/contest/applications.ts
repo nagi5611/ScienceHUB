@@ -17,6 +17,7 @@ import {
   buildContestEntryAppUrl,
   notifyContestParticipationRegisteredEmail,
 } from './contest-email';
+import { cleanupContestApplicationSubmissionFiles } from './contest-storage';
 import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 
@@ -560,7 +561,7 @@ type ContestReservationCancelRow = {
   status: PrintReservation['status'];
 };
 
-async function cancelOpenContestReservationsForApplication(
+async function removeAllContestReservationsForApplication(
   env: Env,
   db: D1Database,
   applicationId: string
@@ -568,7 +569,7 @@ async function cancelOpenContestReservationsForApplication(
   const result = await db
     .prepare(
       `SELECT id, google_event_id, stl_r2_key, status FROM print_reservations
-       WHERE contest_application_id = ? AND source = 'contest' AND status != 'cancelled'`
+       WHERE contest_application_id = ? AND source = 'contest'`
     )
     .bind(applicationId)
     .all<ContestReservationCancelRow>();
@@ -582,48 +583,36 @@ async function cancelOpenContestReservationsForApplication(
 
   for (const row of rows) {
     await deleteCalendarEvent(env, row.google_event_id);
-    try {
-      await env.FILES.delete(row.stl_r2_key);
-    } catch (err) {
-      console.error('contest withdraw: failed to delete reservation stl', row.id, err);
+    if (row.stl_r2_key) {
+      try {
+        await env.FILES.delete(row.stl_r2_key);
+      } catch (err) {
+        console.error('contest withdraw: failed to delete reservation stl', row.id, err);
+      }
     }
     await deleteReservation(db, row.id);
   }
 }
 
-/** Marks participation as withdrawn and cancels cancellable print reservations. */
+/** Deletes participation (application, members, files, reservations). */
 export async function withdrawContestApplicationForUser(
   env: Env,
   db: D1Database,
   userId: string,
   applicationId: string
-): Promise<ContestApplicationWithDetails> {
+): Promise<void> {
   const app = await getApplicationRow(db, applicationId);
   if (!app || app.user_id !== userId) {
     throw new Error('参加申請が見つかりません');
-  }
-  if (app.status === 'withdrawn') {
-    throw new Error('すでに参加を取り消しています');
   }
   if (app.status !== 'approved') {
     throw new Error('この参加申請は取り消せません');
   }
 
-  await cancelOpenContestReservationsForApplication(env, db, applicationId);
+  await removeAllContestReservationsForApplication(env, db, applicationId);
+  await cleanupContestApplicationSubmissionFiles(env, db, app);
 
-  const now = new Date().toISOString();
-  await db
-    .prepare(`UPDATE contest_applications SET status = 'withdrawn', updated_at = ? WHERE id = ?`)
-    .bind(now, applicationId)
-    .run();
-
-  const updated = await getApplicationRow(db, applicationId);
-  if (!updated) throw new Error('参加申請が見つかりません');
-
-  const members = await fetchMembersForApplication(db, applicationId);
-  const reservation = await fetchLatestReservationForApplication(db, applicationId);
-  const active = await getActiveContestReservationForApplication(db, applicationId);
-  return enrichApplication(updated, members, reservation, active, false);
+  await db.prepare(`DELETE FROM contest_applications WHERE id = ?`).bind(applicationId).run();
 }
 
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
