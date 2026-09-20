@@ -78,6 +78,7 @@ import {
   getContestApplicationForUser,
   listContestApplicationsForUser,
   listContestApplicationsAdminGrouped,
+  deleteContestApplicationAsAdmin,
   patchContestApplicationForUser,
   withdrawContestApplicationForUser,
 } from "../../lib/contest/applications";
@@ -1462,6 +1463,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         applicationLimit: Number.isFinite(limit) ? limit : undefined,
       });
       return json({ groups });
+    }
+
+    // DELETE /api/contest/admin/applications/:id
+    if (method === "DELETE" && segments[1] === "applications" && segments.length === 3) {
+      try {
+        await deleteContestApplicationAsAdmin(env, db, authUser.id, authUser.is_admin, segments[2]);
+        return json({ ok: true });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "削除に失敗しました";
+        return error(message, 400);
+      }
     }
 
     // GET /api/contest/admin/settings/email-compose

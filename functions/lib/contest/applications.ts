@@ -599,6 +599,40 @@ async function removeAllContestReservationsForApplication(
   }
 }
 
+async function viewerCanManageContestApplicationUser(
+  db: D1Database,
+  viewerUserId: string,
+  isAdmin: boolean,
+  applicantUserId: string
+): Promise<boolean> {
+  const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
+  for (const root of groupRoots) {
+    const slug = root.key;
+    if (!(await isContestEntryEnabledForGroupSlug(db, slug))) {
+      continue;
+    }
+    const userIds = await listContestEntryUserIdsForGroup(db, slug);
+    if (userIds.has(applicantUserId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Removes application row, members (CASCADE), reservations, and R2 files. */
+async function purgeContestApplication(
+  env: Env,
+  db: D1Database,
+  app: Pick<ContestApplication, 'id' | 'status' | 'stl_r2_key' | 'contest_storage_path'>
+): Promise<void> {
+  if (app.status !== 'approved') {
+    throw new Error('この参加申請は削除できません');
+  }
+  await removeAllContestReservationsForApplication(env, db, app.id);
+  await cleanupContestApplicationSubmissionFiles(env, db, app);
+  await db.prepare(`DELETE FROM contest_applications WHERE id = ?`).bind(app.id).run();
+}
+
 /** Deletes participation (application, members, files, reservations). */
 export async function withdrawContestApplicationForUser(
   env: Env,
@@ -613,11 +647,26 @@ export async function withdrawContestApplicationForUser(
   if (app.status !== 'approved') {
     throw new Error('この参加申請は取り消せません');
   }
+  await purgeContestApplication(env, db, app);
+}
 
-  await removeAllContestReservationsForApplication(env, db, applicationId);
-  await cleanupContestApplicationSubmissionFiles(env, db, app);
-
-  await db.prepare(`DELETE FROM contest_applications WHERE id = ?`).bind(applicationId).run();
+/** Admin: delete a participation application visible in the grouped admin list. */
+export async function deleteContestApplicationAsAdmin(
+  env: Env,
+  db: D1Database,
+  viewerUserId: string,
+  isAdmin: boolean,
+  applicationId: string
+): Promise<void> {
+  const app = await getApplicationRow(db, applicationId);
+  if (!app) {
+    throw new Error('参加申請が見つかりません');
+  }
+  const allowed = await viewerCanManageContestApplicationUser(db, viewerUserId, isAdmin, app.user_id);
+  if (!allowed) {
+    throw new Error('この参加申請を削除する権限がありません');
+  }
+  await purgeContestApplication(env, db, app);
 }
 
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {

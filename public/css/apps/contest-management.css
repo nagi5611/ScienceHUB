@@ -52,6 +52,87 @@
   border-bottom: 1px solid #e5e7eb;
 }
 
+.contest-admin-group-section .admin-table-wrap {
+  margin-top: 0.5rem;
+}
+
+.contest-admin-group-section .admin-table-wrap table {
+  font-size: 0.875rem;
+}
+
+.contest-admin-group-section .admin-table-wrap th,
+.contest-admin-group-section .admin-table-wrap td {
+  vertical-align: middle;
+  padding: 0.45rem 0.5rem;
+}
+
+.contest-admin-members-compact {
+  display: inline-block;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.contest-admin-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.contest-submission-date-inline {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.contest-admin-application-compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.contest-admin-application-compact {
+  padding: 0.65rem 0.75rem;
+  margin: 0;
+}
+
+.contest-admin-application-compact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.contest-admin-application-compact-meta {
+  margin: 0.25rem 0 0;
+}
+
+.contest-admin-impressions-truncate {
+  margin: 0.35rem 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.contest-admin-application-compact-actions {
+  margin-top: 0.5rem;
+  text-align: right;
+}
+
+.contest-admin-app-delete {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.contest-admin-app-delete:hover {
+  background: #fef2f2;
+}
+
 .contest-admin-application-list {
   display: flex;
   flex-direction: column;
