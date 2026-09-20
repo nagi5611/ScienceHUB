@@ -187,3 +187,94 @@
   width: 100%;
   margin-top: 0.5rem;
 }
+
+.contest-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.contest-list-header .contest-section-title {
+  margin: 0;
+}
+
+.contest-application-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.contest-application-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: var(--surface-muted, #fafafa);
+}
+
+.contest-application-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.contest-application-submission {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.contest-card-status {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.contest-back-btn {
+  margin-bottom: 0.75rem;
+}
+
+.contest-submit-target {
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
+
+.contest-member-list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.contest-member-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.contest-member-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.contest-member-remove {
+  flex-shrink: 0;
+  min-width: 2.25rem;
+}
+
+.contest-entry-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}

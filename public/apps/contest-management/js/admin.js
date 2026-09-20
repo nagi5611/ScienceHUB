@@ -46,10 +46,18 @@ const MOBILE_ADMIN_MQ = window.matchMedia('(max-width: 768px)');
 const ADMIN_PANEL_TITLES = {
   dashboard: 'カレンダー',
   history: '印刷履歴',
+  applications: '参加申請',
   members: 'メンバー',
   printers: 'プリンター',
   shifts: 'シフト',
 };
+
+const CONTEST_SCHEDULE_LABELS = {
+  full_time: '全日制',
+  part_time: '平日制',
+};
+
+let contestApplications = [];
 
 let currentReservationId = null;
 let allReservations = [];
@@ -160,6 +168,7 @@ async function init() {
       renderAdminCalendar();
       renderTodayTasks();
       if (activePanel === 'history') renderHistory();
+      if (activePanel === 'applications') renderContestApplications();
       if (activePanel === 'members') renderMembers();
       if (activePanel === 'printers') {
         renderPrinters();
@@ -214,6 +223,7 @@ function switchPanel(panel) {
   const titleEl = document.getElementById('admin-mobile-panel-title');
   if (titleEl) titleEl.textContent = ADMIN_PANEL_TITLES[panel] ?? panel;
   if (panel === 'history') renderHistory();
+  if (panel === 'applications') renderContestApplications();
   if (panel === 'members') renderMembers();
   if (panel === 'printers') {
     renderPrinters();
@@ -236,17 +246,20 @@ async function loadEmailComposeSettings() {
 /** Refreshes dashboard data. */
 async function refreshAll() {
   try {
-    const [resData, membersData, printersData] = await Promise.all([
+    const [resData, membersData, printersData, appsData] = await Promise.all([
       apiRequest('admin/reservations'),
       apiRequest('admin/members'),
       apiRequest('admin/printers'),
+      apiRequest('admin/applications?limit=200').catch(() => ({ applications: [] })),
     ]);
     allReservations = resData.reservations.filter((r) => r.status !== 'cancelled');
     allMembers = membersData.members;
     allPrinters = printersData.printers;
+    contestApplications = appsData.applications ?? [];
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
+    if (activePanel === 'applications') renderContestApplications();
     if (activePanel === 'members') renderMembers();
     if (activePanel === 'printers') {
       renderPrinters();
@@ -935,6 +948,42 @@ function renderTodayTasks() {
   }
 
   bindDetailButtons(mount);
+}
+
+/** Renders contest participation applications list. */
+function renderContestApplications() {
+  const mount = document.getElementById('applications-mount');
+  if (!mount) return;
+
+  if (!contestApplications.length) {
+    mount.innerHTML = '<p class="hint admin-list-empty">参加申請はありません</p>';
+    return;
+  }
+
+  const rows = contestApplications.map((app) => {
+    const members =
+      app.members?.length > 0
+        ? app.members.map((m) => escapeHtml(m.member_name)).join('、')
+        : '—';
+    const reservationLine = app.reservation
+      ? `予約 ${escapeHtml(app.reservation.id.slice(0, 8))}… · ${STATUS_LABELS[app.reservation.status] ?? app.reservation.status} · ${escapeHtml(app.reservation.desired_date)}`
+      : 'STL 未提出';
+    const impressions = app.impressions
+      ? `<p class="hint contest-admin-impressions">${escapeHtml(app.impressions)}</p>`
+      : '';
+    return `
+      <article class="contest-admin-application card" style="margin-bottom:1rem;padding:1rem">
+        <h3 class="section-heading" style="margin-top:0">${escapeHtml(app.title)}</h3>
+        <p class="hint">${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(String(app.student_number))}番 · ${escapeHtml(app.student_name)}</p>
+        <p class="hint">申請者: ${escapeHtml(app.applicant_email ?? '—')}</p>
+        <p class="hint">制作者: ${members}</p>
+        ${impressions}
+        <p class="hint"><strong>提出:</strong> ${reservationLine}</p>
+      </article>
+    `;
+  });
+
+  mount.innerHTML = rows.join('');
 }
 
 /** Renders print history table. */
