@@ -493,6 +493,91 @@ export async function sendContestCustomEmailToApplicant(
   return { ok: true };
 }
 
+export type ContestStaffMessageEmailKind =
+  | 'print_rejected'
+  | 'accepted'
+  | 'decided'
+  | 'status_changed'
+  | 'custom';
+
+const STAFF_MESSAGE_HEADLINES: Record<ContestStaffMessageEmailKind, string> = {
+  print_rejected: '印刷不能のお知らせ',
+  accepted: '印刷依頼を受領しました',
+  decided: '印刷が完了しました',
+  status_changed: 'ステータスのお知らせ',
+  custom: '担当者からのお知らせ',
+};
+
+/** Sends staff message notification email (print reject uses dedicated subject). */
+export async function notifyContestStaffMessageEmail(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  options: {
+    kind: ContestStaffMessageEmailKind;
+    body: string;
+    staffName: string;
+    applicationTitle: string;
+    entryAppUrl: string;
+    reservation: Pick<
+      Reservation,
+      'id' | 'title' | 'desired_date' | 'print_scale' | 'print_staff_member_id'
+    >;
+  }
+): Promise<void> {
+  const from = getFromAddress(env);
+  if (!isEmailSendingConfigured(env, from)) return;
+
+  const to = await getUserEmailById(db, userId);
+  if (!to) {
+    console.warn('contest staff message email skipped: no user email', userId);
+    return;
+  }
+
+  const ctx: ContestEmailContext = {
+    reservation: options.reservation,
+    entryAppUrl: options.entryAppUrl,
+  };
+  const headline = STAFF_MESSAGE_HEADLINES[options.kind] ?? '担当者からのお知らせ';
+  const subject =
+    options.kind === 'print_rejected'
+      ? '【ScienceHUB】STL を印刷できませんでした'
+      : `【ScienceHUB】造形物コンテスト — ${headline}`;
+
+  const leadHtml = `<p style="margin:0 0 8px;font-size:13px;color:#6b7280">担当者</p>
+<p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#111827">${escapeHtml(options.staffName)}</p>
+<div style="padding:14px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;font-size:15px;line-height:1.65;color:#422006">${nl2br(options.body)}</div>`;
+
+  const html = wrapContestEmailHtml({
+    headline,
+    leadHtml,
+    ctx,
+    staffName: options.staffName,
+  });
+
+  const facts = reservationFactsText(ctx);
+  const text = `${subject}
+
+${options.staffName} より:
+
+${options.body.trim()}
+
+---
+作品: ${options.applicationTitle}
+${facts}
+
+${options.entryAppUrl}`;
+
+  await sendTransactionalEmail(env, {
+    to,
+    from: { email: from!, name: getFromName(env) },
+    subject,
+    html,
+    text,
+    replyTo: env.PRINT_3D_EMAIL_REPLY_TO?.trim() || undefined,
+  });
+}
+
 /** Public URL for the contest entry app. */
 export function buildContestEntryAppUrl(baseUrl: string): string {
   const base = baseUrl.replace(/\/$/, '');

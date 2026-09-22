@@ -666,6 +666,77 @@ async function handleStlSubmit(e) {
   }
 }
 
+let staffMessagesPollTimer = null;
+let staffMessagesSignature = '';
+
+function formatStaffMessageDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Intl.DateTimeFormat('ja-JP', {
+      timeZone: 'Asia/Tokyo',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+function renderStaffMessages() {
+  const section = document.getElementById('contest-staff-messages-section');
+  const list = document.getElementById('contest-staff-messages-list');
+  const empty = document.getElementById('contest-staff-messages-empty');
+  if (!section || !list) return;
+
+  section.classList.remove('hidden');
+
+  if (!staffMessages.length) {
+    list.innerHTML = '';
+    empty?.classList.remove('hidden');
+    return;
+  }
+
+  empty?.classList.add('hidden');
+  list.innerHTML = staffMessages
+    .map((msg) => {
+      const titleLine = msg.application_title
+        ? `<p class="contest-staff-message-work hint">${escapeHtml(msg.application_title)}</p>`
+        : '';
+      return `<li class="contest-staff-message" data-message-id="${escapeHtml(msg.id)}">
+        <div class="contest-staff-message-head">
+          <span class="contest-staff-message-kind">${escapeHtml(msg.kind_label ?? msg.kind)}</span>
+          <time class="contest-staff-message-time" datetime="${escapeHtml(msg.created_at)}">${escapeHtml(formatStaffMessageDate(msg.created_at))}</time>
+        </div>
+        <p class="contest-staff-message-staff">担当者: <strong>${escapeHtml(msg.staff_display_name)}</strong></p>
+        ${titleLine}
+        <div class="contest-staff-message-body">${escapeHtml(msg.body).replace(/\n/g, '<br>')}</div>
+      </li>`;
+    })
+    .join('');
+}
+
+async function loadStaffMessages() {
+  const data = await apiRequest('staff-messages');
+  const messages = data.messages ?? [];
+  const nextSig = messages.map((m) => `${m.id}:${m.created_at}:${m.body.length}`).join('|');
+  if (nextSig === staffMessagesSignature) return;
+  staffMessagesSignature = nextSig;
+  staffMessages = messages;
+  renderStaffMessages();
+}
+
+function startStaffMessagesPolling() {
+  loadStaffMessages().catch(() => {});
+  if (staffMessagesPollTimer) clearInterval(staffMessagesPollTimer);
+  staffMessagesPollTimer = setInterval(() => {
+    loadStaffMessages().catch(() => {});
+  }, 5000);
+}
+
+let staffMessages = [];
+
 async function init() {
   const allowed = await checkAppAccess();
   if (!allowed) return;
@@ -719,6 +790,7 @@ async function init() {
 
   setupUploadZone();
   await initAuth();
+  startStaffMessagesPolling();
 
   const draft = loadContestDraft();
   if (draft && applicationForm) {
