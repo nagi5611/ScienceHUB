@@ -32,6 +32,10 @@ import {
 } from './contest-app-settings';
 import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
+import {
+  formatContestStlSubmissionLogForAdmin,
+  listContestStlSubmissionLogsForApplication,
+} from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
   title, impressions, status, self_print, uses_multiple_parts, part_count, stl_r2_key, stl_filename,
@@ -99,6 +103,7 @@ export interface ContestApplicationReservationSummary {
   id: string;
   status: PrintReservation['status'];
   desired_date: string;
+  stl_filename: string | null;
   created_at: string;
 }
 
@@ -109,6 +114,9 @@ export interface ContestApplicationWithDetails extends ContestApplication {
   stl_extra_parts: ContestApplicationStlPart[];
   can_submit_stl: boolean;
   can_withdraw: boolean;
+  can_download_submitted_stl: boolean;
+  submitted_stl_at: string | null;
+  submitted_stl_filename: string | null;
 }
 
 export interface CreateContestApplicationInput {
@@ -188,7 +196,7 @@ async function fetchLatestReservationForApplication(
 ): Promise<ContestApplicationReservationSummary | null> {
   const row = await db
     .prepare(
-      `SELECT id, status, desired_date, created_at
+      `SELECT id, status, desired_date, stl_filename, created_at
        FROM print_reservations
        WHERE contest_application_id = ? AND source = 'contest'
        ORDER BY created_at DESC
@@ -242,6 +250,35 @@ async function hasBlockingReservationForWithdraw(
   return row != null;
 }
 
+function resolveSubmittedStlMeta(
+  app: ContestApplication,
+  reservation: ContestApplicationReservationSummary | null
+): {
+  can_download_submitted_stl: boolean;
+  submitted_stl_at: string | null;
+  submitted_stl_filename: string | null;
+} {
+  if (app.self_print && app.stl_submitted_at && app.stl_r2_key && app.stl_filename) {
+    return {
+      can_download_submitted_stl: true,
+      submitted_stl_at: app.stl_submitted_at,
+      submitted_stl_filename: app.stl_filename,
+    };
+  }
+  if (reservation?.stl_filename) {
+    return {
+      can_download_submitted_stl: true,
+      submitted_stl_at: reservation.created_at,
+      submitted_stl_filename: reservation.stl_filename,
+    };
+  }
+  return {
+    can_download_submitted_stl: false,
+    submitted_stl_at: null,
+    submitted_stl_filename: null,
+  };
+}
+
 async function enrichApplication(
   db: D1Database,
   app: ContestApplication,
@@ -251,6 +288,8 @@ async function enrichApplication(
   canWithdraw: boolean
 ): Promise<ContestApplicationWithDetails> {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
+  const activeBlocksSubmit = active != null && active.status !== 'printing';
+  const stlMeta = resolveSubmittedStlMeta(app, reservation);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
     ...app,
@@ -259,10 +298,9 @@ async function enrichApplication(
     stl_file_limit: contestApplicationStlFileLimit(app),
     stl_extra_parts: stlExtraParts,
     can_submit_stl:
-      app.status === 'approved' &&
-      !active &&
-      !selfPrintSubmitted,
+      app.status === 'approved' && !activeBlocksSubmit && !selfPrintSubmitted,
     can_withdraw: canWithdraw,
+    ...stlMeta,
   };
 }
 
@@ -741,10 +779,23 @@ export async function deleteContestApplicationAsAdmin(
   await purgeContestApplication(env, db, app);
 }
 
+export interface ContestStlSubmissionLogAdmin {
+  id: string;
+  contest_application_id: string | null;
+  print_reservation_id: string | null;
+  sequence_number: number;
+  submission_kind: 'initial' | 'replacement';
+  stl_filename: string;
+  stl_size_bytes: number;
+  uploaded_at: string;
+  uploader_role: 'user' | 'admin';
+}
+
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
   applicant_email: string | null;
   submission_status: ContestAdminSubmissionStatus;
   reservations: ContestApplicationAdminReservationRow[];
+  stl_submission_logs: ContestStlSubmissionLogAdmin[];
 }
 
 export interface ContestAdminSubmissionStatus {
@@ -821,6 +872,7 @@ async function enrichContestApplicationAdminRow(
   const members = await fetchMembersForApplication(db, app.id);
   const reservation = await fetchLatestReservationForApplication(db, app.id);
   const reservations = await fetchContestReservationsForApplicationAdmin(db, app.id);
+  const stlLogs = await listContestStlSubmissionLogsForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' && !(await hasBlockingReservationForWithdraw(db, app.id));
@@ -837,6 +889,7 @@ async function enrichContestApplicationAdminRow(
     applicant_email,
     submission_status: computeContestAdminSubmissionStatus(app, reservation),
     reservations,
+    stl_submission_logs: stlLogs.map(formatContestStlSubmissionLogForAdmin),
   };
 }
 
@@ -931,4 +984,30 @@ export async function listContestApplicationsAdmin(
     enriched.push(await enrichContestApplicationAdminRow(db, raw));
   }
   return enriched;
+}
+
+/** Resolves the user's submitted STL on an application for secure download. */
+export async function getContestApplicationSubmittedStl(
+  db: D1Database,
+  userId: string,
+  applicationId: string
+): Promise<{ r2_key: string; filename: string } | null> {
+  const app = await getApplicationRow(db, applicationId);
+  if (!app || app.user_id !== userId || app.status !== 'approved') {
+    return null;
+  }
+  if (app.self_print && app.stl_r2_key && app.stl_filename) {
+    return { r2_key: app.stl_r2_key, filename: app.stl_filename };
+  }
+  const row = await db
+    .prepare(
+      `SELECT stl_r2_key, stl_filename FROM print_reservations
+       WHERE contest_application_id = ? AND source = 'contest' AND stl_r2_key IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .bind(applicationId)
+    .first<{ stl_r2_key: string; stl_filename: string }>();
+  if (!row?.stl_r2_key || !row.stl_filename) return null;
+  return { r2_key: row.stl_r2_key, filename: row.stl_filename };
 }

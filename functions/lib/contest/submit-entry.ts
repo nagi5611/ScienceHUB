@@ -21,12 +21,15 @@ import {
   createReservation,
   deleteReservation,
   getActiveContestReservationForApplication,
+  getReservationById,
+  updateReservationStlOnly,
   type Reservation,
 } from '../3dprint/reservations';
 import { getPrinterById } from '../3dprint/printers';
 import { verifyR2Key } from '../3dprint/upload';
 import { getOAuthRedirectBase } from '../oauth';
 import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
+import { logContestStlSubmission } from './stl-submission-logs';
 import type { Env } from '../types';
 import { replaceContestApplicationStlParts } from './contest-stl-parts';
 
@@ -175,6 +178,17 @@ async function submitContestSelfPrintEntry(
     console.error('contest self-print storage sync failed:', err);
   }
 
+  await logContestStlSubmission(db, {
+    contest_application_id: application.id,
+    print_reservation_id: null,
+    stl_r2_key: updated.stl_r2_key ?? first.stl_r2_key,
+    stl_filename: updated.stl_filename ?? first.stl_filename,
+    stl_size_bytes: updated.stl_size_bytes ?? first.stl_size_bytes,
+    uploaded_by_user_id: application.user_id,
+    uploader_role: 'user',
+    uploaded_at: updated.stl_submitted_at ?? undefined,
+  });
+
   return {
     self_print: true,
     reservation: null,
@@ -224,7 +238,55 @@ export async function submitContestEntry(
 
   const active = await getActiveContestReservationForApplication(db, applicationId);
   if (active) {
-    throw new Error('この作品はすでに印刷依頼が進行中です');
+    if (active.status !== 'printing') {
+      throw new Error('この作品はすでに印刷依頼が進行中です');
+    }
+    if (files.length !== 1) {
+      throw new Error('印刷中の再提出は1件の STL のみ対応しています');
+    }
+    const resubmitFile = files[0];
+    if (active.stl_r2_key !== resubmitFile.stl_r2_key) {
+      try {
+        await env.FILES.delete(active.stl_r2_key);
+      } catch (err) {
+        console.error('contest re-submit: failed to delete previous stl', err);
+      }
+    }
+    await updateReservationStlOnly(db, active.id, {
+      stl_r2_key: resubmitFile.stl_r2_key,
+      stl_filename: resubmitFile.stl_filename,
+      stl_size_bytes: resubmitFile.stl_size_bytes,
+      print_notes: printNotes,
+    });
+    let reservation = (await getReservationById(db, active.id))!;
+    try {
+      const synced = await syncContestSubmissionToStorage(env, db, reservation);
+      if (synced) {
+        reservation = {
+          ...reservation,
+          contest_storage_path: synced.path,
+          contest_storage_filename: synced.filename,
+        };
+      }
+    } catch (err) {
+      console.error('contest storage sync failed on re-submit:', err);
+    }
+    await logContestStlSubmission(db, {
+      contest_application_id: application.id,
+      print_reservation_id: reservation.id,
+      stl_r2_key: reservation.stl_r2_key,
+      stl_filename: reservation.stl_filename,
+      stl_size_bytes: reservation.stl_size_bytes,
+      uploaded_by_user_id: userId,
+      uploader_role: 'user',
+      uploaded_at: reservation.created_at,
+    });
+    return {
+      self_print: false,
+      reservation,
+      application: null,
+      calendar: { ok: false, error: '印刷中のためカレンダーは変更されません' },
+    };
   }
 
   const grade =
@@ -313,6 +375,21 @@ export async function submitContestEntry(
 
   if (!firstReservation) {
     throw new Error('印刷依頼の作成に失敗しました');
+  }
+
+  for (const reservationId of createdReservationIds) {
+    const loggedReservation = await getReservationById(db, reservationId);
+    if (!loggedReservation) continue;
+    await logContestStlSubmission(db, {
+      contest_application_id: application.id,
+      print_reservation_id: loggedReservation.id,
+      stl_r2_key: loggedReservation.stl_r2_key,
+      stl_filename: loggedReservation.stl_filename,
+      stl_size_bytes: loggedReservation.stl_size_bytes,
+      uploaded_by_user_id: userId,
+      uploader_role: 'user',
+      uploaded_at: loggedReservation.created_at,
+    });
   }
 
   const printerId = firstReservation.printer_id;

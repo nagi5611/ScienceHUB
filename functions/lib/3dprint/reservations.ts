@@ -259,16 +259,30 @@ export async function getReservationById(db: D1Database, id: string): Promise<Re
   return db.prepare('SELECT * FROM print_reservations WHERE id = ?').bind(id).first<Reservation>();
 }
 
+export interface GetAllReservationsOptions {
+  userId?: string | null;
+}
+
 /** Fetches all reservations ordered by date. */
 export async function getAllReservations(
   db: D1Database,
-  source?: ReservationSource | null
+  source?: ReservationSource | null,
+  options?: GetAllReservationsOptions
 ): Promise<Reservation[]> {
   let sql = `SELECT * FROM print_reservations`;
   const binds: string[] = [];
+  const conditions: string[] = [];
   if (source) {
-    sql += ` WHERE source = ?`;
+    conditions.push(`source = ?`);
     binds.push(source);
+  }
+  const userId = options?.userId?.trim();
+  if (userId) {
+    conditions.push(`user_id = ?`);
+    binds.push(userId);
+  }
+  if (conditions.length > 0) {
+    sql += ` WHERE ${conditions.join(' AND ')}`;
   }
   sql += ` ORDER BY desired_date DESC, created_at DESC`;
   const statement = db.prepare(sql);
@@ -362,6 +376,33 @@ export async function updateReservationContestStorage(
        WHERE id = ?`
     )
     .bind(data.contest_storage_path, data.contest_storage_filename, id)
+    .run();
+}
+
+/** Updates STL file metadata on a contest reservation without changing status (e.g. while printing). */
+export async function updateReservationStlOnly(
+  db: D1Database,
+  id: string,
+  data: {
+    stl_r2_key: string;
+    stl_filename: string;
+    stl_size_bytes: number;
+    print_notes: string | null;
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE print_reservations SET
+        stl_r2_key = ?, stl_filename = ?, stl_size_bytes = ?, print_notes = ?
+       WHERE id = ?`
+    )
+    .bind(
+      data.stl_r2_key,
+      data.stl_filename,
+      data.stl_size_bytes,
+      data.print_notes,
+      id
+    )
     .run();
 }
 

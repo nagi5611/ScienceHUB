@@ -1,5 +1,6 @@
 // public/apps/contest-entry/js/main.js
 import { apiRequest } from './api.js';
+import { indexReservationOccurrencesByDate, getCalendarScalePrintLabel } from '../../../js/print-reservation-calendar-span.js';
 import { uploadPrintFile } from './upload/simple.js';
 import { HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
 import { checkAppAccess, initAuth } from './contest-auth.js';
@@ -10,6 +11,8 @@ import {
   parseScheduleType,
   saveContestDraft,
 } from './entry-draft.js';
+import { setPrintFlowOverlay } from './print-flow-overlay.js';
+import { initContestPublicGallery } from './gallery.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
@@ -25,12 +28,33 @@ const SCHEDULE_LABELS = {
   part_time: '定時制',
 };
 
+function formatSubmittedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function submittedStlDownloadUrl(applicationId) {
+  return `/api/contest/applications/${encodeURIComponent(applicationId)}/stl`;
+}
+
 let currentYear;
 let currentMonth;
 let calendarReservations = [];
 /** @type {Array<{ r2Key: string, filename: string, size: number }>} */
 let uploadResults = [];
 let stlFileLimit = 1;
+let calendarNavLock = false;
+let calendarLoading = false;
+let lastWheelMonthNavAt = 0;
+const WHEEL_MONTH_COOLDOWN_MS = 420;
 let scheduleType = 'full_time';
 let applications = [];
 let selectedApplicationId = null;
@@ -297,9 +321,18 @@ function renderApplicationsList() {
     const multiPartLine = app.uses_multiple_parts && app.part_count
       ? `<p class="hint">パーツ数: ${escapeHtml(String(app.part_count))}（複数 STL）</p>`
       : '';
+    const submittedAtLine =
+      app.can_download_submitted_stl && app.submitted_stl_at
+        ? `<p class="hint contest-submitted-at">提出日時: ${escapeHtml(formatSubmittedAt(app.submitted_stl_at))}</p>`
+        : '';
+    const downloadBtn = app.can_download_submitted_stl
+      ? `<a href="${escapeHtml(submittedStlDownloadUrl(app.id))}" class="btn btn-secondary btn-sm" download>提出 STL を確認</a>`
+      : '';
     const submitBtn = app.can_submit_stl
-      ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
-      : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
+      ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">${app.can_download_submitted_stl ? 'STL を再提出' : 'STL を提出'}</button>`
+      : !app.can_download_submitted_stl
+        ? `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`
+        : '';
     const editBtn =
       app.status === 'approved'
         ? `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`
@@ -316,10 +349,12 @@ function renderApplicationsList() {
         ${selfPrintLine}
         ${multiPartLine}
         <p class="contest-application-submission">${escapeHtml(submissionStatusLabel(app))}</p>
+        ${submittedAtLine}
       </div>
       <div class="contest-application-card-actions">
         ${editBtn}
         ${withdrawBtn}
+        ${downloadBtn}
         ${submitBtn}
       </div>
     `;
@@ -433,6 +468,26 @@ function openSubmitView(applicationId) {
   document.getElementById('submit-target-label').textContent = app.self_print
     ? `提出先: ${app.title}（自己印刷・予約なし）`
     : `提出先: ${app.title}`;
+  const existingPanel = document.getElementById('existing-submission-panel');
+  const existingSummary = document.getElementById('existing-submission-summary');
+  const existingDownload = document.getElementById('existing-submission-download');
+  if (existingPanel && existingSummary && existingDownload) {
+    if (app.can_download_submitted_stl) {
+      const when = formatSubmittedAt(app.submitted_stl_at);
+      const name = app.submitted_stl_filename ? `（${app.submitted_stl_filename}）` : '';
+      existingSummary.textContent = when
+        ? `現在の提出: ${when}${name}`
+        : `提出済みのファイル${name}`;
+      existingDownload.href = submittedStlDownloadUrl(app.id);
+      existingPanel.classList.remove('hidden');
+    } else {
+      existingPanel.classList.add('hidden');
+    }
+  }
+  const submitBtn = document.getElementById('submit-btn');
+  if (submitBtn) {
+    submitBtn.textContent = app.can_download_submitted_stl ? 'STL を再提出する' : 'STL を提出する';
+  }
   showView('submit');
   updateSubmitState();
 }
@@ -571,15 +626,26 @@ async function handleApplicationSubmit(e) {
   }
 }
 
-async function loadCalendar() {
-  const data = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
-  calendarReservations = (data.reservations ?? []).filter((r) =>
-    CALENDAR_STATUSES.includes(r.status)
-  );
-  renderCalendar();
+/** CSS トランジション完了を待つ */
+function waitForTransition(el, ms = 320) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      el.removeEventListener('transitionend', onEnd);
+      resolve();
+    };
+    const onEnd = (e) => {
+      if (e.target !== el) return;
+      finish();
+    };
+    el.addEventListener('transitionend', onEnd);
+    setTimeout(finish, ms);
+  });
 }
 
-function changeMonth(delta) {
+function applyMonthDelta(delta) {
   currentMonth += delta;
   if (currentMonth > 12) {
     currentMonth = 1;
@@ -588,7 +654,122 @@ function changeMonth(delta) {
     currentMonth = 12;
     currentYear -= 1;
   }
-  loadCalendar().catch((err) => showToast(err.message, 'error'));
+}
+
+async function loadCalendar() {
+  if (calendarLoading) return;
+  calendarLoading = true;
+  try {
+    const data = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
+    calendarReservations = (data.reservations ?? []).filter((r) =>
+      CALENDAR_STATUSES.includes(r.status)
+    );
+    renderCalendar();
+  } finally {
+    calendarLoading = false;
+  }
+}
+
+async function changeMonth(delta) {
+  applyMonthDelta(delta);
+  await loadCalendar();
+}
+
+/** スライドアニメーション付きで月を移動 */
+async function navigateMonthWithSlide(delta) {
+  if (calendarNavLock || calendarLoading) return;
+
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) {
+    await changeMonth(delta);
+    return;
+  }
+
+  calendarNavLock = true;
+  const exitClass = delta > 0 ? 'is-sliding-out-next' : 'is-sliding-out-prev';
+  const enterClass = delta > 0 ? 'is-sliding-in-from-next' : 'is-sliding-in-from-prev';
+
+  try {
+    grid.classList.add(exitClass);
+    await waitForTransition(grid);
+
+    grid.classList.remove(exitClass);
+    grid.classList.add(enterClass);
+    await changeMonth(delta);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        grid.classList.remove(enterClass);
+      });
+    });
+    await waitForTransition(grid);
+  } finally {
+    calendarNavLock = false;
+    lastWheelMonthNavAt = Date.now();
+  }
+}
+
+function onCalendarMonthNav(delta) {
+  navigateMonthWithSlide(delta).catch((err) => showToast(err.message, 'error'));
+}
+
+/** スワイプで月を移動（モバイル） */
+function initContestCalendarSwipeNavigation() {
+  const wrap = document.querySelector('#calendar-section .calendar-grid-wrap');
+  if (!wrap || wrap.dataset.swipeBound === '1') return;
+  wrap.dataset.swipeBound = '1';
+
+  let startX = 0;
+  let tracking = false;
+
+  wrap.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      tracking = true;
+    },
+    { passive: true }
+  );
+
+  wrap.addEventListener(
+    'touchend',
+    (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - startX;
+      if (Math.abs(dx) < 48) return;
+      if (Date.now() - lastWheelMonthNavAt < WHEEL_MONTH_COOLDOWN_MS) return;
+      onCalendarMonthNav(dx < 0 ? 1 : -1);
+    },
+    { passive: true }
+  );
+}
+
+/** カレンダー上のホイールで月を移動 */
+function initContestCalendarWheelNavigation() {
+  const section = document.getElementById('calendar-section');
+  if (!section || section.dataset.wheelBound === '1') return;
+  section.dataset.wheelBound = '1';
+
+  section.addEventListener(
+    'wheel',
+    (e) => {
+      const raw = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (Math.abs(raw) < 15) return;
+
+      e.preventDefault();
+
+      if (Date.now() - lastWheelMonthNavAt < WHEEL_MONTH_COOLDOWN_MS) return;
+      if (calendarNavLock || calendarLoading) return;
+
+      const delta = raw > 0 ? 1 : -1;
+      navigateMonthWithSlide(delta).catch((err) => showToast(err.message, 'error'));
+    },
+    { passive: false }
+  );
 }
 
 function goToToday() {
@@ -621,11 +802,13 @@ function renderCalendar() {
   if (!grid) return;
   grid.innerHTML = '';
 
-  const byDate = {};
-  for (const r of calendarReservations) {
-    if (!byDate[r.desired_date]) byDate[r.desired_date] = [];
-    byDate[r.desired_date].push(r);
-  }
+  const monthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+  const byDate = indexReservationOccurrencesByDate(
+    calendarReservations.filter((r) => {
+      const end = r.calendar_end_date || r.desired_date;
+      return r.desired_date.slice(0, 7) <= monthPrefix && end.slice(0, 7) >= monthPrefix;
+    })
+  );
 
   const firstDay = new Date(currentYear, currentMonth - 1, 1);
   const lastDay = new Date(currentYear, currentMonth, 0).getDate();
@@ -661,18 +844,26 @@ function createDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   num.textContent = dayNum;
   cell.appendChild(num);
 
-  const dayRes = dateStr && byDate[dateStr] ? byDate[dateStr] : [];
-  if (dayRes.length) {
+  const dayEntries = dateStr && byDate[dateStr] ? byDate[dateStr] : [];
+  if (dayEntries.length) {
     const slotsWrap = document.createElement('div');
     slotsWrap.className = 'calendar-slots';
-    for (const r of dayRes) {
+    for (const { reservation: r, occurrence } of dayEntries) {
       const slot = document.createElement('div');
       const statusClass = CALENDAR_STATUSES.includes(r.status) ? r.status : 'applied';
-      slot.className = `calendar-slot calendar-slot--readonly status-${statusClass}`;
+      slot.className = `calendar-slot calendar-slot--readonly status-${statusClass} ${occurrence.printScale}`;
+      slot.classList.add(`calendar-slot-segment-${occurrence.segment}`);
+      if (occurrence.segment !== 'start' && occurrence.segment !== 'single') {
+        slot.classList.add('calendar-slot-span-continue');
+      }
       const statusLabel = STATUS_LABELS[statusClass] ?? statusClass;
-      const label = `${statusLabel} ${truncateForCell(r.title ?? '', 4)}`;
+      const scaleLabel = getCalendarScalePrintLabel(occurrence.partCount);
+      const primary =
+        occurrence.displayLabel ||
+        (scaleLabel && occurrence.segment === 'start' ? scaleLabel : r.title ?? '');
+      const label = `${statusLabel} ${truncateForCell(primary, 4)}`;
       slot.innerHTML = `<span class="calendar-slot-compact-label">${escapeHtml(label)}</span>`;
-      slot.title = `${statusLabel} — ${r.title ?? ''}`;
+      slot.title = `${statusLabel} — ${primary || r.title || ''}`;
       slotsWrap.appendChild(slot);
     }
     cell.appendChild(slotsWrap);
@@ -704,16 +895,30 @@ function setupUploadZone() {
     statusEl.textContent = 'アップロード中…';
     fileNameEl.textContent = '';
 
+    const overlayHints = {
+      認証中: 'アップロードの準備をしています',
+      処理中: 'ファイルを送信しています',
+    };
+
     try {
+      setPrintFlowOverlay(true, '認証中…', overlayHints['認証中']);
       const uploaded = [];
       for (let i = 0; i < files.length; i += 1) {
         const file = files[i];
         const label = files.length > 1 ? `（${i + 1}/${files.length}）` : '';
         statusEl.textContent = `アップロード中…${label}`;
-        const result = await uploadPrintFile(file, (pct) => {
-          const overall = ((i + pct / 100) / files.length) * 100;
-          progressBar.style.width = `${overall}%`;
-        });
+        const result = await uploadPrintFile(
+          file,
+          (pct) => {
+            const overall = ((i + pct / 100) / files.length) * 100;
+            progressBar.style.width = `${overall}%`;
+          },
+          (stage) => {
+            const hint = overlayHints[stage] ?? '';
+            setPrintFlowOverlay(true, `${stage}…`, hint);
+            statusEl.textContent = `${stage}…${label}`;
+          }
+        );
         uploaded.push({
           r2Key: result.r2Key,
           filename: result.filename,
@@ -734,6 +939,8 @@ function setupUploadZone() {
       statusEl.textContent = err.message || 'アップロードに失敗しました';
       progress.classList.add('hidden');
       updateSubmitState();
+    } finally {
+      setPrintFlowOverlay(false);
     }
   };
 
@@ -766,6 +973,9 @@ async function handleStlSubmit(e) {
   }
 
   const printNotesRaw = String(new FormData(form).get('print_notes') ?? '').trim();
+  const app = applications.find((a) => a.id === selectedApplicationId);
+  const selfPrint = app?.self_print === true;
+
   btn.disabled = true;
   try {
     const payload =
@@ -784,6 +994,23 @@ async function handleStlSubmit(e) {
               stl_size_bytes: u.size,
             })),
           };
+
+    setPrintFlowOverlay(true, '認証中…', '提出内容を確認しています');
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+    setPrintFlowOverlay(true, '処理中…', 'STL ファイルを確認しています');
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+    if (!selfPrint) {
+      setPrintFlowOverlay(
+        true,
+        '予約確認中…',
+        '印刷日の割り当てと依頼登録を行っています'
+      );
+    }
+
     const data = await apiRequest('entries', {
       method: 'POST',
       body: JSON.stringify({
@@ -799,6 +1026,7 @@ async function handleStlSubmit(e) {
   } catch (err) {
     showToast(err.message || '提出に失敗しました', 'error');
   } finally {
+    setPrintFlowOverlay(false);
     updateSubmitState();
   }
 }
@@ -812,11 +1040,13 @@ async function init() {
   currentYear = now.getFullYear();
   currentMonth = now.getMonth() + 1;
 
-  document.getElementById('prev-month')?.addEventListener('click', () => changeMonth(-1));
-  document.getElementById('next-month')?.addEventListener('click', () => changeMonth(1));
-  document.getElementById('prev-month-mobile')?.addEventListener('click', () => changeMonth(-1));
-  document.getElementById('next-month-mobile')?.addEventListener('click', () => changeMonth(1));
+  document.getElementById('prev-month')?.addEventListener('click', () => onCalendarMonthNav(-1));
+  document.getElementById('next-month')?.addEventListener('click', () => onCalendarMonthNav(1));
+  document.getElementById('prev-month-mobile')?.addEventListener('click', () => onCalendarMonthNav(-1));
+  document.getElementById('next-month-mobile')?.addEventListener('click', () => onCalendarMonthNav(1));
   document.getElementById('go-today-btn')?.addEventListener('click', goToToday);
+  initContestCalendarWheelNavigation();
+  initContestCalendarSwipeNavigation();
 
   document.getElementById('btn-new-application')?.addEventListener('click', openApplyView);
   document.getElementById('btn-back-from-apply')?.addEventListener('click', () => {
@@ -882,6 +1112,7 @@ async function init() {
   try {
     await loadApplications();
     await loadCalendar();
+    await initContestPublicGallery();
   } catch (err) {
     showToast(err.message, 'error');
   }
