@@ -19,6 +19,7 @@ import {
 import { gradeFromHomeroom } from '../3dprint/homeroom';
 import {
   createReservation,
+  deleteReservation,
   getActiveContestReservationForApplication,
   type Reservation,
 } from '../3dprint/reservations';
@@ -232,7 +233,9 @@ export async function submitContestEntry(
       : 0;
 
   let firstReservation: Reservation | null = null;
+  const createdReservationIds: string[] = [];
 
+  try {
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
     const file = files[fileIndex];
     const slot = await findAutoScheduleSlot(db);
@@ -281,6 +284,7 @@ export async function submitContestEntry(
     };
 
     await createReservation(db, reservation);
+    createdReservationIds.push(reservation.id);
 
     try {
       const synced = await syncContestSubmissionToStorage(env, db, reservation);
@@ -295,6 +299,16 @@ export async function submitContestEntry(
     if (!firstReservation) {
       firstReservation = reservation;
     }
+  }
+  } catch (err) {
+    for (const reservationId of createdReservationIds) {
+      try {
+        await deleteReservation(db, reservationId);
+      } catch (rollbackErr) {
+        console.error('contest submit: failed to roll back reservation', reservationId, rollbackErr);
+      }
+    }
+    throw err;
   }
 
   if (!firstReservation) {

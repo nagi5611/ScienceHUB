@@ -472,11 +472,36 @@ function updateApplicationSubmitState() {
   btn.disabled = !(participantsOk && titleOk && multiPartOk);
 }
 
+function getSelectedSubmitApplication() {
+  return applications.find((a) => a.id === selectedApplicationId) ?? null;
+}
+
+function updateSubmitButtonLabel(btn, app) {
+  const uploaded = uploadResults.length;
+  const limit = stlFileLimit;
+  if (!app) {
+    btn.textContent = '提出する';
+    return;
+  }
+  if (app.self_print) {
+    btn.textContent =
+      uploaded >= limit
+        ? `STL を提出する（${limit} 件）`
+        : `STL を提出する（${uploaded} / ${limit} 件）`;
+    return;
+  }
+  btn.textContent =
+    uploaded >= limit
+      ? `印刷予約する（${limit} パーツ）`
+      : `印刷予約（${uploaded} / ${limit} 件の STL）`;
+}
+
 function updateSubmitState() {
   const btn = document.getElementById('submit-btn');
   if (!btn) return;
   const countOk = uploadResults.length === stlFileLimit;
   btn.disabled = !countOk || !selectedApplicationId;
+  updateSubmitButtonLabel(btn, getSelectedSubmitApplication());
 }
 
 async function handleApplicationSubmit(e) {
