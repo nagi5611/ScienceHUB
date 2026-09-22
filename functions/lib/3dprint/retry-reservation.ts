@@ -5,6 +5,7 @@ import {
   type Reservation,
 } from './reservations';
 import { gradeFromHomeroom } from './homeroom';
+import { normalizePartCount } from './calendar-span';
 import {
   validateGuestStaffAvailability,
   validateReservationContentFields,
@@ -84,13 +85,15 @@ export async function retryFailedReservation(
     throw new Error('希望印刷日は予約可能な日付を選択してください');
   }
 
+  const partCount = normalizePartCount(failedReservation.part_count ?? 1);
+
   const slotError = await validateReservationSlot(
     env.DB,
     body.desired_date,
     body.print_scale,
     failedReservation.id,
     content.printer_id ?? undefined,
-    { isAdmin: false }
+    { isAdmin: false, partCount }
   );
   if (slotError) {
     throw new Error(slotError);
@@ -155,6 +158,7 @@ export async function retryFailedReservation(
     print_scale: body.print_scale,
     printer_id: body.printer_id ?? failedReservation.printer_id,
     desired_date: body.desired_date,
+    part_count: partCount,
     stl_r2_key: stlR2Key,
     stl_filename: stlFilename,
     stl_size_bytes: stlSizeBytes,

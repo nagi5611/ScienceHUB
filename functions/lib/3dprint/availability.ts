@@ -22,6 +22,12 @@ import {
   isAdminDateBookable,
   type PrintScale,
 } from './slots';
+import {
+  computeCalendarEndDate,
+  listDatesInclusive,
+  normalizePartCount,
+  resolveReservationCalendarEndDate,
+} from './calendar-span';
 import { isPrinterBookable, normalizePrinterStatus } from './printer-status';
 
 export interface PrinterDateAvailability {
@@ -222,6 +228,41 @@ export async function validatePrinterReservationSlot(
 
   return getScaleBookingConflictMessage(existingScales, printScale, capacity);
 }
+
+/** Validates each day in a multi-part / multi-day reservation span. */
+export async function validatePrinterReservationSpan(
+  db: D1Database,
+  startDate: string,
+  printerId: string,
+  printScale: PrintScale,
+  partCountInput: unknown,
+  excludeReservationId: string,
+  options: { isAdmin?: boolean } = {}
+): Promise<string | null> {
+  const partCount = normalizePartCount(partCountInput);
+  const endDate = computeCalendarEndDate(startDate, partCount);
+  const dates = listDatesInclusive(startDate, endDate);
+
+  for (const date of dates) {
+    const slotError = await validatePrinterReservationSlot(
+      db,
+      date,
+      printerId,
+      printScale,
+      excludeReservationId,
+      options
+    );
+    if (slotError) {
+      if (dates.length > 1) {
+        return `${date}: ${slotError}`;
+      }
+      return slotError;
+    }
+  }
+  return null;
+}
+
+export { resolveReservationCalendarEndDate };
 
 async function getPrintersForAvailability(
   db: D1Database,

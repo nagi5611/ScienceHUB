@@ -1,10 +1,13 @@
 // functions/lib/contest/auto-schedule.ts
-import { getDateAvailability, validatePrinterReservationSlot } from '../3dprint/availability';
+import {
+  getDateAvailability,
+  validatePrinterReservationSpan,
+} from '../3dprint/availability';
+import { derivePrintScaleFromPartCount, normalizePartCount } from '../3dprint/calendar-span';
 import { getAllPrinters } from '../3dprint/printers';
 import { getAvailableMemberIdsOnDate } from '../3dprint/reservations';
-import { addDays, getEarliestBookableDate, type PrintScale } from '../3dprint/slots';
+import { addDays, getEarliestBookableDate } from '../3dprint/slots';
 
-const CONTEST_SCALE: PrintScale = 'small';
 const MAX_LOOKAHEAD_DAYS = 60;
 
 export interface AutoScheduleResult {
@@ -12,10 +15,13 @@ export interface AutoScheduleResult {
   printer_id: string;
 }
 
-/** Picks the earliest bookable date and printer (担当は管理側の承認時に割当). */
+/** Picks the earliest bookable date and printer for a multi-part job. */
 export async function findAutoScheduleSlot(
-  db: D1Database
+  db: D1Database,
+  partCountInput = 1
 ): Promise<AutoScheduleResult | null> {
+  const partCount = normalizePartCount(partCountInput);
+  const printScale = derivePrintScaleFromPartCount(partCount);
   const startDate = getEarliestBookableDate();
   const printers = await getAllPrinters(db);
   const sortedPrinters = [...printers].sort((a, b) => a.position - b.position);
@@ -26,20 +32,21 @@ export async function findAutoScheduleSlot(
     if (!staffIds.length) continue;
 
     const dayAvailability = await getDateAvailability(db, date, {
-      scale: CONTEST_SCALE,
+      scale: printScale,
       isAdmin: false,
     });
     if (!dayAvailability.can_book) continue;
 
     for (const printer of sortedPrinters) {
       const printerDay = dayAvailability.printers.find((p) => p.printer_id === printer.id);
-      if (!printerDay?.available_scales.includes(CONTEST_SCALE)) continue;
+      if (!printerDay?.available_scales.includes(printScale)) continue;
 
-      const slotError = await validatePrinterReservationSlot(
+      const slotError = await validatePrinterReservationSpan(
         db,
         date,
         printer.id,
-        CONTEST_SCALE,
+        printScale,
+        partCount,
         '',
         { isAdmin: false }
       );

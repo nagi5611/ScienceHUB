@@ -17,9 +17,9 @@ import {
   syncContestSubmissionToStorage,
 } from './contest-storage';
 import { gradeFromHomeroom } from '../3dprint/homeroom';
+import { syncReservationSpanFields } from '../3dprint/calendar-span';
 import {
   createReservation,
-  deleteReservation,
   getActiveContestReservationForApplication,
   getReservationById,
   updateReservationStlOnly,
@@ -294,125 +294,112 @@ export async function submitContestEntry(
       ? gradeFromHomeroom(application.homeroom)
       : 0;
 
-  let firstReservation: Reservation | null = null;
-  const createdReservationIds: string[] = [];
+  const partCount = files.length;
+  const slot = await findAutoScheduleSlot(db, partCount);
+  if (!slot) {
+    throw new Error(
+      '現在、自動で割り当てられる印刷日がありません。しばらくしてから再度お試しください'
+    );
+  }
+
+  const span = syncReservationSpanFields(slot.desired_date, partCount);
+  const [firstFile, ...restFiles] = files;
+
+  const reservation: Reservation = {
+    id: crypto.randomUUID(),
+    grade,
+    homeroom: application.homeroom,
+    student_number: application.student_number,
+    student_name: application.student_name,
+    title: application.title,
+    purpose: 'other',
+    purpose_other: '印刷依頼',
+    summary: application.impressions,
+    print_notes: printNotes,
+    print_scale: span.print_scale,
+    printer_id: slot.printer_id,
+    desired_date: slot.desired_date,
+    part_count: span.part_count,
+    calendar_end_date: span.calendar_end_date,
+    stl_r2_key: firstFile.stl_r2_key,
+    stl_filename: firstFile.stl_filename,
+    stl_size_bytes: firstFile.stl_size_bytes,
+    status: 'applied',
+    status_comment: null,
+    print_staff: null,
+    print_staff_member_id: null,
+    delivery_staff: null,
+    google_event_id: null,
+    request_print_video: 0,
+    print_video_storage_path: null,
+    print_video_filename: null,
+    print_video_size_bytes: null,
+    user_id: userId,
+    source: 'contest',
+    schedule_type: application.schedule_type,
+    contest_storage_path: null,
+    contest_storage_filename: null,
+    contest_application_id: application.id,
+    created_at: new Date().toISOString(),
+  };
+
+  await createReservation(db, reservation);
+
+  if (restFiles.length > 0) {
+    await replaceContestApplicationStlParts(
+      db,
+      application.id,
+      restFiles.map((file, index) => ({
+        part_index: index + 2,
+        stl_r2_key: file.stl_r2_key,
+        stl_filename: file.stl_filename,
+        stl_size_bytes: file.stl_size_bytes,
+      }))
+    );
+  }
 
   try {
-  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
-    const file = files[fileIndex];
-    const slot = await findAutoScheduleSlot(db);
-    if (!slot) {
-      throw new Error(
-        '現在、自動で割り当てられる印刷日がありません。しばらくしてから再度お試しください'
-      );
+    const synced = await syncContestSubmissionToStorage(env, db, reservation);
+    if (synced) {
+      reservation.contest_storage_path = synced.path;
+      reservation.contest_storage_filename = synced.filename;
     }
-
-    const titleSuffix =
-      files.length > 1 ? ` パーツ${fileIndex + 1}` : '';
-    const reservation: Reservation = {
-      id: crypto.randomUUID(),
-      grade,
-      homeroom: application.homeroom,
-      student_number: application.student_number,
-      student_name: application.student_name,
-      title: `${application.title}${titleSuffix}`,
-      purpose: 'other',
-      purpose_other: '印刷依頼',
-      summary: application.impressions,
-      print_notes: printNotes,
-      print_scale: 'small',
-      printer_id: slot.printer_id,
-      desired_date: slot.desired_date,
-      stl_r2_key: file.stl_r2_key,
-      stl_filename: file.stl_filename,
-      stl_size_bytes: file.stl_size_bytes,
-      status: 'applied',
-      status_comment: null,
-      print_staff: null,
-      print_staff_member_id: null,
-      delivery_staff: null,
-      google_event_id: null,
-      request_print_video: 0,
-      print_video_storage_path: null,
-      print_video_filename: null,
-      print_video_size_bytes: null,
-      user_id: userId,
-      source: 'contest',
-      schedule_type: application.schedule_type,
-      contest_storage_path: null,
-      contest_storage_filename: null,
-      contest_application_id: application.id,
-      created_at: new Date().toISOString(),
-    };
-
-    await createReservation(db, reservation);
-    createdReservationIds.push(reservation.id);
-
-    try {
-      const synced = await syncContestSubmissionToStorage(env, db, reservation);
-      if (synced) {
-        reservation.contest_storage_path = synced.path;
-        reservation.contest_storage_filename = synced.filename;
-      }
-    } catch (err) {
-      console.error('contest storage sync failed on submit:', err);
-    }
-
-    if (!firstReservation) {
-      firstReservation = reservation;
-    }
-  }
   } catch (err) {
-    for (const reservationId of createdReservationIds) {
-      try {
-        await deleteReservation(db, reservationId);
-      } catch (rollbackErr) {
-        console.error('contest submit: failed to roll back reservation', reservationId, rollbackErr);
-      }
-    }
-    throw err;
+    console.error('contest storage sync failed on submit:', err);
   }
 
-  if (!firstReservation) {
-    throw new Error('印刷依頼の作成に失敗しました');
-  }
+  await logContestStlSubmission(db, {
+    contest_application_id: application.id,
+    print_reservation_id: reservation.id,
+    stl_r2_key: reservation.stl_r2_key,
+    stl_filename: reservation.stl_filename,
+    stl_size_bytes: reservation.stl_size_bytes,
+    uploaded_by_user_id: userId,
+    uploader_role: 'user',
+    uploaded_at: reservation.created_at,
+  });
 
-  for (const reservationId of createdReservationIds) {
-    const loggedReservation = await getReservationById(db, reservationId);
-    if (!loggedReservation) continue;
-    await logContestStlSubmission(db, {
-      contest_application_id: application.id,
-      print_reservation_id: loggedReservation.id,
-      stl_r2_key: loggedReservation.stl_r2_key,
-      stl_filename: loggedReservation.stl_filename,
-      stl_size_bytes: loggedReservation.stl_size_bytes,
-      uploaded_by_user_id: userId,
-      uploader_role: 'user',
-      uploaded_at: loggedReservation.created_at,
-    });
-  }
-
-  const printerId = firstReservation.printer_id;
+  const printerId = reservation.printer_id;
   const printer = printerId ? await getPrinterById(db, printerId) : null;
 
   const baseUrl = getOAuthRedirectBase(request, env);
   const adminUrl = build3dPrintAdminUrl(baseUrl);
   await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-    title: firstReservation.title,
-    desired_date: firstReservation.desired_date,
-    print_scale: firstReservation.print_scale,
+    title: reservation.title,
+    desired_date: reservation.desired_date,
+    print_scale: reservation.print_scale,
   });
 
   const entryUrl = buildContestEntryAppUrl(baseUrl);
   await notifyContestApplicantEmail(env, db, userId, 'submitted', {
-    reservation: firstReservation,
+    reservation,
     printerName: printer?.name ?? null,
     entryAppUrl: entryUrl,
   });
 
   return {
     self_print: false,
-    reservation: firstReservation,
+    reservation,
     application: null,
     calendar: { ok: false, error: '担当者承認後にカレンダーへ反映されます' },
   };

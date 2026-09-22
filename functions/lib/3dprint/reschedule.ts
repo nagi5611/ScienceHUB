@@ -14,6 +14,7 @@ import {
 } from './google-calendar';
 import { isAdminDateBookable } from './slots';
 import { validateReservationSlot } from './reservation-edit';
+import { normalizePartCount } from './calendar-span';
 
 /** Reschedules a reservation to a new date (admin). Updates Google Calendar when accepted. */
 export async function adminRescheduleReservation(
@@ -41,7 +42,10 @@ export async function adminRescheduleReservation(
     reservation.print_scale,
     reservation.id,
     reservation.printer_id ?? undefined,
-    { isAdmin: true }
+    {
+      isAdmin: true,
+      partCount: normalizePartCount(reservation.part_count ?? 1),
+    }
   );
   if (slotError) {
     throw new Error(slotError);

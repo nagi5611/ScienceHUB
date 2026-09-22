@@ -1,4 +1,10 @@
 ﻿// functions/api/lib/db.ts
+import {
+  computeCalendarEndDate,
+  normalizePartCount,
+  resolveReservationCalendarEndDate,
+  syncReservationSpanFields,
+} from './calendar-span';
 import type { PrintScale } from './slots';
 
 export interface Reservation {
@@ -15,6 +21,8 @@ export interface Reservation {
   print_scale: PrintScale;
   printer_id: string | null;
   desired_date: string;
+  part_count?: number;
+  calendar_end_date?: string;
   stl_r2_key: string;
   stl_filename: string;
   stl_size_bytes: number;
@@ -107,13 +115,18 @@ export async function getAppliedReservationCountsByPrinter(
   return counts;
 }
 
-/** Fetches active reservations for a given date. */
+const RESERVATION_OCCUPIES_DATE_SQL = `desired_date <= ?
+  AND COALESCE(NULLIF(calendar_end_date, ''), desired_date) >= ?`;
+
+/** Fetches active reservations occupying a calendar date (multi-day spans included). */
 export async function getReservationsByDate(db: D1Database, date: string): Promise<Reservation[]> {
   const result = await db
     .prepare(
-      `SELECT * FROM print_reservations WHERE desired_date = ? AND status != 'cancelled' ORDER BY created_at`
+      `SELECT * FROM print_reservations
+       WHERE status != 'cancelled' AND ${RESERVATION_OCCUPIES_DATE_SQL}
+       ORDER BY created_at`
     )
-    .bind(date)
+    .bind(date, date)
     .all<Reservation>();
   return result.results ?? [];
 }
@@ -127,23 +140,26 @@ export async function getReservationsByDateAndPrinter(
   const result = await db
     .prepare(
       `SELECT * FROM print_reservations
-       WHERE desired_date = ? AND printer_id = ? AND status != 'cancelled'
+       WHERE printer_id = ? AND status != 'cancelled' AND ${RESERVATION_OCCUPIES_DATE_SQL}
        ORDER BY created_at`
     )
-    .bind(date, printerId)
+    .bind(printerId, date, date)
     .all<Reservation>();
   return result.results ?? [];
 }
 
-/** Fetches reservations within a month range. */
+/** Fetches reservations whose calendar span overlaps a date range. */
 export async function getReservationsInRange(
   db: D1Database,
   startDate: string,
   endDate: string,
   source?: ReservationSource | null
 ): Promise<Reservation[]> {
-  let sql = `SELECT * FROM print_reservations WHERE desired_date >= ? AND desired_date <= ? AND status != 'cancelled'`;
-  const binds: string[] = [startDate, endDate];
+  let sql = `SELECT * FROM print_reservations
+    WHERE status != 'cancelled'
+      AND desired_date <= ?
+      AND COALESCE(NULLIF(calendar_end_date, ''), desired_date) >= ?`;
+  const binds: string[] = [endDate, startDate];
   if (source) {
     sql += ` AND source = ?`;
     binds.push(source);
@@ -295,17 +311,23 @@ export async function getAllReservations(
 
 /** Inserts a new reservation. */
 export async function createReservation(db: D1Database, data: Reservation): Promise<void> {
+  const span = syncReservationSpanFields(
+    data.desired_date,
+    data.part_count ?? 1,
+    data.print_scale
+  );
   await db
     .prepare(
       `INSERT INTO print_reservations (
         id, grade, homeroom, student_number, student_name, title,
         purpose, purpose_other, summary, print_notes, print_scale, printer_id, desired_date,
+        part_count, calendar_end_date,
         stl_r2_key, stl_filename, stl_size_bytes, status,
         print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
         user_id, source, schedule_type, contest_storage_path, contest_storage_filename,
         contest_application_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -318,9 +340,11 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.purpose_other,
       data.summary ?? '',
       data.print_notes ?? '',
-      data.print_scale,
+      span.print_scale,
       data.printer_id,
       data.desired_date,
+      span.part_count,
+      span.calendar_end_date,
       data.stl_r2_key,
       data.stl_filename,
       data.stl_size_bytes,
@@ -423,18 +447,25 @@ export async function updateReservationContent(
     print_scale: PrintScale;
     printer_id: string | null;
     desired_date: string;
+    part_count?: number;
     request_print_video: boolean;
     stl_r2_key: string;
     stl_filename: string;
     stl_size_bytes: number;
   }
 ): Promise<void> {
+  const span = syncReservationSpanFields(
+    data.desired_date,
+    data.part_count ?? 1,
+    data.print_scale
+  );
   await db
     .prepare(
       `UPDATE print_reservations SET
         grade = ?, homeroom = ?, student_number = ?, student_name = ?,
         title = ?, purpose = ?, purpose_other = ?, summary = ?, print_notes = ?,
         print_scale = ?, printer_id = ?, desired_date = ?,
+        part_count = ?, calendar_end_date = ?,
         request_print_video = ?,
         stl_r2_key = ?, stl_filename = ?, stl_size_bytes = ?,
         status = 'applied', print_staff_member_id = NULL, google_event_id = NULL,
@@ -451,9 +482,11 @@ export async function updateReservationContent(
       data.purpose_other,
       data.summary ?? '',
       data.print_notes ?? '',
-      data.print_scale,
+      span.print_scale,
       data.printer_id,
       data.desired_date,
+      span.part_count,
+      span.calendar_end_date,
       data.request_print_video ? 1 : 0,
       data.stl_r2_key,
       data.stl_filename,
@@ -753,9 +786,15 @@ export async function updateReservationDesiredDate(
   id: string,
   desiredDate: string
 ): Promise<void> {
+  const existing = await getReservationById(db, id);
+  if (!existing) return;
+  const partCount = normalizePartCount(existing.part_count ?? 1);
+  const calendarEndDate = computeCalendarEndDate(desiredDate, partCount);
   await db
-    .prepare('UPDATE print_reservations SET desired_date = ? WHERE id = ?')
-    .bind(desiredDate, id)
+    .prepare(
+      'UPDATE print_reservations SET desired_date = ?, calendar_end_date = ? WHERE id = ?'
+    )
+    .bind(desiredDate, calendarEndDate, id)
     .run();
 }
 
@@ -785,12 +824,10 @@ export async function deleteReservation(db: D1Database, id: string): Promise<boo
 
 /** Fetches reservations for a specific date (including all statuses for admin). */
 export async function getReservationsByDateAdmin(db: D1Database, date: string): Promise<Reservation[]> {
-  const result = await db
-    .prepare(`SELECT * FROM print_reservations WHERE desired_date = ? AND status != 'cancelled' ORDER BY created_at`)
-    .bind(date)
-    .all<Reservation>();
-  return result.results ?? [];
+  return getReservationsByDate(db, date);
 }
+
+export { resolveReservationCalendarEndDate };
 
 /** Fetches upcoming reservations for a user (today and later). */
 export async function getUserUpcomingReservations(
