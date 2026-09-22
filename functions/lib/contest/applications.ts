@@ -806,15 +806,14 @@ async function fetchAllApprovedApplicationsForAdmin(
   return result.results ?? [];
 }
 
-/** 管理画面: アクセス可能なグループごとに参加申請を返す */
-export async function listContestApplicationsAdminGrouped(
+/** 管理画面: 閲覧可能な参加申請を1リストで返す */
+export async function listContestApplicationsForAdmin(
   db: D1Database,
   viewerUserId: string,
   isAdmin: boolean,
   options?: { applicationLimit?: number }
-): Promise<ContestApplicationAdminGroupSection[]> {
+): Promise<ContestApplicationAdminRow[]> {
   const applicationLimit = Math.min(Math.max(options?.applicationLimit ?? 500, 1), 2000);
-  const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
   const rawApps = await fetchAllApprovedApplicationsForAdmin(db, applicationLimit);
 
   const enrichedRows: ContestApplicationAdminRow[] = [];
@@ -822,80 +821,47 @@ export async function listContestApplicationsAdminGrouped(
     enrichedRows.push(await enrichContestApplicationAdminRow(db, raw));
   }
 
-  if (enrichedRows.length === 0) {
+  const sortNewest = (rows: ContestApplicationAdminRow[]) =>
+    rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  if (isAdmin) {
+    return sortNewest(enrichedRows);
+  }
+
+  const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
+  if (groupRoots.length === 0) {
+    return sortNewest(enrichedRows);
+  }
+
+  const allowedApplicants = new Set<string>();
+  for (const root of groupRoots) {
+    const userIds = await listGroupMemberUserIdsForGroupSlug(db, root.key);
+    for (const userId of userIds) {
+      allowedApplicants.add(userId);
+    }
+  }
+
+  return sortNewest(enrichedRows.filter((app) => allowedApplicants.has(app.user_id)));
+}
+
+/** @deprecated Use listContestApplicationsForAdmin */
+export async function listContestApplicationsAdminGrouped(
+  db: D1Database,
+  viewerUserId: string,
+  isAdmin: boolean,
+  options?: { applicationLimit?: number }
+): Promise<ContestApplicationAdminGroupSection[]> {
+  const applications = await listContestApplicationsForAdmin(db, viewerUserId, isAdmin, options);
+  if (applications.length === 0) {
     return [];
   }
-
-  if (groupRoots.length === 0) {
-    return [
-      {
-        group_slug: '_all',
-        group_display_name: '参加申請',
-        applications: enrichedRows.sort((a, b) => b.created_at.localeCompare(a.created_at)),
-      },
-    ];
-  }
-
-  const memberSets = new Map<string, Set<string>>();
-  for (const root of groupRoots) {
-    memberSets.set(root.key, await listGroupMemberUserIdsForGroupSlug(db, root.key));
-  }
-
-  const buckets = new Map<string, ContestApplicationAdminRow[]>();
-  for (const root of groupRoots) {
-    buckets.set(root.key, []);
-  }
-  const unassigned: ContestApplicationAdminRow[] = [];
-
-  for (const app of enrichedRows) {
-    let placed = false;
-    for (const root of groupRoots) {
-      if (memberSets.get(root.key)?.has(app.user_id)) {
-        buckets.get(root.key)!.push(app);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      unassigned.push(app);
-    }
-  }
-
-  const sections: ContestApplicationAdminGroupSection[] = [];
-
-  for (const root of groupRoots) {
-    const applications = (buckets.get(root.key) ?? []).sort((a, b) =>
-      b.created_at.localeCompare(a.created_at)
-    );
-    if (applications.length === 0) {
-      continue;
-    }
-    sections.push({
-      group_slug: root.key,
-      group_display_name: root.label,
+  return [
+    {
+      group_slug: '_all',
+      group_display_name: '参加申請',
       applications,
-    });
-  }
-
-  if (unassigned.length > 0) {
-    sections.push({
-      group_slug: '_unassigned',
-      group_display_name: 'グループ未所属',
-      applications: unassigned.sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    });
-  }
-
-  if (sections.length === 0) {
-    return [
-      {
-        group_slug: '_all',
-        group_display_name: '参加申請',
-        applications: enrichedRows.sort((a, b) => b.created_at.localeCompare(a.created_at)),
-      },
-    ];
-  }
-
-  return sections;
+    },
+  ];
 }
 
 /** @deprecated Prefer listContestApplicationsAdminGrouped */

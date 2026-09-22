@@ -57,7 +57,7 @@ const CONTEST_SCHEDULE_LABELS = {
   part_time: '定時制',
 };
 
-let contestApplicationGroups = [];
+let contestApplications = [];
 let contestApplicationById = new Map();
 let contestApplicationDetailId = null;
 
@@ -253,17 +253,15 @@ async function refreshAll() {
       apiRequest('admin/reservations'),
       apiRequest('admin/members'),
       apiRequest('admin/printers'),
-      apiRequest('admin/applications?limit=500').catch(() => ({ groups: [] })),
+      apiRequest('admin/applications?limit=500').catch(() => ({ applications: [] })),
     ]);
     allReservations = resData.reservations.filter((r) => r.status !== 'cancelled');
     allMembers = membersData.members;
     allPrinters = printersData.printers;
-    contestApplicationGroups = appsData.groups ?? [];
+    contestApplications = appsData.applications ?? [];
     contestApplicationById = new Map();
-    for (const group of contestApplicationGroups) {
-      for (const app of group.applications ?? []) {
-        contestApplicationById.set(app.id, app);
-      }
+    for (const app of contestApplications) {
+      contestApplicationById.set(app.id, app);
     }
     await renderAdminCalendar();
     renderTodayTasks();
@@ -1168,46 +1166,42 @@ async function handleDeleteContestApplication(applicationId, title) {
   }
 }
 
-/** Renders contest participation applications grouped by hub group. */
-function renderContestApplications() {
-  const mount = document.getElementById('applications-mount');
-  if (!mount) return;
+/** Column definitions for the participation applications admin table. */
+function contestAdminApplicationTableColumns() {
+  return [
+    { label: 'HR', cell: (app) => escapeHtml(app.homeroom) },
+    { label: '番', cell: (app) => escapeHtml(String(app.student_number)) },
+    { label: '代表', cell: (app) => escapeHtml(app.student_name) },
+    { label: 'タイトル', cell: (app) => escapeHtml(app.title) },
+    { label: '区分', cell: (app) => escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type) },
+    {
+      label: '参加者',
+      cell: (app) => formatContestMembersCompactCell(app.members, 1),
+    },
+    {
+      label: 'ステータス',
+      cell: (app) => {
+        const date =
+          app.submission_status?.desired_date != null
+            ? `<span class="contest-submission-date-inline">${escapeHtml(app.submission_status.desired_date)}</span>`
+            : '';
+        return `<div class="contest-admin-status-cell">${formatContestSubmissionStatusBadge(app)}${date}</div>`;
+      },
+    },
+    { label: '申請者', cell: (app) => escapeHtml(app.applicant_email ?? '—') },
+    { label: '', cell: (app) => contestAdminApplicationActionsCell(app) },
+  ];
+}
 
-  if (!contestApplicationGroups.length) {
-    mount.innerHTML =
-      '<p class="hint admin-list-empty">参加申請はまだありません</p>';
-    return;
-  }
-
-  const totalApplications = contestApplicationGroups.reduce(
-    (sum, group) => sum + (group.applications?.length ?? 0),
-    0
-  );
-  if (totalApplications === 0) {
-    mount.innerHTML =
-      '<p class="hint admin-list-empty">参加申請はまだありません</p>';
-    return;
-  }
-
-  const sections = contestApplicationGroups
-    .map((group) => {
-      const apps = group.applications ?? [];
-      if (apps.length === 0) {
+/** Renders one participation applications list (desktop table or mobile cards). */
+function renderContestApplicationsListHtml(apps) {
+  if (isMobileAdminView()) {
+    return `<div class="contest-admin-application-compact-list">${apps
+      .map((app) => {
+        const impressions = app.impressions
+          ? `<p class="hint contest-admin-impressions-truncate">${escapeHtml(app.impressions)}</p>`
+          : '';
         return `
-      <section class="contest-admin-group-section">
-        <h2 class="section-heading contest-admin-group-heading">${escapeHtml(group.group_display_name)} <span class="hint">(0件)</span></h2>
-        <p class="hint admin-list-empty">このグループの参加申請はありません</p>
-      </section>`;
-      }
-
-      let body;
-      if (isMobileAdminView()) {
-        body = `<div class="contest-admin-application-compact-list">${apps
-          .map((app) => {
-            const impressions = app.impressions
-              ? `<p class="hint contest-admin-impressions-truncate">${escapeHtml(app.impressions)}</p>`
-              : '';
-            return `
         <article class="contest-admin-application-compact card">
           <div class="contest-admin-application-compact-head">
             <strong>${escapeHtml(app.title)}</strong>
@@ -1222,43 +1216,23 @@ function renderContestApplications() {
           ${impressions}
           <div class="contest-admin-application-compact-actions">${contestAdminApplicationActionsCell(app)}</div>
         </article>`;
-          })
-          .join('')}</div>`;
-      } else {
-        body = adminReservationTableHtml(apps, [
-          { label: 'HR', cell: (app) => escapeHtml(app.homeroom) },
-          { label: '番', cell: (app) => escapeHtml(String(app.student_number)) },
-          { label: '代表', cell: (app) => escapeHtml(app.student_name) },
-          { label: 'タイトル', cell: (app) => escapeHtml(app.title) },
-          { label: '区分', cell: (app) => escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type) },
-          {
-            label: '参加者',
-            cell: (app) => formatContestMembersCompactCell(app.members, 1),
-          },
-          {
-            label: 'ステータス',
-            cell: (app) => {
-              const date =
-                app.submission_status?.desired_date != null
-                  ? `<span class="contest-submission-date-inline">${escapeHtml(app.submission_status.desired_date)}</span>`
-                  : '';
-              return `<div class="contest-admin-status-cell">${formatContestSubmissionStatusBadge(app)}${date}</div>`;
-            },
-          },
-          { label: '申請者', cell: (app) => escapeHtml(app.applicant_email ?? '—') },
-          { label: '', cell: (app) => contestAdminApplicationActionsCell(app) },
-        ]);
-      }
+      })
+      .join('')}</div>`;
+  }
+  return adminReservationTableHtml(apps, contestAdminApplicationTableColumns());
+}
 
-      return `
-      <section class="contest-admin-group-section">
-        <h2 class="section-heading contest-admin-group-heading">${escapeHtml(group.group_display_name)} <span class="hint">(${apps.length}件)</span></h2>
-        ${body}
-      </section>`;
-    })
-    .join('');
+/** Renders contest participation applications in a single list. */
+function renderContestApplications() {
+  const mount = document.getElementById('applications-mount');
+  if (!mount) return;
 
-  mount.innerHTML = sections;
+  if (!contestApplications.length) {
+    mount.innerHTML = '<p class="hint admin-list-empty">参加申請はまだありません</p>';
+    return;
+  }
+
+  mount.innerHTML = renderContestApplicationsListHtml(contestApplications);
   bindContestApplicationDeleteButtons(mount);
   bindContestApplicationDetailButtons(mount);
 }
