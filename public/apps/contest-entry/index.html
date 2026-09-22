@@ -189,6 +189,14 @@
     </section>
   </main>
 
+  <div id="print-flow-overlay" class="print-flow-overlay hidden" aria-hidden="true">
+    <div class="print-flow-overlay-card" role="status" aria-live="polite" aria-busy="true">
+      <span class="print-flow-spinner" aria-hidden="true"></span>
+      <p class="print-flow-overlay-text" id="print-flow-overlay-text">処理中…</p>
+      <p class="hint print-flow-overlay-hint hidden" id="print-flow-overlay-hint"></p>
+    </div>
+  </div>
+
   <script type="module" src="/apps/contest-entry/js/main.js"></script>
 </body>
 </html>
