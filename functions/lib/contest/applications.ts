@@ -20,8 +20,7 @@ import {
 import { cleanupContestApplicationSubmissionFiles } from './contest-storage';
 import {
   getContestManagementAccessibleGroupRoots,
-  isContestEntryEnabledForGroupSlug,
-  listContestEntryUserIdsForGroup,
+  listGroupMemberUserIdsForGroupSlug,
 } from './contest-app-settings';
 import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
@@ -605,13 +604,12 @@ async function viewerCanManageContestApplicationUser(
   isAdmin: boolean,
   applicantUserId: string
 ): Promise<boolean> {
+  if (isAdmin) {
+    return true;
+  }
   const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
   for (const root of groupRoots) {
-    const slug = root.key;
-    if (!(await isContestEntryEnabledForGroupSlug(db, slug))) {
-      continue;
-    }
-    const userIds = await listContestEntryUserIdsForGroup(db, slug);
+    const userIds = await listGroupMemberUserIdsForGroupSlug(db, root.key);
     if (userIds.has(applicantUserId)) {
       return true;
     }
@@ -794,24 +792,77 @@ export async function listContestApplicationsAdminGrouped(
     enrichedRows.push(await enrichContestApplicationAdminRow(db, raw));
   }
 
+  if (enrichedRows.length === 0) {
+    return [];
+  }
+
+  if (groupRoots.length === 0) {
+    return [
+      {
+        group_slug: '_all',
+        group_display_name: '参加申請',
+        applications: enrichedRows.sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      },
+    ];
+  }
+
+  const memberSets = new Map<string, Set<string>>();
+  for (const root of groupRoots) {
+    memberSets.set(root.key, await listGroupMemberUserIdsForGroupSlug(db, root.key));
+  }
+
+  const buckets = new Map<string, ContestApplicationAdminRow[]>();
+  for (const root of groupRoots) {
+    buckets.set(root.key, []);
+  }
+  const unassigned: ContestApplicationAdminRow[] = [];
+
+  for (const app of enrichedRows) {
+    let placed = false;
+    for (const root of groupRoots) {
+      if (memberSets.get(root.key)?.has(app.user_id)) {
+        buckets.get(root.key)!.push(app);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      unassigned.push(app);
+    }
+  }
+
   const sections: ContestApplicationAdminGroupSection[] = [];
 
   for (const root of groupRoots) {
-    const slug = root.key;
-    if (!(await isContestEntryEnabledForGroupSlug(db, slug))) {
+    const applications = (buckets.get(root.key) ?? []).sort((a, b) =>
+      b.created_at.localeCompare(a.created_at)
+    );
+    if (applications.length === 0) {
       continue;
     }
-
-    const userIds = await listContestEntryUserIdsForGroup(db, slug);
-    const applications = enrichedRows
-      .filter((app) => userIds.has(app.user_id))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-
     sections.push({
-      group_slug: slug,
+      group_slug: root.key,
       group_display_name: root.label,
       applications,
     });
+  }
+
+  if (unassigned.length > 0) {
+    sections.push({
+      group_slug: '_unassigned',
+      group_display_name: 'グループ未所属',
+      applications: unassigned.sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    });
+  }
+
+  if (sections.length === 0) {
+    return [
+      {
+        group_slug: '_all',
+        group_display_name: '参加申請',
+        applications: enrichedRows.sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      },
+    ];
   }
 
   return sections;
