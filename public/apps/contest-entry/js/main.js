@@ -51,6 +51,12 @@ let calendarReservations = [];
 /** @type {Array<{ r2Key: string, filename: string, size: number }>} */
 let uploadResults = [];
 let stlFileLimit = 1;
+const STL_PART_COUNT_MAX = 20;
+const STL_PART_LABEL_MAX = 40;
+/** @type {Array<{ label: string, upload: { r2Key: string, filename: string, size: number } | null, uploading: boolean }>} */
+let stlParts = [];
+let stlPartConfigSaveTimer = null;
+let stlPartConfigSaveInFlight = false;
 let calendarNavLock = false;
 let calendarLoading = false;
 let lastWheelMonthNavAt = 0;
@@ -239,8 +245,6 @@ function setApplicationFormMode(mode) {
     }
     scheduleFieldset?.classList.add('contest-fieldset-readonly');
     document.getElementById('self-print-field')?.classList.add('hidden');
-    document.getElementById('multi-part-field')?.classList.add('hidden');
-    document.getElementById('part-count-field')?.classList.add('hidden');
   } else {
     if (heading) heading.textContent = '参加申請';
     if (submitBtn) submitBtn.textContent = '参加申請する';
@@ -248,9 +252,6 @@ function setApplicationFormMode(mode) {
     scheduleFieldset?.classList.remove('contest-fieldset-readonly');
     document.getElementById('self-print-field')?.classList.remove('hidden');
     document.getElementById('self-print-readonly-hint')?.classList.add('hidden');
-    document.getElementById('multi-part-field')?.classList.remove('hidden');
-    document.getElementById('part-count-field')?.classList.add('hidden');
-    document.getElementById('multi-part-readonly-hint')?.classList.add('hidden');
   }
   document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
     input.disabled = mode === 'edit';
@@ -268,24 +269,201 @@ function resetApplicationFormForCreate() {
   form?.reset();
   const selfPrint = document.getElementById('self_print');
   if (selfPrint instanceof HTMLInputElement) selfPrint.checked = false;
-  const multiPart = document.getElementById('uses_multiple_parts');
-  if (multiPart instanceof HTMLInputElement) multiPart.checked = false;
-  const partCount = document.getElementById('part_count');
-  if (partCount instanceof HTMLInputElement) partCount.value = '';
-  updateMultiPartFieldVisibility();
   participants = [createEmptyParticipant()];
 }
 
-function updateMultiPartFieldVisibility() {
-  const checkbox = document.getElementById('uses_multiple_parts');
-  const partCountField = document.getElementById('part-count-field');
-  const checked = checkbox instanceof HTMLInputElement && checkbox.checked;
-  partCountField?.classList.toggle('hidden', !checked);
+function createEmptyStlPart(index) {
+  return {
+    label: index === 0 ? '' : '',
+    upload: null,
+    uploading: false,
+  };
 }
 
-function isPartCountValid(raw) {
-  const n = Number(String(raw).trim());
-  return Number.isInteger(n) && n >= 2 && n <= 20;
+function stlPartsFromApplication(app) {
+  const count =
+    app.uses_multiple_parts && app.part_count && app.part_count >= 2
+      ? app.part_count
+      : 1;
+  return Array.from({ length: count }, () => createEmptyStlPart(0));
+}
+
+function syncUploadResultsFromStlParts() {
+  uploadResults = stlParts
+    .filter((part) => part.upload)
+    .map((part) => part.upload);
+  stlFileLimit = stlParts.length;
+  updateSubmitState();
+}
+
+function schedulePersistStlPartConfig() {
+  if (!selectedApplicationId) return;
+  clearTimeout(stlPartConfigSaveTimer);
+  stlPartConfigSaveTimer = setTimeout(() => {
+    void persistStlPartConfig();
+  }, 450);
+}
+
+async function persistStlPartConfig() {
+  if (!selectedApplicationId || stlPartConfigSaveInFlight) return;
+  const count = stlParts.length;
+  if (count < 1 || count > STL_PART_COUNT_MAX) return;
+  const usesMultiple = count > 1;
+  stlPartConfigSaveInFlight = true;
+  try {
+    const data = await apiRequest(`applications/${selectedApplicationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        uses_multiple_parts: usesMultiple,
+        part_count: usesMultiple ? count : null,
+      }),
+    });
+    const updated = data.application;
+    if (updated) {
+      const idx = applications.findIndex((a) => a.id === updated.id);
+      if (idx >= 0) applications[idx] = updated;
+      stlFileLimit =
+        updated.stl_file_limit ??
+        (updated.uses_multiple_parts && updated.part_count ? updated.part_count : 1);
+    }
+  } catch (err) {
+    showToast(err.message || 'パーツ設定の保存に失敗しました', 'error');
+  } finally {
+    stlPartConfigSaveInFlight = false;
+  }
+}
+
+function renderStlPartList() {
+  const list = document.getElementById('stl-part-list');
+  const addBtn = document.getElementById('btn-add-stl-part');
+  if (!list) return;
+
+  if (stlParts.length === 0) {
+    stlParts.push(createEmptyStlPart(0));
+  }
+
+  list.innerHTML = '';
+  stlParts.forEach((part, index) => {
+    const li = document.createElement('li');
+    li.className = 'contest-stl-part-row';
+    const fileLabel = part.upload
+      ? escapeHtml(part.upload.filename)
+      : part.uploading
+        ? 'アップロード中…'
+        : '未選択';
+    const fileClass = part.upload
+      ? 'stl-part-file-name stl-part-file-name--done'
+      : 'stl-part-file-name';
+    let removeBtn = '<span class="stl-part-remove-placeholder" aria-hidden="true"></span>';
+    if (stlParts.length > 1) {
+      removeBtn = `<button type="button" class="btn btn-secondary btn-sm stl-part-remove" data-index="${index}" aria-label="パーツを削除">×</button>`;
+    }
+    li.innerHTML = `
+      <input type="text" class="stl-part-label" data-index="${index}" maxlength="${STL_PART_LABEL_MAX}" placeholder="例: 本体" value="${escapeHtml(part.label)}" aria-label="パーツ${index + 1}の名前" />
+      <div class="stl-part-file-cell">
+        <button type="button" class="btn btn-secondary btn-sm stl-part-choose-file" data-index="${index}">ファイルを選択</button>
+        <span class="${fileClass}">${fileLabel}</span>
+        <input type="file" class="stl-part-file-input" data-index="${index}" accept=".stl,.gcode,.gco,.nc" hidden />
+      </div>
+      ${removeBtn}
+    `;
+    list.appendChild(li);
+  });
+
+  if (addBtn instanceof HTMLButtonElement) {
+    addBtn.disabled = stlParts.length >= STL_PART_COUNT_MAX;
+  }
+
+  list.querySelectorAll('.stl-part-label').forEach((input) => {
+    input.addEventListener('input', () => {
+      const idx = Number(input.dataset.index);
+      if (stlParts[idx]) {
+        stlParts[idx].label = input.value;
+      }
+    });
+  });
+
+  list.querySelectorAll('.stl-part-choose-file').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.index);
+      const fileInput = list.querySelector(`.stl-part-file-input[data-index="${idx}"]`);
+      fileInput?.click();
+    });
+  });
+
+  list.querySelectorAll('.stl-part-file-input').forEach((input) => {
+    input.addEventListener('change', () => {
+      const idx = Number(input.dataset.index);
+      const file = input.files?.[0];
+      if (file) void handleStlPartFileSelected(idx, file);
+      input.value = '';
+    });
+  });
+
+  list.querySelectorAll('.stl-part-remove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.index);
+      stlParts.splice(idx, 1);
+      if (stlParts.length === 0) stlParts.push(createEmptyStlPart(0));
+      syncUploadResultsFromStlParts();
+      renderStlPartList();
+      schedulePersistStlPartConfig();
+    });
+  });
+
+  syncUploadResultsFromStlParts();
+}
+
+async function handleStlPartFileSelected(index, file) {
+  if (!stlParts[index] || stlParts[index].uploading) return;
+  const progress = document.getElementById('upload-progress');
+  const progressBar = document.getElementById('upload-progress-bar');
+  const statusEl = document.getElementById('upload-status');
+  const overlayHints = {
+    認証中: 'アップロードの準備をしています',
+    処理中: 'ファイルを送信しています',
+  };
+
+  stlParts[index].uploading = true;
+  renderStlPartList();
+  progress?.classList.remove('hidden');
+  if (progressBar) progressBar.style.width = '0%';
+  if (statusEl) statusEl.textContent = `パーツ ${index + 1} をアップロード中…`;
+
+  try {
+    setPrintFlowOverlay(true, '認証中…', overlayHints['認証中']);
+    const result = await uploadPrintFile(
+      file,
+      (pct) => {
+        if (progressBar) progressBar.style.width = `${pct}%`;
+      },
+      (stage) => {
+        const hint = overlayHints[stage] ?? '';
+        setPrintFlowOverlay(true, `${stage}…`, hint);
+        if (statusEl) statusEl.textContent = `${stage}…（パーツ ${index + 1}）`;
+      }
+    );
+    stlParts[index].upload = {
+      r2Key: result.r2Key,
+      filename: result.filename,
+      size: result.size,
+    };
+    if (progressBar) progressBar.style.width = '100%';
+    if (statusEl) {
+      statusEl.textContent = stlParts.every((p) => p.upload)
+        ? 'すべてのパーツのアップロードが完了しました'
+        : `パーツ ${index + 1} のアップロード完了`;
+    }
+  } catch (err) {
+    stlParts[index].upload = null;
+    if (statusEl) statusEl.textContent = err.message || 'アップロードに失敗しました';
+    progress?.classList.add('hidden');
+    showToast(err.message || 'アップロードに失敗しました', 'error');
+  } finally {
+    stlParts[index].uploading = false;
+    setPrintFlowOverlay(false);
+    renderStlPartList();
+  }
 }
 
 function submissionStatusLabel(app) {
@@ -424,18 +602,6 @@ function openEditView(applicationId) {
     form.impressions.value = app.impressions ?? '';
   }
   document.getElementById('self-print-readonly-hint')?.classList.toggle('hidden', !app.self_print);
-  document.getElementById('multi-part-field')?.classList.add('hidden');
-  document.getElementById('part-count-field')?.classList.add('hidden');
-  const multiHint = document.getElementById('multi-part-readonly-hint');
-  if (multiHint) {
-    if (app.uses_multiple_parts && app.part_count) {
-      multiHint.textContent = `この作品は ${app.part_count} パーツ（複数 STL）で登録されています`;
-      multiHint.classList.remove('hidden');
-    } else {
-      multiHint.textContent = '';
-      multiHint.classList.add('hidden');
-    }
-  }
   participants = participantsFromApplication(app);
   showView('apply');
   renderParticipantList();
@@ -450,21 +616,12 @@ function openSubmitView(applicationId) {
   }
   selectedApplicationId = applicationId;
   uploadResults = [];
-  stlFileLimit = app.stl_file_limit ?? (app.uses_multiple_parts && app.part_count ? app.part_count : 1);
-  const fileInput = document.getElementById('file-input');
-  if (fileInput instanceof HTMLInputElement) {
-    fileInput.multiple = stlFileLimit > 1;
-  }
-  const uploadHint = document.getElementById('upload-file-hint');
-  if (uploadHint) {
-    uploadHint.textContent =
-      stlFileLimit > 1
-        ? `またはクリックしてファイルを選択（最大 ${stlFileLimit} 件・.stl .gcode .gco .nc）`
-        : 'またはクリックしてファイルを選択（.stl .gcode .gco .nc）';
-  }
-  document.getElementById('selected-file-name').textContent = '';
+  stlParts = stlPartsFromApplication(app);
+  stlFileLimit = app.stl_file_limit ?? stlParts.length;
   document.getElementById('upload-progress')?.classList.add('hidden');
-  document.getElementById('upload-status').textContent = '';
+  const uploadStatus = document.getElementById('upload-status');
+  if (uploadStatus) uploadStatus.textContent = '';
+  renderStlPartList();
   document.getElementById('submit-target-label').textContent = app.self_print
     ? `提出先: ${app.title}（自己印刷・予約なし）`
     : `提出先: ${app.title}`;
@@ -516,15 +673,7 @@ function updateApplicationSubmitState() {
     (applicationFormMode === 'edit' || participants.every((row) => isParticipantRowValid(row))) &&
     rowsToValidate.every((row) => isParticipantRowValid(row));
 
-  let multiPartOk = true;
-  if (applicationFormMode === 'create') {
-    const usesMulti = form.querySelector('#uses_multiple_parts')?.checked === true;
-    if (usesMulti) {
-      multiPartOk = isPartCountValid(formData.get('part_count'));
-    }
-  }
-
-  btn.disabled = !(participantsOk && titleOk && multiPartOk);
+  btn.disabled = !(participantsOk && titleOk);
 }
 
 function getSelectedSubmitApplication() {
@@ -554,8 +703,9 @@ function updateSubmitButtonLabel(btn, app) {
 function updateSubmitState() {
   const btn = document.getElementById('submit-btn');
   if (!btn) return;
-  const countOk = uploadResults.length === stlFileLimit;
-  btn.disabled = !countOk || !selectedApplicationId;
+  const countOk = uploadResults.length === stlFileLimit && stlParts.length === stlFileLimit;
+  btn.disabled =
+    !countOk || !selectedApplicationId || stlParts.some((part) => part.uploading);
   updateSubmitButtonLabel(btn, getSelectedSubmitApplication());
 }
 
@@ -595,13 +745,6 @@ async function handleApplicationSubmit(e) {
       });
       showToast('参加申請を更新しました', 'success');
     } else {
-      const usesMultipleParts = form.querySelector('#uses_multiple_parts')?.checked === true;
-      const partCountRaw = String(formData.get('part_count') ?? '').trim();
-      if (usesMultipleParts && !isPartCountValid(partCountRaw)) {
-        showToast('パーツ数は2〜20の整数で入力してください', 'error');
-        btn.disabled = false;
-        return;
-      }
       await apiRequest('applications', {
         method: 'POST',
         body: JSON.stringify({
@@ -610,8 +753,6 @@ async function handleApplicationSubmit(e) {
           impressions: String(formData.get('impressions') ?? '').trim() || null,
           participants: payloadParticipants,
           self_print: form.querySelector('#self_print')?.checked === true,
-          uses_multiple_parts: usesMultipleParts,
-          part_count: usesMultipleParts ? Number(partCountRaw) : null,
         }),
       });
       persistApplicationDraft();
@@ -872,100 +1013,19 @@ function createDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   return cell;
 }
 
-function setupUploadZone() {
-  const zone = document.getElementById('upload-zone');
-  const input = document.getElementById('file-input');
-  const fileNameEl = document.getElementById('selected-file-name');
-  const progress = document.getElementById('upload-progress');
-  const progressBar = document.getElementById('upload-progress-bar');
-  const statusEl = document.getElementById('upload-status');
-  if (!zone || !input) return;
-
-  const handleFiles = async (fileList) => {
-    const files = Array.from(fileList ?? []).slice(0, stlFileLimit);
-    if (!files.length) return;
-    if (files.length > stlFileLimit) {
-      showToast(`ファイルは最大 ${stlFileLimit} 件まで選択できます`, 'error');
-      return;
-    }
-    uploadResults = [];
-    updateSubmitState();
-    progress.classList.remove('hidden');
-    progressBar.style.width = '0%';
-    statusEl.textContent = 'アップロード中…';
-    fileNameEl.textContent = '';
-
-    const overlayHints = {
-      認証中: 'アップロードの準備をしています',
-      処理中: 'ファイルを送信しています',
-    };
-
-    try {
-      setPrintFlowOverlay(true, '認証中…', overlayHints['認証中']);
-      const uploaded = [];
-      for (let i = 0; i < files.length; i += 1) {
-        const file = files[i];
-        const label = files.length > 1 ? `（${i + 1}/${files.length}）` : '';
-        statusEl.textContent = `アップロード中…${label}`;
-        const result = await uploadPrintFile(
-          file,
-          (pct) => {
-            const overall = ((i + pct / 100) / files.length) * 100;
-            progressBar.style.width = `${overall}%`;
-          },
-          (stage) => {
-            const hint = overlayHints[stage] ?? '';
-            setPrintFlowOverlay(true, `${stage}…`, hint);
-            statusEl.textContent = `${stage}…${label}`;
-          }
-        );
-        uploaded.push({
-          r2Key: result.r2Key,
-          filename: result.filename,
-          size: result.size,
-        });
-      }
-      uploadResults = uploaded;
-      fileNameEl.textContent = uploaded.map((u) => u.filename).join('、 ');
-      progressBar.style.width = '100%';
-      statusEl.textContent =
-        stlFileLimit > 1
-          ? `${uploaded.length} / ${stlFileLimit} 件アップロード完了`
-          : 'アップロード完了';
-      updateSubmitState();
-    } catch (err) {
-      uploadResults = [];
-      fileNameEl.textContent = '';
-      statusEl.textContent = err.message || 'アップロードに失敗しました';
-      progress.classList.add('hidden');
-      updateSubmitState();
-    } finally {
-      setPrintFlowOverlay(false);
-    }
-  };
-
-  zone.addEventListener('click', () => input.click());
-  input.addEventListener('change', () => handleFiles(input.files));
-  zone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    zone.classList.add('dragover');
-  });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
-  });
-}
-
 async function handleStlSubmit(e) {
   e.preventDefault();
   const btn = document.getElementById('submit-btn');
   const form = document.getElementById('submit-form');
-  if (uploadResults.length !== stlFileLimit || !selectedApplicationId) {
+  const requiredParts = stlParts.length;
+  if (
+    !selectedApplicationId ||
+    uploadResults.length !== requiredParts ||
+    stlParts.some((part) => !part.upload)
+  ) {
     showToast(
-      stlFileLimit > 1
-        ? `STL ファイルを ${stlFileLimit} 件アップロードしてください`
+      requiredParts > 1
+        ? `各パーツの STL ファイルを ${requiredParts} 件すべてアップロードしてください`
         : 'ファイルをアップロードしてください',
       'error'
     );
@@ -978,6 +1038,8 @@ async function handleStlSubmit(e) {
 
   btn.disabled = true;
   try {
+    clearTimeout(stlPartConfigSaveTimer);
+    await persistStlPartConfig();
     const payload =
       uploadResults.length === 1
         ? {
@@ -1152,15 +1214,16 @@ async function init() {
     updateApplicationSubmitState();
   });
   applicationForm?.addEventListener('submit', handleApplicationSubmit);
-  document.getElementById('uses_multiple_parts')?.addEventListener('change', () => {
-    updateMultiPartFieldVisibility();
-    persistApplicationDraft();
-    updateApplicationSubmitState();
-  });
-
   document.getElementById('submit-form')?.addEventListener('submit', handleStlSubmit);
-
-  setupUploadZone();
+  document.getElementById('btn-add-stl-part')?.addEventListener('click', () => {
+    if (stlParts.length >= STL_PART_COUNT_MAX) {
+      showToast(`パーツは最大 ${STL_PART_COUNT_MAX} 件までです`, 'error');
+      return;
+    }
+    stlParts.push(createEmptyStlPart(stlParts.length));
+    renderStlPartList();
+    schedulePersistStlPartConfig();
+  });
   await initAuth();
   startStaffMessagesPolling();
 
@@ -1179,7 +1242,6 @@ async function init() {
     }
   }
   updateScheduleTypeUi();
-  updateMultiPartFieldVisibility();
 
   try {
     await loadApplications();

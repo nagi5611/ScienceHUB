@@ -139,6 +139,8 @@ export interface PatchContestApplicationInput {
   impressions?: string | null;
   participants?: unknown;
   members?: unknown;
+  uses_multiple_parts?: boolean;
+  part_count?: number | null;
 }
 
 function primaryParticipantFromApplication(
@@ -533,6 +535,19 @@ export async function getContestApplicationForSubmit(
   return app;
 }
 
+async function assertCanUpdateContestMultiPartSettings(
+  db: D1Database,
+  app: ContestApplication
+): Promise<void> {
+  if (app.self_print && app.stl_submitted_at) {
+    throw new Error('提出済みの作品はパーツ設定を変更できません');
+  }
+  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  if (reservation?.stl_filename) {
+    throw new Error('STL 提出後はパーツ設定を変更できません');
+  }
+}
+
 /** Updates title, impressions, and/or additional members (primary row is fixed). */
 export async function patchContestApplicationForUser(
   db: D1Database,
@@ -551,6 +566,21 @@ export async function patchContestApplicationForUser(
   const now = new Date().toISOString();
   let title = app.title;
   let impressions = app.impressions;
+  let usesMultipleParts = app.uses_multiple_parts;
+  let partCount = app.part_count;
+
+  if (input.uses_multiple_parts !== undefined || input.part_count !== undefined) {
+    await assertCanUpdateContestMultiPartSettings(db, app);
+    const usesFlag =
+      input.uses_multiple_parts !== undefined
+        ? Boolean(input.uses_multiple_parts)
+        : app.uses_multiple_parts;
+    const countRaw =
+      input.part_count !== undefined ? input.part_count : app.part_count;
+    const multiPart = parseContestMultiPartOptions(usesFlag, usesFlag ? countRaw : null);
+    usesMultipleParts = multiPart.uses_multiple_parts;
+    partCount = multiPart.part_count;
+  }
 
   if (input.title !== undefined) {
     const parsedTitle = parseContestApplicationFields({
@@ -578,9 +608,16 @@ export async function patchContestApplicationForUser(
 
   await db
     .prepare(
-      `UPDATE contest_applications SET title = ?, impressions = ?, updated_at = ? WHERE id = ?`
+      `UPDATE contest_applications SET title = ?, impressions = ?, uses_multiple_parts = ?, part_count = ?, updated_at = ? WHERE id = ?`
     )
-    .bind(title, impressions, now, applicationId)
+    .bind(
+      title,
+      impressions,
+      usesMultipleParts ? 1 : 0,
+      partCount,
+      now,
+      applicationId
+    )
     .run();
 
   if (title !== app.title && !app.self_print) {
@@ -605,6 +642,8 @@ export async function patchContestApplicationForUser(
     ...app,
     title,
     impressions,
+    uses_multiple_parts: usesMultipleParts,
+    part_count: partCount,
     updated_at: now,
   };
   const reservation = await fetchLatestReservationForApplication(db, applicationId);
