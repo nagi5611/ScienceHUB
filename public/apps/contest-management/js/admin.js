@@ -58,6 +58,8 @@ const CONTEST_SCHEDULE_LABELS = {
 };
 
 let contestApplicationGroups = [];
+let contestApplicationById = new Map();
+let contestApplicationDetailId = null;
 
 let currentReservationId = null;
 let allReservations = [];
@@ -138,6 +140,7 @@ async function init() {
   saveBtn.addEventListener('click', saveReservation);
   acceptBtn?.addEventListener('click', acceptReservation);
   deleteBtn.addEventListener('click', deleteReservation);
+  setupContestApplicationDetailModal();
   document.getElementById('edit-content-btn').addEventListener('click', () => {
     if (!currentReservationData) return;
     document.getElementById('detail-modal').classList.remove('open');
@@ -256,6 +259,12 @@ async function refreshAll() {
     allMembers = membersData.members;
     allPrinters = printersData.printers;
     contestApplicationGroups = appsData.groups ?? [];
+    contestApplicationById = new Map();
+    for (const group of contestApplicationGroups) {
+      for (const app of group.applications ?? []) {
+        contestApplicationById.set(app.id, app);
+      }
+    }
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
@@ -983,23 +992,157 @@ function formatContestMembersCompact(members, maxShown = 2) {
   return `${parts.join('、')}${suffix}`;
 }
 
-function contestAdminApplicationMembersTitle(members) {
-  if (!members?.length) return '';
-  return members
+function contestAdminApplicationDeleteCell(app) {
+  const title = escapeHtml(app.title);
+  return `<button type="button" class="btn btn-secondary btn-sm contest-admin-app-delete" data-app-id="${escapeHtml(app.id)}" data-app-title="${title}">削除</button>`;
+}
+
+function contestAdminApplicationActionsCell(app) {
+  return `<div class="contest-admin-app-actions">
+    <button type="button" class="btn btn-secondary btn-sm contest-admin-app-detail" data-app-id="${escapeHtml(app.id)}">詳細</button>
+    ${contestAdminApplicationDeleteCell(app)}
+  </div>`;
+}
+
+/** Hover tooltip listing all members in the compact applications table. */
+function formatContestMembersCompactCell(members, maxShown = 1) {
+  if (!members?.length) return '—';
+  const compact = formatContestMembersCompact(members, maxShown);
+  const fullLines = members
     .map((m) => {
       const bits = [
         m.homeroom ?? '',
         m.student_number != null ? `${m.student_number}番` : '',
         m.member_name,
       ].filter(Boolean);
-      return bits.join(' ');
+      return escapeHtml(bits.join(' '));
     })
-    .join('\n');
+    .join('<br>');
+  return `<span class="contest-admin-members-compact">${compact}<span class="contest-admin-members-tooltip" role="tooltip">${fullLines}</span></span>`;
 }
 
-function contestAdminApplicationDeleteCell(app) {
-  const title = escapeHtml(app.title);
-  return `<button type="button" class="btn btn-secondary btn-sm contest-admin-app-delete" data-app-id="${escapeHtml(app.id)}" data-app-title="${title}">削除</button>`;
+/** Wires contest application detail modal close/delete actions. */
+function setupContestApplicationDetailModal() {
+  const modal = document.getElementById('contest-application-detail-modal');
+  if (!modal) return;
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('contest-application-detail-close')?.addEventListener('click', closeModal);
+  document.getElementById('contest-application-detail-dismiss')?.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  document.getElementById('contest-application-detail-delete')?.addEventListener('click', async () => {
+    if (!contestApplicationDetailId) return;
+    const app = contestApplicationById.get(contestApplicationDetailId);
+    const title = app?.title ?? '';
+    closeModal();
+    await handleDeleteContestApplication(contestApplicationDetailId, title);
+  });
+}
+
+/** Builds HTML for the participation application detail modal. */
+function renderContestApplicationDetailHtml(app) {
+  const membersHtml =
+    (app.members ?? [])
+      .map((m) => {
+        const parts = [
+          m.homeroom ? escapeHtml(m.homeroom) : null,
+          m.student_number != null ? `${m.student_number}番` : null,
+          escapeHtml(m.member_name),
+        ].filter(Boolean);
+        return `<li>${parts.join(' ')}</li>`;
+      })
+      .join('') || '<li>—</li>';
+
+  const reservations = app.reservations ?? [];
+  const historyHtml =
+    reservations.length === 0
+      ? '<p class="hint">印刷依頼はまだありません</p>'
+      : `<div class="table-wrap admin-table-wrap"><table><thead><tr>
+          <th>希望日</th><th>ステータス</th><th>ファイル</th><th>規模</th><th>申請日時</th><th></th>
+        </tr></thead><tbody>${reservations
+          .map(
+            (r) => `<tr>
+          <td>${escapeHtml(r.desired_date)}</td>
+          <td><span class="status-badge status-${r.status}">${STATUS_LABELS[r.status]}</span></td>
+          <td>${escapeHtml(r.stl_filename)} (${formatSize(r.stl_size_bytes)})</td>
+          <td>${SCALE_LABELS[r.print_scale] ?? escapeHtml(String(r.print_scale))}</td>
+          <td>${escapeHtml(r.created_at)}</td>
+          <td><button type="button" class="btn btn-secondary btn-sm contest-app-reservation-detail" data-reservation-id="${escapeHtml(r.id)}">予約詳細</button></td>
+        </tr>`
+          )
+          .join('')}</tbody></table></div>`;
+
+  const selfPrintBlock = app.self_print
+    ? `
+      <div class="detail-row"><span class="detail-label">印刷</span><span>自己印刷</span></div>
+      ${
+        app.stl_submitted_at
+          ? `<div class="detail-row"><span class="detail-label">STL提出</span><span>${escapeHtml(app.stl_submitted_at)}</span></div>`
+          : ''
+      }
+      ${
+        app.stl_filename
+          ? `<div class="detail-row"><span class="detail-label">STLファイル</span><span>${escapeHtml(app.stl_filename)}${
+              app.stl_size_bytes != null ? ` (${formatSize(app.stl_size_bytes)})` : ''
+            }</span></div>`
+          : ''
+      }
+      ${
+        app.stl_print_notes
+          ? `<div class="detail-row"><span class="detail-label">印刷時の注意</span><span>${escapeHtml(app.stl_print_notes).replace(/\n/g, '<br>')}</span></div>`
+          : ''
+      }
+    `
+    : '';
+
+  return `
+    <div class="detail-grid">
+      <div class="detail-row"><span class="detail-label">タイトル</span><span>${escapeHtml(app.title)}</span></div>
+      <div class="detail-row"><span class="detail-label">在籍区分</span><span>${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)}</span></div>
+      <div class="detail-row"><span class="detail-label">代表者</span><span>${escapeHtml(app.homeroom)} ${escapeHtml(String(app.student_number))}番 ${escapeHtml(app.student_name)}</span></div>
+      <div class="detail-row"><span class="detail-label">申請者</span><span>${escapeHtml(app.applicant_email ?? '—')}</span></div>
+      <div class="detail-row"><span class="detail-label">提出ステータス</span><span>${formatContestSubmissionStatusBadge(app)}</span></div>
+      <div class="detail-row"><span class="detail-label">申請日時</span><span>${escapeHtml(app.created_at)}</span></div>
+      <div class="detail-row"><span class="detail-label">更新日時</span><span>${escapeHtml(app.updated_at)}</span></div>
+      ${selfPrintBlock}
+      <div class="detail-row detail-row-block"><span class="detail-label">感想</span><span class="contest-detail-impressions">${app.impressions ? escapeHtml(app.impressions).replace(/\n/g, '<br>') : '—'}</span></div>
+      <div class="detail-row detail-row-block"><span class="detail-label">参加者</span><ul class="contest-detail-members">${membersHtml}</ul></div>
+    </div>
+    <h3 class="contest-detail-subheading">印刷依頼履歴</h3>
+    ${historyHtml}
+  `;
+}
+
+function bindContestApplicationDetailReservationLinks(container) {
+  container.querySelectorAll('.contest-app-reservation-detail').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.getElementById('contest-application-detail-modal')?.classList.remove('open');
+      openDetail(btn.dataset.reservationId);
+    });
+  });
+}
+
+/** Opens the participation application detail modal. */
+function openContestApplicationDetail(applicationId) {
+  const app = contestApplicationById.get(applicationId);
+  if (!app) return;
+  contestApplicationDetailId = applicationId;
+  document.getElementById('contest-application-detail-title').textContent = app.title;
+  const body = document.getElementById('contest-application-detail-body');
+  body.innerHTML = renderContestApplicationDetailHtml(app);
+  bindContestApplicationDetailReservationLinks(body);
+  document.getElementById('contest-application-detail-modal').classList.add('open');
+}
+
+/** Binds detail buttons on the participation applications panel. */
+function bindContestApplicationDetailButtons(container) {
+  container.querySelectorAll('.contest-admin-app-detail').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openContestApplicationDetail(btn.dataset.appId);
+    });
+  });
 }
 
 /** Binds delete buttons on the participation applications panel. */
@@ -1061,7 +1204,6 @@ function renderContestApplications() {
       if (isMobileAdminView()) {
         body = `<div class="contest-admin-application-compact-list">${apps
           .map((app) => {
-            const membersTitle = contestAdminApplicationMembersTitle(app.members);
             const impressions = app.impressions
               ? `<p class="hint contest-admin-impressions-truncate">${escapeHtml(app.impressions)}</p>`
               : '';
@@ -1076,9 +1218,9 @@ function renderContestApplications() {
             · ${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)}
             ${app.self_print ? ' · 自己印刷' : ''}
           </p>
-          <p class="hint" title="${escapeHtml(membersTitle)}">参加者: ${formatContestMembersCompact(app.members)}</p>
+          <p class="hint">参加者: ${formatContestMembersCompactCell(app.members, 2)}</p>
           ${impressions}
-          <div class="contest-admin-application-compact-actions">${contestAdminApplicationDeleteCell(app)}</div>
+          <div class="contest-admin-application-compact-actions">${contestAdminApplicationActionsCell(app)}</div>
         </article>`;
           })
           .join('')}</div>`;
@@ -1091,10 +1233,7 @@ function renderContestApplications() {
           { label: '区分', cell: (app) => escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type) },
           {
             label: '参加者',
-            cell: (app) => {
-              const title = contestAdminApplicationMembersTitle(app.members);
-              return `<span class="contest-admin-members-compact" title="${escapeHtml(title)}">${formatContestMembersCompact(app.members, 1)}</span>`;
-            },
+            cell: (app) => formatContestMembersCompactCell(app.members, 1),
           },
           {
             label: 'ステータス',
@@ -1107,7 +1246,7 @@ function renderContestApplications() {
             },
           },
           { label: '申請者', cell: (app) => escapeHtml(app.applicant_email ?? '—') },
-          { label: '', cell: (app) => contestAdminApplicationDeleteCell(app) },
+          { label: '', cell: (app) => contestAdminApplicationActionsCell(app) },
         ]);
       }
 
@@ -1121,6 +1260,7 @@ function renderContestApplications() {
 
   mount.innerHTML = sections;
   bindContestApplicationDeleteButtons(mount);
+  bindContestApplicationDetailButtons(mount);
 }
 
 /** Renders print history table. */
