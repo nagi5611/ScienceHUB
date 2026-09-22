@@ -17,6 +17,14 @@
   <link rel="stylesheet" href="/css/apps/3dprint-reservation.css" />
   <link rel="stylesheet" href="/css/dashboard.css" />
   <link rel="stylesheet" href="/css/apps/contest-entry.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body class="contest-entry-page">
   <header class="site-header">
@@ -167,6 +175,13 @@
         </section>
       </aside>
     </div>
+
+    <section class="card contest-public-gallery hidden" id="contest-public-gallery" aria-labelledby="contest-gallery-heading">
+      <h2 class="contest-section-title" id="contest-gallery-heading">提出作品一覧</h2>
+      <p class="hint contest-gallery-intro">STL を提出済みの作品です。タイトルと3Dモデルのみ表示しています（個人名・クラスなどは非表示）。</p>
+      <p class="hint contest-gallery-empty hidden" id="contest-gallery-empty">まだ提出された作品はありません。</p>
+      <div class="contest-gallery-grid" id="contest-gallery-grid"></div>
+    </section>
   </main>
 
   <script type="module" src="/apps/contest-entry/js/main.js"></script>

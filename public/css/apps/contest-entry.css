@@ -434,3 +434,90 @@
   flex-direction: column;
   gap: 1rem;
 }
+
+.contest-public-gallery {
+  margin-top: 1.5rem;
+}
+
+.contest-gallery-intro {
+  margin: -0.5rem 0 1rem;
+}
+
+.contest-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.contest-gallery-card {
+  border: 1px solid var(--border, #e5e7eb);
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--card-bg, #fff);
+}
+
+.contest-gallery-preview-wrap {
+  aspect-ratio: 4 / 3;
+  background: #0f172a;
+  position: relative;
+  overflow: hidden;
+}
+
+.contest-gallery-preview-host {
+  position: absolute;
+  inset: 0;
+}
+
+.contest-gallery-preview-host .cs-model3d-viewer {
+  position: absolute;
+  inset: 0;
+}
+
+.contest-gallery-preview-host .cs-model3d-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.contest-gallery-preview-host .cs-model3d-hint {
+  font-size: 0.65rem;
+  padding: 0.25rem 0.5rem;
+  bottom: 0;
+}
+
+.contest-gallery-preview-loading,
+.contest-gallery-preview-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.contest-gallery-card-body {
+  padding: 0.75rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.contest-gallery-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.35;
+}
+
+.contest-gallery-file-meta {
+  margin: 0;
+  word-break: break-all;
+}
+
+.contest-gallery-download {
+  align-self: flex-start;
+  margin-top: auto;
+}

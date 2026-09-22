@@ -83,6 +83,10 @@ import {
   withdrawContestApplicationForUser,
 } from "../../lib/contest/applications";
 import {
+  listContestPublicGallery,
+  resolveContestGalleryModelFile,
+} from "../../lib/contest/public-gallery";
+import {
   getContestStorageGroupSlug,
   setContestStorageGroupSlug,
   getContestManagementAccessibleGroupRoots,
@@ -609,6 +613,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[0] === "calendar" ||
       segments[0] === "applications" ||
       segments[0] === "entries" ||
+      segments[0] === "gallery" ||
       segments[0] === "reservations" ||
       segments[0] === "printers" ||
       segments[0] === "print-videos" ||
@@ -660,6 +665,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!body.sessionId) return error("sessionId が必要です");
       await abortUpload(env, body.sessionId);
       return json({ ok: true });
+    }
+
+    // GET /api/contest/gallery
+    if (method === "GET" && segments[0] === "gallery" && segments.length === 1) {
+      const entries = await listContestPublicGallery(db);
+      return json({ entries });
+    }
+
+    // GET /api/contest/gallery/:id/model
+    if (
+      method === "GET" &&
+      segments[0] === "gallery" &&
+      segments.length === 3 &&
+      segments[2] === "model"
+    ) {
+      const file = await resolveContestGalleryModelFile(db, segments[1]);
+      if (!file) {
+        return error("作品が見つかりません", 404);
+      }
+      try {
+        return await streamPrintFile(env.FILES, file.r2_key, file.filename);
+      } catch {
+        return error("ファイルが見つかりません", 404);
+      }
     }
 
     // GET /api/contest/applications

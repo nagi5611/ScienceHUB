@@ -10,6 +10,7 @@ import {
   parseScheduleType,
   saveContestDraft,
 } from './entry-draft.js';
+import { initContestPublicGallery } from './gallery.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
@@ -739,6 +740,7 @@ async function init() {
   try {
     await loadApplications();
     await loadCalendar();
+    await initContestPublicGallery();
   } catch (err) {
     showToast(err.message, 'error');
   }
