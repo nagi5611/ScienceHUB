@@ -34,6 +34,10 @@ import {
   getCalendarUserFilterQuery,
   updateAdminCalendarUserFilterOptions,
 } from '../../../js/admin-calendar-user-filter.js';
+import {
+  createCalendarOccurrenceSlot,
+  indexReservationOccurrencesByDate,
+} from '../../../js/print-reservation-calendar-ui.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 
@@ -363,14 +367,13 @@ async function renderAdminCalendar() {
   grid.innerHTML = '';
   renderAdminWeekdayHeaders();
 
-  const reservationsByDate = {};
-  for (const r of getCalendarFilteredReservations()) {
-    const d = r.desired_date;
-    if (d.startsWith(`${currentYear}-${String(currentMonth).padStart(2, '0')}`)) {
-      if (!reservationsByDate[d]) reservationsByDate[d] = [];
-      reservationsByDate[d].push(r);
-    }
-  }
+  const monthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+  const byDate = indexReservationOccurrencesByDate(
+    getCalendarFilteredReservations().filter((r) => {
+      const end = r.calendar_end_date || r.desired_date;
+      return r.desired_date.slice(0, 7) <= monthPrefix && end.slice(0, 7) >= monthPrefix;
+    })
+  );
 
   const firstDay = new Date(currentYear, currentMonth - 1, 1);
   const lastDay = new Date(currentYear, currentMonth, 0).getDate();
@@ -384,7 +387,7 @@ async function renderAdminCalendar() {
 
   for (let day = 1; day <= lastDay; day++) {
     const dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    grid.appendChild(createAdminDayCell(day, false, reservationsByDate, todayStr, dateStr));
+    grid.appendChild(createAdminDayCell(day, false, byDate, todayStr, dateStr));
   }
 
   const totalCells = startWeekday + lastDay;
@@ -396,15 +399,24 @@ async function renderAdminCalendar() {
   updateAdminStickyOffsets();
 }
 
+function uniqueReservationsFromOccurrences(entries) {
+  const map = new Map();
+  for (const { reservation } of entries) {
+    map.set(reservation.id, reservation);
+  }
+  return [...map.values()];
+}
+
 /** Creates an admin calendar day cell. */
-function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr) {
+function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   const cell = document.createElement('div');
   cell.className = 'calendar-day';
   if (otherMonth) cell.classList.add('other-month');
   if (dateStr === todayStr) cell.classList.add('today');
   if (dateStr === adminSelectedDate) cell.classList.add('selected');
 
-  const dayReservations = dateStr && reservationsByDate[dateStr] ? reservationsByDate[dateStr] : [];
+  const dayEntries = dateStr && byDate[dateStr] ? byDate[dateStr] : [];
+  const dayReservations = uniqueReservationsFromOccurrences(dayEntries);
   const hasMediumOrLarge = dayReservations.some((r) => r.print_scale === 'medium' || r.print_scale === 'large');
   const smallCount = dayReservations.filter((r) => r.print_scale === 'small').length;
   const isFull = hasMediumOrLarge || smallCount >= 2;
@@ -427,37 +439,26 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
   num.textContent = dayNum;
   cell.appendChild(num);
 
-  if (dayReservations.length) {
+  if (dayEntries.length) {
     const slotsWrap = document.createElement('div');
     slotsWrap.className = 'calendar-slots';
 
-    const sorted = [...dayReservations].sort((a, b) => {
+    const sorted = [...dayEntries].sort((a, b) => {
       const order = { small: 0, medium: 1, large: 2 };
-      return (order[a.print_scale] ?? 9) - (order[b.print_scale] ?? 9);
+      const scaleDiff =
+        (order[a.occurrence.printScale] ?? 9) - (order[b.occurrence.printScale] ?? 9);
+      if (scaleDiff !== 0) return scaleDiff;
+      return a.reservation.desired_date.localeCompare(b.reservation.desired_date);
     });
 
-    for (const r of sorted) {
-      const slot = document.createElement('button');
-      slot.type = 'button';
-      slot.className = `calendar-slot admin-calendar-slot ${r.print_scale}`;
-      const staffLabel = r.print_staff_label ? `担当者: ${r.print_staff_label}` : '';
-
-      if (isMobileAdminView()) {
-        slot.classList.add('calendar-slot-compact');
-        slot.innerHTML = `<span class="calendar-slot-compact-label">${escapeHtml(`${SCALE_SHORT[r.print_scale]} ${truncateForCell(r.title, 5)}`)}</span>`;
-        slot.title = [r.title, staffLabel].filter(Boolean).join(' / ');
-      } else {
-        slot.innerHTML = [
-          `<span class="calendar-slot-scale">${SCALE_SHORT[r.print_scale]}</span>`,
-          `<span class="calendar-slot-title-text">${escapeHtml(r.title)}</span>`,
-          staffLabel ? `<span class="calendar-slot-staff">${escapeHtml(staffLabel)}</span>` : '',
-        ].join('');
-        slot.title = [r.title, staffLabel].filter(Boolean).join(' / ');
-      }
-
-      slot.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openDetail(r.id);
+    for (const entry of sorted) {
+      const slot = createCalendarOccurrenceSlot({
+        reservation: entry.reservation,
+        occurrence: entry.occurrence,
+        onOpenDetail: openDetail,
+        compact: isMobileAdminView(),
+        truncateForCell,
+        escapeHtml,
       });
       slotsWrap.appendChild(slot);
     }

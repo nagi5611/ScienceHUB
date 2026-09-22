@@ -124,8 +124,13 @@ import {
 } from "../../lib/3dprint/printer-image";
 import {
   getDateAvailability,
-  validatePrinterReservationSlot,
+  validatePrinterReservationSpan,
 } from "../../lib/3dprint/availability";
+import {
+  formatReservationCalendarApiFields,
+  normalizePartCount,
+  syncReservationSpanFields,
+} from "../../lib/3dprint/calendar-span";
 import {
   checkPrinterShiftRemovalBlocked,
   checkPrinterShiftRemovalBlockedForDates,
@@ -211,6 +216,7 @@ function publicCalendarReservation(
     printer_id: r.printer_id,
     printer_name: resolvePrinterLabel(r, printerMap),
     desired_date: r.desired_date,
+    ...formatReservationCalendarApiFields(r),
     status: r.status,
     title: r.title,
     print_staff: resolvePrintStaffLabel(r, memberMap),
@@ -233,6 +239,7 @@ function userReservationDetail(
     printer_name: resolvePrinterLabel(r, printerMap),
     printer_capabilities: resolvePrinterCapabilities(r, printerMap),
     desired_date: r.desired_date,
+    ...formatReservationCalendarApiFields(r),
     status: r.status,
     purpose: r.purpose,
     purpose_other: r.purpose_other || null,
@@ -432,13 +439,15 @@ async function applyReservationContentEdit(
   const printerError = await validatePrinterId(db, printerId, { requireBookable: options.isUser });
   if (printerError) return error(printerError);
 
+  const partCount = normalizePartCount(body.part_count ?? reservation.part_count ?? 1);
+
   const slotError = await validateReservationSlot(
     db,
     body.desired_date,
     body.print_scale,
     reservation.id,
     printerId,
-    { isAdmin: !options.isUser }
+    { isAdmin: !options.isUser, partCount }
   );
   if (slotError) return error(slotError);
 
@@ -489,6 +498,7 @@ async function applyReservationContentEdit(
     print_scale: body.print_scale,
     printer_id: printerId,
     desired_date: body.desired_date,
+    part_count: partCount,
     request_print_video: videoResolved.value,
     stl_r2_key: stlR2Key,
     stl_filename: stlFilename,
@@ -683,6 +693,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
+        part_count?: number;
       }>();
 
       const required = [
@@ -721,11 +732,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error(`希望印刷日は ${getEarliestBookableDate()} 以降を選択してください`);
       }
 
-      const slotError = await validatePrinterReservationSlot(
+      const partCount = normalizePartCount(body.part_count ?? 1);
+      const span = syncReservationSpanFields(body.desired_date, partCount, body.print_scale);
+
+      const slotError = await validatePrinterReservationSpan(
         db,
         body.desired_date,
         body.printer_id,
-        body.print_scale,
+        span.print_scale,
+        span.part_count,
         "",
         { isAdmin: false }
       );
@@ -759,9 +774,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other: body.purpose_other ?? null,
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
-        print_scale: body.print_scale,
+        print_scale: span.print_scale,
         printer_id: body.printer_id,
         desired_date: body.desired_date,
+        part_count: span.part_count,
+        calendar_end_date: span.calendar_end_date,
         stl_r2_key: body.stl_r2_key,
         stl_filename: body.stl_filename,
         stl_size_bytes: Number(body.stl_size_bytes),
@@ -1178,6 +1195,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         stl_filename: string;
         stl_size_bytes: number;
         user_id?: string;
+        part_count?: number;
       }>();
 
       const required = [
@@ -1213,11 +1231,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error(`希望印刷日は ${getAdminEarliestBookableDate()} 以降を選択してください`);
       }
 
-      const slotError = await validatePrinterReservationSlot(
+      const adminPartCount = normalizePartCount(body.part_count ?? 1);
+      const adminSpan = syncReservationSpanFields(
+        body.desired_date,
+        adminPartCount,
+        body.print_scale
+      );
+
+      const slotError = await validatePrinterReservationSpan(
         db,
         body.desired_date,
         body.printer_id,
-        body.print_scale,
+        adminSpan.print_scale,
+        adminSpan.part_count,
         "",
         { isAdmin: true }
       );
@@ -1248,9 +1274,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other: body.purpose_other ?? null,
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
-        print_scale: body.print_scale,
+        print_scale: adminSpan.print_scale,
         printer_id: body.printer_id,
         desired_date: body.desired_date,
+        part_count: adminSpan.part_count,
+        calendar_end_date: adminSpan.calendar_end_date,
         stl_r2_key: body.stl_r2_key,
         stl_filename: body.stl_filename,
         stl_size_bytes: Number(body.stl_size_bytes),

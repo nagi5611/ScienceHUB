@@ -1,5 +1,9 @@
 ﻿// functions/lib/3dprint/reservation-edit.ts
-import { getDateAvailability, validatePrinterReservationSlot } from './availability';
+import {
+  getDateAvailability,
+  validatePrinterReservationSlot,
+  validatePrinterReservationSpan,
+} from './availability';
 import { type PrintScale } from './slots';
 import { hasStaffOnDate, type Reservation } from './reservations';
 import { isPrinterAvailableOnDate } from './printer-availability';
@@ -22,6 +26,7 @@ export interface ReservationContentInput {
   stl_r2_key?: string;
   stl_filename?: string;
   stl_size_bytes?: number;
+  part_count?: number;
 }
 
 const PURPOSES = ['ss_s_tan', 'club', 'other'] as const;
@@ -77,10 +82,23 @@ export async function validateReservationSlot(
   printScale: PrintScale,
   excludeReservationId: string,
   printerId?: string | null,
-  options: { isAdmin?: boolean } = {}
+  options: { isAdmin?: boolean; partCount?: number } = {}
 ): Promise<string | null> {
   if (!printerId?.trim()) {
     return '印刷機種を選択してください';
+  }
+
+  const partCount = options.partCount ?? 1;
+  if (partCount > 1) {
+    return validatePrinterReservationSpan(
+      db,
+      desiredDate,
+      printerId,
+      printScale,
+      partCount,
+      excludeReservationId,
+      options
+    );
   }
 
   return validatePrinterReservationSlot(
