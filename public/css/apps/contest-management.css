@@ -62,6 +62,49 @@
   gap: 0.5rem 0.75rem;
 }
 
+.admin-calendar-user-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.admin-calendar-user-filter--dashboard {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.admin-calendar-user-filter-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.admin-calendar-user-filter-input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  max-width: 28rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.admin-calendar-user-filter-status {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 640px) {
+  .admin-calendar-user-filter-input {
+    max-width: none;
+    width: 100%;
+  }
+}
+
 .contest-applications-search-label {
   font-size: 0.875rem;
   font-weight: 600;
@@ -373,4 +416,32 @@
     width: 100%;
     text-align: left;
   }
+}
+
+.contest-stl-log-table th:first-child,
+.contest-stl-log-table td:first-child {
+  width: 3rem;
+  text-align: center;
+}
+
+.contest-stl-log-kind {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.contest-stl-log-kind--initial {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.contest-stl-log-kind--replacement {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
 }

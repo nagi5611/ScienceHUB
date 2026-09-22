@@ -23,6 +23,12 @@ import {
   initPrintVideoFolderPicker,
   openPrintVideoFolderPicker,
 } from './print-video-folder-picker.js';
+import {
+  bindAdminCalendarUserFilter,
+  filterReservationsForCalendar,
+  getCalendarUserFilterQuery,
+  updateAdminCalendarUserFilterOptions,
+} from '../../../js/admin-calendar-user-filter.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 let contestStorageGroupSlug = '';
@@ -92,13 +98,51 @@ let currentMonth;
 let activePanel = 'dashboard';
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 let draggedReservationId = null;
+let calendarRescheduleBusy = false;
 let emailComposeSettings = {
   email_configured: false,
 };
 
+/** Shows or hides loading UI while a drag-reschedule API call is in flight. */
+function setCalendarRescheduleBusy(busy, reservationId = null) {
+  calendarRescheduleBusy = busy;
+  const wrap = document.querySelector('#admin-calendar-section .calendar-grid-wrap');
+  if (!wrap) return;
+
+  let overlay = wrap.querySelector('.calendar-reschedule-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'calendar-reschedule-overlay hidden';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.innerHTML =
+      '<span class="calendar-reschedule-spinner" aria-hidden="true"></span><span class="calendar-reschedule-label">反映中…</span>';
+    wrap.appendChild(overlay);
+  }
+
+  wrap.classList.toggle('is-rescheduling', busy);
+  wrap.setAttribute('aria-busy', busy ? 'true' : 'false');
+  overlay.classList.toggle('hidden', !busy);
+
+  document.querySelectorAll('.admin-calendar-slot.is-rescheduling-pending').forEach((el) => {
+    el.classList.remove('is-rescheduling-pending');
+  });
+  if (busy && reservationId) {
+    const slot = wrap.querySelector(
+      `.admin-calendar-slot[data-reservation-id="${CSS.escape(reservationId)}"]`
+    );
+    slot?.classList.add('is-rescheduling-pending');
+  }
+}
+
 /** Returns whether the compact mobile admin layout is active. */
 function isMobileAdminView() {
   return MOBILE_ADMIN_MQ.matches;
+}
+
+/** Reservations visible on the calendar (user filter applied). */
+function getCalendarFilteredReservations() {
+  return filterReservationsForCalendar(allReservations);
 }
 
 /** Truncates a title for a narrow calendar cell. */
@@ -170,6 +214,12 @@ async function init() {
   document.getElementById('admin-go-today-btn')?.addEventListener('click', goToAdminToday);
   document.getElementById('admin-calendar-month-label-mobile')?.addEventListener('click', () => {
     document.getElementById('admin-calendar-month-chips')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  bindAdminCalendarUserFilter({
+    onChange: () => {
+      void renderAdminCalendar();
+      renderTodayTasks();
+    },
   });
 
   document.querySelectorAll('.admin-menu-item[data-panel]').forEach((btn) => {
@@ -279,6 +329,7 @@ async function refreshAll() {
     for (const app of contestApplications) {
       contestApplicationById.set(app.id, app);
     }
+    updateAdminCalendarUserFilterOptions(allReservations);
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
@@ -399,7 +450,7 @@ async function renderAdminCalendar() {
   renderAdminWeekdayHeaders();
 
   const reservationsByDate = {};
-  for (const r of allReservations) {
+  for (const r of getCalendarFilteredReservations()) {
     const d = r.desired_date;
     if (d.startsWith(`${currentYear}-${String(currentMonth).padStart(2, '0')}`)) {
       if (!reservationsByDate[d]) reservationsByDate[d] = [];
@@ -453,7 +504,7 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
     }
 
     cell.addEventListener('dragover', (e) => {
-      if (!draggedReservationId || dateStr < todayStr) return;
+      if (calendarRescheduleBusy || !draggedReservationId || dateStr < todayStr) return;
       e.preventDefault();
       cell.classList.add('drop-target');
     });
@@ -463,7 +514,12 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
       cell.classList.remove('drop-target');
       const id = e.dataTransfer.getData('text/plain') || draggedReservationId;
       draggedReservationId = null;
-      if (!id || dateStr < todayStr) return;
+      if (!id || dateStr < todayStr || calendarRescheduleBusy) return;
+
+      const reservation = allReservations.find((r) => r.id === id);
+      if (reservation?.desired_date === dateStr) return;
+
+      setCalendarRescheduleBusy(true, id);
       try {
         await apiRequest(`admin/reservations/${id}/reschedule`, {
           method: 'PATCH',
@@ -472,6 +528,8 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
         await refreshAll();
       } catch (err) {
         alert(err.message);
+      } finally {
+        setCalendarRescheduleBusy(false);
       }
     });
   }
@@ -509,14 +567,21 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
         slot.title = [r.title, staffLabel].filter(Boolean).join(' / ');
       }
 
-      slot.draggable = true;
+      slot.dataset.reservationId = r.id;
+      slot.draggable = !calendarRescheduleBusy;
       slot.addEventListener('dragstart', (e) => {
+        if (calendarRescheduleBusy) {
+          e.preventDefault();
+          return;
+        }
         draggedReservationId = r.id;
         e.dataTransfer.setData('text/plain', r.id);
         e.dataTransfer.effectAllowed = 'move';
+        slot.classList.add('is-dragging');
         e.stopPropagation();
       });
       slot.addEventListener('dragend', () => {
+        slot.classList.remove('is-dragging');
         draggedReservationId = null;
         document.querySelectorAll('#calendar-grid .calendar-day.drop-target').forEach((el) => {
           el.classList.remove('drop-target');
@@ -900,6 +965,60 @@ function formatDateJa(isoDate) {
   return `${y}年${Number(m)}月${Number(d)}日`;
 }
 
+/** Formats an ISO datetime for Japanese display. */
+function formatDateTimeJa(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return escapeHtml(String(iso));
+  return d.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function contestStlLogKindLabel(kind) {
+  return kind === 'replacement' ? '追加アップロード' : '初回提出';
+}
+
+function contestStlUploaderRoleLabel(role) {
+  return role === 'admin' ? '管理者' : '依頼者';
+}
+
+/** Renders STL submission history table for admin modals. */
+function renderContestStlSubmissionLogsHtml(logs, { heading = 'STL提出履歴' } = {}) {
+  if (!logs?.length) {
+    return `<h3 class="contest-detail-subheading">${escapeHtml(heading)}</h3><p class="hint">提出履歴はありません</p>`;
+  }
+  const rows = logs
+    .map((log) => {
+      const kindClass =
+        log.submission_kind === 'replacement'
+          ? 'contest-stl-log-kind--replacement'
+          : 'contest-stl-log-kind--initial';
+      return `<tr>
+        <td>${log.sequence_number}</td>
+        <td><span class="contest-stl-log-kind ${kindClass}">${escapeHtml(contestStlLogKindLabel(log.submission_kind))}</span></td>
+        <td>${formatDateTimeJa(log.uploaded_at)}</td>
+        <td>${escapeHtml(log.stl_filename)} (${formatSize(log.stl_size_bytes)})</td>
+        <td>${escapeHtml(contestStlUploaderRoleLabel(log.uploader_role))}</td>
+      </tr>`;
+    })
+    .join('');
+  return `
+    <h3 class="contest-detail-subheading">${escapeHtml(heading)}</h3>
+    <div class="table-wrap admin-table-wrap">
+      <table class="contest-stl-log-table">
+        <thead>
+          <tr>
+            <th>順番</th>
+            <th>区分</th>
+            <th>アップロード日時</th>
+            <th>ファイル</th>
+            <th>操作者</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 /** Builds admin reservation card HTML for mobile lists. */
 function adminReservationCardHtml(r, { showPurpose = false } = {}) {
   const scaleLabel = SCALE_LABELS[r.print_scale];
@@ -946,12 +1065,15 @@ function adminReservationTableHtml(rows, columns) {
 function renderTodayTasks() {
   const mount = document.getElementById('today-tasks-mount');
   const today = getTodayJst();
-  const tasks = allReservations
+  const tasks = getCalendarFilteredReservations()
     .filter((r) => r.desired_date === today)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   if (!tasks.length) {
-    mount.innerHTML = '<p class="hint admin-list-empty">本日の印刷予約はありません</p>';
+    const filterActive = getCalendarUserFilterQuery().trim();
+    mount.innerHTML = filterActive
+      ? '<p class="hint admin-list-empty">絞り込みに一致する本日の印刷予約はありません</p>'
+      : '<p class="hint admin-list-empty">本日の印刷予約はありません</p>';
     return;
   }
 
@@ -1125,6 +1247,7 @@ function renderContestApplicationDetailHtml(app) {
     </div>
     <h3 class="contest-detail-subheading">印刷依頼履歴</h3>
     ${historyHtml}
+    ${renderContestStlSubmissionLogsHtml(app.stl_submission_logs)}
   `;
 }
 
@@ -1762,6 +1885,7 @@ async function openDetail(id) {
   try {
     const data = await apiRequest(`admin/reservations/${id}`);
     const r = data.reservation;
+    const stlSubmissionLogs = data.stl_submission_logs ?? [];
     const compose = data.email_compose ?? emailComposeSettings;
     currentReservationData = r.status === 'cancelled' ? null : r;
     const availableStaff = data.available_staff ?? allMembers;
@@ -1816,6 +1940,7 @@ async function openDetail(id) {
         <div class="detail-row"><span class="detail-label">ファイル</span><span>${escapeHtml(r.stl_filename)} (${formatSize(r.stl_size_bytes)})</span></div>
         <div class="detail-row"><span class="detail-label">申請日時</span><span>${r.created_at}</span></div>
       </div>
+      ${renderContestStlSubmissionLogsHtml(stlSubmissionLogs)}
       ${statusField}
       ${printStaffField}
       <div class="form-group" style="margin-top:1rem">

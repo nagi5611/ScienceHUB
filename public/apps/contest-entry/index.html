@@ -17,6 +17,14 @@
   <link rel="stylesheet" href="/css/apps/3dprint-reservation.css" />
   <link rel="stylesheet" href="/css/dashboard.css" />
   <link rel="stylesheet" href="/css/apps/contest-entry.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body class="contest-entry-page">
   <header class="site-header">
@@ -34,6 +42,7 @@
 
     <h1 class="page-heading">造形物コンテスト</h1>
     <p class="page-subheading">まず参加申請を出し、作品ごとに STL ファイルを提出してください。印刷日は提出後に自動で設定され、担当者の承認後にメールでお知らせします。</p>
+    <p class="contact-notice">お問い合わせ：<br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
 
     <div class="contest-entry-layout">
       <div class="contest-entry-primary">
@@ -89,6 +98,7 @@
             <div class="form-group">
               <label for="impressions">感想</label>
               <textarea id="impressions" name="impressions" rows="4" placeholder="作品への思いや制作のポイントなど"></textarea>
+              <p class="hint">後で変更可能</p>
             </div>
 
             <div class="form-group" id="self-print-field">
@@ -107,6 +117,10 @@
           <button type="button" class="btn btn-secondary btn-sm contest-back-btn" id="btn-back-from-submit">← 一覧に戻る</button>
           <h2 class="contest-section-title" id="submit-heading">STL 提出</h2>
           <p class="contest-submit-target" id="submit-target-label"></p>
+          <div class="contest-existing-submission hidden" id="existing-submission-panel" aria-live="polite">
+            <p class="hint" id="existing-submission-summary"></p>
+            <a href="#" class="btn btn-secondary btn-sm" id="existing-submission-download" download>提出済み STL をダウンロード</a>
+          </div>
 
           <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
             <p class="upload-zone-title">STL / Gコードをドロップ</p>
@@ -166,6 +180,13 @@
         </section>
       </aside>
     </div>
+
+    <section class="card contest-public-gallery hidden" id="contest-public-gallery" aria-labelledby="contest-gallery-heading">
+      <h2 class="contest-section-title" id="contest-gallery-heading">提出作品一覧</h2>
+      <p class="hint contest-gallery-intro">STL を提出済みの作品です。タイトルと3Dモデルのみ表示しています（個人名・クラスなどは非表示）。</p>
+      <p class="hint contest-gallery-empty hidden" id="contest-gallery-empty">まだ提出された作品はありません。</p>
+      <div class="contest-gallery-grid" id="contest-gallery-grid"></div>
+    </section>
   </main>
 
   <div id="print-flow-overlay" class="print-flow-overlay hidden" aria-hidden="true">

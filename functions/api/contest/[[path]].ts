@@ -81,7 +81,12 @@ import {
   deleteContestApplicationAsAdmin,
   patchContestApplicationForUser,
   withdrawContestApplicationForUser,
+  getContestApplicationSubmittedStl,
 } from "../../lib/contest/applications";
+import {
+  listContestPublicGallery,
+  resolveContestGalleryModelFile,
+} from "../../lib/contest/public-gallery";
 import {
   getContestStorageGroupSlug,
   setContestStorageGroupSlug,
@@ -93,6 +98,11 @@ import {
   ensureContestStorageDirectories,
   syncContestSubmissionToStorage,
 } from "../../lib/contest/contest-storage";
+import {
+  formatContestStlSubmissionLogForAdmin,
+  listContestStlSubmissionLogsForReservation,
+  logContestStlSubmission,
+} from "../../lib/contest/stl-submission-logs";
 import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
@@ -431,7 +441,7 @@ async function applyReservationContentEdit(
   context: EventContext<Env, string, unknown>,
   reservation: Reservation,
   body: ReservationContentInput,
-  options: { isUser: boolean }
+  options: { isUser: boolean; actorUserId: string }
 ): Promise<Response> {
   const { env } = context;
   const db = getDb(env);
@@ -476,6 +486,8 @@ async function applyReservationContentEdit(
   let stlR2Key = reservation.stl_r2_key;
   let stlFilename = reservation.stl_filename;
   let stlSizeBytes = reservation.stl_size_bytes;
+  const stlWillChange =
+    !!body.stl_r2_key && body.stl_r2_key !== reservation.stl_r2_key;
 
   if (body.stl_r2_key) {
     if (!body.stl_filename || body.stl_size_bytes === undefined) {
@@ -539,6 +551,17 @@ async function applyReservationContentEdit(
       await syncContestSubmissionToStorage(env, db, updated);
     } catch (syncErr) {
       console.error("contest storage sync failed on update:", syncErr);
+    }
+    if (stlWillChange) {
+      await logContestStlSubmission(db, {
+        contest_application_id: updated.contest_application_id,
+        print_reservation_id: updated.id,
+        stl_r2_key: updated.stl_r2_key,
+        stl_filename: updated.stl_filename,
+        stl_size_bytes: updated.stl_size_bytes,
+        uploaded_by_user_id: options.actorUserId,
+        uploader_role: options.isUser ? "user" : "admin",
+      });
     }
   }
   const memberMap = await buildMemberMap(db);
@@ -609,6 +632,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[0] === "calendar" ||
       segments[0] === "applications" ||
       segments[0] === "entries" ||
+      segments[0] === "gallery" ||
       segments[0] === "reservations" ||
       segments[0] === "printers" ||
       segments[0] === "print-videos" ||
@@ -662,6 +686,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: true });
     }
 
+    // GET /api/contest/gallery
+    if (method === "GET" && segments[0] === "gallery" && segments.length === 1) {
+      const entries = await listContestPublicGallery(db);
+      return json({ entries });
+    }
+
+    // GET /api/contest/gallery/:id/model
+    if (
+      method === "GET" &&
+      segments[0] === "gallery" &&
+      segments.length === 3 &&
+      segments[2] === "model"
+    ) {
+      const file = await resolveContestGalleryModelFile(db, segments[1]);
+      if (!file) {
+        return error("作品が見つかりません", 404);
+      }
+      try {
+        return await streamPrintFile(env.FILES, file.r2_key, file.filename);
+      } catch {
+        return error("ファイルが見つかりません", 404);
+      }
+    }
+
     // GET /api/contest/applications
     if (method === "GET" && segments[0] === "applications" && segments.length === 1) {
       const applications = await listContestApplicationsForUser(db, userId);
@@ -700,6 +748,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const message = err instanceof Error ? err.message : "参加申請に失敗しました";
         return error(message, 400);
       }
+    }
+
+    // GET /api/contest/applications/:id/stl
+    if (
+      method === "GET" &&
+      segments[0] === "applications" &&
+      segments.length === 3 &&
+      segments[2] === "stl"
+    ) {
+      const stl = await getContestApplicationSubmittedStl(db, userId, segments[1]);
+      if (!stl) return error("提出済みの STL が見つかりません", 404);
+      return streamPrintFile(env.FILES, stl.r2_key, stl.filename);
     }
 
     // GET /api/contest/applications/:id
@@ -967,6 +1027,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         console.error("contest storage sync failed on user create:", syncErr);
       }
 
+      await logContestStlSubmission(db, {
+        contest_application_id: reservation.contest_application_id,
+        print_reservation_id: reservation.id,
+        stl_r2_key: reservation.stl_r2_key,
+        stl_filename: reservation.stl_filename,
+        stl_size_bytes: reservation.stl_size_bytes,
+        uploaded_by_user_id: userId,
+        uploader_role: "user",
+        uploaded_at: reservation.created_at,
+      });
+
       context.waitUntil(
         notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
           title: reservation.title,
@@ -1196,7 +1267,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           student_number: profile.student_number,
           student_name: profile.student_name,
         },
-        { isUser: true }
+        { isUser: true, actorUserId: userId }
       );
     }
 
@@ -1224,12 +1295,28 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }>();
 
       try {
+        const failedReservation = await getReservationById(db, segments[1]);
         const created = await retryFailedReservation(env, segments[1], {
           ...body,
           homeroom: profile.homeroom,
           student_number: profile.student_number,
           student_name: profile.student_name,
         }, userId);
+        if (created.source === "contest") {
+          await logContestStlSubmission(db, {
+            contest_application_id:
+              created.contest_application_id ??
+              failedReservation?.contest_application_id ??
+              null,
+            print_reservation_id: created.id,
+            stl_r2_key: created.stl_r2_key,
+            stl_filename: created.stl_filename,
+            stl_size_bytes: created.stl_size_bytes,
+            uploaded_by_user_id: userId,
+            uploader_role: "user",
+            uploaded_at: created.created_at,
+          });
+        }
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
 
@@ -1439,6 +1526,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         console.error("contest storage sync failed on admin create:", syncErr);
       }
 
+      await logContestStlSubmission(db, {
+        contest_application_id: reservation.contest_application_id,
+        print_reservation_id: reservation.id,
+        stl_r2_key: reservation.stl_r2_key,
+        stl_filename: reservation.stl_filename,
+        stl_size_bytes: reservation.stl_size_bytes,
+        uploaded_by_user_id: authUser.id,
+        uploader_role: "admin",
+        uploaded_at: reservation.created_at,
+      });
+
       context.waitUntil(
         notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
           title: reservation.title,
@@ -1614,7 +1712,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // GET /api/3dprint/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
-      const reservations = await getAllReservations(db, 'contest');
+      const userId = url.searchParams.get("user_id")?.trim() || null;
+      const reservations = await getAllReservations(
+        db,
+        "contest",
+        userId ? { userId } : undefined
+      );
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
@@ -1634,9 +1737,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         (m) =>
           availableIds.includes(m.id) || m.id === reservation.print_staff_member_id
       );
+      const stlLogs = await listContestStlSubmissionLogsForReservation(db, reservation);
       return json({
         reservation: enrichReservationForAdmin(reservation, memberMap, printerMap),
         available_staff,
+        stl_submission_logs: stlLogs.map(formatContestStlSubmissionLogForAdmin),
         email_compose: {
           ...getContestEmailComposeSettings(env),
           staff_name: await resolveContestEmailStaffName(
@@ -1787,7 +1892,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const reservation = await getReservationById(db, segments[2]);
       if (!reservation) return error("予約が見つかりません", 404);
 
-      return applyReservationContentEdit(context, reservation, body, { isUser: false });
+      return applyReservationContentEdit(context, reservation, body, {
+        isUser: false,
+        actorUserId: authUser.id,
+      });
     }
 
     // PATCH /api/3dprint/admin/reservations/:id/reschedule

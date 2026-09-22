@@ -347,6 +347,49 @@ textarea {
   margin-bottom: 1.5rem;
 }
 
+.admin-calendar-user-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.admin-calendar-user-filter--dashboard {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.admin-calendar-user-filter-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.admin-calendar-user-filter-input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  max-width: 28rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.admin-calendar-user-filter-status {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 640px) {
+  .admin-calendar-user-filter-input {
+    max-width: none;
+    width: 100%;
+  }
+}
+
 .calendar-header {
   display: flex;
   align-items: center;
@@ -365,9 +408,68 @@ textarea {
 }
 
 .calendar-grid-wrap {
+  position: relative;
   width: 100%;
   max-width: 100%;
   overflow: hidden;
+}
+
+.calendar-day.drop-target {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-bg));
+}
+
+.calendar-grid-wrap.is-rescheduling .calendar-grid {
+  pointer-events: none;
+  opacity: 0.72;
+}
+
+.calendar-reschedule-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(1px);
+  pointer-events: none;
+}
+
+.calendar-reschedule-overlay.hidden {
+  display: none;
+}
+
+.calendar-reschedule-spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 3px solid color-mix(in srgb, var(--color-primary) 20%, var(--color-border));
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: calendar-reschedule-spin 0.75s linear infinite;
+}
+
+.calendar-reschedule-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.admin-calendar-slot.is-rescheduling-pending {
+  opacity: 0.55;
+}
+
+.admin-calendar-slot.is-dragging {
+  opacity: 0.45;
+}
+
+@keyframes calendar-reschedule-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .calendar-weekdays-row {
