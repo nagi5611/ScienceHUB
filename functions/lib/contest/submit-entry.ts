@@ -22,6 +22,7 @@ import { getPrinterById } from '../3dprint/printers';
 import { verifyR2Key } from '../3dprint/upload';
 import { getOAuthRedirectBase } from '../oauth';
 import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
+import { logContestStlSubmission } from './stl-submission-logs';
 import type { Env } from '../types';
 
 export interface SubmitContestEntryInput {
@@ -92,6 +93,17 @@ async function submitContestSelfPrintEntry(
   } catch (err) {
     console.error('contest self-print storage sync failed:', err);
   }
+
+  await logContestStlSubmission(db, {
+    contest_application_id: application.id,
+    print_reservation_id: null,
+    stl_r2_key: updated.stl_r2_key ?? input.stl_r2_key,
+    stl_filename: updated.stl_filename ?? input.stl_filename,
+    stl_size_bytes: updated.stl_size_bytes ?? input.stl_size_bytes,
+    uploaded_by_user_id: application.user_id,
+    uploader_role: 'user',
+    uploaded_at: updated.stl_submitted_at ?? undefined,
+  });
 
   return {
     self_print: true,
@@ -194,6 +206,17 @@ export async function submitContestEntry(
   } catch (err) {
     console.error('contest storage sync failed on submit:', err);
   }
+
+  await logContestStlSubmission(db, {
+    contest_application_id: application.id,
+    print_reservation_id: reservation.id,
+    stl_r2_key: reservation.stl_r2_key,
+    stl_filename: reservation.stl_filename,
+    stl_size_bytes: reservation.stl_size_bytes,
+    uploaded_by_user_id: userId,
+    uploader_role: 'user',
+    uploaded_at: reservation.created_at,
+  });
 
   const printer = await getPrinterById(db, slot.printer_id);
 
