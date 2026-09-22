@@ -87,13 +87,24 @@ body.share-body {
 
 .share-file-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.65rem;
   padding: 0.85rem 1rem;
   border: 1px solid var(--share-border);
   border-radius: 10px;
   background: #fafafa;
+}
+
+.share-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.share-file-item.is-downloading {
+  border-color: #bae6fd;
+  background: #f0f9ff;
 }
 
 .share-file-info {
@@ -134,8 +145,47 @@ body.share-body {
   cursor: not-allowed;
 }
 
+.share-download-progress {
+  width: 100%;
+}
+
+.share-download-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.share-download-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--share-accent), #38bdf8);
+  transition: width 0.15s ease;
+}
+
+.share-download-progress-bar.is-indeterminate {
+  width: 40% !important;
+  animation: share-download-bar-slide 1.1s ease-in-out infinite;
+}
+
+.share-download-progress-label {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--share-muted);
+}
+
+@keyframes share-download-bar-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 @media (max-width: 560px) {
-  .share-file-item {
+  .share-file-row {
     flex-direction: column;
     align-items: stretch;
   }
