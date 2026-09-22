@@ -134,6 +134,21 @@
                 </div>
 
                 <div class="calendar-month-chips" id="admin-calendar-month-chips" role="tablist" aria-label="月を選択"></div>
+
+                <div class="admin-calendar-user-filter">
+                  <label class="admin-calendar-user-filter-label" for="admin-calendar-user-filter">予約者</label>
+                  <input
+                    type="search"
+                    id="admin-calendar-user-filter"
+                    class="admin-calendar-user-filter-input"
+                    list="admin-calendar-user-filter-options"
+                    placeholder="名前・クラス・作品名で絞り込み"
+                    autocomplete="off"
+                  >
+                  <datalist id="admin-calendar-user-filter-options"></datalist>
+                  <button type="button" class="btn btn-secondary btn-sm" id="admin-calendar-user-filter-clear">クリア</button>
+                  <p class="hint admin-calendar-user-filter-status" id="admin-calendar-user-filter-status" hidden></p>
+                </div>
               </div>
 
               <div class="calendar-weekdays-row" id="admin-calendar-weekdays-row"></div>

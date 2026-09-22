@@ -123,6 +123,21 @@
           <h1 class="page-heading">ダッシュボード</h1>
           <p class="page-subheading">本日の実行タスクを確認できます。予約の詳細は依頼履歴から開いてください。</p>
 
+          <div class="admin-calendar-user-filter admin-calendar-user-filter--dashboard">
+            <label class="admin-calendar-user-filter-label" for="admin-calendar-user-filter">依頼者</label>
+            <input
+              type="search"
+              id="admin-calendar-user-filter"
+              class="admin-calendar-user-filter-input"
+              list="admin-calendar-user-filter-options"
+              placeholder="名前・クラス・作品名で絞り込み"
+              autocomplete="off"
+            >
+            <datalist id="admin-calendar-user-filter-options"></datalist>
+            <button type="button" class="btn btn-secondary btn-sm" id="admin-calendar-user-filter-clear">クリア</button>
+            <p class="hint admin-calendar-user-filter-status" id="admin-calendar-user-filter-status" hidden></p>
+          </div>
+
           <section class="card admin-list-section">
             <h2 class="section-heading">本日のタスク</h2>
             <div id="today-tasks-mount">

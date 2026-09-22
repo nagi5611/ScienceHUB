@@ -259,16 +259,30 @@ export async function getReservationById(db: D1Database, id: string): Promise<Re
   return db.prepare('SELECT * FROM print_reservations WHERE id = ?').bind(id).first<Reservation>();
 }
 
+export interface GetAllReservationsOptions {
+  userId?: string | null;
+}
+
 /** Fetches all reservations ordered by date. */
 export async function getAllReservations(
   db: D1Database,
-  source?: ReservationSource | null
+  source?: ReservationSource | null,
+  options?: GetAllReservationsOptions
 ): Promise<Reservation[]> {
   let sql = `SELECT * FROM print_reservations`;
   const binds: string[] = [];
+  const conditions: string[] = [];
   if (source) {
-    sql += ` WHERE source = ?`;
+    conditions.push(`source = ?`);
     binds.push(source);
+  }
+  const userId = options?.userId?.trim();
+  if (userId) {
+    conditions.push(`user_id = ?`);
+    binds.push(userId);
+  }
+  if (conditions.length > 0) {
+    sql += ` WHERE ${conditions.join(' AND ')}`;
   }
   sql += ` ORDER BY desired_date DESC, created_at DESC`;
   const statement = db.prepare(sql);

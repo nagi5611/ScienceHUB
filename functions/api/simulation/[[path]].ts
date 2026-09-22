@@ -2759,7 +2759,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // GET /api/simulation/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
-      const reservations = await getAllReservations(db);
+      const userId = url.searchParams.get("user_id")?.trim() || null;
+      const reservations = await getAllReservations(db, userId ? { userId } : undefined);
       const memberMap = await buildMemberMap(db);
       const simulatorMap = await buildSimulatorMap(db);
       return json({

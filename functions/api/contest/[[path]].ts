@@ -1712,7 +1712,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // GET /api/3dprint/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
-      const reservations = await getAllReservations(db, 'contest');
+      const userId = url.searchParams.get("user_id")?.trim() || null;
+      const reservations = await getAllReservations(
+        db,
+        "contest",
+        userId ? { userId } : undefined
+      );
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
