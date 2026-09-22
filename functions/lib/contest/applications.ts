@@ -9,15 +9,23 @@ import {
 import {
   parseContestApplicationFields,
   parseContestMemberNames,
+  parseContestMultiPartOptions,
   parseContestParticipants,
   type ContestParticipantFields,
   type ContestScheduleType,
 } from './contest-validation';
 import {
+  listContestApplicationStlParts,
+  type ContestApplicationStlPart,
+} from './contest-stl-parts';
+import {
   buildContestEntryAppUrl,
   notifyContestParticipationRegisteredEmail,
 } from './contest-email';
-import { cleanupContestApplicationSubmissionFiles } from './contest-storage';
+import {
+  cleanupContestApplicationSubmissionFiles,
+  cleanupContestApplicationStlPartsFiles,
+} from './contest-storage';
 import {
   getContestManagementAccessibleGroupRoots,
   listGroupMemberUserIdsForGroupSlug,
@@ -30,16 +38,32 @@ import {
 } from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
-  title, impressions, status, self_print, stl_r2_key, stl_filename, stl_size_bytes, stl_print_notes,
-  stl_submitted_at, contest_storage_path, contest_storage_filename, created_at, updated_at`;
+  title, impressions, status, self_print, uses_multiple_parts, part_count, stl_r2_key, stl_filename,
+  stl_size_bytes, stl_print_notes, stl_submitted_at, contest_storage_path, contest_storage_filename,
+  created_at, updated_at`;
 
-type ContestApplicationRow = Omit<ContestApplication, 'self_print'> & { self_print: number };
+type ContestApplicationRow = Omit<
+  ContestApplication,
+  'self_print' | 'uses_multiple_parts'
+> & { self_print: number; uses_multiple_parts: number };
 
 function mapContestApplicationRow(row: ContestApplicationRow): ContestApplication {
   return {
     ...row,
     self_print: row.self_print === 1,
+    uses_multiple_parts: row.uses_multiple_parts === 1,
   };
+}
+
+/** Max STL files allowed for an application at submit time. */
+export function contestApplicationStlFileLimit(app: Pick<
+  ContestApplication,
+  'uses_multiple_parts' | 'part_count'
+>): number {
+  if (app.uses_multiple_parts && app.part_count != null && app.part_count >= 2) {
+    return app.part_count;
+  }
+  return 1;
 }
 
 export interface ContestApplication {
@@ -53,6 +77,8 @@ export interface ContestApplication {
   impressions: string | null;
   status: 'approved' | 'withdrawn';
   self_print: boolean;
+  uses_multiple_parts: boolean;
+  part_count: number | null;
   stl_r2_key: string | null;
   stl_filename: string | null;
   stl_size_bytes: number | null;
@@ -77,14 +103,20 @@ export interface ContestApplicationReservationSummary {
   id: string;
   status: PrintReservation['status'];
   desired_date: string;
+  stl_filename: string | null;
   created_at: string;
 }
 
 export interface ContestApplicationWithDetails extends ContestApplication {
   members: ContestApplicationMember[];
   reservation: ContestApplicationReservationSummary | null;
+  stl_file_limit: number;
+  stl_extra_parts: ContestApplicationStlPart[];
   can_submit_stl: boolean;
   can_withdraw: boolean;
+  can_download_submitted_stl: boolean;
+  submitted_stl_at: string | null;
+  submitted_stl_filename: string | null;
 }
 
 export interface CreateContestApplicationInput {
@@ -98,6 +130,8 @@ export interface CreateContestApplicationInput {
   student_name?: string;
   members?: unknown;
   self_print?: boolean;
+  uses_multiple_parts?: boolean;
+  part_count?: number | null;
 }
 
 export interface PatchContestApplicationInput {
@@ -162,7 +196,7 @@ async function fetchLatestReservationForApplication(
 ): Promise<ContestApplicationReservationSummary | null> {
   const row = await db
     .prepare(
-      `SELECT id, status, desired_date, created_at
+      `SELECT id, status, desired_date, stl_filename, created_at
        FROM print_reservations
        WHERE contest_application_id = ? AND source = 'contest'
        ORDER BY created_at DESC
@@ -216,23 +250,57 @@ async function hasBlockingReservationForWithdraw(
   return row != null;
 }
 
-function enrichApplication(
+function resolveSubmittedStlMeta(
+  app: ContestApplication,
+  reservation: ContestApplicationReservationSummary | null
+): {
+  can_download_submitted_stl: boolean;
+  submitted_stl_at: string | null;
+  submitted_stl_filename: string | null;
+} {
+  if (app.self_print && app.stl_submitted_at && app.stl_r2_key && app.stl_filename) {
+    return {
+      can_download_submitted_stl: true,
+      submitted_stl_at: app.stl_submitted_at,
+      submitted_stl_filename: app.stl_filename,
+    };
+  }
+  if (reservation?.stl_filename) {
+    return {
+      can_download_submitted_stl: true,
+      submitted_stl_at: reservation.created_at,
+      submitted_stl_filename: reservation.stl_filename,
+    };
+  }
+  return {
+    can_download_submitted_stl: false,
+    submitted_stl_at: null,
+    submitted_stl_filename: null,
+  };
+}
+
+async function enrichApplication(
+  db: D1Database,
   app: ContestApplication,
   members: ContestApplicationMember[],
   reservation: ContestApplicationReservationSummary | null,
   active: Reservation | null,
   canWithdraw: boolean
-): ContestApplicationWithDetails {
+): Promise<ContestApplicationWithDetails> {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
+  const activeBlocksSubmit = active != null && active.status !== 'printing';
+  const stlMeta = resolveSubmittedStlMeta(app, reservation);
+  const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
     ...app,
     members,
     reservation,
+    stl_file_limit: contestApplicationStlFileLimit(app),
+    stl_extra_parts: stlExtraParts,
     can_submit_stl:
-      app.status === 'approved' &&
-      !active &&
-      !selfPrintSubmitted,
+      app.status === 'approved' && !activeBlocksSubmit && !selfPrintSubmitted,
     can_withdraw: canWithdraw,
+    ...stlMeta,
   };
 }
 
@@ -329,13 +397,19 @@ export async function createContestApplication(
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const selfPrint = input.self_print ? 1 : 0;
+  const multiPart = parseContestMultiPartOptions(
+    Boolean(input.uses_multiple_parts),
+    input.part_count
+  );
+  const usesMultipleParts = multiPart.uses_multiple_parts ? 1 : 0;
 
   await db
     .prepare(
       `INSERT INTO contest_applications (
         id, user_id, schedule_type, homeroom, student_number, student_name,
-        title, impressions, status, self_print, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?)`
+        title, impressions, status, self_print, uses_multiple_parts, part_count,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -347,6 +421,8 @@ export async function createContestApplication(
       parsed.title,
       parsed.impressions,
       selfPrint,
+      usesMultipleParts,
+      multiPart.part_count,
       now,
       now
     )
@@ -364,6 +440,8 @@ export async function createContestApplication(
     impressions: parsed.impressions,
     status: 'approved',
     self_print: selfPrint === 1,
+    uses_multiple_parts: multiPart.uses_multiple_parts,
+    part_count: multiPart.part_count,
     stl_r2_key: null,
     stl_filename: null,
     stl_size_bytes: null,
@@ -381,7 +459,7 @@ export async function createContestApplication(
     entryAppUrl: entryUrl,
   });
 
-  return enrichApplication(application, members, null, null, true);
+  return await enrichApplication(db, application, members, null, null, true);
 }
 
 /** Lists the user's contest applications newest first. */
@@ -408,7 +486,9 @@ export async function listContestApplicationsForUser(
     const canWithdraw =
       app.status === 'approved' &&
       !(await hasBlockingReservationForWithdraw(db, app.id));
-    enriched.push(enrichApplication(app, members, reservation, active, canWithdraw));
+    enriched.push(
+      await enrichApplication(db, app, members, reservation, active, canWithdraw)
+    );
   }
   return enriched;
 }
@@ -438,7 +518,7 @@ export async function getContestApplicationForUser(
   const canWithdraw =
     app.status === 'approved' &&
     !(await hasBlockingReservationForWithdraw(db, app.id));
-  return enrichApplication(app, members, reservation, active, canWithdraw);
+  return await enrichApplication(db, app, members, reservation, active, canWithdraw);
 }
 
 /** Loads application for STL submit (must be approved and owned). */
@@ -531,7 +611,7 @@ export async function patchContestApplicationForUser(
   const canWithdraw =
     updated.status === 'approved' &&
     !(await hasBlockingReservationForWithdraw(db, applicationId));
-  return enrichApplication(updated, members, reservation, active, canWithdraw);
+  return await enrichApplication(db, updated, members, reservation, active, canWithdraw);
 }
 
 /** Records STL submission for self-print applications (no print reservation). */
@@ -658,6 +738,7 @@ async function purgeContestApplication(
     throw new Error('この参加申請は削除できません');
   }
   await removeAllContestReservationsForApplication(env, db, app.id);
+  await cleanupContestApplicationStlPartsFiles(env, db, app.id);
   await cleanupContestApplicationSubmissionFiles(env, db, app);
   await db.prepare(`DELETE FROM contest_applications WHERE id = ?`).bind(app.id).run();
 }
@@ -795,8 +876,16 @@ async function enrichContestApplicationAdminRow(
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' && !(await hasBlockingReservationForWithdraw(db, app.id));
+  const enriched = await enrichApplication(
+    db,
+    app,
+    members,
+    reservation,
+    active,
+    canWithdraw
+  );
   return {
-    ...enrichApplication(app, members, reservation, active, canWithdraw),
+    ...enriched,
     applicant_email,
     submission_status: computeContestAdminSubmissionStatus(app, reservation),
     reservations,
@@ -895,4 +984,30 @@ export async function listContestApplicationsAdmin(
     enriched.push(await enrichContestApplicationAdminRow(db, raw));
   }
   return enriched;
+}
+
+/** Resolves the user's submitted STL on an application for secure download. */
+export async function getContestApplicationSubmittedStl(
+  db: D1Database,
+  userId: string,
+  applicationId: string
+): Promise<{ r2_key: string; filename: string } | null> {
+  const app = await getApplicationRow(db, applicationId);
+  if (!app || app.user_id !== userId || app.status !== 'approved') {
+    return null;
+  }
+  if (app.self_print && app.stl_r2_key && app.stl_filename) {
+    return { r2_key: app.stl_r2_key, filename: app.stl_filename };
+  }
+  const row = await db
+    .prepare(
+      `SELECT stl_r2_key, stl_filename FROM print_reservations
+       WHERE contest_application_id = ? AND source = 'contest' AND stl_r2_key IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .bind(applicationId)
+    .first<{ stl_r2_key: string; stl_filename: string }>();
+  if (!row?.stl_r2_key || !row.stl_filename) return null;
+  return { r2_key: row.stl_r2_key, filename: row.stl_filename };
 }

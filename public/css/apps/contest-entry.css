@@ -57,13 +57,27 @@
   margin: 0 0 1rem;
 }
 
+.contest-existing-submission {
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.contest-submitted-at {
+  margin-top: 0.25rem;
+}
+
 .contest-readonly-calendar {
   pointer-events: none;
 }
 
 .contest-readonly-calendar .calendar-nav-btn,
 .contest-readonly-calendar .btn,
-.contest-readonly-calendar #go-today-btn {
+.contest-readonly-calendar #go-today-btn,
+.contest-readonly-calendar .calendar-grid-wrap,
+.contest-readonly-calendar .calendar-weekdays-row {
   pointer-events: auto;
 }
 
@@ -488,4 +502,143 @@
   font-size: 0.9375rem;
   line-height: 1.6;
   color: #422006;
+}
+
+/* STL 提出・印刷予約の進行オーバーレイ（シミュレーション依頼の審査オーバーレイと同系） */
+.print-flow-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.print-flow-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 22rem;
+  padding: 1.75rem 1.5rem;
+  border-radius: 0;
+  background: var(--color-bg, #fff);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.print-flow-overlay-text {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-text, #0f172a);
+}
+
+.print-flow-overlay-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.print-flow-spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid var(--color-border, #e2e8f0);
+  border-top-color: var(--color-primary, #f38020);
+  border-radius: 50%;
+  animation: print-flow-spin 0.75s linear infinite;
+}
+
+@keyframes print-flow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.contest-public-gallery {
+  margin-top: 1.5rem;
+}
+
+.contest-gallery-intro {
+  margin: -0.5rem 0 1rem;
+}
+
+.contest-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.contest-gallery-card {
+  border: 1px solid var(--border, #e5e7eb);
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--card-bg, #fff);
+}
+
+.contest-gallery-preview-wrap {
+  aspect-ratio: 4 / 3;
+  background: #0f172a;
+  position: relative;
+  overflow: hidden;
+}
+
+.contest-gallery-preview-host {
+  position: absolute;
+  inset: 0;
+}
+
+.contest-gallery-preview-host .cs-model3d-viewer {
+  position: absolute;
+  inset: 0;
+}
+
+.contest-gallery-preview-host .cs-model3d-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.contest-gallery-preview-host .cs-model3d-hint {
+  font-size: 0.65rem;
+  padding: 0.25rem 0.5rem;
+  bottom: 0;
+}
+
+.contest-gallery-preview-loading,
+.contest-gallery-preview-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.contest-gallery-card-body {
+  padding: 0.75rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.contest-gallery-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.35;
+}
+
+.contest-gallery-file-meta {
+  margin: 0;
+  word-break: break-all;
+}
+
+.contest-gallery-download {
+  align-self: flex-start;
+  margin-top: auto;
 }

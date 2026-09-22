@@ -21,6 +21,7 @@ import {
   simpleStorageUpload,
 } from '../storage/upload';
 import { getContestStorageGroupSlug } from './contest-app-settings';
+import { listContestApplicationStlParts } from './contest-stl-parts';
 
 export const CONTEST_STORAGE_ROOT_FOLDER = '.造形物コンテスト';
 export const CONTEST_STORAGE_SUBMISSIONS_FOLDER = '提出ファイル';
@@ -269,6 +270,29 @@ export async function resolveContestSubmissionFilename(
   }
 
   throw new Error('同名ファイルが多すぎます');
+}
+
+/** Deletes extra STL part files (part_index >= 2) for an application. */
+export async function cleanupContestApplicationStlPartsFiles(
+  env: Env,
+  db: D1Database,
+  applicationId: string
+): Promise<void> {
+  const parts = await listContestApplicationStlParts(db, applicationId);
+  for (const part of parts) {
+    try {
+      await env.FILES.delete(part.stl_r2_key);
+    } catch (err) {
+      console.error('contest withdraw: failed to delete extra stl part', part.id, err);
+    }
+    if (part.contest_storage_path) {
+      try {
+        await removeStorageFileIfExists(env, db, part.contest_storage_path);
+      } catch (err) {
+        console.error('contest withdraw: failed to delete extra part storage', part.id, err);
+      }
+    }
+  }
 }
 
 /** Deletes self-print upload R2 object and synced contest storage file for an application. */

@@ -80,6 +80,7 @@ import {
   deleteContestApplicationAsAdmin,
   patchContestApplicationForUser,
   withdrawContestApplicationForUser,
+  getContestApplicationSubmittedStl,
 } from "../../lib/contest/applications";
 import {
   listContestStaffMessagesForUser,
@@ -90,6 +91,10 @@ import {
   insertContestStaffMessage,
 } from "../../lib/contest/staff-messages";
 import { submitContestEntry } from "../../lib/contest/submit-entry";
+import {
+  listContestPublicGallery,
+  resolveContestGalleryModelFile,
+} from "../../lib/contest/public-gallery";
 import {
   getContestStorageGroupSlug,
   setContestStorageGroupSlug,
@@ -636,6 +641,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[0] === "applications" ||
       segments[0] === "staff-messages" ||
       segments[0] === "entries" ||
+      segments[0] === "gallery" ||
       segments[0] === "reservations" ||
       segments[0] === "printers" ||
       segments[0] === "print-videos" ||
@@ -689,6 +695,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: true });
     }
 
+    // GET /api/contest/gallery
+    if (method === "GET" && segments[0] === "gallery" && segments.length === 1) {
+      const entries = await listContestPublicGallery(db);
+      return json({ entries });
+    }
+
+    // GET /api/contest/gallery/:id/model
+    if (
+      method === "GET" &&
+      segments[0] === "gallery" &&
+      segments.length === 3 &&
+      segments[2] === "model"
+    ) {
+      const file = await resolveContestGalleryModelFile(db, segments[1]);
+      if (!file) {
+        return error("作品が見つかりません", 404);
+      }
+      try {
+        return await streamPrintFile(env.FILES, file.r2_key, file.filename);
+      } catch {
+        return error("ファイルが見つかりません", 404);
+      }
+    }
+
     // GET /api/contest/applications
     if (method === "GET" && segments[0] === "applications" && segments.length === 1) {
       const applications = await listContestApplicationsForUser(db, userId);
@@ -734,6 +764,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const message = err instanceof Error ? err.message : "参加申請に失敗しました";
         return error(message, 400);
       }
+    }
+
+    // GET /api/contest/applications/:id/stl
+    if (
+      method === "GET" &&
+      segments[0] === "applications" &&
+      segments.length === 3 &&
+      segments[2] === "stl"
+    ) {
+      const stl = await getContestApplicationSubmittedStl(db, userId, segments[1]);
+      if (!stl) return error("提出済みの STL が見つかりません", 404);
+      return streamPrintFile(env.FILES, stl.r2_key, stl.filename);
     }
 
     // GET /api/contest/applications/:id
@@ -1686,7 +1728,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // GET /api/3dprint/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
-      const reservations = await getAllReservations(db, 'contest');
+      const userId = url.searchParams.get("user_id")?.trim() || null;
+      const reservations = await getAllReservations(
+        db,
+        "contest",
+        userId ? { userId } : undefined
+      );
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({

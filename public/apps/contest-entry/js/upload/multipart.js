@@ -2,7 +2,8 @@
 import { apiRequest, apiUpload } from '../api.js';
 
 /** Uploads a large file via R2 multipart upload. */
-export async function multipart(file, initiate, onProgress) {
+export async function multipart(file, initiate, onProgress, onStatus) {
+  onStatus?.('処理中');
   const { sessionId, partSize, totalParts } = initiate;
   let sessionToAbort = sessionId;
 

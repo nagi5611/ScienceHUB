@@ -23,6 +23,17 @@ import {
   initPrintVideoFolderPicker,
   openPrintVideoFolderPicker,
 } from './print-video-folder-picker.js';
+import {
+  buildAdminForceReservationPayload,
+  isAdminForcePrintCreateMode,
+  setAdminForcePrintCreateMode,
+} from '../../../js/admin-force-print-reservation-form.js';
+import {
+  bindAdminCalendarUserFilter,
+  filterReservationsForCalendar,
+  getCalendarUserFilterQuery,
+  updateAdminCalendarUserFilterOptions,
+} from '../../../js/admin-calendar-user-filter.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 let contestStorageGroupSlug = '';
@@ -92,13 +103,51 @@ let currentMonth;
 let activePanel = 'dashboard';
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 let draggedReservationId = null;
+let calendarRescheduleBusy = false;
 let emailComposeSettings = {
   email_configured: false,
 };
 
+/** Shows or hides loading UI while a drag-reschedule API call is in flight. */
+function setCalendarRescheduleBusy(busy, reservationId = null) {
+  calendarRescheduleBusy = busy;
+  const wrap = document.querySelector('#admin-calendar-section .calendar-grid-wrap');
+  if (!wrap) return;
+
+  let overlay = wrap.querySelector('.calendar-reschedule-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'calendar-reschedule-overlay hidden';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.innerHTML =
+      '<span class="calendar-reschedule-spinner" aria-hidden="true"></span><span class="calendar-reschedule-label">反映中…</span>';
+    wrap.appendChild(overlay);
+  }
+
+  wrap.classList.toggle('is-rescheduling', busy);
+  wrap.setAttribute('aria-busy', busy ? 'true' : 'false');
+  overlay.classList.toggle('hidden', !busy);
+
+  document.querySelectorAll('.admin-calendar-slot.is-rescheduling-pending').forEach((el) => {
+    el.classList.remove('is-rescheduling-pending');
+  });
+  if (busy && reservationId) {
+    const slot = wrap.querySelector(
+      `.admin-calendar-slot[data-reservation-id="${CSS.escape(reservationId)}"]`
+    );
+    slot?.classList.add('is-rescheduling-pending');
+  }
+}
+
 /** Returns whether the compact mobile admin layout is active. */
 function isMobileAdminView() {
   return MOBILE_ADMIN_MQ.matches;
+}
+
+/** Reservations visible on the calendar (user filter applied). */
+function getCalendarFilteredReservations() {
+  return filterReservationsForCalendar(allReservations);
 }
 
 /** Truncates a title for a narrow calendar cell. */
@@ -170,6 +219,12 @@ async function init() {
   document.getElementById('admin-go-today-btn')?.addEventListener('click', goToAdminToday);
   document.getElementById('admin-calendar-month-label-mobile')?.addEventListener('click', () => {
     document.getElementById('admin-calendar-month-chips')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  bindAdminCalendarUserFilter({
+    onChange: () => {
+      void renderAdminCalendar();
+      renderTodayTasks();
+    },
   });
 
   document.querySelectorAll('.admin-menu-item[data-panel]').forEach((btn) => {
@@ -279,6 +334,7 @@ async function refreshAll() {
     for (const app of contestApplications) {
       contestApplicationById.set(app.id, app);
     }
+    updateAdminCalendarUserFilterOptions(allReservations);
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
@@ -399,7 +455,7 @@ async function renderAdminCalendar() {
   renderAdminWeekdayHeaders();
 
   const reservationsByDate = {};
-  for (const r of allReservations) {
+  for (const r of getCalendarFilteredReservations()) {
     const d = r.desired_date;
     if (d.startsWith(`${currentYear}-${String(currentMonth).padStart(2, '0')}`)) {
       if (!reservationsByDate[d]) reservationsByDate[d] = [];
@@ -450,10 +506,14 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
       cell.classList.add('disabled');
     } else if (isFull) {
       cell.classList.add('full');
+      cell.addEventListener('click', () => alert('この日はもう満杯です'));
+    } else {
+      cell.classList.add('clickable');
+      cell.addEventListener('click', () => openAdminFormForDate(dateStr));
     }
 
     cell.addEventListener('dragover', (e) => {
-      if (!draggedReservationId || dateStr < todayStr) return;
+      if (calendarRescheduleBusy || !draggedReservationId || dateStr < todayStr) return;
       e.preventDefault();
       cell.classList.add('drop-target');
     });
@@ -463,7 +523,12 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
       cell.classList.remove('drop-target');
       const id = e.dataTransfer.getData('text/plain') || draggedReservationId;
       draggedReservationId = null;
-      if (!id || dateStr < todayStr) return;
+      if (!id || dateStr < todayStr || calendarRescheduleBusy) return;
+
+      const reservation = allReservations.find((r) => r.id === id);
+      if (reservation?.desired_date === dateStr) return;
+
+      setCalendarRescheduleBusy(true, id);
       try {
         await apiRequest(`admin/reservations/${id}/reschedule`, {
           method: 'PATCH',
@@ -472,6 +537,8 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
         await refreshAll();
       } catch (err) {
         alert(err.message);
+      } finally {
+        setCalendarRescheduleBusy(false);
       }
     });
   }
@@ -509,14 +576,21 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
         slot.title = [r.title, staffLabel].filter(Boolean).join(' / ');
       }
 
-      slot.draggable = true;
+      slot.dataset.reservationId = r.id;
+      slot.draggable = !calendarRescheduleBusy;
       slot.addEventListener('dragstart', (e) => {
+        if (calendarRescheduleBusy) {
+          e.preventDefault();
+          return;
+        }
         draggedReservationId = r.id;
         e.dataTransfer.setData('text/plain', r.id);
         e.dataTransfer.effectAllowed = 'move';
+        slot.classList.add('is-dragging');
         e.stopPropagation();
       });
       slot.addEventListener('dragend', () => {
+        slot.classList.remove('is-dragging');
         draggedReservationId = null;
         document.querySelectorAll('#calendar-grid .calendar-day.drop-target').forEach((el) => {
           el.classList.remove('drop-target');
@@ -628,7 +702,9 @@ function setupAdminFormModal() {
     alertBox.innerHTML = '';
 
     const isEdit = adminFormMode === 'edit';
-    if (!isEdit && !adminUploadResult) {
+    const isForceCreate = !isEdit && isAdminForcePrintCreateMode();
+
+    if (!isEdit && !isForceCreate && !adminUploadResult) {
       showAdminFormAlert('ファイルをアップロードしてください', 'error');
       return;
     }
@@ -645,26 +721,35 @@ function setupAdminFormModal() {
       return;
     }
 
-    if (purpose === 'other' && !formData.get('purpose_other')?.trim()) {
-      showAdminFormAlert('目的が「その他」の場合は内容を入力してください', 'error');
-      return;
-    }
+    if (!isForceCreate) {
+      if (purpose === 'other' && !formData.get('purpose_other')?.trim()) {
+        showAdminFormAlert('目的が「その他」の場合は内容を入力してください', 'error');
+        return;
+      }
 
-    if (!reservationHomeroomField.isValid()) {
+      if (!reservationHomeroomField.isValid()) {
+        showAdminFormAlert('ホームルームは 101〜109、201〜209、301〜309 から選択してください', 'error');
+        return;
+      }
+
+      if (!formData.get('printer_id')) {
+        showAdminFormAlert('印刷機種を選択してください', 'error');
+        return;
+      }
+    } else if (
+      reservationHomeroomField.getValue().trim() &&
+      !reservationHomeroomField.isValid()
+    ) {
       showAdminFormAlert('ホームルームは 101〜109、201〜209、301〜309 から選択してください', 'error');
       return;
     }
 
-    if (!formData.get('printer_id')) {
-      showAdminFormAlert('印刷機種を選択してください', 'error');
-      return;
-    }
-
     const excludeParam = isEdit ? `&exclude_reservation_id=${currentReservationId}` : '';
+    const scaleQuery = printScale ? `&scale=${printScale}` : '';
 
     try {
       const availability = await apiRequest(
-        `admin/calendar/availability?date=${desiredDate}&scale=${printScale}${excludeParam}`
+        `admin/calendar/availability?date=${desiredDate}${scaleQuery}${excludeParam}`
       );
 
       if (availability.isFull) {
@@ -672,7 +757,12 @@ function setupAdminFormModal() {
         return;
       }
 
-      if (!availability.canBook) {
+      if (!isForceCreate && !availability.canBook) {
+        showAdminFormAlert('選択した印刷規模はこの日付では予約できません', 'error');
+        return;
+      }
+
+      if (isForceCreate && printScale && !availability.canBook) {
         showAdminFormAlert('選択した印刷規模はこの日付では予約できません', 'error');
         return;
       }
@@ -706,6 +796,18 @@ function setupAdminFormModal() {
           body: JSON.stringify(payload),
         });
         showAdminFormAlert('予約内容を修正しました。再承認が必要です', 'success');
+      } else if (isForceCreate) {
+        const forcePayload = buildAdminForceReservationPayload({
+          formData,
+          desiredDate,
+          homeroomValue: reservationHomeroomField.getValue(),
+          uploadResult: adminUploadResult,
+        });
+        await apiRequest('admin/reservations/force', {
+          method: 'POST',
+          body: JSON.stringify(forcePayload),
+        });
+        showAdminFormAlert('仮予約をカレンダーに追加しました', 'success');
       } else {
         if (!adminUploadResult) {
           showAdminFormAlert('ファイルをアップロードしてください', 'error');
@@ -754,6 +856,7 @@ function setupAdminFormModal() {
 
 /** Restores admin form modal UI to create mode defaults. */
 function resetAdminFormUi() {
+  setAdminForcePrintCreateMode(false);
   document.getElementById('admin-selected-date-display').classList.remove('hidden');
   document.getElementById('admin-desired-date-group').classList.add('hidden');
   document.getElementById('admin-submit-btn').textContent = '予約を追加';
@@ -791,8 +894,9 @@ async function openAdminFormForDate(dateStr) {
 
   document.getElementById('admin-desired-date').value = dateStr;
   document.getElementById('admin-selected-date-display').textContent = `希望印刷日: ${formatDateJa(dateStr)}`;
-  document.getElementById('admin-form-modal-title').textContent = `${formatDateJa(dateStr)} の新規予約`;
+  document.getElementById('admin-form-modal-title').textContent = `${formatDateJa(dateStr)} の新規予約（管理者）`;
   document.getElementById('admin-form-alert').innerHTML = '';
+  setAdminForcePrintCreateMode(true);
 
   setAdminScaleOptions(availability.availableScales);
 
@@ -815,6 +919,7 @@ async function openAdminFormForDate(dateStr) {
 /** Opens the admin form to edit an existing reservation. */
 async function openAdminEditForm(r) {
   adminFormMode = 'edit';
+  setAdminForcePrintCreateMode(false);
   adminUploadResult = null;
   currentReservationId = r.id;
 
@@ -1000,12 +1105,15 @@ function adminReservationTableHtml(rows, columns) {
 function renderTodayTasks() {
   const mount = document.getElementById('today-tasks-mount');
   const today = getTodayJst();
-  const tasks = allReservations
+  const tasks = getCalendarFilteredReservations()
     .filter((r) => r.desired_date === today)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   if (!tasks.length) {
-    mount.innerHTML = '<p class="hint admin-list-empty">本日の印刷予約はありません</p>';
+    const filterActive = getCalendarUserFilterQuery().trim();
+    mount.innerHTML = filterActive
+      ? '<p class="hint admin-list-empty">絞り込みに一致する本日の印刷予約はありません</p>'
+      : '<p class="hint admin-list-empty">本日の印刷予約はありません</p>';
     return;
   }
 
@@ -1169,6 +1277,11 @@ function renderContestApplicationDetailHtml(app) {
       <div class="detail-row"><span class="detail-label">タイトル</span><span>${escapeHtml(app.title)}</span></div>
       <div class="detail-row"><span class="detail-label">在籍区分</span><span>${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)}</span></div>
       <div class="detail-row"><span class="detail-label">代表者</span><span>${escapeHtml(app.homeroom)} ${escapeHtml(String(app.student_number))}番 ${escapeHtml(app.student_name)}</span></div>
+      ${
+        app.uses_multiple_parts && app.part_count
+          ? `<div class="detail-row"><span class="detail-label">パーツ数</span><span>${escapeHtml(String(app.part_count))}（複数 STL）</span></div>`
+          : ''
+      }
       <div class="detail-row"><span class="detail-label">申請者</span><span>${escapeHtml(app.applicant_email ?? '—')}</span></div>
       <div class="detail-row"><span class="detail-label">提出ステータス</span><span>${formatContestSubmissionStatusBadge(app)}</span></div>
       <div class="detail-row"><span class="detail-label">申請日時</span><span>${escapeHtml(app.created_at)}</span></div>
