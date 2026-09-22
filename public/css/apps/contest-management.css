@@ -67,12 +67,65 @@
 }
 
 .contest-admin-members-compact {
+  position: relative;
   display: inline-block;
   max-width: 10rem;
-  overflow: hidden;
+  overflow: visible;
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+  cursor: help;
+  border-bottom: 1px dotted #9ca3af;
+}
+
+.contest-admin-members-tooltip {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 20;
+  min-width: 12rem;
+  max-width: 22rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  white-space: normal;
+  pointer-events: none;
+}
+
+.contest-admin-members-compact:hover .contest-admin-members-tooltip,
+.contest-admin-members-compact:focus-visible .contest-admin-members-tooltip {
+  display: block;
+}
+
+.contest-admin-app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.contest-detail-subheading {
+  margin: 1.25rem 0 0.65rem;
+  font-size: 1rem;
+}
+
+.contest-detail-members {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.contest-detail-impressions {
+  white-space: pre-wrap;
+}
+
+.detail-row-block {
+  align-items: flex-start;
 }
 
 .contest-admin-status-cell {

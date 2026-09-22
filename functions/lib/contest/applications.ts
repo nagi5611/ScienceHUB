@@ -169,6 +169,33 @@ async function fetchLatestReservationForApplication(
   return row ?? null;
 }
 
+export interface ContestApplicationAdminReservationRow {
+  id: string;
+  status: PrintReservation['status'];
+  desired_date: string;
+  stl_filename: string;
+  stl_size_bytes: number;
+  print_scale: PrintReservation['print_scale'];
+  print_notes: string | null;
+  created_at: string;
+}
+
+async function fetchContestReservationsForApplicationAdmin(
+  db: D1Database,
+  applicationId: string
+): Promise<ContestApplicationAdminReservationRow[]> {
+  const result = await db
+    .prepare(
+      `SELECT id, status, desired_date, stl_filename, stl_size_bytes, print_scale, print_notes, created_at
+       FROM print_reservations
+       WHERE contest_application_id = ? AND source = 'contest'
+       ORDER BY created_at DESC`
+    )
+    .bind(applicationId)
+    .all<ContestApplicationAdminReservationRow>();
+  return result.results ?? [];
+}
+
 async function hasBlockingReservationForWithdraw(
   db: D1Database,
   applicationId: string
@@ -670,6 +697,7 @@ export async function deleteContestApplicationAsAdmin(
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
   applicant_email: string | null;
   submission_status: ContestAdminSubmissionStatus;
+  reservations: ContestApplicationAdminReservationRow[];
 }
 
 export interface ContestAdminSubmissionStatus {
@@ -745,6 +773,7 @@ async function enrichContestApplicationAdminRow(
   const app = mapContestApplicationRow(appFields);
   const members = await fetchMembersForApplication(db, app.id);
   const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservations = await fetchContestReservationsForApplicationAdmin(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' && !(await hasBlockingReservationForWithdraw(db, app.id));
@@ -752,6 +781,7 @@ async function enrichContestApplicationAdminRow(
     ...enrichApplication(app, members, reservation, active, canWithdraw),
     applicant_email,
     submission_status: computeContestAdminSubmissionStatus(app, reservation),
+    reservations,
   };
 }
 
