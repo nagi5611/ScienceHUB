@@ -97,7 +97,9 @@ export async function initContestPublicGallery() {
     renderGallery(entries);
   } catch (err) {
     const empty = document.getElementById('contest-gallery-empty');
-    empty?.classList.remove('hidden');
-    empty?.textContent = err.message || '作品一覧の読み込みに失敗しました';
+    if (empty) {
+      empty.classList.remove('hidden');
+      empty.textContent = err.message || '作品一覧の読み込みに失敗しました';
+    }
   }
 }
