@@ -347,6 +347,49 @@ textarea {
   margin-bottom: 1.5rem;
 }
 
+.admin-calendar-user-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.admin-calendar-user-filter--dashboard {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.admin-calendar-user-filter-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.admin-calendar-user-filter-input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  max-width: 28rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.admin-calendar-user-filter-status {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 640px) {
+  .admin-calendar-user-filter-input {
+    max-width: none;
+    width: 100%;
+  }
+}
+
 .calendar-header {
   display: flex;
   align-items: center;

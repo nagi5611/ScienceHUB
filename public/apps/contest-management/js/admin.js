@@ -23,6 +23,12 @@ import {
   initPrintVideoFolderPicker,
   openPrintVideoFolderPicker,
 } from './print-video-folder-picker.js';
+import {
+  bindAdminCalendarUserFilter,
+  filterReservationsForCalendar,
+  getCalendarUserFilterQuery,
+  updateAdminCalendarUserFilterOptions,
+} from '../../../js/admin-calendar-user-filter.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 let contestStorageGroupSlug = '';
@@ -101,6 +107,11 @@ function isMobileAdminView() {
   return MOBILE_ADMIN_MQ.matches;
 }
 
+/** Reservations visible on the calendar (user filter applied). */
+function getCalendarFilteredReservations() {
+  return filterReservationsForCalendar(allReservations);
+}
+
 /** Truncates a title for a narrow calendar cell. */
 function truncateForCell(text, maxLen = 6) {
   const trimmed = String(text).trim();
@@ -170,6 +181,12 @@ async function init() {
   document.getElementById('admin-go-today-btn')?.addEventListener('click', goToAdminToday);
   document.getElementById('admin-calendar-month-label-mobile')?.addEventListener('click', () => {
     document.getElementById('admin-calendar-month-chips')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  bindAdminCalendarUserFilter({
+    onChange: () => {
+      void renderAdminCalendar();
+      renderTodayTasks();
+    },
   });
 
   document.querySelectorAll('.admin-menu-item[data-panel]').forEach((btn) => {
@@ -279,6 +296,7 @@ async function refreshAll() {
     for (const app of contestApplications) {
       contestApplicationById.set(app.id, app);
     }
+    updateAdminCalendarUserFilterOptions(allReservations);
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
@@ -399,7 +417,7 @@ async function renderAdminCalendar() {
   renderAdminWeekdayHeaders();
 
   const reservationsByDate = {};
-  for (const r of allReservations) {
+  for (const r of getCalendarFilteredReservations()) {
     const d = r.desired_date;
     if (d.startsWith(`${currentYear}-${String(currentMonth).padStart(2, '0')}`)) {
       if (!reservationsByDate[d]) reservationsByDate[d] = [];
@@ -946,12 +964,15 @@ function adminReservationTableHtml(rows, columns) {
 function renderTodayTasks() {
   const mount = document.getElementById('today-tasks-mount');
   const today = getTodayJst();
-  const tasks = allReservations
+  const tasks = getCalendarFilteredReservations()
     .filter((r) => r.desired_date === today)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   if (!tasks.length) {
-    mount.innerHTML = '<p class="hint admin-list-empty">本日の印刷予約はありません</p>';
+    const filterActive = getCalendarUserFilterQuery().trim();
+    mount.innerHTML = filterActive
+      ? '<p class="hint admin-list-empty">絞り込みに一致する本日の印刷予約はありません</p>'
+      : '<p class="hint admin-list-empty">本日の印刷予約はありません</p>';
     return;
   }
 
