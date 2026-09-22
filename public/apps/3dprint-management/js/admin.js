@@ -24,6 +24,11 @@ import {
   openPrintVideoFolderPicker,
 } from './print-video-folder-picker.js';
 import {
+  buildAdminForceReservationPayload,
+  isAdminForcePrintCreateMode,
+  setAdminForcePrintCreateMode,
+} from '../../../js/admin-force-print-reservation-form.js';
+import {
   bindAdminCalendarUserFilter,
   filterReservationsForCalendar,
   getCalendarUserFilterQuery,
@@ -555,7 +560,9 @@ function setupAdminFormModal() {
     alertBox.innerHTML = '';
 
     const isEdit = adminFormMode === 'edit';
-    if (!isEdit && !adminUploadResult) {
+    const isForceCreate = !isEdit && isAdminForcePrintCreateMode();
+
+    if (!isEdit && !isForceCreate && !adminUploadResult) {
       showAdminFormAlert('ファイルをアップロードしてください', 'error');
       return;
     }
@@ -572,26 +579,35 @@ function setupAdminFormModal() {
       return;
     }
 
-    if (purpose === 'other' && !formData.get('purpose_other')?.trim()) {
-      showAdminFormAlert('目的が「その他」の場合は内容を入力してください', 'error');
-      return;
-    }
+    if (!isForceCreate) {
+      if (purpose === 'other' && !formData.get('purpose_other')?.trim()) {
+        showAdminFormAlert('目的が「その他」の場合は内容を入力してください', 'error');
+        return;
+      }
 
-    if (!reservationHomeroomField.isValid()) {
+      if (!reservationHomeroomField.isValid()) {
+        showAdminFormAlert('ホームルームは 101〜109、201〜209、301〜309 から選択してください', 'error');
+        return;
+      }
+
+      if (!formData.get('printer_id')) {
+        showAdminFormAlert('印刷機種を選択してください', 'error');
+        return;
+      }
+    } else if (
+      reservationHomeroomField.getValue().trim() &&
+      !reservationHomeroomField.isValid()
+    ) {
       showAdminFormAlert('ホームルームは 101〜109、201〜209、301〜309 から選択してください', 'error');
       return;
     }
 
-    if (!formData.get('printer_id')) {
-      showAdminFormAlert('印刷機種を選択してください', 'error');
-      return;
-    }
-
     const excludeParam = isEdit ? `&exclude_reservation_id=${currentReservationId}` : '';
+    const scaleQuery = printScale ? `&scale=${printScale}` : '';
 
     try {
       const availability = await apiRequest(
-        `admin/calendar/availability?date=${desiredDate}&scale=${printScale}${excludeParam}`
+        `admin/calendar/availability?date=${desiredDate}${scaleQuery}${excludeParam}`
       );
 
       if (availability.isFull) {
@@ -599,7 +615,12 @@ function setupAdminFormModal() {
         return;
       }
 
-      if (!availability.canBook) {
+      if (!isForceCreate && !availability.canBook) {
+        showAdminFormAlert('選択した印刷規模はこの日付では予約できません', 'error');
+        return;
+      }
+
+      if (isForceCreate && printScale && !availability.canBook) {
         showAdminFormAlert('選択した印刷規模はこの日付では予約できません', 'error');
         return;
       }
@@ -633,6 +654,18 @@ function setupAdminFormModal() {
           body: JSON.stringify(payload),
         });
         showAdminFormAlert('予約内容を修正しました。再承認が必要です', 'success');
+      } else if (isForceCreate) {
+        const forcePayload = buildAdminForceReservationPayload({
+          formData,
+          desiredDate,
+          homeroomValue: reservationHomeroomField.getValue(),
+          uploadResult: adminUploadResult,
+        });
+        await apiRequest('admin/reservations/force', {
+          method: 'POST',
+          body: JSON.stringify(forcePayload),
+        });
+        showAdminFormAlert('仮予約をカレンダーに追加しました', 'success');
       } else {
         if (!adminUploadResult) {
           showAdminFormAlert('ファイルをアップロードしてください', 'error');
@@ -681,6 +714,7 @@ function setupAdminFormModal() {
 
 /** Restores admin form modal UI to create mode defaults. */
 function resetAdminFormUi() {
+  setAdminForcePrintCreateMode(false);
   document.getElementById('admin-selected-date-display').classList.remove('hidden');
   document.getElementById('admin-desired-date-group').classList.add('hidden');
   document.getElementById('admin-submit-btn').textContent = '予約を追加';
@@ -718,8 +752,9 @@ async function openAdminFormForDate(dateStr) {
 
   document.getElementById('admin-desired-date').value = dateStr;
   document.getElementById('admin-selected-date-display').textContent = `希望印刷日: ${formatDateJa(dateStr)}`;
-  document.getElementById('admin-form-modal-title').textContent = `${formatDateJa(dateStr)} の新規予約`;
+  document.getElementById('admin-form-modal-title').textContent = `${formatDateJa(dateStr)} の新規予約（管理者）`;
   document.getElementById('admin-form-alert').innerHTML = '';
+  setAdminForcePrintCreateMode(true);
 
   setAdminScaleOptions(availability.availableScales);
 
@@ -742,6 +777,7 @@ async function openAdminFormForDate(dateStr) {
 /** Opens the admin form to edit an existing reservation. */
 async function openAdminEditForm(r) {
   adminFormMode = 'edit';
+  setAdminForcePrintCreateMode(false);
   adminUploadResult = null;
   currentReservationId = r.id;
 

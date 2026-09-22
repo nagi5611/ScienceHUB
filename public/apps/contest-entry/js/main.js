@@ -1,5 +1,6 @@
 // public/apps/contest-entry/js/main.js
 import { apiRequest } from './api.js';
+import { indexReservationOccurrencesByDate, getCalendarScalePrintLabel } from '../../../js/print-reservation-calendar-span.js';
 import { uploadPrintFile } from './upload/simple.js';
 import { HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
 import { checkAppAccess, initAuth } from './contest-auth.js';
@@ -47,11 +48,13 @@ function submittedStlDownloadUrl(applicationId) {
 let currentYear;
 let currentMonth;
 let calendarReservations = [];
+/** @type {Array<{ r2Key: string, filename: string, size: number }>} */
+let uploadResults = [];
+let stlFileLimit = 1;
 let calendarNavLock = false;
 let calendarLoading = false;
 let lastWheelMonthNavAt = 0;
 const WHEEL_MONTH_COOLDOWN_MS = 420;
-let uploadResult = null;
 let scheduleType = 'full_time';
 let applications = [];
 let selectedApplicationId = null;
@@ -236,6 +239,8 @@ function setApplicationFormMode(mode) {
     }
     scheduleFieldset?.classList.add('contest-fieldset-readonly');
     document.getElementById('self-print-field')?.classList.add('hidden');
+    document.getElementById('multi-part-field')?.classList.add('hidden');
+    document.getElementById('part-count-field')?.classList.add('hidden');
   } else {
     if (heading) heading.textContent = '参加申請';
     if (submitBtn) submitBtn.textContent = '参加申請する';
@@ -243,6 +248,9 @@ function setApplicationFormMode(mode) {
     scheduleFieldset?.classList.remove('contest-fieldset-readonly');
     document.getElementById('self-print-field')?.classList.remove('hidden');
     document.getElementById('self-print-readonly-hint')?.classList.add('hidden');
+    document.getElementById('multi-part-field')?.classList.remove('hidden');
+    document.getElementById('part-count-field')?.classList.add('hidden');
+    document.getElementById('multi-part-readonly-hint')?.classList.add('hidden');
   }
   document.querySelectorAll('#application-form input[name="schedule_type"]').forEach((input) => {
     input.disabled = mode === 'edit';
@@ -260,7 +268,24 @@ function resetApplicationFormForCreate() {
   form?.reset();
   const selfPrint = document.getElementById('self_print');
   if (selfPrint instanceof HTMLInputElement) selfPrint.checked = false;
+  const multiPart = document.getElementById('uses_multiple_parts');
+  if (multiPart instanceof HTMLInputElement) multiPart.checked = false;
+  const partCount = document.getElementById('part_count');
+  if (partCount instanceof HTMLInputElement) partCount.value = '';
+  updateMultiPartFieldVisibility();
   participants = [createEmptyParticipant()];
+}
+
+function updateMultiPartFieldVisibility() {
+  const checkbox = document.getElementById('uses_multiple_parts');
+  const partCountField = document.getElementById('part-count-field');
+  const checked = checkbox instanceof HTMLInputElement && checkbox.checked;
+  partCountField?.classList.toggle('hidden', !checked);
+}
+
+function isPartCountValid(raw) {
+  const n = Number(String(raw).trim());
+  return Number.isInteger(n) && n >= 2 && n <= 20;
 }
 
 function submissionStatusLabel(app) {
@@ -293,6 +318,9 @@ function renderApplicationsList() {
     const selfPrintLine = app.self_print
       ? '<p class="hint">印刷: 自分で行う（学校プリンター予約なし）</p>'
       : '';
+    const multiPartLine = app.uses_multiple_parts && app.part_count
+      ? `<p class="hint">パーツ数: ${escapeHtml(String(app.part_count))}（複数 STL）</p>`
+      : '';
     const submittedAtLine =
       app.can_download_submitted_stl && app.submitted_stl_at
         ? `<p class="hint contest-submitted-at">提出日時: ${escapeHtml(formatSubmittedAt(app.submitted_stl_at))}</p>`
@@ -319,6 +347,7 @@ function renderApplicationsList() {
         <p class="hint">${escapeHtml(SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)} · ${escapeHtml(app.homeroom)} · ${escapeHtml(app.student_name)}</p>
         ${memberLine}
         ${selfPrintLine}
+        ${multiPartLine}
         <p class="contest-application-submission">${escapeHtml(submissionStatusLabel(app))}</p>
         ${submittedAtLine}
       </div>
@@ -395,6 +424,18 @@ function openEditView(applicationId) {
     form.impressions.value = app.impressions ?? '';
   }
   document.getElementById('self-print-readonly-hint')?.classList.toggle('hidden', !app.self_print);
+  document.getElementById('multi-part-field')?.classList.add('hidden');
+  document.getElementById('part-count-field')?.classList.add('hidden');
+  const multiHint = document.getElementById('multi-part-readonly-hint');
+  if (multiHint) {
+    if (app.uses_multiple_parts && app.part_count) {
+      multiHint.textContent = `この作品は ${app.part_count} パーツ（複数 STL）で登録されています`;
+      multiHint.classList.remove('hidden');
+    } else {
+      multiHint.textContent = '';
+      multiHint.classList.add('hidden');
+    }
+  }
   participants = participantsFromApplication(app);
   showView('apply');
   renderParticipantList();
@@ -408,7 +449,19 @@ function openSubmitView(applicationId) {
     return;
   }
   selectedApplicationId = applicationId;
-  uploadResult = null;
+  uploadResults = [];
+  stlFileLimit = app.stl_file_limit ?? (app.uses_multiple_parts && app.part_count ? app.part_count : 1);
+  const fileInput = document.getElementById('file-input');
+  if (fileInput instanceof HTMLInputElement) {
+    fileInput.multiple = stlFileLimit > 1;
+  }
+  const uploadHint = document.getElementById('upload-file-hint');
+  if (uploadHint) {
+    uploadHint.textContent =
+      stlFileLimit > 1
+        ? `またはクリックしてファイルを選択（最大 ${stlFileLimit} 件・.stl .gcode .gco .nc）`
+        : 'またはクリックしてファイルを選択（.stl .gcode .gco .nc）';
+  }
   document.getElementById('selected-file-name').textContent = '';
   document.getElementById('upload-progress')?.classList.add('hidden');
   document.getElementById('upload-status').textContent = '';
@@ -463,13 +516,47 @@ function updateApplicationSubmitState() {
     (applicationFormMode === 'edit' || participants.every((row) => isParticipantRowValid(row))) &&
     rowsToValidate.every((row) => isParticipantRowValid(row));
 
-  btn.disabled = !(participantsOk && titleOk);
+  let multiPartOk = true;
+  if (applicationFormMode === 'create') {
+    const usesMulti = form.querySelector('#uses_multiple_parts')?.checked === true;
+    if (usesMulti) {
+      multiPartOk = isPartCountValid(formData.get('part_count'));
+    }
+  }
+
+  btn.disabled = !(participantsOk && titleOk && multiPartOk);
+}
+
+function getSelectedSubmitApplication() {
+  return applications.find((a) => a.id === selectedApplicationId) ?? null;
+}
+
+function updateSubmitButtonLabel(btn, app) {
+  const uploaded = uploadResults.length;
+  const limit = stlFileLimit;
+  if (!app) {
+    btn.textContent = '提出する';
+    return;
+  }
+  if (app.self_print) {
+    btn.textContent =
+      uploaded >= limit
+        ? `STL を提出する（${limit} 件）`
+        : `STL を提出する（${uploaded} / ${limit} 件）`;
+    return;
+  }
+  btn.textContent =
+    uploaded >= limit
+      ? `印刷予約する（${limit} パーツ）`
+      : `印刷予約（${uploaded} / ${limit} 件の STL）`;
 }
 
 function updateSubmitState() {
   const btn = document.getElementById('submit-btn');
   if (!btn) return;
-  btn.disabled = !uploadResult?.r2Key || !selectedApplicationId;
+  const countOk = uploadResults.length === stlFileLimit;
+  btn.disabled = !countOk || !selectedApplicationId;
+  updateSubmitButtonLabel(btn, getSelectedSubmitApplication());
 }
 
 async function handleApplicationSubmit(e) {
@@ -508,6 +595,13 @@ async function handleApplicationSubmit(e) {
       });
       showToast('参加申請を更新しました', 'success');
     } else {
+      const usesMultipleParts = form.querySelector('#uses_multiple_parts')?.checked === true;
+      const partCountRaw = String(formData.get('part_count') ?? '').trim();
+      if (usesMultipleParts && !isPartCountValid(partCountRaw)) {
+        showToast('パーツ数は2〜20の整数で入力してください', 'error');
+        btn.disabled = false;
+        return;
+      }
       await apiRequest('applications', {
         method: 'POST',
         body: JSON.stringify({
@@ -516,6 +610,8 @@ async function handleApplicationSubmit(e) {
           impressions: String(formData.get('impressions') ?? '').trim() || null,
           participants: payloadParticipants,
           self_print: form.querySelector('#self_print')?.checked === true,
+          uses_multiple_parts: usesMultipleParts,
+          part_count: usesMultipleParts ? Number(partCountRaw) : null,
         }),
       });
       persistApplicationDraft();
@@ -706,11 +802,13 @@ function renderCalendar() {
   if (!grid) return;
   grid.innerHTML = '';
 
-  const byDate = {};
-  for (const r of calendarReservations) {
-    if (!byDate[r.desired_date]) byDate[r.desired_date] = [];
-    byDate[r.desired_date].push(r);
-  }
+  const monthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+  const byDate = indexReservationOccurrencesByDate(
+    calendarReservations.filter((r) => {
+      const end = r.calendar_end_date || r.desired_date;
+      return r.desired_date.slice(0, 7) <= monthPrefix && end.slice(0, 7) >= monthPrefix;
+    })
+  );
 
   const firstDay = new Date(currentYear, currentMonth - 1, 1);
   const lastDay = new Date(currentYear, currentMonth, 0).getDate();
@@ -746,18 +844,26 @@ function createDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   num.textContent = dayNum;
   cell.appendChild(num);
 
-  const dayRes = dateStr && byDate[dateStr] ? byDate[dateStr] : [];
-  if (dayRes.length) {
+  const dayEntries = dateStr && byDate[dateStr] ? byDate[dateStr] : [];
+  if (dayEntries.length) {
     const slotsWrap = document.createElement('div');
     slotsWrap.className = 'calendar-slots';
-    for (const r of dayRes) {
+    for (const { reservation: r, occurrence } of dayEntries) {
       const slot = document.createElement('div');
       const statusClass = CALENDAR_STATUSES.includes(r.status) ? r.status : 'applied';
-      slot.className = `calendar-slot calendar-slot--readonly status-${statusClass}`;
+      slot.className = `calendar-slot calendar-slot--readonly status-${statusClass} ${occurrence.printScale}`;
+      slot.classList.add(`calendar-slot-segment-${occurrence.segment}`);
+      if (occurrence.segment !== 'start' && occurrence.segment !== 'single') {
+        slot.classList.add('calendar-slot-span-continue');
+      }
       const statusLabel = STATUS_LABELS[statusClass] ?? statusClass;
-      const label = `${statusLabel} ${truncateForCell(r.title ?? '', 4)}`;
+      const scaleLabel = getCalendarScalePrintLabel(occurrence.partCount);
+      const primary =
+        occurrence.displayLabel ||
+        (scaleLabel && occurrence.segment === 'start' ? scaleLabel : r.title ?? '');
+      const label = `${statusLabel} ${truncateForCell(primary, 4)}`;
       slot.innerHTML = `<span class="calendar-slot-compact-label">${escapeHtml(label)}</span>`;
-      slot.title = `${statusLabel} — ${r.title ?? ''}`;
+      slot.title = `${statusLabel} — ${primary || r.title || ''}`;
       slotsWrap.appendChild(slot);
     }
     cell.appendChild(slotsWrap);
@@ -775,14 +881,19 @@ function setupUploadZone() {
   const statusEl = document.getElementById('upload-status');
   if (!zone || !input) return;
 
-  const handleFile = async (file) => {
-    if (!file) return;
-    uploadResult = null;
+  const handleFiles = async (fileList) => {
+    const files = Array.from(fileList ?? []).slice(0, stlFileLimit);
+    if (!files.length) return;
+    if (files.length > stlFileLimit) {
+      showToast(`ファイルは最大 ${stlFileLimit} 件まで選択できます`, 'error');
+      return;
+    }
+    uploadResults = [];
     updateSubmitState();
-    fileNameEl.textContent = file.name;
     progress.classList.remove('hidden');
     progressBar.style.width = '0%';
-    statusEl.textContent = '';
+    statusEl.textContent = 'アップロード中…';
+    fileNameEl.textContent = '';
 
     const overlayHints = {
       認証中: 'アップロードの準備をしています',
@@ -791,30 +902,50 @@ function setupUploadZone() {
 
     try {
       setPrintFlowOverlay(true, '認証中…', overlayHints['認証中']);
-      uploadResult = await uploadPrintFile(
-        file,
-        (pct) => {
-          progressBar.style.width = `${pct}%`;
-        },
-        (stage) => {
-          const hint = overlayHints[stage] ?? '';
-          setPrintFlowOverlay(true, `${stage}…`, hint);
-          statusEl.textContent = `${stage}…`;
-        }
-      );
-      statusEl.textContent = 'アップロード完了';
+      const uploaded = [];
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const label = files.length > 1 ? `（${i + 1}/${files.length}）` : '';
+        statusEl.textContent = `アップロード中…${label}`;
+        const result = await uploadPrintFile(
+          file,
+          (pct) => {
+            const overall = ((i + pct / 100) / files.length) * 100;
+            progressBar.style.width = `${overall}%`;
+          },
+          (stage) => {
+            const hint = overlayHints[stage] ?? '';
+            setPrintFlowOverlay(true, `${stage}…`, hint);
+            statusEl.textContent = `${stage}…${label}`;
+          }
+        );
+        uploaded.push({
+          r2Key: result.r2Key,
+          filename: result.filename,
+          size: result.size,
+        });
+      }
+      uploadResults = uploaded;
+      fileNameEl.textContent = uploaded.map((u) => u.filename).join('、 ');
+      progressBar.style.width = '100%';
+      statusEl.textContent =
+        stlFileLimit > 1
+          ? `${uploaded.length} / ${stlFileLimit} 件アップロード完了`
+          : 'アップロード完了';
       updateSubmitState();
     } catch (err) {
+      uploadResults = [];
       fileNameEl.textContent = '';
       statusEl.textContent = err.message || 'アップロードに失敗しました';
       progress.classList.add('hidden');
+      updateSubmitState();
     } finally {
       setPrintFlowOverlay(false);
     }
   };
 
   zone.addEventListener('click', () => input.click());
-  input.addEventListener('change', () => handleFile(input.files?.[0]));
+  input.addEventListener('change', () => handleFiles(input.files));
   zone.addEventListener('dragover', (e) => {
     e.preventDefault();
     zone.classList.add('dragover');
@@ -823,8 +954,7 @@ function setupUploadZone() {
   zone.addEventListener('drop', (e) => {
     e.preventDefault();
     zone.classList.remove('dragover');
-    const file = e.dataTransfer?.files?.[0];
-    if (file) handleFile(file);
+    if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
   });
 }
 
@@ -832,8 +962,13 @@ async function handleStlSubmit(e) {
   e.preventDefault();
   const btn = document.getElementById('submit-btn');
   const form = document.getElementById('submit-form');
-  if (!uploadResult?.r2Key || !selectedApplicationId) {
-    showToast('ファイルをアップロードしてください', 'error');
+  if (uploadResults.length !== stlFileLimit || !selectedApplicationId) {
+    showToast(
+      stlFileLimit > 1
+        ? `STL ファイルを ${stlFileLimit} 件アップロードしてください`
+        : 'ファイルをアップロードしてください',
+      'error'
+    );
     return;
   }
 
@@ -843,6 +978,23 @@ async function handleStlSubmit(e) {
 
   btn.disabled = true;
   try {
+    const payload =
+      uploadResults.length === 1
+        ? {
+            contest_application_id: selectedApplicationId,
+            stl_r2_key: uploadResults[0].r2Key,
+            stl_filename: uploadResults[0].filename,
+            stl_size_bytes: uploadResults[0].size,
+          }
+        : {
+            contest_application_id: selectedApplicationId,
+            stl_files: uploadResults.map((u) => ({
+              stl_r2_key: u.r2Key,
+              stl_filename: u.filename,
+              stl_size_bytes: u.size,
+            })),
+          };
+
     setPrintFlowOverlay(true, '認証中…', '提出内容を確認しています');
     await new Promise((resolve) => {
       requestAnimationFrame(() => resolve());
@@ -862,10 +1014,7 @@ async function handleStlSubmit(e) {
     const data = await apiRequest('entries', {
       method: 'POST',
       body: JSON.stringify({
-        contest_application_id: selectedApplicationId,
-        stl_r2_key: uploadResult.r2Key,
-        stl_filename: uploadResult.filename,
-        stl_size_bytes: uploadResult.size,
+        ...payload,
         ...(printNotesRaw ? { print_notes: printNotesRaw } : {}),
       }),
     });
@@ -932,6 +1081,11 @@ async function init() {
     updateApplicationSubmitState();
   });
   applicationForm?.addEventListener('submit', handleApplicationSubmit);
+  document.getElementById('uses_multiple_parts')?.addEventListener('change', () => {
+    updateMultiPartFieldVisibility();
+    persistApplicationDraft();
+    updateApplicationSubmitState();
+  });
 
   document.getElementById('submit-form')?.addEventListener('submit', handleStlSubmit);
 
@@ -953,6 +1107,7 @@ async function init() {
     }
   }
   updateScheduleTypeUi();
+  updateMultiPartFieldVisibility();
 
   try {
     await loadApplications();
