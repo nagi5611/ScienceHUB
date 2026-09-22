@@ -92,9 +92,42 @@ let currentMonth;
 let activePanel = 'dashboard';
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 let draggedReservationId = null;
+let calendarRescheduleBusy = false;
 let emailComposeSettings = {
   email_configured: false,
 };
+
+/** Shows or hides loading UI while a drag-reschedule API call is in flight. */
+function setCalendarRescheduleBusy(busy, reservationId = null) {
+  calendarRescheduleBusy = busy;
+  const wrap = document.querySelector('#admin-calendar-section .calendar-grid-wrap');
+  if (!wrap) return;
+
+  let overlay = wrap.querySelector('.calendar-reschedule-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'calendar-reschedule-overlay hidden';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.innerHTML =
+      '<span class="calendar-reschedule-spinner" aria-hidden="true"></span><span class="calendar-reschedule-label">反映中…</span>';
+    wrap.appendChild(overlay);
+  }
+
+  wrap.classList.toggle('is-rescheduling', busy);
+  wrap.setAttribute('aria-busy', busy ? 'true' : 'false');
+  overlay.classList.toggle('hidden', !busy);
+
+  document.querySelectorAll('.admin-calendar-slot.is-rescheduling-pending').forEach((el) => {
+    el.classList.remove('is-rescheduling-pending');
+  });
+  if (busy && reservationId) {
+    const slot = wrap.querySelector(
+      `.admin-calendar-slot[data-reservation-id="${CSS.escape(reservationId)}"]`
+    );
+    slot?.classList.add('is-rescheduling-pending');
+  }
+}
 
 /** Returns whether the compact mobile admin layout is active. */
 function isMobileAdminView() {
@@ -453,7 +486,7 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
     }
 
     cell.addEventListener('dragover', (e) => {
-      if (!draggedReservationId || dateStr < todayStr) return;
+      if (calendarRescheduleBusy || !draggedReservationId || dateStr < todayStr) return;
       e.preventDefault();
       cell.classList.add('drop-target');
     });
@@ -463,7 +496,12 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
       cell.classList.remove('drop-target');
       const id = e.dataTransfer.getData('text/plain') || draggedReservationId;
       draggedReservationId = null;
-      if (!id || dateStr < todayStr) return;
+      if (!id || dateStr < todayStr || calendarRescheduleBusy) return;
+
+      const reservation = allReservations.find((r) => r.id === id);
+      if (reservation?.desired_date === dateStr) return;
+
+      setCalendarRescheduleBusy(true, id);
       try {
         await apiRequest(`admin/reservations/${id}/reschedule`, {
           method: 'PATCH',
@@ -472,6 +510,8 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
         await refreshAll();
       } catch (err) {
         alert(err.message);
+      } finally {
+        setCalendarRescheduleBusy(false);
       }
     });
   }
@@ -509,14 +549,21 @@ function createAdminDayCell(dayNum, otherMonth, reservationsByDate, todayStr, da
         slot.title = [r.title, staffLabel].filter(Boolean).join(' / ');
       }
 
-      slot.draggable = true;
+      slot.dataset.reservationId = r.id;
+      slot.draggable = !calendarRescheduleBusy;
       slot.addEventListener('dragstart', (e) => {
+        if (calendarRescheduleBusy) {
+          e.preventDefault();
+          return;
+        }
         draggedReservationId = r.id;
         e.dataTransfer.setData('text/plain', r.id);
         e.dataTransfer.effectAllowed = 'move';
+        slot.classList.add('is-dragging');
         e.stopPropagation();
       });
       slot.addEventListener('dragend', () => {
+        slot.classList.remove('is-dragging');
         draggedReservationId = null;
         document.querySelectorAll('#calendar-grid .calendar-day.drop-target').forEach((el) => {
           el.classList.remove('drop-target');
