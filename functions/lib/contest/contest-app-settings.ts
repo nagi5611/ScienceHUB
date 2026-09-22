@@ -22,6 +22,26 @@ type GroupMemberAccessRow = {
   group_role_weight: number;
 };
 
+/** 指定グループの全メンバー user_id（依頼アプリの有効/無効は問わない） */
+export async function listGroupMemberUserIdsForGroupSlug(
+  db: D1Database,
+  groupSlug: string
+): Promise<Set<string>> {
+  const normalizedSlug = groupSlug.trim().toLowerCase();
+  const group = await db
+    .prepare(`SELECT id FROM hub_groups WHERE slug = ?`)
+    .bind(normalizedSlug)
+    .first<{ id: string }>();
+  if (!group) return new Set();
+
+  const result = await db
+    .prepare(`SELECT user_id FROM user_group_memberships WHERE group_id = ?`)
+    .bind(group.id)
+    .all<{ user_id: string }>();
+
+  return new Set((result.results ?? []).map((row) => row.user_id));
+}
+
 /** 指定グループで造形物コンテスト（依頼）アプリを使えるユーザー ID 一覧 */
 export async function listContestEntryUserIdsForGroup(
   db: D1Database,

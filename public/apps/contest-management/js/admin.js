@@ -1032,7 +1032,17 @@ function renderContestApplications() {
 
   if (!contestApplicationGroups.length) {
     mount.innerHTML =
-      '<p class="hint admin-list-empty">表示できるグループがありません（造形物コンテスト依頼アプリが有効なグループがありません）</p>';
+      '<p class="hint admin-list-empty">参加申請はまだありません</p>';
+    return;
+  }
+
+  const totalApplications = contestApplicationGroups.reduce(
+    (sum, group) => sum + (group.applications?.length ?? 0),
+    0
+  );
+  if (totalApplications === 0) {
+    mount.innerHTML =
+      '<p class="hint admin-list-empty">参加申請はまだありません</p>';
     return;
   }
 
