@@ -1115,6 +1115,11 @@ function renderContestApplicationDetailHtml(app) {
       <div class="detail-row"><span class="detail-label">タイトル</span><span>${escapeHtml(app.title)}</span></div>
       <div class="detail-row"><span class="detail-label">在籍区分</span><span>${escapeHtml(CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type)}</span></div>
       <div class="detail-row"><span class="detail-label">代表者</span><span>${escapeHtml(app.homeroom)} ${escapeHtml(String(app.student_number))}番 ${escapeHtml(app.student_name)}</span></div>
+      ${
+        app.uses_multiple_parts && app.part_count
+          ? `<div class="detail-row"><span class="detail-label">パーツ数</span><span>${escapeHtml(String(app.part_count))}（複数 STL）</span></div>`
+          : ''
+      }
       <div class="detail-row"><span class="detail-label">申請者</span><span>${escapeHtml(app.applicant_email ?? '—')}</span></div>
       <div class="detail-row"><span class="detail-label">提出ステータス</span><span>${formatContestSubmissionStatusBadge(app)}</span></div>
       <div class="detail-row"><span class="detail-label">申請日時</span><span>${escapeHtml(app.created_at)}</span></div>

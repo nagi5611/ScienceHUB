@@ -7,6 +7,29 @@ export const CONTEST_TITLE_MAX_LEN = 40;
 export const CONTEST_IMPRESSIONS_MAX_LEN = 8000;
 export const CONTEST_MEMBER_NAME_MAX_LEN = 50;
 export const CONTEST_STUDENT_NAME_MAX_LEN = 50;
+export const CONTEST_PART_COUNT_MIN = 2;
+export const CONTEST_PART_COUNT_MAX = 20;
+
+/** Validates multi-part options for a contest application. */
+export function parseContestMultiPartOptions(
+  usesMultipleParts: boolean,
+  partCountRaw: unknown
+): { uses_multiple_parts: boolean; part_count: number | null } {
+  if (!usesMultipleParts) {
+    return { uses_multiple_parts: false, part_count: null };
+  }
+  const partCount = Number(partCountRaw);
+  if (
+    !Number.isInteger(partCount) ||
+    partCount < CONTEST_PART_COUNT_MIN ||
+    partCount > CONTEST_PART_COUNT_MAX
+  ) {
+    throw new Error(
+      `パーツ数は${CONTEST_PART_COUNT_MIN}〜${CONTEST_PART_COUNT_MAX}の整数で入力してください`
+    );
+  }
+  return { uses_multiple_parts: true, part_count: partCount };
+}
 
 export interface ContestApplicationFieldsInput {
   schedule_type: ContestScheduleType;

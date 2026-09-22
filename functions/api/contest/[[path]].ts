@@ -680,6 +680,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         student_name?: string;
         members?: unknown;
         self_print?: boolean;
+        uses_multiple_parts?: boolean;
+        part_count?: number | null;
       }>();
       try {
         const application = await createContestApplication(env, request, userId, {
@@ -694,6 +696,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.student_name !== undefined ? String(body.student_name) : undefined,
           members: body.members,
           self_print: Boolean(body.self_print),
+          uses_multiple_parts: Boolean(body.uses_multiple_parts),
+          part_count: body.part_count ?? null,
         });
         return json({ application }, 201);
       } catch (err) {
@@ -753,18 +757,26 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
       const body = await request.json<{
         contest_application_id: string;
-        stl_r2_key: string;
-        stl_filename: string;
-        stl_size_bytes: number;
+        stl_r2_key?: string;
+        stl_filename?: string;
+        stl_size_bytes?: number;
+        stl_files?: Array<{
+          stl_r2_key: string;
+          stl_filename: string;
+          stl_size_bytes: number;
+        }>;
         print_notes?: string | null;
       }>();
 
       try {
         const result = await submitContestEntry(env, request, userId, {
           contest_application_id: String(body.contest_application_id ?? ""),
-          stl_r2_key: String(body.stl_r2_key ?? ""),
-          stl_filename: String(body.stl_filename ?? ""),
-          stl_size_bytes: Number(body.stl_size_bytes),
+          stl_r2_key: body.stl_r2_key !== undefined ? String(body.stl_r2_key) : undefined,
+          stl_filename:
+            body.stl_filename !== undefined ? String(body.stl_filename) : undefined,
+          stl_size_bytes:
+            body.stl_size_bytes !== undefined ? Number(body.stl_size_bytes) : undefined,
+          stl_files: body.stl_files,
           print_notes: body.print_notes ?? null,
         });
         if (result.self_print) {

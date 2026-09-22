@@ -99,6 +99,20 @@
             </div>
             <p class="hint hidden" id="self-print-readonly-hint">この作品は自己印刷で登録されています</p>
 
+            <div class="form-group" id="multi-part-field">
+              <label class="checkbox-label">
+                <input type="checkbox" id="uses_multiple_parts" name="uses_multiple_parts" value="1" />
+                複数個の物体を使用する
+              </label>
+              <p class="hint">1つの作品に複数のパーツ（STL）がある場合にチェックしてください</p>
+            </div>
+            <div class="form-group hidden" id="part-count-field">
+              <label for="part_count">パーツ数</label>
+              <input type="number" id="part_count" name="part_count" min="2" max="20" step="1" inputmode="numeric" placeholder="例: 3" />
+              <p class="hint">提出する STL ファイルの数（2〜20）</p>
+            </div>
+            <p class="hint hidden" id="multi-part-readonly-hint"></p>
+
             <button type="submit" class="btn btn-primary btn-block" id="application-submit-btn">参加申請する</button>
           </form>
         </section>
@@ -110,7 +124,7 @@
 
           <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
             <p class="upload-zone-title">STL / Gコードをドロップ</p>
-            <p class="hint">またはクリックしてファイルを選択（.stl .gcode .gco .nc）</p>
+            <p class="hint" id="upload-file-hint">またはクリックしてファイルを選択（.stl .gcode .gco .nc）</p>
             <input type="file" id="file-input" accept=".stl,.gcode,.gco,.nc" hidden />
           </div>
           <p class="selected-file-name" id="selected-file-name"></p>
