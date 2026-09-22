@@ -63,7 +63,9 @@
 
 .contest-readonly-calendar .calendar-nav-btn,
 .contest-readonly-calendar .btn,
-.contest-readonly-calendar #go-today-btn {
+.contest-readonly-calendar #go-today-btn,
+.contest-readonly-calendar .calendar-grid-wrap,
+.contest-readonly-calendar .calendar-weekdays-row {
   pointer-events: auto;
 }
 
