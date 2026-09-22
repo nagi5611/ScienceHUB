@@ -24,6 +24,10 @@ import {
 } from './contest-app-settings';
 import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
+import {
+  formatContestStlSubmissionLogForAdmin,
+  listContestStlSubmissionLogsForApplication,
+} from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
   title, impressions, status, self_print, stl_r2_key, stl_filename, stl_size_bytes, stl_print_notes,
@@ -694,10 +698,23 @@ export async function deleteContestApplicationAsAdmin(
   await purgeContestApplication(env, db, app);
 }
 
+export interface ContestStlSubmissionLogAdmin {
+  id: string;
+  contest_application_id: string | null;
+  print_reservation_id: string | null;
+  sequence_number: number;
+  submission_kind: 'initial' | 'replacement';
+  stl_filename: string;
+  stl_size_bytes: number;
+  uploaded_at: string;
+  uploader_role: 'user' | 'admin';
+}
+
 export interface ContestApplicationAdminRow extends ContestApplicationWithDetails {
   applicant_email: string | null;
   submission_status: ContestAdminSubmissionStatus;
   reservations: ContestApplicationAdminReservationRow[];
+  stl_submission_logs: ContestStlSubmissionLogAdmin[];
 }
 
 export interface ContestAdminSubmissionStatus {
@@ -774,6 +791,7 @@ async function enrichContestApplicationAdminRow(
   const members = await fetchMembersForApplication(db, app.id);
   const reservation = await fetchLatestReservationForApplication(db, app.id);
   const reservations = await fetchContestReservationsForApplicationAdmin(db, app.id);
+  const stlLogs = await listContestStlSubmissionLogsForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' && !(await hasBlockingReservationForWithdraw(db, app.id));
@@ -782,6 +800,7 @@ async function enrichContestApplicationAdminRow(
     applicant_email,
     submission_status: computeContestAdminSubmissionStatus(app, reservation),
     reservations,
+    stl_submission_logs: stlLogs.map(formatContestStlSubmissionLogForAdmin),
   };
 }
 
