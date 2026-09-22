@@ -10,6 +10,7 @@ import {
   parseScheduleType,
   saveContestDraft,
 } from './entry-draft.js';
+import { setPrintFlowOverlay } from './print-flow-overlay.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
@@ -602,18 +603,34 @@ function setupUploadZone() {
     fileNameEl.textContent = file.name;
     progress.classList.remove('hidden');
     progressBar.style.width = '0%';
-    statusEl.textContent = 'アップロード中…';
+    statusEl.textContent = '';
+
+    const overlayHints = {
+      認証中: 'アップロードの準備をしています',
+      処理中: 'ファイルを送信しています',
+    };
 
     try {
-      uploadResult = await uploadPrintFile(file, (pct) => {
-        progressBar.style.width = `${pct}%`;
-      });
+      setPrintFlowOverlay(true, '認証中…', overlayHints['認証中']);
+      uploadResult = await uploadPrintFile(
+        file,
+        (pct) => {
+          progressBar.style.width = `${pct}%`;
+        },
+        (stage) => {
+          const hint = overlayHints[stage] ?? '';
+          setPrintFlowOverlay(true, `${stage}…`, hint);
+          statusEl.textContent = `${stage}…`;
+        }
+      );
       statusEl.textContent = 'アップロード完了';
       updateSubmitState();
     } catch (err) {
       fileNameEl.textContent = '';
       statusEl.textContent = err.message || 'アップロードに失敗しました';
       progress.classList.add('hidden');
+    } finally {
+      setPrintFlowOverlay(false);
     }
   };
 
@@ -642,8 +659,27 @@ async function handleStlSubmit(e) {
   }
 
   const printNotesRaw = String(new FormData(form).get('print_notes') ?? '').trim();
+  const app = applications.find((a) => a.id === selectedApplicationId);
+  const selfPrint = app?.self_print === true;
+
   btn.disabled = true;
   try {
+    setPrintFlowOverlay(true, '認証中…', '提出内容を確認しています');
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+    setPrintFlowOverlay(true, '処理中…', 'STL ファイルを確認しています');
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+    if (!selfPrint) {
+      setPrintFlowOverlay(
+        true,
+        '予約確認中…',
+        '印刷日の割り当てと依頼登録を行っています'
+      );
+    }
+
     const data = await apiRequest('entries', {
       method: 'POST',
       body: JSON.stringify({
@@ -662,6 +698,7 @@ async function handleStlSubmit(e) {
   } catch (err) {
     showToast(err.message || '提出に失敗しました', 'error');
   } finally {
+    setPrintFlowOverlay(false);
     updateSubmitState();
   }
 }

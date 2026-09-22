@@ -434,3 +434,55 @@
   flex-direction: column;
   gap: 1rem;
 }
+
+/* STL 提出・印刷予約の進行オーバーレイ（シミュレーション依頼の審査オーバーレイと同系） */
+.print-flow-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.print-flow-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 22rem;
+  padding: 1.75rem 1.5rem;
+  border-radius: 0;
+  background: var(--color-bg, #fff);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.print-flow-overlay-text {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-text, #0f172a);
+}
+
+.print-flow-overlay-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.print-flow-spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid var(--color-border, #e2e8f0);
+  border-top-color: var(--color-primary, #f38020);
+  border-radius: 50%;
+  animation: print-flow-spin 0.75s linear infinite;
+}
+
+@keyframes print-flow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
