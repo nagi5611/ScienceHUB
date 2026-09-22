@@ -86,8 +86,8 @@ function canDownloadAsZip(entries) {
 }
 
 /** 認証付きでファイル Blob を取得 */
-async function fetchFileBlob(storagePath) {
-  return fetchDownloadBlob(storagePath);
+async function fetchFileBlob(storagePath, options = {}) {
+  return fetchDownloadBlob(storagePath, options);
 }
 
 /** Blob をローカルに保存 */
@@ -122,25 +122,45 @@ function buildZipFilename() {
 }
 
 /** 単一ファイルをダウンロード */
-export async function downloadSingleFile(storagePath, filename) {
+export async function downloadSingleFile(storagePath, filename, options = {}) {
   const name = filename ?? storagePath.split("/").pop() ?? "download";
+  const { onFileStart, onFileProgress, onFileComplete, sizeBytes } = options;
+  const hasProgressUi = Boolean(onFileStart || onFileProgress || onFileComplete);
+
+  onFileStart?.(storagePath, { filename: name, totalBytes: sizeBytes ?? null });
+
   try {
-    const info = await fetchDownloadInfo(storagePath);
-    if (info.mode === "direct" && info.url) {
-      const a = document.createElement("a");
-      a.href = info.url;
-      a.download = name;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      return;
+    if (!hasProgressUi) {
+      try {
+        const info = await fetchDownloadInfo(storagePath);
+        if (info.mode === "direct" && info.url) {
+          const a = document.createElement("a");
+          a.href = info.url;
+          a.download = name;
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          onFileComplete?.(storagePath, { ok: true });
+          return;
+        }
+      } catch {
+        // presigned 未設定時はプロキシへフォールバック
+      }
     }
-  } catch {
-    // presigned 未設定時はプロキシへフォールバック
+
+    const blob = await fetchFileBlob(storagePath, {
+      onProgress: (detail) => onFileProgress?.(storagePath, detail),
+    });
+    saveBlob(blob, name);
+    onFileComplete?.(storagePath, { ok: true });
+  } catch (error) {
+    onFileComplete?.(storagePath, {
+      ok: false,
+      error: error instanceof Error ? error : new Error("ダウンロードに失敗しました"),
+    });
+    throw error;
   }
-  const blob = await fetchFileBlob(storagePath);
-  saveBlob(blob, name);
 }
 
 /** 複数ファイルを ZIP にまとめてダウンロード */
@@ -148,13 +168,30 @@ async function downloadEntriesAsZip(entries, options = {}) {
   const { onProgress } = options;
   const files = {};
 
+  const { onFileStart, onFileProgress, onFileComplete } = options;
+
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     onProgress?.(i, entries.length, entry.filename);
-    const blob = await fetchFileBlob(entry.storagePath);
-    const data = new Uint8Array(await blob.arrayBuffer());
-    const zipPath = ensureUniqueZipPath(files, entry.filename);
-    files[zipPath] = data;
+    onFileStart?.(entry.storagePath, {
+      filename: entry.filename,
+      totalBytes: entry.sizeBytes,
+    });
+    try {
+      const blob = await fetchFileBlob(entry.storagePath, {
+        onProgress: (detail) => onFileProgress?.(entry.storagePath, detail),
+      });
+      const data = new Uint8Array(await blob.arrayBuffer());
+      const zipPath = ensureUniqueZipPath(files, entry.filename);
+      files[zipPath] = data;
+      onFileComplete?.(entry.storagePath, { ok: true });
+    } catch (error) {
+      onFileComplete?.(entry.storagePath, {
+        ok: false,
+        error: error instanceof Error ? error : new Error("ダウンロードに失敗しました"),
+      });
+      throw error;
+    }
     onProgress?.(i + 1, entries.length, entry.filename);
   }
 
@@ -176,9 +213,16 @@ async function downloadEntriesAsZip(entries, options = {}) {
 async function downloadEntriesSequentially(entries, options = {}) {
   const { onProgress } = options;
 
+  const { onFileStart, onFileProgress, onFileComplete } = options;
+
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    await downloadSingleFile(entry.storagePath, toDownloadFilename(entry.filename));
+    await downloadSingleFile(entry.storagePath, toDownloadFilename(entry.filename), {
+      onFileStart,
+      onFileProgress,
+      onFileComplete,
+      sizeBytes: entry.sizeBytes,
+    });
     onProgress?.(i + 1, entries.length, entry.filename);
     if (i < entries.length - 1) {
       await sleep(DOWNLOAD_GAP_MS);
@@ -198,7 +242,12 @@ export async function downloadItems(items, options = {}) {
 
   if (entries.length === 1) {
     const entry = entries[0];
-    await downloadSingleFile(entry.storagePath, entry.filename);
+    await downloadSingleFile(entry.storagePath, entry.filename, {
+      onFileStart: options.onFileStart,
+      onFileProgress: options.onFileProgress,
+      onFileComplete: options.onFileComplete,
+      sizeBytes: entry.sizeBytes,
+    });
     options.onProgress?.(1, 1, entry.filename);
     return { count: 1, mode: "single" };
   }

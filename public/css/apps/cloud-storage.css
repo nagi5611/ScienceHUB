@@ -465,6 +465,60 @@ body.cs-app-body {
   color: var(--cs-muted);
 }
 
+.cs-download-ring {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.25rem;
+}
+
+.cs-download-ring-bg {
+  stroke: #e5e7eb;
+}
+
+.cs-download-ring-fg {
+  stroke: var(--cs-accent);
+  transition: stroke-dashoffset 0.15s ease;
+}
+
+.cs-download-ring.is-indeterminate .cs-download-ring-svg {
+  animation: cs-download-ring-spin 0.9s linear infinite;
+}
+
+.cs-download-ring.is-indeterminate .cs-download-ring-fg {
+  stroke-dasharray: 16 47;
+}
+
+.cs-download-ring.is-complete .cs-download-ring-fg {
+  stroke: #16a34a;
+}
+
+.cs-download-ring.is-error .cs-download-ring-fg {
+  stroke: var(--cs-danger);
+}
+
+.cs-icon-tile.is-downloading {
+  position: relative;
+}
+
+.cs-icon-tile .cs-download-ring {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 0.1rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+@keyframes cs-download-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .cs-upload-banner {
   margin-bottom: 0.75rem;
   padding: 0.75rem 0.875rem;

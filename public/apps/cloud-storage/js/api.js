@@ -30,17 +30,55 @@ export async function fetchDownloadInfo(storagePath, options = {}) {
   return data;
 }
 
+/** レスポンス body を読み込みつつ進捗を通知 */
+async function readBlobWithProgress(response, onProgress) {
+  const headerTotal = Number(response.headers.get("Content-Length"));
+  const total = Number.isFinite(headerTotal) && headerTotal > 0 ? headerTotal : null;
+
+  if (!response.body || typeof onProgress !== "function") {
+    const blob = await response.blob();
+    onProgress?.({ loaded: blob.size, total: blob.size, percent: 100 });
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    const percent =
+      total != null ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+    onProgress({ loaded, total, percent });
+  }
+
+  const blob = new Blob(chunks);
+  onProgress({ loaded: blob.size, total: total ?? blob.size, percent: 100 });
+  return blob;
+}
+
 /** 認証付きでファイル Blob を取得（presigned 優先） */
 export async function fetchDownloadBlob(storagePath, options = {}) {
-  const { signal } = options;
+  const { signal, onProgress } = options;
   const info = await fetchDownloadInfo(storagePath, { signal });
+
+  if (info.mode === "direct" && info.url && !onProgress) {
+    const response = await fetch(info.url, { method: "GET", signal });
+    if (!response.ok) {
+      throw new Error("ダウンロードに失敗しました");
+    }
+    return response.blob();
+  }
 
   if (info.mode === "direct" && info.url) {
     const response = await fetch(info.url, { method: "GET", signal });
     if (!response.ok) {
       throw new Error("ダウンロードに失敗しました");
     }
-    return response.blob();
+    return readBlobWithProgress(response, onProgress);
   }
 
   const response = await fetch(
@@ -61,7 +99,7 @@ export async function fetchDownloadBlob(storagePath, options = {}) {
     throw new Error(data.error ?? "ダウンロードに失敗しました");
   }
 
-  return response.blob();
+  return readBlobWithProgress(response, onProgress);
 }
 
 /**

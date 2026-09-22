@@ -19,6 +19,7 @@ import { loadViewModeForPath, saveViewModeForPath, hasViewModeForPath } from "./
 import { clearInactiveFileListRoot } from "./list-dom.js";
 import { ICON_THUMB_MAX_EDGE } from "./media-thumb.js";
 import { createUploadProgress } from "./upload-progress.js";
+import { createDownloadProgress } from "./download-progress.js";
 import {
   classifyFile,
   getSameCategoryPreviewItems,
@@ -120,6 +121,21 @@ const SEARCH_SCOPE_LABELS = {
 };
 
 const uploadProgress = createUploadProgress();
+const downloadProgress = createDownloadProgress();
+
+/** ストレージ上の1ファイルをダウンロード（行ごとの進捗表示付き） */
+async function runStorageDownload(storagePath, filename, sizeBytes) {
+  const hooks = downloadProgress.hooks();
+  try {
+    await downloadSingleFile(storagePath, filename, {
+      ...hooks,
+      sizeBytes,
+    });
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error("ダウンロードに失敗しました");
+  }
+}
 
 const MOBILE_MEDIA = "(max-width: 768px)";
 
@@ -1668,7 +1684,9 @@ function handleContextAction(action, item) {
       });
       break;
     case "download":
-      downloadSingleFile(item.path, item.name);
+      runStorageDownload(item.path, item.name, item.sizeBytes).catch((err) => {
+        showToast(err.message, true);
+      });
       break;
     case "share":
       openShareDialog([item]);
@@ -2557,7 +2575,11 @@ function bindFileEntryEvents(entry) {
     }
 
     if (canPreviewFile(item)) previewFile(item);
-    else downloadSingleFile(item.path, item.name);
+    else {
+      runStorageDownload(item.path, item.name, item.sizeBytes).catch((err) => {
+        showToast(err.message, true);
+      });
+    }
   });
 
   entry.addEventListener("keydown", (e) => {
@@ -2724,6 +2746,7 @@ function appendFileListRows(items) {
 
   enqueueListThumbnails(items, listLoadGeneration);
   syncEntryDragState();
+  downloadProgress.syncAll();
 }
 
 function renderFileList() {
@@ -2754,6 +2777,7 @@ function renderFileList() {
 
   enqueueListThumbnails(listItems, listLoadGeneration);
   syncEntryDragState();
+  downloadProgress.syncAll();
 }
 
 async function loadQuota() {
@@ -3274,15 +3298,10 @@ async function handleDownloadSelected() {
     return;
   }
 
-  const prog = document.getElementById("cs-upload-progress");
   try {
     showToast("ダウンロードを開始します…");
     const result = await downloadItems(items, {
-      onProgress(done, total, filename) {
-        if (!prog) return;
-        prog.hidden = false;
-        prog.textContent = `ダウンロード中… (${done}/${total}) ${filename}`;
-      },
+      ...downloadProgress.hooks(),
     });
     if (result.mode === "zip") {
       showToast(`${result.count} 件を ZIP でダウンロードしました`);
@@ -3293,21 +3312,14 @@ async function handleDownloadSelected() {
     }
   } catch (err) {
     showToast(err.message, true);
-  } finally {
-    if (prog) prog.hidden = true;
   }
 }
 
 async function downloadFile(path) {
+  const item = getItemByPath(path);
+  const name = path.split("/").pop() ?? "download";
   try {
-    const blob = await fetchDownloadBlob(path);
-    const name = path.split("/").pop() ?? "download";
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(url);
+    await runStorageDownload(path, name, item?.sizeBytes);
   } catch (err) {
     showToast(err.message, true);
   }
