@@ -40,6 +40,79 @@ function setVisible(id, visible) {
   if (el) el.hidden = !visible;
 }
 
+/** レスポンスを読み込みつつ進捗を通知 */
+async function readBlobWithProgress(response, onProgress, knownTotalBytes) {
+  const headerTotal = Number(response.headers.get("Content-Length"));
+  const totalFromHeader =
+    Number.isFinite(headerTotal) && headerTotal > 0 ? headerTotal : null;
+  const total =
+    totalFromHeader ??
+    (typeof knownTotalBytes === "number" && knownTotalBytes > 0
+      ? knownTotalBytes
+      : null);
+
+  if (!response.body || typeof onProgress !== "function") {
+    const blob = await response.blob();
+    onProgress({ loaded: blob.size, total: total ?? blob.size, percent: 100 });
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    const percent =
+      total != null ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+    onProgress({ loaded, total, percent });
+  }
+
+  const blob = new Blob(chunks);
+  onProgress({ loaded: blob.size, total: total ?? blob.size, percent: 100 });
+  return blob;
+}
+
+function setShareDownloadProgress(itemEl, detail) {
+  const wrap = itemEl.querySelector(".share-download-progress");
+  const bar = itemEl.querySelector(".share-download-progress-bar");
+  const label = itemEl.querySelector(".share-download-progress-label");
+  if (!wrap || !bar || !label) return;
+
+  wrap.hidden = false;
+  itemEl.classList.add("is-downloading");
+
+  const { loaded, total, percent } = detail;
+  if (percent == null) {
+    bar.style.width = "30%";
+    bar.classList.add("is-indeterminate");
+    label.textContent = `${formatBytes(loaded)} を受信中…`;
+    return;
+  }
+
+  bar.classList.remove("is-indeterminate");
+  bar.style.width = `${percent}%`;
+  wrap.setAttribute("aria-valuenow", String(percent));
+  const totalLabel = total != null ? formatBytes(total) : "—";
+  label.textContent = `${percent}% · ${formatBytes(loaded)} / ${totalLabel}`;
+}
+
+function resetShareDownloadProgress(itemEl) {
+  itemEl.classList.remove("is-downloading");
+  const wrap = itemEl.querySelector(".share-download-progress");
+  const bar = itemEl.querySelector(".share-download-progress-bar");
+  const label = itemEl.querySelector(".share-download-progress-label");
+  if (wrap) wrap.hidden = true;
+  if (bar) {
+    bar.style.width = "0%";
+    bar.classList.remove("is-indeterminate");
+  }
+  if (label) label.textContent = "";
+}
+
 function renderSharePage(info, token) {
   setVisible("share-loading", false);
   setVisible("share-error", false);
@@ -62,14 +135,22 @@ function renderSharePage(info, token) {
   list.innerHTML = info.files
     .map((file) => {
       const disabled = info.downloads_exhausted ? " disabled" : "";
-      return `<li class="share-file-item">
-        <div class="share-file-info">
-          <span class="share-file-name">${escapeHtml(file.filename)}</span>
-          <span class="share-file-size">${escapeHtml(formatBytes(file.size_bytes))}</span>
+      return `<li class="share-file-item" data-file-id="${escapeHtml(file.id)}">
+        <div class="share-file-row">
+          <div class="share-file-info">
+            <span class="share-file-name">${escapeHtml(file.filename)}</span>
+            <span class="share-file-size">${escapeHtml(formatBytes(file.size_bytes))}</span>
+          </div>
+          <button type="button" class="share-download-btn" data-file-id="${escapeHtml(file.id)}" data-file-size="${escapeHtml(String(file.size_bytes ?? ""))}"${disabled}>
+            ダウンロード
+          </button>
         </div>
-        <button type="button" class="share-download-btn" data-file-id="${escapeHtml(file.id)}"${disabled}>
-          ダウンロード
-        </button>
+        <div class="share-download-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="ダウンロード進捗">
+          <div class="share-download-progress-track" aria-hidden="true">
+            <div class="share-download-progress-bar"></div>
+          </div>
+          <p class="share-download-progress-label"></p>
+        </div>
       </li>`;
     })
     .join("");
@@ -79,9 +160,17 @@ function renderSharePage(info, token) {
       const fileId = btn.dataset.fileId;
       if (!fileId || btn.disabled) return;
 
+      const itemEl = btn.closest(".share-file-item");
+      const knownSize = Number(btn.dataset.fileSize);
+      const knownTotalBytes =
+        Number.isFinite(knownSize) && knownSize > 0 ? knownSize : null;
+
       btn.disabled = true;
       const originalLabel = btn.textContent;
-      btn.textContent = "準備中…";
+      btn.textContent = "ダウンロード中…";
+      if (itemEl) {
+        setShareDownloadProgress(itemEl, { loaded: 0, total: knownTotalBytes, percent: 0 });
+      }
 
       try {
         const url = `/api/storage/share/download?token=${encodeURIComponent(token)}&file=${encodeURIComponent(fileId)}`;
@@ -91,7 +180,13 @@ function renderSharePage(info, token) {
           throw new Error(data.error ?? "ダウンロードに失敗しました");
         }
 
-        const blob = await response.blob();
+        const blob = await readBlobWithProgress(
+          response,
+          (detail) => {
+            if (itemEl) setShareDownloadProgress(itemEl, detail);
+          },
+          knownTotalBytes
+        );
         const disposition = response.headers.get("Content-Disposition") ?? "";
         const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
         const filename = match?.[1]
@@ -108,9 +203,18 @@ function renderSharePage(info, token) {
         anchor.remove();
         URL.revokeObjectURL(objectUrl);
 
+        if (itemEl) {
+          setShareDownloadProgress(itemEl, {
+            loaded: blob.size,
+            total: knownTotalBytes ?? blob.size,
+            percent: 100,
+          });
+        }
+
         const refreshed = await fetchShareInfo(token);
         renderSharePage(refreshed, token);
       } catch (error) {
+        if (itemEl) resetShareDownloadProgress(itemEl);
         btn.disabled = false;
         btn.textContent = originalLabel;
         alert(error instanceof Error ? error.message : "ダウンロードに失敗しました");
