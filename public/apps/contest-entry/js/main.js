@@ -29,6 +29,10 @@ const SCHEDULE_LABELS = {
 let currentYear;
 let currentMonth;
 let calendarReservations = [];
+let calendarNavLock = false;
+let calendarLoading = false;
+let lastWheelMonthNavAt = 0;
+const WHEEL_MONTH_COOLDOWN_MS = 420;
 let uploadResult = null;
 let scheduleType = 'full_time';
 let applications = [];
@@ -477,15 +481,26 @@ async function handleApplicationSubmit(e) {
   }
 }
 
-async function loadCalendar() {
-  const data = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
-  calendarReservations = (data.reservations ?? []).filter((r) =>
-    CALENDAR_STATUSES.includes(r.status)
-  );
-  renderCalendar();
+/** CSS トランジション完了を待つ */
+function waitForTransition(el, ms = 320) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      el.removeEventListener('transitionend', onEnd);
+      resolve();
+    };
+    const onEnd = (e) => {
+      if (e.target !== el) return;
+      finish();
+    };
+    el.addEventListener('transitionend', onEnd);
+    setTimeout(finish, ms);
+  });
 }
 
-function changeMonth(delta) {
+function applyMonthDelta(delta) {
   currentMonth += delta;
   if (currentMonth > 12) {
     currentMonth = 1;
@@ -494,7 +509,122 @@ function changeMonth(delta) {
     currentMonth = 12;
     currentYear -= 1;
   }
-  loadCalendar().catch((err) => showToast(err.message, 'error'));
+}
+
+async function loadCalendar() {
+  if (calendarLoading) return;
+  calendarLoading = true;
+  try {
+    const data = await apiRequest(`calendar?year=${currentYear}&month=${currentMonth}`);
+    calendarReservations = (data.reservations ?? []).filter((r) =>
+      CALENDAR_STATUSES.includes(r.status)
+    );
+    renderCalendar();
+  } finally {
+    calendarLoading = false;
+  }
+}
+
+async function changeMonth(delta) {
+  applyMonthDelta(delta);
+  await loadCalendar();
+}
+
+/** スライドアニメーション付きで月を移動 */
+async function navigateMonthWithSlide(delta) {
+  if (calendarNavLock || calendarLoading) return;
+
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) {
+    await changeMonth(delta);
+    return;
+  }
+
+  calendarNavLock = true;
+  const exitClass = delta > 0 ? 'is-sliding-out-next' : 'is-sliding-out-prev';
+  const enterClass = delta > 0 ? 'is-sliding-in-from-next' : 'is-sliding-in-from-prev';
+
+  try {
+    grid.classList.add(exitClass);
+    await waitForTransition(grid);
+
+    grid.classList.remove(exitClass);
+    grid.classList.add(enterClass);
+    await changeMonth(delta);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        grid.classList.remove(enterClass);
+      });
+    });
+    await waitForTransition(grid);
+  } finally {
+    calendarNavLock = false;
+    lastWheelMonthNavAt = Date.now();
+  }
+}
+
+function onCalendarMonthNav(delta) {
+  navigateMonthWithSlide(delta).catch((err) => showToast(err.message, 'error'));
+}
+
+/** スワイプで月を移動（モバイル） */
+function initContestCalendarSwipeNavigation() {
+  const wrap = document.querySelector('#calendar-section .calendar-grid-wrap');
+  if (!wrap || wrap.dataset.swipeBound === '1') return;
+  wrap.dataset.swipeBound = '1';
+
+  let startX = 0;
+  let tracking = false;
+
+  wrap.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      tracking = true;
+    },
+    { passive: true }
+  );
+
+  wrap.addEventListener(
+    'touchend',
+    (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - startX;
+      if (Math.abs(dx) < 48) return;
+      if (Date.now() - lastWheelMonthNavAt < WHEEL_MONTH_COOLDOWN_MS) return;
+      onCalendarMonthNav(dx < 0 ? 1 : -1);
+    },
+    { passive: true }
+  );
+}
+
+/** カレンダー上のホイールで月を移動 */
+function initContestCalendarWheelNavigation() {
+  const section = document.getElementById('calendar-section');
+  if (!section || section.dataset.wheelBound === '1') return;
+  section.dataset.wheelBound = '1';
+
+  section.addEventListener(
+    'wheel',
+    (e) => {
+      const raw = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (Math.abs(raw) < 15) return;
+
+      e.preventDefault();
+
+      if (Date.now() - lastWheelMonthNavAt < WHEEL_MONTH_COOLDOWN_MS) return;
+      if (calendarNavLock || calendarLoading) return;
+
+      const delta = raw > 0 ? 1 : -1;
+      navigateMonthWithSlide(delta).catch((err) => showToast(err.message, 'error'));
+    },
+    { passive: false }
+  );
 }
 
 function goToToday() {
@@ -676,11 +806,13 @@ async function init() {
   currentYear = now.getFullYear();
   currentMonth = now.getMonth() + 1;
 
-  document.getElementById('prev-month')?.addEventListener('click', () => changeMonth(-1));
-  document.getElementById('next-month')?.addEventListener('click', () => changeMonth(1));
-  document.getElementById('prev-month-mobile')?.addEventListener('click', () => changeMonth(-1));
-  document.getElementById('next-month-mobile')?.addEventListener('click', () => changeMonth(1));
+  document.getElementById('prev-month')?.addEventListener('click', () => onCalendarMonthNav(-1));
+  document.getElementById('next-month')?.addEventListener('click', () => onCalendarMonthNav(1));
+  document.getElementById('prev-month-mobile')?.addEventListener('click', () => onCalendarMonthNav(-1));
+  document.getElementById('next-month-mobile')?.addEventListener('click', () => onCalendarMonthNav(1));
   document.getElementById('go-today-btn')?.addEventListener('click', goToToday);
+  initContestCalendarWheelNavigation();
+  initContestCalendarSwipeNavigation();
 
   document.getElementById('btn-new-application')?.addEventListener('click', openApplyView);
   document.getElementById('btn-back-from-apply')?.addEventListener('click', () => {
