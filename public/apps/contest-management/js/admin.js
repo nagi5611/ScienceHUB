@@ -900,6 +900,60 @@ function formatDateJa(isoDate) {
   return `${y}年${Number(m)}月${Number(d)}日`;
 }
 
+/** Formats an ISO datetime for Japanese display. */
+function formatDateTimeJa(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return escapeHtml(String(iso));
+  return d.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function contestStlLogKindLabel(kind) {
+  return kind === 'replacement' ? '追加アップロード' : '初回提出';
+}
+
+function contestStlUploaderRoleLabel(role) {
+  return role === 'admin' ? '管理者' : '依頼者';
+}
+
+/** Renders STL submission history table for admin modals. */
+function renderContestStlSubmissionLogsHtml(logs, { heading = 'STL提出履歴' } = {}) {
+  if (!logs?.length) {
+    return `<h3 class="contest-detail-subheading">${escapeHtml(heading)}</h3><p class="hint">提出履歴はありません</p>`;
+  }
+  const rows = logs
+    .map((log) => {
+      const kindClass =
+        log.submission_kind === 'replacement'
+          ? 'contest-stl-log-kind--replacement'
+          : 'contest-stl-log-kind--initial';
+      return `<tr>
+        <td>${log.sequence_number}</td>
+        <td><span class="contest-stl-log-kind ${kindClass}">${escapeHtml(contestStlLogKindLabel(log.submission_kind))}</span></td>
+        <td>${formatDateTimeJa(log.uploaded_at)}</td>
+        <td>${escapeHtml(log.stl_filename)} (${formatSize(log.stl_size_bytes)})</td>
+        <td>${escapeHtml(contestStlUploaderRoleLabel(log.uploader_role))}</td>
+      </tr>`;
+    })
+    .join('');
+  return `
+    <h3 class="contest-detail-subheading">${escapeHtml(heading)}</h3>
+    <div class="table-wrap admin-table-wrap">
+      <table class="contest-stl-log-table">
+        <thead>
+          <tr>
+            <th>順番</th>
+            <th>区分</th>
+            <th>アップロード日時</th>
+            <th>ファイル</th>
+            <th>操作者</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 /** Builds admin reservation card HTML for mobile lists. */
 function adminReservationCardHtml(r, { showPurpose = false } = {}) {
   const scaleLabel = SCALE_LABELS[r.print_scale];
@@ -1125,6 +1179,7 @@ function renderContestApplicationDetailHtml(app) {
     </div>
     <h3 class="contest-detail-subheading">印刷依頼履歴</h3>
     ${historyHtml}
+    ${renderContestStlSubmissionLogsHtml(app.stl_submission_logs)}
   `;
 }
 
@@ -1808,6 +1863,7 @@ async function openDetail(id) {
   try {
     const data = await apiRequest(`admin/reservations/${id}`);
     const r = data.reservation;
+    const stlSubmissionLogs = data.stl_submission_logs ?? [];
     const compose = data.email_compose ?? emailComposeSettings;
     currentReservationData = r.status === 'cancelled' ? null : r;
     const availableStaff = data.available_staff ?? allMembers;
@@ -1862,6 +1918,7 @@ async function openDetail(id) {
         <div class="detail-row"><span class="detail-label">ファイル</span><span>${escapeHtml(r.stl_filename)} (${formatSize(r.stl_size_bytes)})</span></div>
         <div class="detail-row"><span class="detail-label">申請日時</span><span>${r.created_at}</span></div>
       </div>
+      ${renderContestStlSubmissionLogsHtml(stlSubmissionLogs)}
       ${statusField}
       ${printStaffField}
       ${
