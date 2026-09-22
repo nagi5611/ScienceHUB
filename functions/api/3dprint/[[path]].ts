@@ -75,6 +75,10 @@ import {
   testGoogleCalendarConnection,
 } from "../../lib/3dprint/google-calendar";
 import {
+  createAdminForcePrintReservation,
+  type AdminForceReservationInput,
+} from "../../lib/3dprint/admin-force-reservation";
+import {
   canEditReservation,
   validateGuestStaffAvailability,
   validateReservationContentFields,
@@ -1136,6 +1140,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         isAdmin: true,
       });
       return json(mapAvailabilityResponse(result));
+    }
+
+    // POST /api/3dprint/admin/reservations/force
+    if (method === "POST" && segments[1] === "reservations" && segments[2] === "force") {
+      const body = await request.json<AdminForceReservationInput>();
+      const forced = await createAdminForcePrintReservation(db, env.FILES, userId, body, {
+        source: "standard",
+      });
+      if ("error" in forced) return error(forced.error);
+      const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
+      return json(
+        {
+          id: forced.reservation.id,
+          reservation: enrichReservationForAdmin(forced.reservation, memberMap, printerMap),
+        },
+        201
+      );
     }
 
     // POST /api/3dprint/admin/reservations

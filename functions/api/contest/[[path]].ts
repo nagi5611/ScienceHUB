@@ -50,6 +50,10 @@ import {
   type Reservation,
 } from "../../lib/3dprint/reservations";
 import { adminRescheduleReservation } from "../../lib/3dprint/reschedule";
+import {
+  createAdminForcePrintReservation,
+  type AdminForceReservationInput,
+} from "../../lib/3dprint/admin-force-reservation";
 import { retryFailedReservation } from "../../lib/3dprint/retry-reservation";
 import {
   checkShiftRemovalBlocked,
@@ -1416,6 +1420,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         isAdmin: true,
       });
       return json(mapAvailabilityResponse(result));
+    }
+
+    // POST /api/contest/admin/reservations/force
+    if (method === "POST" && segments[1] === "reservations" && segments[2] === "force") {
+      const body = await request.json<AdminForceReservationInput>();
+      const forced = await createAdminForcePrintReservation(db, env.FILES, userId, body, {
+        source: "contest",
+      });
+      if ("error" in forced) return error(forced.error);
+      const memberMap = await buildMemberMap(db);
+      const printerMap = await buildPrinterMap(db);
+      return json(
+        {
+          id: forced.reservation.id,
+          reservation: enrichReservationForAdmin(forced.reservation, memberMap, printerMap),
+        },
+        201
+      );
     }
 
     // POST /api/3dprint/admin/reservations
