@@ -1881,6 +1881,52 @@ function bindDetailButtons(container) {
   });
 }
 
+/** Sends print-reject notification (email + participant message). */
+async function submitPrintReject(reservationId) {
+  const reasonEl = document.getElementById('contest-print-reject-reason');
+  const statusEl = document.getElementById('contest-print-reject-status');
+  const btn = document.getElementById('contest-print-reject-btn');
+  if (!reasonEl || !statusEl || !btn) return;
+
+  const reason = reasonEl.value.trim();
+  if (!reason) {
+    statusEl.textContent = '印刷不能の理由を入力してください';
+    statusEl.className = 'hint contest-email-send-err';
+    statusEl.classList.remove('hidden');
+    return;
+  }
+
+  if (
+    !window.confirm(
+      '印刷不能として依頼者に通知します。印刷依頼はキャンセルされ、メールとコンテストページに理由が表示されます。よろしいですか？'
+    )
+  ) {
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = '送信中…';
+  statusEl.className = 'hint';
+  statusEl.classList.remove('hidden');
+
+  try {
+    const staffId = document.getElementById('edit-print-staff')?.value?.trim() || null;
+    await apiRequest(`admin/reservations/${reservationId}/print-reject`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reason,
+        ...(staffId ? { print_staff_member_id: staffId } : {}),
+      }),
+    });
+    document.getElementById('detail-modal')?.classList.remove('open');
+    await refreshAll();
+  } catch (err) {
+    statusEl.textContent = err.message || '送信に失敗しました';
+    statusEl.className = 'hint contest-email-send-err';
+    btn.disabled = false;
+  }
+}
+
 /** Sends a custom email to the applicant from the detail modal. */
 async function sendCustomEmailToApplicant(reservationId) {
   const messageEl = document.getElementById('contest-email-message');
@@ -1988,6 +2034,20 @@ async function openDetail(id) {
       ${renderContestStlSubmissionLogsHtml(stlSubmissionLogs)}
       ${statusField}
       ${printStaffField}
+      ${
+        ['applied', 'accepted'].includes(r.status)
+          ? `<div class="contest-admin-print-reject card" style="margin-top:1rem;padding:1rem">
+          <h3 class="contest-admin-email-heading">印刷不能（負荷判定など）</h3>
+          <p class="hint">STL の印刷負荷判定の結果、印刷できない場合は理由を記入して依頼者へ通知します（メールとコンテストページに表示）。依頼はキャンセルされ、依頼者は STL を再提出できます。</p>
+          <div class="form-group">
+            <label for="contest-print-reject-reason">印刷不能の理由</label>
+            <textarea id="contest-print-reject-reason" rows="4" maxlength="4000" placeholder="例: 造形時間が上限を大幅に超えるため、学校プリンターでは印刷できません"></textarea>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="contest-print-reject-btn">印刷不能として通知する</button>
+          <p class="hint hidden" id="contest-print-reject-status" role="status"></p>
+        </div>`
+          : ''
+      }
       <div class="form-group" style="margin-top:1rem">
         <label>印刷動画（クラウドストレージ）</label>
         ${r.print_video_storage_path
@@ -2026,6 +2086,9 @@ async function openDetail(id) {
     );
     document.getElementById('contest-send-custom-email-btn')?.addEventListener('click', () =>
       sendCustomEmailToApplicant(r.id)
+    );
+    document.getElementById('contest-print-reject-btn')?.addEventListener('click', () =>
+      submitPrintReject(r.id)
     );
 
     const staffSelect = document.getElementById('edit-print-staff');

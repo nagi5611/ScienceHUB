@@ -72,7 +72,6 @@ import {
   resolveContestEmailStaffName,
   type ContestReservationStatus,
 } from "../../lib/contest/contest-email";
-import { submitContestEntry } from "../../lib/contest/submit-entry";
 import {
   createContestApplication,
   getContestApplicationForUser,
@@ -83,6 +82,15 @@ import {
   withdrawContestApplicationForUser,
   getContestApplicationSubmittedStl,
 } from "../../lib/contest/applications";
+import {
+  listContestStaffMessagesForUser,
+  rejectContestPrintReservationAsAdmin,
+  recordContestAcceptedStaffMessage,
+  recordContestDecidedStaffMessage,
+  recordContestStatusChangedStaffMessage,
+  insertContestStaffMessage,
+} from "../../lib/contest/staff-messages";
+import { submitContestEntry } from "../../lib/contest/submit-entry";
 import {
   listContestPublicGallery,
   resolveContestGalleryModelFile,
@@ -631,6 +639,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     } else if (
       segments[0] === "calendar" ||
       segments[0] === "applications" ||
+      segments[0] === "staff-messages" ||
       segments[0] === "entries" ||
       segments[0] === "gallery" ||
       segments[0] === "reservations" ||
@@ -714,6 +723,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[0] === "applications" && segments.length === 1) {
       const applications = await listContestApplicationsForUser(db, userId);
       return json({ applications });
+    }
+
+    // GET /api/contest/staff-messages
+    if (method === "GET" && segments[0] === "staff-messages" && segments.length === 1) {
+      const since = url.searchParams.get("since");
+      const messages = await listContestStaffMessagesForUser(db, userId, { since });
+      return json({ messages });
     }
 
     // POST /api/contest/applications
@@ -1802,7 +1818,60 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!result.ok) {
         return error(result.error ?? "送信に失敗しました", result.error?.includes("設定") ? 503 : 502);
       }
+
+      const staffName = await resolveContestEmailStaffName(db, env, staffMemberIdForEmail);
+      if (reservation.contest_application_id) {
+        await insertContestStaffMessage(db, {
+          userId: reservation.user_id,
+          contestApplicationId: reservation.contest_application_id,
+          printReservationId: reservation.id,
+          kind: "custom",
+          body: message,
+          staffDisplayName: staffName,
+          createdByUserId: userId,
+        });
+      }
+
       return json({ ok: true });
+    }
+
+    // POST /api/contest/admin/reservations/:id/print-reject
+    if (
+      method === "POST" &&
+      segments[1] === "reservations" &&
+      segments.length === 4 &&
+      segments[3] === "print-reject"
+    ) {
+      const body = await request.json<{
+        reason?: string;
+        print_staff_member_id?: string | null;
+      }>();
+      const reason = body.reason?.trim() ?? "";
+      if (!reason) return error("印刷不能の理由を入力してください");
+      if (reason.length > 4000) {
+        return error("理由は4000文字以内で入力してください");
+      }
+
+      try {
+        const result = await rejectContestPrintReservationAsAdmin(
+          env,
+          db,
+          request,
+          userId,
+          segments[2],
+          reason,
+          body.print_staff_member_id
+        );
+        const memberMap = await buildMemberMap(db);
+        const printerMap = await buildPrinterMap(db);
+        return json({
+          ok: true,
+          reservation: enrichReservationForAdmin(result.reservation, memberMap, printerMap),
+          message: result.message,
+        });
+      } catch (err) {
+        return error(err instanceof Error ? err.message : "印刷不能の登録に失敗しました", 400);
+      }
     }
 
     // PATCH /api/3dprint/admin/reservations/:id
@@ -1874,6 +1943,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.status as Reservation['status']
           )
         );
+        if (body.status === "delivered") {
+          context.waitUntil(
+            recordContestDecidedStaffMessage(env, db, request, updated, userId)
+          );
+        } else {
+          context.waitUntil(
+            recordContestStatusChangedStaffMessage(env, db, request, updated, {
+              previousStatus,
+              newStatus: body.status as Reservation["status"],
+              statusComment: updated.status_comment,
+              createdByUserId: userId,
+            })
+          );
+        }
       }
 
       return json({
@@ -1990,6 +2073,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       if (finalReservation) {
         context.waitUntil(sendContestAcceptedEmail(env, db, request, finalReservation));
+        context.waitUntil(
+          recordContestAcceptedStaffMessage(env, db, request, finalReservation, userId)
+        );
       }
 
       return json({
