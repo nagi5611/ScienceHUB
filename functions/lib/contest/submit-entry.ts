@@ -16,6 +16,8 @@ import { gradeFromHomeroom } from '../3dprint/homeroom';
 import {
   createReservation,
   getActiveContestReservationForApplication,
+  getReservationById,
+  updateReservationStlOnly,
   type Reservation,
 } from '../3dprint/reservations';
 import { getPrinterById } from '../3dprint/printers';
@@ -146,7 +148,41 @@ export async function submitContestEntry(
 
   const active = await getActiveContestReservationForApplication(db, applicationId);
   if (active) {
-    throw new Error('この作品はすでに印刷依頼が進行中です');
+    if (active.status !== 'printing') {
+      throw new Error('この作品はすでに印刷依頼が進行中です');
+    }
+    if (active.stl_r2_key !== input.stl_r2_key) {
+      try {
+        await env.FILES.delete(active.stl_r2_key);
+      } catch (err) {
+        console.error('contest re-submit: failed to delete previous stl', err);
+      }
+    }
+    await updateReservationStlOnly(db, active.id, {
+      stl_r2_key: input.stl_r2_key,
+      stl_filename: input.stl_filename,
+      stl_size_bytes: input.stl_size_bytes,
+      print_notes: printNotes,
+    });
+    let reservation = (await getReservationById(db, active.id))!;
+    try {
+      const synced = await syncContestSubmissionToStorage(env, db, reservation);
+      if (synced) {
+        reservation = {
+          ...reservation,
+          contest_storage_path: synced.path,
+          contest_storage_filename: synced.filename,
+        };
+      }
+    } catch (err) {
+      console.error('contest storage sync failed on re-submit:', err);
+    }
+    return {
+      self_print: false,
+      reservation,
+      application: null,
+      calendar: { ok: false, error: '印刷中のためカレンダーは変更されません' },
+    };
   }
 
   const slot = await findAutoScheduleSlot(db);

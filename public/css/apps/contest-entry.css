@@ -57,6 +57,18 @@
   margin: 0 0 1rem;
 }
 
+.contest-existing-submission {
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.contest-submitted-at {
+  margin-top: 0.25rem;
+}
+
 .contest-readonly-calendar {
   pointer-events: none;
 }

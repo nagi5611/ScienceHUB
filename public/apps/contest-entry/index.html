@@ -117,6 +117,10 @@
           <button type="button" class="btn btn-secondary btn-sm contest-back-btn" id="btn-back-from-submit">← 一覧に戻る</button>
           <h2 class="contest-section-title" id="submit-heading">STL 提出</h2>
           <p class="contest-submit-target" id="submit-target-label"></p>
+          <div class="contest-existing-submission hidden" id="existing-submission-panel" aria-live="polite">
+            <p class="hint" id="existing-submission-summary"></p>
+            <a href="#" class="btn btn-secondary btn-sm" id="existing-submission-download" download>提出済み STL をダウンロード</a>
+          </div>
 
           <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
             <p class="upload-zone-title">STL / Gコードをドロップ</p>
