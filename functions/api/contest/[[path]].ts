@@ -77,7 +77,7 @@ import {
   createContestApplication,
   getContestApplicationForUser,
   listContestApplicationsForUser,
-  listContestApplicationsAdminGrouped,
+  listContestApplicationsForAdmin,
   deleteContestApplicationAsAdmin,
   patchContestApplicationForUser,
   withdrawContestApplicationForUser,
@@ -1459,10 +1459,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[1] === "applications" && segments.length === 2) {
       const limitParam = url.searchParams.get("limit");
       const limit = limitParam ? parseInt(limitParam, 10) : undefined;
-      const groups = await listContestApplicationsAdminGrouped(db, authUser.id, authUser.is_admin, {
-        applicationLimit: Number.isFinite(limit) ? limit : undefined,
-      });
-      return json({ groups });
+      const applications = await listContestApplicationsForAdmin(
+        db,
+        authUser.id,
+        authUser.is_admin,
+        {
+          applicationLimit: Number.isFinite(limit) ? limit : undefined,
+        }
+      );
+      return json({ applications });
     }
 
     // DELETE /api/contest/admin/applications/:id
