@@ -1317,12 +1317,19 @@ function setContestApplicationSort(sortKey) {
   syncContestApplicationsMobileSortSelect();
 }
 
-/** Binds sortable column header buttons in the applications table. */
+/** Binds sortable column headers in the applications table. */
 function bindContestApplicationSortButtons(container) {
-  container.querySelectorAll('.contest-app-sort-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      setContestApplicationSort(btn.dataset.sortKey);
+  container.querySelectorAll('th.contest-app-sort-th[data-sort-key]').forEach((th) => {
+    const activate = () => {
+      setContestApplicationSort(th.dataset.sortKey);
       renderContestApplicationsResults();
+    };
+    th.addEventListener('click', activate);
+    th.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate();
+      }
     });
   });
 }
@@ -1365,9 +1372,13 @@ function contestAdminApplicationSortableTableHtml(apps) {
       }
       const active = contestApplicationsSort.key === sortKey;
       const arrow = active ? (contestApplicationsSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
-      return `<th scope="col"><button type="button" class="contest-app-sort-btn${
-        active ? ' is-active' : ''
-      }" data-sort-key="${sortKey}">${col.label}${arrow}</button></th>`;
+      const ariaSort =
+        active && contestApplicationsSort.dir === 'asc'
+          ? 'ascending'
+          : active
+            ? 'descending'
+            : 'none';
+      return `<th scope="col" class="contest-app-sort-th${active ? ' is-active' : ''}" data-sort-key="${sortKey}" tabindex="0" aria-sort="${ariaSort}"><span class="contest-app-sort-label">${col.label}${arrow}</span></th>`;
     })
     .join('');
 

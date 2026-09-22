@@ -90,25 +90,30 @@
   font: inherit;
 }
 
-.contest-applications-table-wrap .contest-app-sort-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.15rem;
-  margin: 0;
+.contest-applications-table-wrap th.contest-app-sort-th {
   padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.contest-applications-table-wrap th.contest-app-sort-th:focus-visible {
+  outline: 2px solid #f38020;
+  outline-offset: -2px;
+}
+
+.contest-applications-table-wrap th.contest-app-sort-th .contest-app-sort-label {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.5rem;
   font-weight: 600;
   color: #374151;
-  cursor: pointer;
+  text-align: left;
 }
 
-.contest-applications-table-wrap .contest-app-sort-btn:hover {
-  color: #f38020;
-}
-
-.contest-applications-table-wrap .contest-app-sort-btn.is-active {
+.contest-applications-table-wrap th.contest-app-sort-th:hover .contest-app-sort-label,
+.contest-applications-table-wrap th.contest-app-sort-th.is-active .contest-app-sort-label {
   color: #f38020;
 }
 
