@@ -25,6 +25,23 @@ const SCHEDULE_LABELS = {
   part_time: '定時制',
 };
 
+function formatSubmittedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function submittedStlDownloadUrl(applicationId) {
+  return `/api/contest/applications/${encodeURIComponent(applicationId)}/stl`;
+}
+
 let currentYear;
 let currentMonth;
 let calendarReservations = [];
@@ -270,9 +287,18 @@ function renderApplicationsList() {
     const selfPrintLine = app.self_print
       ? '<p class="hint">印刷: 自分で行う（学校プリンター予約なし）</p>'
       : '';
+    const submittedAtLine =
+      app.can_download_submitted_stl && app.submitted_stl_at
+        ? `<p class="hint contest-submitted-at">提出日時: ${escapeHtml(formatSubmittedAt(app.submitted_stl_at))}</p>`
+        : '';
+    const downloadBtn = app.can_download_submitted_stl
+      ? `<a href="${escapeHtml(submittedStlDownloadUrl(app.id))}" class="btn btn-secondary btn-sm" download>提出 STL を確認</a>`
+      : '';
     const submitBtn = app.can_submit_stl
-      ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">STL を提出</button>`
-      : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
+      ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">${app.can_download_submitted_stl ? 'STL を再提出' : 'STL を提出'}</button>`
+      : !app.can_download_submitted_stl
+        ? `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`
+        : '';
     const editBtn =
       app.status === 'approved'
         ? `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`
@@ -288,10 +314,12 @@ function renderApplicationsList() {
         ${memberLine}
         ${selfPrintLine}
         <p class="contest-application-submission">${escapeHtml(submissionStatusLabel(app))}</p>
+        ${submittedAtLine}
       </div>
       <div class="contest-application-card-actions">
         ${editBtn}
         ${withdrawBtn}
+        ${downloadBtn}
         ${submitBtn}
       </div>
     `;
@@ -381,6 +409,26 @@ function openSubmitView(applicationId) {
   document.getElementById('submit-target-label').textContent = app.self_print
     ? `提出先: ${app.title}（自己印刷・予約なし）`
     : `提出先: ${app.title}`;
+  const existingPanel = document.getElementById('existing-submission-panel');
+  const existingSummary = document.getElementById('existing-submission-summary');
+  const existingDownload = document.getElementById('existing-submission-download');
+  if (existingPanel && existingSummary && existingDownload) {
+    if (app.can_download_submitted_stl) {
+      const when = formatSubmittedAt(app.submitted_stl_at);
+      const name = app.submitted_stl_filename ? `（${app.submitted_stl_filename}）` : '';
+      existingSummary.textContent = when
+        ? `現在の提出: ${when}${name}`
+        : `提出済みのファイル${name}`;
+      existingDownload.href = submittedStlDownloadUrl(app.id);
+      existingPanel.classList.remove('hidden');
+    } else {
+      existingPanel.classList.add('hidden');
+    }
+  }
+  const submitBtn = document.getElementById('submit-btn');
+  if (submitBtn) {
+    submitBtn.textContent = app.can_download_submitted_stl ? 'STL を再提出する' : 'STL を提出する';
+  }
   showView('submit');
   updateSubmitState();
 }

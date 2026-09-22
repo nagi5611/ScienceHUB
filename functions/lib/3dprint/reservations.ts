@@ -365,6 +365,33 @@ export async function updateReservationContestStorage(
     .run();
 }
 
+/** Updates STL file metadata on a contest reservation without changing status (e.g. while printing). */
+export async function updateReservationStlOnly(
+  db: D1Database,
+  id: string,
+  data: {
+    stl_r2_key: string;
+    stl_filename: string;
+    stl_size_bytes: number;
+    print_notes: string | null;
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE print_reservations SET
+        stl_r2_key = ?, stl_filename = ?, stl_size_bytes = ?, print_notes = ?
+       WHERE id = ?`
+    )
+    .bind(
+      data.stl_r2_key,
+      data.stl_filename,
+      data.stl_size_bytes,
+      data.print_notes,
+      id
+    )
+    .run();
+}
+
 /** Updates reservation content and resets to applied (pending re-approval). */
 export async function updateReservationContent(
   db: D1Database,

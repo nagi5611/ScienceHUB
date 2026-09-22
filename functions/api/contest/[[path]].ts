@@ -81,6 +81,7 @@ import {
   deleteContestApplicationAsAdmin,
   patchContestApplicationForUser,
   withdrawContestApplicationForUser,
+  getContestApplicationSubmittedStl,
 } from "../../lib/contest/applications";
 import {
   getContestStorageGroupSlug,
@@ -700,6 +701,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const message = err instanceof Error ? err.message : "参加申請に失敗しました";
         return error(message, 400);
       }
+    }
+
+    // GET /api/contest/applications/:id/stl
+    if (
+      method === "GET" &&
+      segments[0] === "applications" &&
+      segments.length === 3 &&
+      segments[2] === "stl"
+    ) {
+      const stl = await getContestApplicationSubmittedStl(db, userId, segments[1]);
+      if (!stl) return error("提出済みの STL が見つかりません", 404);
+      return streamPrintFile(env.FILES, stl.r2_key, stl.filename);
     }
 
     // GET /api/contest/applications/:id
