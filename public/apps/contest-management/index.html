@@ -182,9 +182,36 @@
 
         <div class="admin-panel hidden" id="panel-applications">
           <h1 class="page-heading">参加申請</h1>
-          <p class="page-subheading">参加申請を一覧表示します。詳細・削除・ステータス確認ができます。</p>
+          <p class="page-subheading">参加申請を一覧表示します。検索・並び替え、詳細・削除ができます。</p>
           <div class="card admin-list-section">
-            <div id="applications-mount">
+            <div class="contest-applications-toolbar hidden" id="contest-applications-toolbar">
+              <div class="contest-applications-toolbar-row">
+                <label class="contest-applications-search-label" for="contest-applications-search">検索</label>
+                <input
+                  type="search"
+                  id="contest-applications-search"
+                  class="contest-applications-search-input"
+                  placeholder="HR・名前・タイトル・感想・メール・ステータスなど"
+                  autocomplete="off"
+                />
+                <span class="hint" id="contest-applications-count"></span>
+              </div>
+              <div class="contest-applications-toolbar-row contest-applications-sort-mobile">
+                <label for="contest-applications-sort-mobile">並び替え</label>
+                <select id="contest-applications-sort-mobile" class="contest-applications-sort-select">
+                  <option value="created_at:desc">申請日時（新しい順）</option>
+                  <option value="created_at:asc">申請日時（古い順）</option>
+                  <option value="homeroom:asc">HR（昇順）</option>
+                  <option value="homeroom:desc">HR（降順）</option>
+                  <option value="student_number:asc">番（昇順）</option>
+                  <option value="student_number:desc">番（降順）</option>
+                  <option value="student_name:asc">代表（昇順）</option>
+                  <option value="title:asc">タイトル（昇順）</option>
+                  <option value="status:asc">ステータス（昇順）</option>
+                </select>
+              </div>
+            </div>
+            <div id="applications-results-mount">
               <p class="hint">読み込み中...</p>
             </div>
           </div>

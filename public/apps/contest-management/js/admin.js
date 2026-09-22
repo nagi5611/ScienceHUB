@@ -60,6 +60,21 @@ const CONTEST_SCHEDULE_LABELS = {
 let contestApplications = [];
 let contestApplicationById = new Map();
 let contestApplicationDetailId = null;
+let contestApplicationsSearchQuery = '';
+let contestApplicationsSort = { key: 'created_at', dir: 'desc' };
+let contestApplicationsToolbarBound = false;
+
+const CONTEST_APPLICATION_SORT_KEYS = [
+  'homeroom',
+  'student_number',
+  'student_name',
+  'title',
+  'schedule_type',
+  'members',
+  'status',
+  'applicant_email',
+  null,
+];
 
 let currentReservationId = null;
 let allReservations = [];
@@ -141,6 +156,7 @@ async function init() {
   acceptBtn?.addEventListener('click', acceptReservation);
   deleteBtn.addEventListener('click', deleteReservation);
   setupContestApplicationDetailModal();
+  setupContestApplicationsToolbar();
   document.getElementById('edit-content-btn').addEventListener('click', () => {
     if (!currentReservationData) return;
     document.getElementById('detail-modal').classList.remove('open');
@@ -1166,6 +1182,151 @@ async function handleDeleteContestApplication(applicationId, title) {
   }
 }
 
+/** Builds a searchable haystack string for one participation application. */
+function contestApplicationSearchHaystack(app) {
+  const parts = [
+    app.homeroom,
+    String(app.student_number),
+    app.student_name,
+    app.title,
+    app.impressions,
+    app.applicant_email,
+    CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type,
+    app.submission_status?.label,
+    app.submission_status?.detail,
+    app.submission_status?.desired_date,
+    app.created_at,
+  ];
+  for (const member of app.members ?? []) {
+    parts.push(member.member_name, member.homeroom, member.student_number);
+  }
+  return parts
+    .filter((part) => part != null && String(part).trim() !== '')
+    .join(' ')
+    .toLowerCase();
+}
+
+/** Returns sortable value for a participation application column. */
+function contestApplicationSortValue(app, sortKey) {
+  switch (sortKey) {
+    case 'homeroom':
+      return app.homeroom ?? '';
+    case 'student_number':
+      return Number(app.student_number) || 0;
+    case 'student_name':
+      return app.student_name ?? '';
+    case 'title':
+      return app.title ?? '';
+    case 'schedule_type':
+      return CONTEST_SCHEDULE_LABELS[app.schedule_type] ?? app.schedule_type ?? '';
+    case 'members':
+      return (app.members ?? []).map((m) => m.member_name).join(' ');
+    case 'status':
+      return app.submission_status?.label ?? '';
+    case 'applicant_email':
+      return app.applicant_email ?? '';
+    case 'created_at':
+      return app.created_at ?? '';
+    default:
+      return '';
+  }
+}
+
+function filterContestApplicationsBySearch(apps, query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return apps;
+  return apps.filter((app) => contestApplicationSearchHaystack(app).includes(normalized));
+}
+
+function sortContestApplicationsList(apps, sortKey, sortDir) {
+  const direction = sortDir === 'asc' ? 1 : -1;
+  return [...apps].sort((a, b) => {
+    const av = contestApplicationSortValue(a, sortKey);
+    const bv = contestApplicationSortValue(b, sortKey);
+    if (sortKey === 'student_number') {
+      return (av - bv) * direction;
+    }
+    return String(av).localeCompare(String(bv), 'ja') * direction;
+  });
+}
+
+function getVisibleContestApplications() {
+  const filtered = filterContestApplicationsBySearch(
+    contestApplications,
+    contestApplicationsSearchQuery
+  );
+  return sortContestApplicationsList(
+    filtered,
+    contestApplicationsSort.key,
+    contestApplicationsSort.dir
+  );
+}
+
+function syncContestApplicationsMobileSortSelect() {
+  const select = document.getElementById('contest-applications-sort-mobile');
+  if (!select) return;
+  const value = `${contestApplicationsSort.key}:${contestApplicationsSort.dir}`;
+  if ([...select.options].some((opt) => opt.value === value)) {
+    select.value = value;
+  }
+}
+
+function updateContestApplicationsCount(visibleCount) {
+  const el = document.getElementById('contest-applications-count');
+  if (!el) return;
+  const total = contestApplications.length;
+  if (total === 0) {
+    el.textContent = '';
+    return;
+  }
+  if (visibleCount === total) {
+    el.textContent = `${total}件`;
+    return;
+  }
+  el.textContent = `${visibleCount}件 / 全${total}件`;
+}
+
+/** Wires search and mobile sort controls for participation applications. */
+function setupContestApplicationsToolbar() {
+  if (contestApplicationsToolbarBound) return;
+  const searchInput = document.getElementById('contest-applications-search');
+  const sortMobile = document.getElementById('contest-applications-sort-mobile');
+  if (!searchInput && !sortMobile) return;
+  contestApplicationsToolbarBound = true;
+
+  searchInput?.addEventListener('input', (e) => {
+    contestApplicationsSearchQuery = e.target.value;
+    renderContestApplicationsResults();
+  });
+
+  sortMobile?.addEventListener('change', (e) => {
+    const [key, dir] = String(e.target.value).split(':');
+    if (!key || (dir !== 'asc' && dir !== 'desc')) return;
+    contestApplicationsSort = { key, dir };
+    renderContestApplicationsResults();
+  });
+}
+
+function setContestApplicationSort(sortKey) {
+  if (contestApplicationsSort.key === sortKey) {
+    contestApplicationsSort.dir = contestApplicationsSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    contestApplicationsSort.key = sortKey;
+    contestApplicationsSort.dir = 'asc';
+  }
+  syncContestApplicationsMobileSortSelect();
+}
+
+/** Binds sortable column header buttons in the applications table. */
+function bindContestApplicationSortButtons(container) {
+  container.querySelectorAll('.contest-app-sort-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setContestApplicationSort(btn.dataset.sortKey);
+      renderContestApplicationsResults();
+    });
+  });
+}
+
 /** Column definitions for the participation applications admin table. */
 function contestAdminApplicationTableColumns() {
   return [
@@ -1191,6 +1352,39 @@ function contestAdminApplicationTableColumns() {
     { label: '申請者', cell: (app) => escapeHtml(app.applicant_email ?? '—') },
     { label: '', cell: (app) => contestAdminApplicationActionsCell(app) },
   ];
+}
+
+/** Desktop table with clickable sortable column headers. */
+function contestAdminApplicationSortableTableHtml(apps) {
+  const columns = contestAdminApplicationTableColumns();
+  const head = columns
+    .map((col, index) => {
+      const sortKey = CONTEST_APPLICATION_SORT_KEYS[index];
+      if (!sortKey) {
+        return `<th scope="col">${col.label}</th>`;
+      }
+      const active = contestApplicationsSort.key === sortKey;
+      const arrow = active ? (contestApplicationsSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+      return `<th scope="col"><button type="button" class="contest-app-sort-btn${
+        active ? ' is-active' : ''
+      }" data-sort-key="${sortKey}">${col.label}${arrow}</button></th>`;
+    })
+    .join('');
+
+  const body = apps
+    .map((app) => {
+      const cells = columns.map((c) => `<td>${c.cell(app)}</td>`).join('');
+      return `<tr>${cells}</tr>`;
+    })
+    .join('');
+
+  return `
+    <div class="table-wrap admin-table-wrap contest-applications-table-wrap">
+      <table>
+        <thead><tr>${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
 }
 
 /** Renders one participation applications list (desktop table or mobile cards). */
@@ -1219,22 +1413,47 @@ function renderContestApplicationsListHtml(apps) {
       })
       .join('')}</div>`;
   }
-  return adminReservationTableHtml(apps, contestAdminApplicationTableColumns());
+  return contestAdminApplicationSortableTableHtml(apps);
+}
+
+/** Renders filtered/sorted participation application rows. */
+function renderContestApplicationsResults() {
+  const mount = document.getElementById('applications-results-mount');
+  if (!mount) return;
+
+  const toolbar = document.getElementById('contest-applications-toolbar');
+  if (!contestApplications.length) {
+    toolbar?.classList.add('hidden');
+    mount.innerHTML = '<p class="hint admin-list-empty">参加申請はまだありません</p>';
+    updateContestApplicationsCount(0);
+    return;
+  }
+
+  toolbar?.classList.remove('hidden');
+  syncContestApplicationsMobileSortSelect();
+
+  const visible = getVisibleContestApplications();
+  updateContestApplicationsCount(visible.length);
+
+  if (!visible.length) {
+    mount.innerHTML =
+      '<p class="hint admin-list-empty">検索条件に一致する参加申請はありません</p>';
+    return;
+  }
+
+  mount.innerHTML = renderContestApplicationsListHtml(visible);
+  bindContestApplicationDeleteButtons(mount);
+  bindContestApplicationDetailButtons(mount);
+  bindContestApplicationSortButtons(mount);
 }
 
 /** Renders contest participation applications in a single list. */
 function renderContestApplications() {
-  const mount = document.getElementById('applications-mount');
-  if (!mount) return;
-
-  if (!contestApplications.length) {
-    mount.innerHTML = '<p class="hint admin-list-empty">参加申請はまだありません</p>';
-    return;
+  const searchInput = document.getElementById('contest-applications-search');
+  if (searchInput && searchInput.value !== contestApplicationsSearchQuery) {
+    searchInput.value = contestApplicationsSearchQuery;
   }
-
-  mount.innerHTML = renderContestApplicationsListHtml(contestApplications);
-  bindContestApplicationDeleteButtons(mount);
-  bindContestApplicationDetailButtons(mount);
+  renderContestApplicationsResults();
 }
 
 /** Renders print history table. */
