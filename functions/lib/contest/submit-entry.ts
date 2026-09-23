@@ -10,6 +10,7 @@ import {
 import type { ContestApplication } from './applications';
 import {
   buildContestEntryAppUrl,
+  buildContestManagementAdminUrl,
   notifyContestApplicantEmail,
 } from './contest-email';
 import {
@@ -28,7 +29,7 @@ import {
 import { getPrinterById } from '../3dprint/printers';
 import { verifyR2Key } from '../3dprint/upload';
 import { getOAuthRedirectBase } from '../oauth';
-import { build3dPrintAdminUrl, notifyReservationApplication } from '../3dprint/discord';
+import { notifyReservationApplication } from '../3dprint/discord';
 import { logContestStlSubmission } from './stl-submission-logs';
 import type { Env } from '../types';
 import { replaceContestApplicationStlParts } from './contest-stl-parts';
@@ -383,7 +384,7 @@ export async function submitContestEntry(
   const printer = printerId ? await getPrinterById(db, printerId) : null;
 
   const baseUrl = getOAuthRedirectBase(request, env);
-  const adminUrl = build3dPrintAdminUrl(baseUrl);
+  const adminUrl = buildContestManagementAdminUrl(baseUrl);
   await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
     title: reservation.title,
     desired_date: reservation.desired_date,

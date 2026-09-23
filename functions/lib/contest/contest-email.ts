@@ -578,6 +578,14 @@ ${options.entryAppUrl}`;
   });
 }
 
+const CONTEST_MANAGEMENT_APP_PATH = '/apps/contest-management/';
+
+/** Public URL for the contest management (admin) app — used in Discord webhook links. */
+export function buildContestManagementAdminUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/$/, '');
+  return `${base}${CONTEST_MANAGEMENT_APP_PATH}`;
+}
+
 /** Public URL for the contest entry app. */
 export function buildContestEntryAppUrl(baseUrl: string): string {
   const base = baseUrl.replace(/\/$/, '');

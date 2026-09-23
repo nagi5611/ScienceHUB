@@ -63,11 +63,11 @@ import {
   type ShiftBlockReservation,
 } from "../../lib/3dprint/shift-guard";
 import {
-  build3dPrintAdminUrl,
   notifyReservationApplication,
   notifyReservationModified,
 } from "../../lib/3dprint/discord";
 import {
+  buildContestManagementAdminUrl,
   buildContestEntryAppUrl,
   getContestEmailComposeSettings,
   notifyContestApplicantEmail,
@@ -558,7 +558,7 @@ async function applyReservationContentEdit(
   context.waitUntil(
     notifyReservationModified(
       env.DISCORD_WEBHOOK_URL,
-      build3dPrintAdminUrl(getOAuthRedirectBase(context.request, env)),
+      buildContestManagementAdminUrl(getOAuthRedirectBase(context.request, env)),
       {
       title: String(body.title).trim(),
       desired_date: body.desired_date,
@@ -622,7 +622,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   const segments = parsePath(params.path as string);
   const method = request.method;
   const db = getDb(env);
-  const adminUrl = build3dPrintAdminUrl(getOAuthRedirectBase(request, env));
+  const adminUrl = buildContestManagementAdminUrl(getOAuthRedirectBase(request, env));
 
   if (method === "OPTIONS") {
     return new Response(null, {
