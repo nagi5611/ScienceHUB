@@ -806,6 +806,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         impressions?: string | null;
         participants?: unknown;
         members?: unknown;
+        uses_multiple_parts?: boolean;
+        part_count?: number | null;
       }>();
       try {
         const application = await patchContestApplicationForUser(
@@ -843,18 +845,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "POST" && segments[0] === "entries" && segments.length === 1) {
       const body = await request.json<{
         contest_application_id: string;
-        stl_r2_key: string;
-        stl_filename: string;
-        stl_size_bytes: number;
+        stl_r2_key?: string;
+        stl_filename?: string;
+        stl_size_bytes?: number;
+        stl_files?: Array<{
+          stl_r2_key: string;
+          stl_filename: string;
+          stl_size_bytes: number;
+        }>;
         print_notes?: string | null;
       }>();
 
       try {
         const result = await submitContestEntry(env, request, userId, {
           contest_application_id: String(body.contest_application_id ?? ""),
-          stl_r2_key: String(body.stl_r2_key ?? ""),
-          stl_filename: String(body.stl_filename ?? ""),
-          stl_size_bytes: Number(body.stl_size_bytes),
+          stl_r2_key: body.stl_r2_key,
+          stl_filename: body.stl_filename,
+          stl_size_bytes: body.stl_size_bytes,
+          stl_files: body.stl_files,
           print_notes: body.print_notes ?? null,
         });
         if (result.self_print) {

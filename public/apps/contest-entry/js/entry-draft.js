@@ -40,8 +40,6 @@ export function extractContestDraft(form, participants) {
     title: String(formData.get('title') ?? ''),
     impressions: String(formData.get('impressions') ?? ''),
     self_print: form.querySelector('#self_print')?.checked === true,
-    uses_multiple_parts: form.querySelector('#uses_multiple_parts')?.checked === true,
-    part_count: String(formData.get('part_count') ?? ''),
   };
 }
 
@@ -59,14 +57,6 @@ export function applyContestDraft(form, draft) {
   const selfPrint = form.querySelector('#self_print');
   if (selfPrint instanceof HTMLInputElement) {
     selfPrint.checked = Boolean(draft.self_print);
-  }
-  const multiPart = form.querySelector('#uses_multiple_parts');
-  if (multiPart instanceof HTMLInputElement) {
-    multiPart.checked = Boolean(draft.uses_multiple_parts);
-  }
-  const partCount = form.querySelector('#part_count');
-  if (partCount && draft.part_count != null) {
-    partCount.value = draft.part_count;
   }
 }
 

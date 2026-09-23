@@ -115,20 +115,6 @@
             </div>
             <p class="hint hidden" id="self-print-readonly-hint">この作品は自己印刷で登録されています</p>
 
-            <div class="form-group" id="multi-part-field">
-              <label class="checkbox-label">
-                <input type="checkbox" id="uses_multiple_parts" name="uses_multiple_parts" value="1" />
-                複数個の物体を使用する
-              </label>
-              <p class="hint">1つの作品に複数のパーツ（STL）がある場合にチェックしてください</p>
-            </div>
-            <div class="form-group hidden" id="part-count-field">
-              <label for="part_count">パーツ数</label>
-              <input type="number" id="part_count" name="part_count" min="2" max="20" step="1" inputmode="numeric" placeholder="例: 3" />
-              <p class="hint">提出する STL ファイルの数（2〜20）</p>
-            </div>
-            <p class="hint hidden" id="multi-part-readonly-hint"></p>
-
             <button type="submit" class="btn btn-primary btn-block" id="application-submit-btn">参加申請する</button>
           </form>
         </section>
@@ -142,18 +128,26 @@
             <a href="#" class="btn btn-secondary btn-sm" id="existing-submission-download" download>提出済み STL をダウンロード</a>
           </div>
 
-          <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="ファイルをドロップまたはクリックして選択">
-            <p class="upload-zone-title">STL / Gコードをドロップ</p>
-            <p class="hint" id="upload-file-hint">またはクリックしてファイルを選択（.stl .gcode .gco .nc）</p>
-            <input type="file" id="file-input" accept=".stl,.gcode,.gco,.nc" hidden />
-          </div>
-          <p class="selected-file-name" id="selected-file-name"></p>
-          <div class="upload-progress hidden" id="upload-progress">
-            <div class="upload-progress-bar" id="upload-progress-bar"></div>
-          </div>
-          <p class="hint" id="upload-status"></p>
-
           <form id="submit-form" class="contest-entry-form">
+            <div class="form-group" id="stl-parts-setup">
+              <label>パーツの設定</label>
+              <p class="hint">1作品に複数の STL がある場合はパーツを追加し、名前（任意）とファイルを登録してください（最大20）</p>
+              <div class="contest-stl-part-table-wrap">
+                <div class="contest-stl-part-table-head" aria-hidden="true">
+                  <span>パーツ名</span>
+                  <span>STL / Gコード</span>
+                  <span></span>
+                </div>
+                <ul class="contest-stl-part-list" id="stl-part-list" aria-label="提出パーツ一覧"></ul>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm contest-add-stl-part-btn" id="btn-add-stl-part">
+                パーツを追加
+              </button>
+            </div>
+            <div class="upload-progress hidden" id="upload-progress">
+              <div class="upload-progress-bar" id="upload-progress-bar"></div>
+            </div>
+            <p class="hint" id="upload-status"></p>
             <details class="contest-advanced-settings">
               <summary>高度な設定</summary>
               <div class="contest-advanced-settings-body">
