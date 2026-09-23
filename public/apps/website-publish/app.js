@@ -376,6 +376,7 @@ async function checkAccess() {
   }
   if (!response.ok) {
     accessDenied.hidden = false;
+    document.querySelector(".hub-header")?.setAttribute("hidden", "");
     return false;
   }
   appMain.hidden = false;
