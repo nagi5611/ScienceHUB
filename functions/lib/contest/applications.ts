@@ -26,10 +26,7 @@ import {
   cleanupContestApplicationSubmissionFiles,
   cleanupContestApplicationStlPartsFiles,
 } from './contest-storage';
-import {
-  getContestManagementAccessibleGroupRoots,
-  listGroupMemberUserIdsForGroupSlug,
-} from './contest-app-settings';
+import { getContestManagementAccessibleGroupRoots } from './contest-app-settings';
 import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 import {
@@ -748,23 +745,17 @@ async function removeAllContestReservationsForApplication(
   }
 }
 
-async function viewerCanManageContestApplicationUser(
+/** True when the viewer may manage any contest application in the management app. */
+async function viewerCanManageContestApplications(
   db: D1Database,
   viewerUserId: string,
-  isAdmin: boolean,
-  applicantUserId: string
+  isAdmin: boolean
 ): Promise<boolean> {
   if (isAdmin) {
     return true;
   }
   const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
-  for (const root of groupRoots) {
-    const userIds = await listGroupMemberUserIdsForGroupSlug(db, root.key);
-    if (userIds.has(applicantUserId)) {
-      return true;
-    }
-  }
-  return false;
+  return groupRoots.length > 0;
 }
 
 /** Removes application row, members (CASCADE), reservations, and R2 files. */
@@ -811,7 +802,7 @@ export async function deleteContestApplicationAsAdmin(
   if (!app) {
     throw new Error('参加申請が見つかりません');
   }
-  const allowed = await viewerCanManageContestApplicationUser(db, viewerUserId, isAdmin, app.user_id);
+  const allowed = await viewerCanManageContestApplications(db, viewerUserId, isAdmin);
   if (!allowed) {
     throw new Error('この参加申請を削除する権限がありません');
   }
@@ -971,24 +962,13 @@ export async function listContestApplicationsForAdmin(
   const sortNewest = (rows: ContestApplicationAdminRow[]) =>
     rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  if (isAdmin) {
-    return sortNewest(enrichedRows);
+  // App access is enforced on /api/contest/admin/*; applicants need not be hub group members.
+  const canViewAll = await viewerCanManageContestApplications(db, viewerUserId, isAdmin);
+  if (!canViewAll) {
+    return [];
   }
 
-  const groupRoots = await getContestManagementAccessibleGroupRoots(db, viewerUserId, isAdmin);
-  if (groupRoots.length === 0) {
-    return sortNewest(enrichedRows);
-  }
-
-  const allowedApplicants = new Set<string>();
-  for (const root of groupRoots) {
-    const userIds = await listGroupMemberUserIdsForGroupSlug(db, root.key);
-    for (const userId of userIds) {
-      allowedApplicants.add(userId);
-    }
-  }
-
-  return sortNewest(enrichedRows.filter((app) => allowedApplicants.has(app.user_id)));
+  return sortNewest(enrichedRows);
 }
 
 /** @deprecated Use listContestApplicationsForAdmin */
