@@ -27,6 +27,15 @@ export function saveContestDraft(draft) {
   }
 }
 
+/** Removes saved application form draft from localStorage. */
+export function clearContestDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Builds draft object from application form fields. */
 export function extractContestDraft(form, participants) {
   const formData = new FormData(form);
