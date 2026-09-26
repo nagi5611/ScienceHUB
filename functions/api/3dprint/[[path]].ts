@@ -56,6 +56,7 @@ import {
   checkShiftRemovalBlocked,
   checkShiftRemovalBlockedForDates,
   isMemberAvailableOnDate,
+  isMemberAvailableOnReservationSpan,
   isValidDiscordUserId,
   type ShiftBlockReservation,
 } from "../../lib/3dprint/shift-guard";
@@ -1498,12 +1499,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (body.print_staff_member_id) {
         const member = await getMemberById(db, body.print_staff_member_id);
         if (!member) return error("指定されたメンバーが見つかりません", 400);
-        const availableIds = await getAvailableMemberIdsOnDate(db, existing.desired_date);
         if (
-          !availableIds.includes(body.print_staff_member_id) &&
-          body.print_staff_member_id !== existing.print_staff_member_id
+          body.print_staff_member_id !== existing.print_staff_member_id &&
+          !(await isMemberAvailableOnReservationSpan(db, body.print_staff_member_id, existing))
         ) {
-          return error("この日に対応可能なメンバーのみ割り当てできます", 400);
+          return error("予約期間のすべての日に対応可能なメンバーのみ割り当てできます", 400);
         }
       }
 
@@ -1593,9 +1593,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const member = await getMemberById(db, body.print_staff_member_id);
       if (!member) return error("指定されたメンバーが見つかりません", 400);
 
-      const availableIds = await getAvailableMemberIdsOnDate(db, existing.desired_date);
-      if (!availableIds.includes(body.print_staff_member_id)) {
-        return error("この日に対応可能なメンバーのみ割り当てできます", 400);
+      if (!(await isMemberAvailableOnReservationSpan(db, body.print_staff_member_id, existing))) {
+        return error("予約期間のすべての日に対応可能なメンバーのみ割り当てできます", 400);
       }
 
       const accepted = await acceptReservation(db, segments[2], body.print_staff_member_id);
