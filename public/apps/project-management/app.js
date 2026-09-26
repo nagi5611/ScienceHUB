@@ -981,6 +981,7 @@ async function checkAccess() {
 
   if (!response.ok) {
     document.getElementById("access-denied").hidden = false;
+    document.querySelector(".pm-header")?.setAttribute("hidden", "");
     return false;
   }
 
@@ -1011,7 +1012,14 @@ async function loadDashboard(groupId = null) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      showToast(err.error || "データの取得に失敗しました", true);
+      const message = err.error || "データの取得に失敗しました";
+      if (response.status === 400 && /グループ/.test(message)) {
+        document.getElementById("app-main").hidden = true;
+        document.getElementById("access-denied").hidden = false;
+        document.querySelector(".pm-header")?.setAttribute("hidden", "");
+        return;
+      }
+      showToast(message, true);
       return;
     }
 
@@ -3034,7 +3042,7 @@ async function handleSaveEditProject() {
     }
 
     await loadDashboard(selectedGroupId);
-    showToast("タスクを更新しました");
+    showToast("プロジェクトを更新しました");
   } catch {
     showToast("更新に失敗しました", true);
   } finally {

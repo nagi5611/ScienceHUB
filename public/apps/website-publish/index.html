@@ -31,10 +31,13 @@
     </div>
   </header>
 
-  <main class="wsp-main" id="access-denied" hidden>
-    <p class="wsp-message wsp-message--error">このアプリへのアクセス権限がありません。</p>
+  <main class="wsp-main wsp-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>このアプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="wsp-btn wsp-btn--primary">ダッシュボードへ戻る</a>
   </main>
 
+  <p class="wsp-status wsp-status--global" id="global-status" role="status" aria-live="polite"></p>
   <main class="wsp-main" id="app-main" hidden>
     <section class="wsp-panel" id="sites-panel">
       <div class="wsp-panel-head">
@@ -73,7 +76,6 @@
           <button type="button" class="wsp-btn wsp-btn--danger" id="explorer-delete-btn" disabled>削除</button>
         </div>
 
-        <p class="wsp-status" id="status" role="status" aria-live="polite"></p>
         <p class="wsp-current-dir" id="explorer-current-dir"></p>
 
         <nav class="wsp-breadcrumb" id="explorer-breadcrumb" aria-label="フォルダパス"></nav>
