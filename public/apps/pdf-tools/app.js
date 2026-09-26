@@ -265,6 +265,13 @@ function buildMergePagesHtml(entry) {
 }
 
 /** 結合一覧を描画 */
+function updateMergeEntryPreviewDom(entry) {
+  const item = mergeFileList?.querySelector(`[data-id="${entry.id}"]`);
+  if (!item) return;
+  const pages = item.querySelector(".pdf-file-pages");
+  if (pages) pages.outerHTML = buildMergePagesHtml(entry);
+}
+
 function renderMergeList() {
   if (!mergeFileList || !mergeEmpty) return;
 
@@ -346,7 +353,7 @@ async function addMergeFiles(files) {
     loadMergeEntryPreview(entry).catch(() => {
       entry.previewLoading = false;
       entry.previewError = "プレビューの読み込みに失敗しました";
-      renderMergeList();
+      updateMergeEntryPreviewDom(entry);
     });
   }
 
