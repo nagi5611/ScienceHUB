@@ -1308,6 +1308,18 @@ function updateTodayButton() {
   dayNum.textContent = String(Number(todayJst().split('-')[2]));
 }
 
+/** Applies year rollover when picking a month chip (e.g. December → January). */
+function navigateToMonthChip(month) {
+  if (currentMonth === month) return;
+  let year = currentYear;
+  if (month < currentMonth && currentMonth === 12 && month === 1) {
+    year += 1;
+  }
+  currentYear = year;
+  currentMonth = month;
+  render();
+}
+
 /** Renders horizontal month chips for mobile month switching. */
 function renderMonthChips() {
   const container = document.getElementById('calendar-month-chips');
@@ -1322,11 +1334,7 @@ function renderMonthChips() {
     chip.setAttribute('aria-selected', month === currentMonth ? 'true' : 'false');
     if (month === currentMonth) chip.classList.add('active');
     chip.textContent = `${month}月`;
-    chip.addEventListener('click', () => {
-      if (currentMonth === month) return;
-      currentMonth = month;
-      render();
-    });
+    chip.addEventListener('click', () => navigateToMonthChip(month));
     container.appendChild(chip);
   }
 
