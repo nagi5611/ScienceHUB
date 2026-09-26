@@ -76,6 +76,7 @@ let availablePrinters = [];
 let selectedPrinterId = '';
 let formStep = 'printer';
 let printerWaitingDateScoped = false;
+let showSameDayUnavailablePrinters = false;
 
 const MOBILE_CALENDAR_MQ = window.matchMedia('(max-width: 768px)');
 
@@ -179,6 +180,55 @@ function showFormStep(step) {
   updateFormModalSize();
 }
 
+/** Returns whether the printer has no shift on the selected reservation date. */
+function isPrinterSameDayUnavailable(printer) {
+  return printer?.shift_available === false;
+}
+
+/** Sorts printers with bookable entries first. */
+function sortPrintersForPicker(printers) {
+  return [...printers].sort((a, b) => {
+    const aOperational = isPrinterOperational(a) ? 0 : 1;
+    const bOperational = isPrinterOperational(b) ? 0 : 1;
+    if (aOperational !== bOperational) return aOperational - bOperational;
+    const aSameDay = isPrinterSameDayUnavailable(a) ? 1 : 0;
+    const bSameDay = isPrinterSameDayUnavailable(b) ? 1 : 0;
+    if (aSameDay !== bSameDay) return aSameDay - bSameDay;
+    return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ja');
+  });
+}
+
+/** Builds the printer list for the picker (hides same-day unavailable by default). */
+function getPrintersForPicker() {
+  let printers = availablePrinters;
+  if (printerWaitingDateScoped && !showSameDayUnavailablePrinters) {
+    printers = printers.filter((printer) => !isPrinterSameDayUnavailable(printer));
+  }
+  return sortPrintersForPicker(printers);
+}
+
+/** Updates the toggle for showing same-day unavailable printers. */
+function updateSameDayUnavailableToggle() {
+  const toggle = document.getElementById('printer-picker-show-unavailable');
+  if (!toggle) return;
+
+  const hiddenCount = printerWaitingDateScoped
+    ? availablePrinters.filter((printer) => isPrinterSameDayUnavailable(printer)).length
+    : 0;
+
+  if (!printerWaitingDateScoped || hiddenCount === 0) {
+    toggle.classList.add('hidden');
+    toggle.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  toggle.classList.remove('hidden');
+  toggle.setAttribute('aria-expanded', showSameDayUnavailablePrinters ? 'true' : 'false');
+  toggle.textContent = showSameDayUnavailablePrinters
+    ? 'この日は利用不可の機種を非表示'
+    : `この日は利用不可の機種を表示（${hiddenCount}件）`;
+}
+
 /** Renders the printer picker cards. */
 function renderPrinterPicker(preselectedId = '') {
   const picker = document.getElementById('printer-picker');
@@ -188,6 +238,7 @@ function renderPrinterPicker(preselectedId = '') {
   if (!picker || !emptyEl) return;
 
   const bookablePrinters = availablePrinters.filter((printer) => isPrinterOperational(printer));
+  const displayPrinters = getPrintersForPicker();
 
   if (!availablePrinters.length) {
     picker.innerHTML = '';
@@ -196,30 +247,19 @@ function renderPrinterPicker(preselectedId = '') {
     selectedPrinterId = '';
     document.getElementById('printer_id').value = '';
     if (nextBtn) nextBtn.disabled = true;
+    updateSameDayUnavailableToggle();
     return;
   }
 
   emptyEl.classList.add('hidden');
 
   if (!bookablePrinters.length) {
-    picker.innerHTML = availablePrinters
-      .map((printer) => {
-        const imageHtml = printer.image_url
-          ? `<img class="printer-picker-image" src="${escapeHtml(printer.image_url)}" alt="" loading="lazy" />`
-          : `<div class="printer-picker-image printer-picker-image-placeholder" aria-hidden="true">🖨️</div>`;
-        const statusHtml = buildPrinterStatusBadge(printer.status ?? 'available', { escapeHtml });
-        return `
-          <div class="printer-picker-card printer-picker-card-unavailable" role="option" aria-disabled="true">
-            ${imageHtml}
-            <span class="printer-picker-name">${escapeHtml(printer.name)}</span>
-            ${statusHtml}
-          </div>`;
-      })
-      .join('');
+    picker.innerHTML = '';
     allUnavailableEl?.classList.remove('hidden');
     selectedPrinterId = '';
     document.getElementById('printer_id').value = '';
     if (nextBtn) nextBtn.disabled = true;
+    updateSameDayUnavailableToggle();
     return;
   }
 
@@ -239,7 +279,7 @@ function renderPrinterPicker(preselectedId = '') {
     document.getElementById('printer_id').value = selectedPrinterId;
   }
 
-  picker.innerHTML = availablePrinters
+  picker.innerHTML = displayPrinters
     .map((printer) => {
       const bookable = isPrinterOperational(printer);
       const selected = bookable && printer.id === selectedPrinterId;
@@ -291,6 +331,7 @@ function renderPrinterPicker(preselectedId = '') {
 
   const selectedPrinter = availablePrinters.find((p) => p.id === selectedPrinterId);
   if (nextBtn) nextBtn.disabled = !selectedPrinterId || !isPrinterOperational(selectedPrinter);
+  updateSameDayUnavailableToggle();
 }
 
 /** Loads available scales for the selected printer and updates the form. */
@@ -443,6 +484,11 @@ function setupDetailModal() {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) close();
   });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !modal.classList.contains('open')) return;
+    e.preventDefault();
+    close();
+  });
 
   document.getElementById('detail-cancel-toggle-btn').addEventListener('click', () => {
     handleLoggedInCancel();
@@ -475,6 +521,7 @@ function setupFormModal() {
     modal.classList.remove('open');
     selectedDate = '';
     selectedPrinterId = '';
+    showSameDayUnavailablePrinters = false;
     formStep = 'printer';
     document.querySelectorAll('.calendar-day.selected').forEach((el) => el.classList.remove('selected'));
     clearRetryFormUi();
@@ -486,8 +533,17 @@ function setupFormModal() {
   cancelBtn.addEventListener('click', closeModal);
   document.getElementById('form-back-btn')?.addEventListener('click', () => showFormStep('printer'));
   document.getElementById('form-next-btn')?.addEventListener('click', goToFormDetailsStep);
+  document.getElementById('printer-picker-show-unavailable')?.addEventListener('click', () => {
+    showSameDayUnavailablePrinters = !showSameDayUnavailablePrinters;
+    renderPrinterPicker(selectedPrinterId);
+  });
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeModal();
   });
 
   purposeInputs.forEach((input) => {
@@ -681,6 +737,7 @@ function setupFormModal() {
     setScaleOptions(['small', 'medium', 'large']);
     document.getElementById('submit-btn').textContent = '予約を申請';
     selectedPrinterId = '';
+    showSameDayUnavailablePrinters = false;
     showFormStep('printer');
     renderPrinterPicker();
     clearRetryFormUi();
@@ -839,6 +896,7 @@ async function openFormForDate(dateStr) {
   hint.classList.add('hidden');
 
   document.getElementById('form-modal').classList.add('open');
+  showSameDayUnavailablePrinters = false;
   await loadPrinters(dateStr);
   selectedPrinterId = retryFormSnapshot?.printer_id || '';
   renderPrinterPicker(selectedPrinterId);
@@ -1150,6 +1208,30 @@ function showEditAlert(message, type) {
     `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
 }
 
+/** Opens read-only preview for another user's calendar slot (no API). */
+function openCalendarReservationPreview(r) {
+  const modal = document.getElementById('detail-modal');
+  const body = document.getElementById('detail-modal-body');
+  currentDetailId = null;
+  currentEditSnapshot = null;
+
+  const status = r.status || 'applied';
+  document.getElementById('detail-modal-title').textContent = '予約（参照のみ）';
+  document.getElementById('detail-edit-toggle-btn').classList.add('hidden');
+  document.getElementById('detail-cancel-toggle-btn').classList.add('hidden');
+
+  body.innerHTML = `
+    <p class="hint">他人の予約です。詳細の確認や取り消しはできません。</p>
+    <div class="detail-grid">
+      <div class="detail-row"><span class="detail-label">希望印刷日</span><span>${escapeHtml(r.desired_date)}</span></div>
+      <div class="detail-row"><span class="detail-label">印刷規模</span><span>${escapeHtml(SCALE_LABELS[r.print_scale] ?? r.print_scale)}</span></div>
+      <div class="detail-row"><span class="detail-label">ステータス</span><span class="status-badge status-${status}">${escapeHtml(STATUS_LABELS[status] || status)}</span></div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+}
+
 /** Opens reservation detail view (PII hidden). */
 async function openReservationDetail(id) {
   const modal = document.getElementById('detail-modal');
@@ -1163,6 +1245,7 @@ async function openReservationDetail(id) {
 
     document.getElementById('detail-modal-title').textContent = escapeHtml(r.title);
     document.getElementById('detail-edit-toggle-btn').classList.toggle('hidden', !r.editable);
+    document.getElementById('detail-cancel-toggle-btn').classList.remove('hidden');
 
     body.innerHTML = `
       <div class="detail-grid">
@@ -1360,9 +1443,13 @@ async function render() {
   const startWeekday = firstDay.getDay();
   const todayStr = todayJst();
 
+  const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+  const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
   const prevMonthLast = new Date(currentYear, currentMonth - 1, 0).getDate();
   for (let i = startWeekday - 1; i >= 0; i--) {
-    grid.appendChild(createDayCell(prevMonthLast - i, true, {}, todayStr));
+    const dayNum = prevMonthLast - i;
+    const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    grid.appendChild(createDayCell(dayNum, true, reservationsByDate, todayStr, dateStr));
   }
 
   for (let day = 1; day <= lastDay; day++) {
@@ -1372,8 +1459,11 @@ async function render() {
 
   const totalCells = startWeekday + lastDay;
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+  const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
   for (let day = 1; day <= remaining; day++) {
-    grid.appendChild(createDayCell(day, true, {}, todayStr));
+    const dateStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    grid.appendChild(createDayCell(day, true, reservationsByDate, todayStr, dateStr));
   }
 
   updateStickyOffsets();
@@ -1573,11 +1663,11 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
   const hasStaff = dateStr ? (staffCountByDate[dateStr] ?? 0) > 0 : false;
   const hasPrinter = dateStr ? (printerCountByDate[dateStr] ?? 0) > 0 : false;
 
-  if (dateStr && !otherMonth && dateStr >= earliestBookable) {
+  if (dateStr && dateStr >= earliestBookable && !otherMonth) {
     cell.classList.add(hasStaff && hasPrinter ? 'shift-covered' : 'shift-empty');
   }
 
-  if (dateStr && !otherMonth) {
+  if (dateStr) {
     cell.dataset.date = dateStr;
     if (dateStr >= earliestBookable && !hasStaff) {
       cell.classList.add('no-staff');
@@ -1590,6 +1680,11 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
       cell.addEventListener('click', () => openFormForDate(dateStr));
     } else {
       cell.classList.add('disabled');
+      cell.addEventListener('click', () => {
+        if (dateStr < earliestBookable) {
+          showPageToast(`${formatDateJa(earliestBookable)} 以降の日付のみ予約できます`);
+        }
+      });
     }
   }
 
@@ -1611,9 +1706,12 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
       const slot = document.createElement('button');
       slot.type = 'button';
       const status = r.status || 'applied';
-      slot.className = `calendar-slot status-${status}`;
+      const owned = r.owned === true;
+      slot.className = `calendar-slot status-${status}${owned ? '' : ' calendar-slot-title'}`;
       const staffLine = r.print_staff ? `\n担当者: ${r.print_staff}` : '';
-      slot.title = `${STATUS_LABELS[status] || status} / ${SCALE_LABELS[r.print_scale]} / ${r.title}${staffLine}`;
+      slot.title = owned
+        ? `${STATUS_LABELS[status] || status} / ${SCALE_LABELS[r.print_scale]} / ${r.title}${staffLine}`
+        : `${STATUS_LABELS[status] || status} / ${SCALE_LABELS[r.print_scale]}（他人の予約・参照のみ）`;
 
       if (isMobileCalendarView()) {
         slot.classList.add('calendar-slot-compact');
@@ -1624,7 +1722,11 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
 
       slot.addEventListener('click', (e) => {
         e.stopPropagation();
-        openReservationDetail(r.id);
+        if (owned) {
+          openReservationDetail(r.id);
+        } else {
+          openCalendarReservationPreview(r);
+        }
       });
       slotsWrap.appendChild(slot);
     }

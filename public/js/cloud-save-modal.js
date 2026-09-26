@@ -26,11 +26,12 @@ function formatBytes(bytes) {
 /**
  * クラウド保存モーダルを生成
  * @param {HTMLDialogElement} dialogEl
- * @param {{ idPrefix?: string, loginNext?: string }} [options]
+ * @param {{ idPrefix?: string, loginNext?: string, skipLoginRedirect?: boolean }} [options]
  */
 export function createCloudSaveModal(dialogEl, options = {}) {
   const idPrefix = options.idPrefix ?? "uv-cloud-save";
   const loginNext = options.loginNext ?? "/apps/cloud-storage/";
+  const skipLoginRedirect = options.skipLoginRedirect === true;
 
   /** @type {{ blob: Blob, filename: string } | null} */
   let pending = null;
@@ -201,7 +202,12 @@ export function createCloudSaveModal(dialogEl, options = {}) {
   async function ensureAccess() {
     const res = await fetch("/api/storage/access", { credentials: "same-origin" });
     if (res.status === 401) {
-      window.location.href = `/login/?next=${encodeURIComponent(loginNext)}`;
+      const suppressLoginRedirect =
+        skipLoginRedirect ||
+        /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
+      if (!suppressLoginRedirect) {
+        window.location.href = `/login/?next=${encodeURIComponent(loginNext)}`;
+      }
       return false;
     }
     if (!res.ok) return false;

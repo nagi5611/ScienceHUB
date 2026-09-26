@@ -69,6 +69,15 @@
   margin-top: 0.25rem;
 }
 
+/* dashboard.css hides .hub-calendar-card .calendar-header-desktop; show nav on tablet/desktop */
+.hub-calendar-card.contest-readonly-calendar .calendar-header-desktop {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .contest-readonly-calendar {
   pointer-events: none;
 }
