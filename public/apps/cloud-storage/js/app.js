@@ -2312,7 +2312,8 @@ async function checkAccess() {
     credentials: "same-origin",
   });
   if (res.status === 401) {
-    window.location.href = "/?next=" + encodeURIComponent(window.location.pathname);
+    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+    window.location.href = "/?next=" + encodeURIComponent(returnTo);
     return false;
   }
   const data = await res.json().catch(() => ({}));
