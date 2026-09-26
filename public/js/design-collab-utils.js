@@ -126,6 +126,27 @@ export function applyRemoteDesignScene(scene, onApply) {
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
+/** DO 未バインド時の collab API ステータス（Upgrade 前に返る） */
+export const DESIGN_COLLAB_UNAVAILABLE_STATUS = 503;
+
+/** WebSocket URL を HTTP プローブ用 URL に変換 */
+export function designCollabWsUrlToHttp(wsUrl) {
+  return wsUrl.replace(/^wss:/i, "https:").replace(/^ws:/i, "http:");
+}
+
+/**
+ * 共同編集が恒久利用不可か HTTP で確認（503 = サービス未設定）
+ * @returns {Promise<boolean>}
+ */
+export async function isDesignCollabServiceUnavailable(httpUrl) {
+  try {
+    const response = await fetch(httpUrl, { credentials: "include" });
+    return response.status === DESIGN_COLLAB_UNAVAILABLE_STATUS;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 共同編集 WebSocket 接続を管理
  */
@@ -137,6 +158,7 @@ export function createDesignCollabConnection(options) {
     onOpen,
     onClose,
     onError,
+    onUnavailable,
     onPeersChange,
     onRemotePointer,
   } = options;
@@ -146,6 +168,7 @@ export function createDesignCollabConnection(options) {
   let reconnectAttempt = 0;
   let reconnectTimer = null;
   let intentionalClose = false;
+  let serviceUnavailable = false;
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -155,7 +178,7 @@ export function createDesignCollabConnection(options) {
   }
 
   function scheduleReconnect() {
-    if (intentionalClose) return;
+    if (intentionalClose || serviceUnavailable) return;
     clearReconnectTimer();
     const delay = Math.min(
       RECONNECT_BASE_MS * 2 ** reconnectAttempt,
@@ -206,8 +229,10 @@ export function createDesignCollabConnection(options) {
     }
   }
 
-  function connect() {
+  async function connect() {
     clearReconnectTimer();
+    if (serviceUnavailable) return;
+
     if (socket) {
       try {
         socket.close();
@@ -215,6 +240,13 @@ export function createDesignCollabConnection(options) {
         /* ignore */
       }
       socket = null;
+    }
+
+    const httpUrl = designCollabWsUrlToHttp(buildUrl());
+    if (await isDesignCollabServiceUnavailable(httpUrl)) {
+      serviceUnavailable = true;
+      onUnavailable?.();
+      return;
     }
 
     const ws = new WebSocket(buildUrl());
@@ -229,12 +261,19 @@ export function createDesignCollabConnection(options) {
 
     ws.addEventListener("close", () => {
       socket = null;
-      onClose?.();
-      scheduleReconnect();
+      void (async () => {
+        if (await isDesignCollabServiceUnavailable(httpUrl)) {
+          serviceUnavailable = true;
+          onUnavailable?.();
+          return;
+        }
+        onClose?.();
+        scheduleReconnect();
+      })();
     });
 
     ws.addEventListener("error", () => {
-      onError?.();
+      if (!serviceUnavailable) onError?.();
     });
   }
 
@@ -243,6 +282,7 @@ export function createDesignCollabConnection(options) {
     disconnect() {
       intentionalClose = true;
       clearReconnectTimer();
+      serviceUnavailable = false;
       clientId = null;
       if (socket) {
         try {

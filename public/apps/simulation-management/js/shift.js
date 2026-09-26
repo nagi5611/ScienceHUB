@@ -1,6 +1,7 @@
 // src/admin/js/shift.js — shift calendar management
 import { apiRequest, ApiError } from '../../simulation-request/js/api.js';
 import { SHIFT_COLORS, shiftColorStyle } from '../../simulation-request/js/shift-colors.js';
+import { simulatorPlaceholderHtml } from '../../simulation-request/js/simulator-placeholder-icon.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const MOBILE_SHIFT_MQ = window.matchMedia('(max-width: 768px)');
@@ -396,7 +397,7 @@ function shiftSimulatorIconHtml(simulator) {
   if (simulator.image_url) {
     return `<img class="shift-simulator-icon" src="${escapeHtml(simulator.image_url)}" alt="" loading="lazy" />`;
   }
-  return `<span class="shift-simulator-icon shift-simulator-icon-placeholder" aria-hidden="true">🖨️</span>`;
+  return simulatorPlaceholderHtml('span', 'shift-simulator-icon shift-simulator-icon-placeholder');
 }
 
 /** Renders simulator toolbar for shift editing. */
@@ -506,8 +507,12 @@ function renderShiftCalendar() {
   const todayStr = todayJst();
 
   const prevMonthLast = new Date(shiftYear, shiftMonth - 1, 0).getDate();
+  const prevMonth = shiftMonth === 1 ? 12 : shiftMonth - 1;
+  const prevYear = shiftMonth === 1 ? shiftYear - 1 : shiftYear;
   for (let i = startWeekday - 1; i >= 0; i--) {
-    grid.appendChild(createShiftDayCell(prevMonthLast - i, true, {}, {}, todayStr));
+    const dayNum = prevMonthLast - i;
+    const dateStr = `${prevYear}-${String(prevMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+    grid.appendChild(createShiftDayCell(dayNum, true, byDate, simulatorsByDate, todayStr, dateStr));
   }
 
   for (let day = 1; day <= lastDay; day++) {
@@ -517,8 +522,11 @@ function renderShiftCalendar() {
 
   const totalCells = startWeekday + lastDay;
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  const nextMonth = shiftMonth === 12 ? 1 : shiftMonth + 1;
+  const nextYear = shiftMonth === 12 ? shiftYear + 1 : shiftYear;
   for (let day = 1; day <= remaining; day++) {
-    grid.appendChild(createShiftDayCell(day, true, {}, {}, todayStr));
+    const dateStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    grid.appendChild(createShiftDayCell(day, true, byDate, simulatorsByDate, todayStr, dateStr));
   }
 }
 
@@ -534,7 +542,7 @@ function createShiftDayCell(dayNum, otherMonth, byDate, simulatorsByDate, todayS
   num.textContent = dayNum;
   cell.appendChild(num);
 
-  if (dateStr && !otherMonth) {
+  if (dateStr) {
     cell.dataset.date = dateStr;
     const members = byDate[dateStr] ?? [];
     const simulators = simulatorsByDate[dateStr] ?? [];

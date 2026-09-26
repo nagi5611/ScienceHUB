@@ -3,7 +3,6 @@ import { apiFormRequest, apiRequest } from './api.js';
 // import { createShiftMiniCalendar } from './shift-mini-calendar.js';
 import { setupHomeroomCombobox } from './homeroom.js';
 import {
-  initPhoneVerification,
   ensureSimPhoneVerified,
   applyPhoneVerificationUi,
 } from './phone-verification.js';
@@ -322,6 +321,11 @@ async function forceOpenfoamSecondaryById(requestId) {
   }
 }
 let selectedDesiredDate = null;
+
+/** Syncs OpenFOAM desired date from the shared mini calendar. */
+export function setOpenfoamDesiredDate(date) {
+  selectedDesiredDate = date;
+}
 let instancePreviewTimer = null;
 
 /** Shows a transient toast message. */
@@ -734,10 +738,6 @@ export async function initOpenfoamRequestPanel(deps = {}) {
 
   const allowed = true;
   if (!allowed) return;
-
-  
-  
-  await initPhoneVerification();
 
   document.getElementById('openfoam-mpi-processes')?.addEventListener('input', scheduleInstancePreview);
   document.getElementById('openfoam-max-runtime-hours')?.addEventListener('input', scheduleInstancePreview);

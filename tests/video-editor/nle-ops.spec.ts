@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
-import { loadSampleVideo, openVideoEditor } from "./helpers.js";
+import { fileURLToPath } from "node:url";
+import { FIXTURES_DIR, loadSampleVideo, openVideoEditor } from "./helpers.js";
 
-const FIXTURE_MP3 = path.join(path.dirname(new URL(import.meta.url).pathname), "../image-converter/fixtures/sample.mp3");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURE_MP3 = path.join(__dirname, "..", "image-converter", "fixtures", "sample.mp3");
 
 test.describe("NLE operations", () => {
   test.beforeEach(async ({ page }) => {
@@ -44,7 +46,7 @@ test.describe("NLE operations", () => {
   });
 
   test("second video places at playhead on v1 track", async ({ page }) => {
-    const fixturePath = path.join(path.dirname(new URL(import.meta.url).pathname), "fixtures/sample.mp4");
+    const fixturePath = path.join(FIXTURES_DIR, "sample.mp4");
     const clip = page.locator("#multi-track .ve-track-clip").first();
     const box = await clip.boundingBox();
     if (!box) throw new Error("clip not found");
@@ -60,7 +62,7 @@ test.describe("NLE operations", () => {
   });
 
   test("shift click places overlay on v2 track", async ({ page }) => {
-    const fixturePath = path.join(path.dirname(new URL(import.meta.url).pathname), "fixtures/sample.mp4");
+    const fixturePath = path.join(FIXTURES_DIR, "sample.mp4");
     const chooserPromise = page.waitForEvent("filechooser");
     await page.locator("#add-video-btn").click();
     const chooser = await chooserPromise;

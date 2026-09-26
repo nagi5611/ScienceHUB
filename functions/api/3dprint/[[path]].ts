@@ -50,11 +50,13 @@ import {
   type Reservation,
 } from "../../lib/3dprint/reservations";
 import { adminRescheduleReservation } from "../../lib/3dprint/reschedule";
+import { syncReservationCalendarAfterAdminPatch } from "../../lib/3dprint/admin-calendar-sync";
 import { retryFailedReservation } from "../../lib/3dprint/retry-reservation";
 import {
   checkShiftRemovalBlocked,
   checkShiftRemovalBlockedForDates,
   isMemberAvailableOnDate,
+  isMemberAvailableOnReservationSpan,
   isValidDiscordUserId,
   type ShiftBlockReservation,
 } from "../../lib/3dprint/shift-guard";
@@ -1470,27 +1472,67 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("申請中の予約は「予約を受領」ボタンから受領してください", 400);
       }
 
+      if (
+        existing.status === "applied" &&
+        body.status &&
+        (body.status === "printing" || body.status === "delivered")
+      ) {
+        return error(
+          "申請中の予約は「予約を受領」から受領してからステータスを変更してください",
+          400
+        );
+      }
+
+      const effectiveStaffId =
+        body.print_staff_member_id !== undefined
+          ? body.print_staff_member_id
+          : existing.print_staff_member_id;
+
+      if (
+        body.status &&
+        (body.status === "printing" || body.status === "delivered") &&
+        !effectiveStaffId
+      ) {
+        return error("印刷中・配布済みにするには印刷担当者を割り当ててください", 400);
+      }
+
       if (body.print_staff_member_id) {
         const member = await getMemberById(db, body.print_staff_member_id);
         if (!member) return error("指定されたメンバーが見つかりません", 400);
-        const availableIds = await getAvailableMemberIdsOnDate(db, existing.desired_date);
         if (
-          !availableIds.includes(body.print_staff_member_id) &&
-          body.print_staff_member_id !== existing.print_staff_member_id
+          body.print_staff_member_id !== existing.print_staff_member_id &&
+          !(await isMemberAvailableOnReservationSpan(db, body.print_staff_member_id, existing))
         ) {
-          return error("この日に対応可能なメンバーのみ割り当てできます", 400);
+          return error("予約期間のすべての日に対応可能なメンバーのみ割り当てできます", 400);
         }
+      }
+
+      if (
+        body.status &&
+        (body.status === "cancelled" || body.status === "failed") &&
+        existing.google_event_id
+      ) {
+        await deleteCalendarEvent(env, existing.google_event_id);
+        await setGoogleEventId(db, segments[2], null);
       }
 
       await updateReservationAdmin(db, segments[2], {
         ...body,
         status_comment: statusComment,
       });
-      const updated = await getReservationById(db, segments[2]);
+      let updated = await getReservationById(db, segments[2]);
+      let calendar: { ok: boolean; error?: string } | null = null;
+      if (updated) {
+        calendar = await syncReservationCalendarAfterAdminPatch(env, existing, updated, body);
+        if (calendar) {
+          updated = await getReservationById(db, segments[2]);
+        }
+      }
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
         reservation: updated ? enrichReservationForAdmin(updated, memberMap, printerMap) : null,
+        ...(calendar ? { calendar } : {}),
       });
     }
 
@@ -1551,9 +1593,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const member = await getMemberById(db, body.print_staff_member_id);
       if (!member) return error("指定されたメンバーが見つかりません", 400);
 
-      const availableIds = await getAvailableMemberIdsOnDate(db, existing.desired_date);
-      if (!availableIds.includes(body.print_staff_member_id)) {
-        return error("この日に対応可能なメンバーのみ割り当てできます", 400);
+      if (!(await isMemberAvailableOnReservationSpan(db, body.print_staff_member_id, existing))) {
+        return error("予約期間のすべての日に対応可能なメンバーのみ割り当てできます", 400);
       }
 
       const accepted = await acceptReservation(db, segments[2], body.print_staff_member_id);
