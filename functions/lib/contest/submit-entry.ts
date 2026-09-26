@@ -2,7 +2,6 @@
 import { findAutoScheduleSlot } from './auto-schedule';
 import {
   contestApplicationStlFileLimit,
-  contestApplicationCanSubmitStl,
   fetchLatestContestReservationForApplication,
   getContestApplicationForSubmit,
   updateContestApplicationSelfPrintStl,
@@ -295,8 +294,8 @@ export async function submitContestEntry(
     db,
     applicationId
   );
-  if (!contestApplicationCanSubmitStl(application, null, latestReservation)) {
-    throw new Error('この作品はすでに STL を提出済みのため、新たに提出できません');
+  if (latestReservation?.status === 'delivered') {
+    throw new Error('印刷が完了しているため、新たに STL を提出できません');
   }
 
   const grade =

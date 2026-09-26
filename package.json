@@ -11,6 +11,8 @@
     "build": "npm run types && npm run typecheck",
     "typecheck": "tsc --noEmit",
     "test:workspace-edits": "npx tsx --test functions/lib/third-party/workspace-edits.test.ts",
+    "test:contest-logic": "npx tsx --test functions/lib/contest/applications.submission-status.test.ts",
+    "test:contest": "playwright test tests/contest",
     "predeploy": "npm run build && npm run assets:upload-ffmpeg && npm run db:migrate:remote && npm run storage:index:backfill:kick:remote",
     "assets:upload-ffmpeg": "node scripts/upload-ffmpeg-core.mjs",
     "assets:upload-ffmpeg:local": "node scripts/upload-ffmpeg-core.mjs --local",
@@ -36,7 +38,7 @@
     "test:video-editor": "playwright test tests/video-editor",
     "test:video-editor:ui": "playwright test tests/video-editor --ui",
     "test:website-publish": "playwright test tests/website-publish",
-    "test:3dprint-reservation": "playwright test tests/3dprint-reservation"
+    "test:contest": "playwright test tests/contest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260722.1",
