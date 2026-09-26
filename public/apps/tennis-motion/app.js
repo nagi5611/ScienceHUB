@@ -630,6 +630,11 @@ function initApp() {
       S.horizB = d.horizB;
       $("#scaleLen").value = d.scaleLength || 1;
       $("#step").value = d.frameStep || 1;
+      const videoEl = document.querySelector("video");
+      if (!videoEl || !videoEl.videoWidth) {
+        alert("先に元動画を読み込んでからプロジェクト JSON を開いてください");
+        return;
+      }
       draw();
       metrics();
       updateAS();
