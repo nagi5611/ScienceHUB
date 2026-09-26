@@ -138,6 +138,12 @@ function initApp() {
   }
 
   $("#drop").onclick = () => $("#file").click();
+  $("#drop").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      $("#file").click();
+    }
+  });
   $("#file").onchange = (e) => e.target.files[0] && load(e.target.files[0]);
   ["dragenter", "dragover"].forEach((x) =>
     $("#drop").addEventListener(x, (e) => {
