@@ -214,6 +214,13 @@ function init() {
     showAlert(decodeURIComponent(error));
   }
 
+  if (params.get("hint") === "oauth_profile") {
+    showAlert(
+      "このページは外部ログイン（Google / Microsoft）のサインアップ途中専用です。通常のログインまたはサインアップをご利用ください。",
+      "error"
+    );
+  }
+
   bindOAuthButtons();
   document.getElementById("login-form")?.addEventListener("submit", handleLoginSubmit);
   document.getElementById("signup-form")?.addEventListener("submit", handleSignupSubmit);
