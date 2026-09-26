@@ -1984,7 +1984,6 @@ function initCloudModals() {
     cloudSaveModal = createCloudSaveModal(saveDialog, {
       idPrefix: "ve-cloud-save",
       loginNext: "/apps/video-editor/",
-      // E2E ハーネスでは未ログイン時もページを維持しモーダル内 denied を検証する
       skipLoginRedirect: veE2eHarness,
     });
   }
