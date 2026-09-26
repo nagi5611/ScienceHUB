@@ -321,6 +321,11 @@ async function forceOpenfoamSecondaryById(requestId) {
   }
 }
 let selectedDesiredDate = null;
+
+/** Syncs OpenFOAM desired date from the shared mini calendar. */
+export function setOpenfoamDesiredDate(date) {
+  selectedDesiredDate = date;
+}
 let instancePreviewTimer = null;
 
 /** Shows a transient toast message. */
