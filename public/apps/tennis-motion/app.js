@@ -5,6 +5,12 @@
 const APP_SLUG = "tennis-motion";
 const APP_PATH = `/apps/${APP_SLUG}/`;
 
+/** ファイルサイズを表示用に整形 */
+function formatFileSize(bytes) {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** アクセス権を確認 */
 async function checkAccess() {
   const response = await fetch(`/api/apps/${APP_SLUG}/access`, {
@@ -156,7 +162,7 @@ function initApp() {
     S.name = f.name;
     video.src = S.url;
     video.load();
-    $("#info").textContent = `${f.name} / ${(f.size / 1048576).toFixed(1)} MB`;
+    $("#info").textContent = `${f.name} / ${formatFileSize(f.size)}`;
     status("動画情報を読み込んでいます…");
   }
 
