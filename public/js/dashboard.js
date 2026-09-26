@@ -36,6 +36,50 @@ function todayJst() {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
+/** 未認証時の login リダイレクト URL（現在のパス・クエリを next に保持） */
+function hubLoginRedirectUrl() {
+  const next = window.location.pathname + window.location.search;
+  return `/login/?next=${encodeURIComponent(next)}`;
+}
+
+/** ハブ `/` の ?next= を login.js getRedirectTarget と同様の規則で解決 */
+function resolveHubNextRedirect(user) {
+  const params = new URLSearchParams(window.location.search);
+  const next = params.get("next");
+  if (!next || next === "/") return null;
+
+  if (next.startsWith("/") && !next.startsWith("//")) {
+    if (next.startsWith("/admin/panel") && !user?.is_admin) {
+      return null;
+    }
+    return next;
+  }
+
+  return null;
+}
+
+/** 安全な ?next= があれば着地先へ遷移 */
+async function redirectHubIfNextParam() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("next")) return false;
+
+  try {
+    const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    const target = resolveHubNextRedirect(data.user);
+    if (target) {
+      window.location.replace(target);
+      return true;
+    }
+  } catch {
+    /* ダッシュボード表示を続行 */
+  }
+
+  return false;
+}
+
 /** HTML エスケープ */
 function escapeHtml(str) {
   return String(str)
@@ -127,7 +171,7 @@ async function renderAnnouncements() {
   try {
     const response = await fetch("/api/announcements", { credentials: "same-origin" });
     if (response.status === 401) {
-      window.location.href = "/login/?next=" + encodeURIComponent("/");
+      window.location.href = hubLoginRedirectUrl();
       return;
     }
     const data = await response.json();
@@ -301,7 +345,7 @@ function renderStorageOverview(storage) {
 async function fetchDashboard() {
   const response = await fetch("/api/dashboard", { credentials: "same-origin" });
   if (response.status === 401) {
-    window.location.href = "/login/?next=" + encodeURIComponent("/");
+    window.location.href = hubLoginRedirectUrl();
     return null;
   }
   if (!response.ok) {
@@ -342,7 +386,7 @@ async function renderGroups(dashboardData) {
     const defaultSection =
       defaultApps.length > 0
         ? `<div class="hub-group hub-group--default" style="--group-color:var(--cf-orange)">
-          <h2 class="hub-group-title">Default App</h2>
+          <h2 class="hub-group-title">既定のアプリ</h2>
           <div class="hub-app-grid">${defaultApps.map(renderAppTileHtml).join("")}</div>
         </div>`
         : "";
@@ -445,7 +489,7 @@ async function loadSchedule(force = false) {
       { credentials: "same-origin" }
     );
     if (response.status === 401) {
-      window.location.href = "/login/?next=" + encodeURIComponent("/");
+      window.location.href = hubLoginRedirectUrl();
       return;
     }
     if (!response.ok) {
@@ -1273,7 +1317,7 @@ async function openScheduleSubscribeModal() {
       credentials: "same-origin",
     });
     if (response.status === 401) {
-      window.location.href = "/login/?next=" + encodeURIComponent("/");
+      window.location.href = hubLoginRedirectUrl();
       return;
     }
     const data = await response.json().catch(() => ({}));
@@ -1413,6 +1457,8 @@ function bindEvents() {
 
 /** 初期化 */
 async function init() {
+  if (await redirectHubIfNextParam()) return;
+
   const parts = todayJst().split("-").map(Number);
   currentYear = parts[0];
   currentMonth = parts[1];
