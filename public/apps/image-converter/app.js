@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * 画像変換アプリ — クライアントサイドのみ
  */
@@ -181,7 +182,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 

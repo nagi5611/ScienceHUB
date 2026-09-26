@@ -14,7 +14,7 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: BASE_URL,
-    trace: "on-first-retry",
+    trace: process.env.CI ? "retain-on-failure" : "on-first-retry",
     ...devices["Desktop Chrome"],
   },
   webServer: {

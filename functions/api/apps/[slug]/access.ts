@@ -7,6 +7,7 @@ import { jsonError } from "../../../lib/types";
 import { getDb } from "../../../lib/db";
 import { requireUser } from "../../../lib/auth";
 import { canUserAccessApp, getAppBySlug } from "../../../lib/apps";
+import { getAccessibleMemberships } from "../../../lib/project-management";
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireUser(context.request, context.env);
@@ -22,7 +23,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return jsonError("アプリが見つかりません", 404);
   }
 
-  const allowed = await canUserAccessApp(getDb(context.env), auth.id, slug);
+  let allowed = await canUserAccessApp(getDb(context.env), auth.id, slug);
+  if (allowed && slug === "project-management") {
+    const memberships = await getAccessibleMemberships(getDb(context.env), auth.id);
+    allowed = memberships.length > 0;
+  }
   if (!allowed) {
     return jsonError("このアプリへのアクセス権限がありません", 403);
   }

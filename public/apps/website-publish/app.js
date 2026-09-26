@@ -376,6 +376,7 @@ async function checkAccess() {
   }
   if (!response.ok) {
     accessDenied.hidden = false;
+    document.querySelector(".hub-header")?.setAttribute("hidden", "");
     return false;
   }
   appMain.hidden = false;
@@ -467,6 +468,16 @@ async function openSite(siteId) {
   updateStatsDisplay(site);
   explorer.resetDir();
   await loadFiles();
+}
+
+async function refreshCurrentSiteFromServer() {
+  if (!currentSite) return;
+  const data = await api("sites");
+  sites = data.sites ?? [];
+  const site = sites.find((s) => s.id === currentSite.id);
+  if (!site) return;
+  currentSite = site;
+  updateStatsDisplay(site);
 }
 
 /** 統計表示 */
@@ -640,15 +651,20 @@ async function handleCreateSite(event) {
   if (!title || !pathSlug) return;
 
   setStatus("サイトを作成中…");
-  await api("sites", {
-    method: "POST",
-    body: JSON.stringify({ title, path_slug: pathSlug }),
-  });
-  createDialog.close();
-  createTitle.value = "";
-  createPath.value = "";
-  await loadSites();
-  setStatus("サイトを作成しました");
+  try {
+    await api("sites", {
+      method: "POST",
+      body: JSON.stringify({ title, path_slug: pathSlug }),
+    });
+    createDialog.close();
+    createTitle.value = "";
+    createPath.value = "";
+    await loadSites();
+    setStatus("サイトを作成しました");
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "サイトの作成に失敗しました", true);
+    createDialog.close();
+  }
 }
 
 /** サイト削除 */
@@ -667,6 +683,12 @@ async function handleDeleteSite() {
 createSiteBtn.addEventListener("click", () => createDialog.showModal());
 createCancel.addEventListener("click", () => createDialog.close());
 createForm.addEventListener("submit", handleCreateSite);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && currentSite) {
+    refreshCurrentSiteFromServer().catch(() => {});
+  }
+});
+
 backToSites.addEventListener("click", () => {
   currentSite = null;
   filesPanel.hidden = true;

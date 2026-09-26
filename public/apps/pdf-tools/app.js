@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * PDF結合・分割アプリ — クライアントサイド
  */
@@ -66,7 +67,7 @@ async function checkAccess() {
   }
 
   if (response.status === 404) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     const denied = document.getElementById("access-denied");
     if (denied) {
       const p = denied.querySelector("p");
@@ -79,7 +80,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 
@@ -168,6 +169,7 @@ function bindDropZone(zone, input, onFiles) {
 
 /** タブ切り替え */
 function switchTab(tab) {
+  if (isBusy) return;
   const isMerge = tab === "merge";
   if (tabMerge) {
     tabMerge.setAttribute("aria-selected", isMerge ? "true" : "false");
@@ -181,6 +183,17 @@ function switchTab(tab) {
 
 tabMerge?.addEventListener("click", () => switchTab("merge"));
 tabSplit?.addEventListener("click", () => switchTab("split"));
+
+const pdfTablist = document.querySelector('[role="tablist"]');
+pdfTablist?.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const tabs = [tabMerge, tabSplit].filter(Boolean);
+  const idx = tabs.findIndex((el) => el.getAttribute("aria-selected") === "true");
+  const next = event.key === "ArrowRight" ? (idx + 1) % tabs.length : (idx - 1 + tabs.length) % tabs.length;
+  switchTab(next === 0 ? "merge" : "split");
+  tabs[next]?.focus();
+});
 
 /** pdf-lib でページ数取得 */
 async function countPdfPages(file) {
@@ -252,6 +265,13 @@ function buildMergePagesHtml(entry) {
 }
 
 /** 結合一覧を描画 */
+function updateMergeEntryPreviewDom(entry) {
+  const item = mergeFileList?.querySelector(`[data-id="${entry.id}"]`);
+  if (!item) return;
+  const pages = item.querySelector(".pdf-file-pages");
+  if (pages) pages.outerHTML = buildMergePagesHtml(entry);
+}
+
 function renderMergeList() {
   if (!mergeFileList || !mergeEmpty) return;
 
@@ -333,7 +353,7 @@ async function addMergeFiles(files) {
     loadMergeEntryPreview(entry).catch(() => {
       entry.previewLoading = false;
       entry.previewError = "プレビューの読み込みに失敗しました";
-      renderMergeList();
+      updateMergeEntryPreviewDom(entry);
     });
   }
 
