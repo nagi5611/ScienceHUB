@@ -425,9 +425,12 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
     cell.dataset.date = dateStr;
     if (dateStr < todayStr) {
       cell.classList.add('disabled');
+      cell.addEventListener('click', () =>
+        showAdminPageToast('当日より前の日付には予約できません')
+      );
     } else if (isFull) {
       cell.classList.add('full');
-      cell.addEventListener('click', () => alert('この日はもう満杯です'));
+      cell.addEventListener('click', () => showAdminPageToast('この日はもう満杯です'));
     } else {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openAdminFormForDate(dateStr));
@@ -728,7 +731,7 @@ async function openAdminFormForDate(dateStr) {
   resetAdminFormUi();
   const todayStr = getTodayJst();
   if (dateStr < todayStr) {
-    alert('当日より前の日付には予約できません');
+    showAdminPageToast('当日より前の日付には予約できません');
     return;
   }
 
@@ -741,7 +744,7 @@ async function openAdminFormForDate(dateStr) {
   }
 
   if (availability.isFull) {
-    alert('この日はもう満杯です');
+    showAdminPageToast('この日はもう満杯です');
     return;
   }
 
@@ -856,6 +859,16 @@ function setAdminScaleOptions(availableScales) {
 function showAdminFormAlert(message, type) {
   document.getElementById('admin-form-alert').innerHTML =
     `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+}
+
+/** Shows a temporary page-level toast (calendar / non-modal feedback). */
+function showAdminPageToast(message) {
+  const toast = document.getElementById('page-toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  clearTimeout(showAdminPageToast._timer);
+  showAdminPageToast._timer = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
 /** Formats a date string for Japanese display. */
