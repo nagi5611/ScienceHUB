@@ -169,6 +169,7 @@ function bindDropZone(zone, input, onFiles) {
 
 /** タブ切り替え */
 function switchTab(tab) {
+  if (isBusy) return;
   const isMerge = tab === "merge";
   if (tabMerge) {
     tabMerge.setAttribute("aria-selected", isMerge ? "true" : "false");
