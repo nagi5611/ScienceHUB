@@ -1482,6 +1482,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         }
       }
 
+      if (
+        body.status &&
+        (body.status === "cancelled" || body.status === "failed") &&
+        existing.google_event_id
+      ) {
+        await deleteCalendarEvent(env, existing.google_event_id);
+        await setGoogleEventId(db, segments[2], null);
+      }
+
       await updateReservationAdmin(db, segments[2], {
         ...body,
         status_comment: statusComment,
