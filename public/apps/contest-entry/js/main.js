@@ -490,7 +490,7 @@ function renderApplicationsList() {
     li.className = 'contest-application-card';
     const memberCount = app.members?.length ?? 0;
     const memberLine =
-      memberCount > 0
+      memberCount > 1
         ? `<p class="hint">参加者: ${escapeHtml(formatParticipantSummary(app.members))}</p>`
         : '';
     const selfPrintLine = app.self_print
