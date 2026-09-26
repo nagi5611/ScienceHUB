@@ -981,6 +981,7 @@ async function checkAccess() {
 
   if (!response.ok) {
     document.getElementById("access-denied").hidden = false;
+    document.querySelector(".pm-header")?.setAttribute("hidden", "");
     return false;
   }
 
