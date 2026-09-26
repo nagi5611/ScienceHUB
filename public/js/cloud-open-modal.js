@@ -224,7 +224,9 @@ export function createCloudOpenModal(dialogEl, options = {}) {
     const res = await fetch("/api/storage/access", { credentials: "same-origin" });
     if (res.status === 401) {
       accessDeniedReason = "unauthenticated";
-      if (redirectOn401) {
+      const veE2eHarness =
+        /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
+      if (redirectOn401 && !veE2eHarness) {
         window.location.href = `/login/?next=${encodeURIComponent(loginNext)}`;
       }
       return false;
@@ -245,7 +247,9 @@ export function createCloudOpenModal(dialogEl, options = {}) {
   function showAccessDenied() {
     if (els.body) els.body.hidden = true;
     if (els.denied) {
-      if (accessDeniedReason === "unauthenticated" && !redirectOn401) {
+      const veE2eHarness =
+        /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
+      if (accessDeniedReason === "unauthenticated" && (!redirectOn401 || veE2eHarness)) {
         els.denied.innerHTML = `<p>クラウドストレージを利用するにはログインが必要です。</p>
         <a href="/login/?next=${encodeURIComponent(loginNext)}" class="cloud-save-btn">ログインして続行</a>`;
       } else {

@@ -172,6 +172,8 @@ test.describe("video-editor buttons", () => {
 
     await page.locator("#cloud-load-btn").click();
     await expect(page.locator("#ve-cloud-open-dialog")).toBeVisible();
+    await expect(page).toHaveURL(/video-editor-e2e/);
+    await expect(page.locator("#ve-cloud-open-denied")).toBeVisible();
     await page.getByRole("button", { name: "キャンセル" }).click();
     await assertNoPageErrors(page);
   });
