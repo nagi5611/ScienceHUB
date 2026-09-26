@@ -1582,6 +1582,11 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
       cell.addEventListener('click', () => openFormForDate(dateStr));
     } else {
       cell.classList.add('disabled');
+      cell.addEventListener('click', () => {
+        if (dateStr < earliestBookable) {
+          showPageToast(`${formatDateJa(earliestBookable)} 以降の日付のみ予約できます`);
+        }
+      });
     }
   }
 
