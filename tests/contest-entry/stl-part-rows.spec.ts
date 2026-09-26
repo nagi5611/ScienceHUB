@@ -3,7 +3,7 @@ import {
   applicationCardByTitle,
   createSelfPrintApplicationViaApi,
   openContestEntry,
-  openSubmitViewForTitle,
+  openSubmitViewForApplicationId,
   submitStlForm,
   uniqueContestTitle,
   uploadStlPartAt,
@@ -17,15 +17,17 @@ test.describe("造形物コンテスト — 複数パーツ STL 行 UI", () => {
   test("複数パーツ行を追加して2件の STL を提出できる", async ({ page }) => {
     test.setTimeout(120_000);
     const title = uniqueContestTitle("stl-multi");
-    await createSelfPrintApplicationViaApi(page, title);
+    const applicationId = await createSelfPrintApplicationViaApi(page, title);
 
-    await openSubmitViewForTitle(page, title);
-    await page.locator("#btn-add-stl-part").click();
+    await openSubmitViewForApplicationId(page, applicationId);
+    await page.getByRole("button", { name: "パーツを追加" }).click();
     await expect(page.locator(".contest-stl-part-row")).toHaveCount(2);
 
     await uploadStlPartAt(page, 0);
     await uploadStlPartAt(page, 1);
-    await expect(page.locator("#submit-btn")).toContainText("2 件");
+    const submitBtn = page.locator("#view-submit #submit-btn");
+    await expect(submitBtn).toBeEnabled({ timeout: 30_000 });
+    await expect(submitBtn).toContainText("2 件");
     await submitStlForm(page);
 
     const card = applicationCardByTitle(page, title);
