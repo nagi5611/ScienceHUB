@@ -191,7 +191,31 @@ async function fetchMembersForApplication(
   return result.results ?? [];
 }
 
-async function fetchLatestReservationForApplication(
+const CONTEST_STL_SUBMIT_BLOCKED_RESERVATION_STATUSES: PrintReservation['status'][] = [
+  'delivered',
+  'failed',
+  'cancelled',
+];
+
+/** School-printer contest entries: whether STL upload / re-upload is allowed. */
+export function contestApplicationCanSubmitStl(
+  app: Pick<ContestApplication, 'status' | 'self_print' | 'stl_submitted_at'>,
+  active: Reservation | null,
+  reservation: ContestApplicationReservationSummary | null
+): boolean {
+  if (app.status !== 'approved') return false;
+  if (app.self_print && app.stl_submitted_at != null) return false;
+  if (active?.status === 'printing') return true;
+  if (active != null) return false;
+  if (reservation == null) return true;
+  if (reservation.stl_filename) return false;
+  if (CONTEST_STL_SUBMIT_BLOCKED_RESERVATION_STATUSES.includes(reservation.status)) {
+    return false;
+  }
+  return false;
+}
+
+export async function fetchLatestContestReservationForApplication(
   db: D1Database,
   applicationId: string
 ): Promise<ContestApplicationReservationSummary | null> {
@@ -301,8 +325,7 @@ async function enrichApplication(
     reservation,
     stl_file_limit: contestApplicationStlFileLimit(app),
     stl_extra_parts: stlExtraParts,
-    can_submit_stl:
-      app.status === 'approved' && !activeBlocksSubmit && !selfPrintSubmitted,
+    can_submit_stl: contestApplicationCanSubmitStl(app, active, reservation),
     can_withdraw: canWithdraw,
     ...stlMeta,
   };
@@ -485,7 +508,7 @@ export async function listContestApplicationsForUser(
   const enriched: ContestApplicationWithDetails[] = [];
   for (const app of apps) {
     const members = await fetchMembersForApplication(db, app.id);
-    const reservation = await fetchLatestReservationForApplication(db, app.id);
+    const reservation = await fetchLatestContestReservationForApplication(db, app.id);
     const active = await getActiveContestReservationForApplication(db, app.id);
     const canWithdraw =
       app.status === 'approved' &&
@@ -517,7 +540,7 @@ export async function getContestApplicationForUser(
   const app = await getApplicationRow(db, applicationId);
   if (!app || app.user_id !== userId) return null;
   const members = await fetchMembersForApplication(db, app.id);
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' &&
@@ -544,7 +567,7 @@ async function assertCanUpdateContestMultiPartSettings(
   if (app.self_print && app.stl_submitted_at) {
     throw new Error('提出済みの作品はパーツ設定を変更できません');
   }
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   if (reservation?.stl_filename) {
     throw new Error('STL 提出後はパーツ設定を変更できません');
   }
@@ -648,7 +671,7 @@ export async function patchContestApplicationForUser(
     part_count: partCount,
     updated_at: now,
   };
-  const reservation = await fetchLatestReservationForApplication(db, applicationId);
+  const reservation = await fetchLatestContestReservationForApplication(db, applicationId);
   const canWithdraw =
     updated.status === 'approved' &&
     !(await hasBlockingReservationForWithdraw(db, applicationId));
@@ -905,7 +928,7 @@ async function enrichContestApplicationAdminRow(
   const { applicant_email, ...appFields } = rawApp;
   const app = mapContestApplicationRow(appFields);
   const members = await fetchMembersForApplication(db, app.id);
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   const reservations = await fetchContestReservationsForApplicationAdmin(db, app.id);
   const stlLogs = await listContestStlSubmissionLogsForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);

@@ -981,6 +981,7 @@ async function checkAccess() {
 
   if (!response.ok) {
     document.getElementById("access-denied").hidden = false;
+    document.querySelector(".pm-header")?.setAttribute("hidden", "");
     return false;
   }
 
@@ -3041,7 +3042,7 @@ async function handleSaveEditProject() {
     }
 
     await loadDashboard(selectedGroupId);
-    showToast("タスクを更新しました");
+    showToast("プロジェクトを更新しました");
   } catch {
     showToast("更新に失敗しました", true);
   } finally {

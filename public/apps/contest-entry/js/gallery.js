@@ -94,11 +94,11 @@ export async function initContestPublicGallery() {
     const data = await apiRequest('gallery');
     const entries = data.entries ?? [];
     renderGallery(entries);
-  } catch (err) {
+  } catch {
     const empty = document.getElementById('contest-gallery-empty');
     if (empty) {
       empty.classList.remove('hidden');
-      empty.textContent = err.message || '作品一覧の読み込みに失敗しました';
+      empty.textContent = '作品一覧を読み込めませんでした';
     }
   }
 }

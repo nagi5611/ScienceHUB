@@ -34,7 +34,7 @@
     <div id="page-toast" class="page-toast hidden"></div>
 
     <h1 class="page-heading">3D印刷予約</h1>
-    <p class="page-subheading">カレンダーから印刷希望日をクリックして予約してください。タイトルをクリックすると詳細の確認・取り消しができます。</p>
+    <p class="page-subheading">カレンダーから印刷希望日をクリックして予約してください。自分の予約のタイトルをクリックすると詳細の確認・取り消しができます。</p>
     <p class="contact-notice">予約の取り消しができない場合など：<br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
 
     <section class="card" id="calendar-section">
@@ -122,6 +122,12 @@
           <h3 class="form-section-title">印刷機種を選択</h3>
           <p class="hint" id="form-step-printer-hint">使用する3Dプリンターの機種を選んでください。表示されている「予約待ち」は、選択した日の申請中（受領待ち）件数です。メンテナンス中・印刷不能の機種は選択できません。</p>
           <div id="printer-picker" class="printer-picker" role="listbox" aria-label="印刷機種"></div>
+          <button
+            type="button"
+            class="btn btn-link btn-sm printer-picker-show-unavailable hidden"
+            id="printer-picker-show-unavailable"
+            aria-expanded="false"
+          ></button>
           <p class="hint hidden" id="printer-picker-empty">利用可能なプリンターが登録されていません。管理者にお問い合わせください。</p>
           <p class="hint hidden" id="printer-picker-all-unavailable">現在、予約可能なプリンターがありません。しばらくしてから再度お試しください。</p>
         </section>
@@ -390,6 +396,12 @@
         </form>
       </div>
     </div>
+  </div>
+
+  <div class="reservation-denied" id="access-denied" hidden>
+    <h2>アクセスできません</h2>
+    <p>3D印刷予約アプリを利用する権限がありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>
+    <a href="/" class="btn btn-primary">ダッシュボードへ戻る</a>
   </div>
 
   <script type="module" src="./js/main.js"></script>
