@@ -39,16 +39,15 @@ async function loadPreviewIntoCard(cardEl, entry) {
   try {
     const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) {
-      throw new Error(`プレビュー取得に失敗しました (${res.status})`);
+      throw new Error('プレビューを表示できませんでした');
     }
     const rawBlob = await res.blob();
     const blob = ensureModelBlobType(rawBlob, entry.model_filename);
     const objectUrl = URL.createObjectURL(blob);
     await mountModel3dPreview(previewHost, objectUrl, entry.model_filename);
-  } catch (err) {
-    previewHost.innerHTML = `<p class="hint contest-gallery-preview-error">${escapeHtml(
-      err.message || 'プレビューを表示できません'
-    )}</p>`;
+  } catch {
+    previewHost.innerHTML =
+      '<p class="hint contest-gallery-preview-error">プレビューを表示できませんでした</p>';
   }
 }
 
@@ -95,11 +94,11 @@ export async function initContestPublicGallery() {
     const data = await apiRequest('gallery');
     const entries = data.entries ?? [];
     renderGallery(entries);
-  } catch (err) {
+  } catch {
     const empty = document.getElementById('contest-gallery-empty');
     if (empty) {
       empty.classList.remove('hidden');
-      empty.textContent = err.message || '作品一覧の読み込みに失敗しました';
+      empty.textContent = '作品一覧を読み込めませんでした';
     }
   }
 }

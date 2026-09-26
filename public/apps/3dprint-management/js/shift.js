@@ -482,6 +482,11 @@ function printerAvailabilityByDate() {
   return map;
 }
 
+/** Formats a shift calendar date (month is 1-based). */
+function formatShiftDateString(year, month, day) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 /** Renders the shift calendar grid. */
 function renderShiftCalendar() {
   const grid = document.getElementById('shift-calendar-grid');
@@ -496,8 +501,12 @@ function renderShiftCalendar() {
   const todayStr = todayJst();
 
   const prevMonthLast = new Date(shiftYear, shiftMonth - 1, 0).getDate();
+  const prevMonthYear = shiftMonth === 1 ? shiftYear - 1 : shiftYear;
+  const prevMonthNum = shiftMonth === 1 ? 12 : shiftMonth - 1;
   for (let i = startWeekday - 1; i >= 0; i--) {
-    grid.appendChild(createShiftDayCell(prevMonthLast - i, true, {}, {}, todayStr));
+    const dayNum = prevMonthLast - i;
+    const dateStr = formatShiftDateString(prevMonthYear, prevMonthNum, dayNum);
+    grid.appendChild(createShiftDayCell(dayNum, true, byDate, printersByDate, todayStr, dateStr));
   }
 
   for (let day = 1; day <= lastDay; day++) {
@@ -507,8 +516,11 @@ function renderShiftCalendar() {
 
   const totalCells = startWeekday + lastDay;
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  const nextMonthYear = shiftMonth === 12 ? shiftYear + 1 : shiftYear;
+  const nextMonthNum = shiftMonth === 12 ? 1 : shiftMonth + 1;
   for (let day = 1; day <= remaining; day++) {
-    grid.appendChild(createShiftDayCell(day, true, {}, {}, todayStr));
+    const dateStr = formatShiftDateString(nextMonthYear, nextMonthNum, day);
+    grid.appendChild(createShiftDayCell(day, true, byDate, printersByDate, todayStr, dateStr));
   }
 }
 
@@ -524,7 +536,7 @@ function createShiftDayCell(dayNum, otherMonth, byDate, printersByDate, todayStr
   num.textContent = dayNum;
   cell.appendChild(num);
 
-  if (dateStr && !otherMonth) {
+  if (dateStr) {
     cell.dataset.date = dateStr;
     const members = byDate[dateStr] ?? [];
     const printers = printersByDate[dateStr] ?? [];

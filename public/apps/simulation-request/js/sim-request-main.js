@@ -18,7 +18,7 @@ import {
   isFdsRequestChatAvailable,
 } from './fds-request-chat.js';
 
-import { initOpenfoamRequestPanel } from './openfoam-request.js';
+import { initOpenfoamRequestPanel, setOpenfoamDesiredDate } from './openfoam-request.js';
 
 const SIM_TYPES = [
   {
@@ -1019,8 +1019,11 @@ async function init() {
     const miniCal = createShiftMiniCalendar(calMount);
     miniCal.onDateSelect((date) => {
       selectedDesiredDate = date;
+      setOpenfoamDesiredDate(date);
       const label = document.getElementById('fds-desired-date-label');
       if (label) label.textContent = date ? `希望日: ${date}` : '';
+      const openfoamLabel = document.getElementById('openfoam-desired-date-label');
+      if (openfoamLabel) openfoamLabel.textContent = date ? `希望日: ${date}` : '';
     });
     await miniCal.load();
   }
