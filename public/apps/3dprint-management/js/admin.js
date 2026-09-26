@@ -421,7 +421,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   const smallCount = dayReservations.filter((r) => r.print_scale === 'small').length;
   const isFull = hasMediumOrLarge || smallCount >= 2;
 
-  if (dateStr && !otherMonth) {
+  if (dateStr) {
     cell.dataset.date = dateStr;
     if (dateStr < todayStr) {
       cell.classList.add('disabled');
