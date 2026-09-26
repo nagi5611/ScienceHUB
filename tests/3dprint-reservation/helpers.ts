@@ -144,123 +144,12 @@ export async function goToCalendarMonth(page: Page, dateStr: string) {
   const [year, month] = dateStr.split("-").map(Number);
   const targetLabel = `${year}年${month}月`;
 
-  for (let attempt = 0; attempt < 24; attempt++) {
+  for (let attempt = 0; attempt < 14; attempt++) {
     const label = await page.locator("#calendar-month-label").textContent();
     if (label?.includes(targetLabel)) return;
-
-    const match = label?.match(/(\d+)年(\d+)月/);
-    if (!match) {
-      await page.locator("#next-month").click();
-    } else {
-      const currentYear = Number(match[1]);
-      const currentMonth = Number(match[2]);
-      const afterTarget =
-        currentYear > year || (currentYear === year && currentMonth > month);
-      await page.locator(afterTarget ? "#prev-month" : "#next-month").click();
-    }
+    await page.locator("#prev-month").click();
     await page.waitForTimeout(150);
   }
 
   throw new Error(`カレンダーを ${targetLabel} に移動できませんでした`);
-}
-
-export interface PrinterStatusTestPrinters {
-  availableId: string;
-  maintenanceId: string;
-  availableName: string;
-  maintenanceName: string;
-}
-
-/** 稼働・メンテの2台と当日シフトを用意する */
-export async function ensurePrinterStatusTestPrinters(
-  request: APIRequestContext,
-  bookableDate: string,
-): Promise<PrinterStatusTestPrinters> {
-  const tag = Date.now().toString(36);
-
-  const createPrinter = async (name: string) => {
-    const res = await request.post("/api/3dprint/admin/printers", {
-      data: { name },
-    });
-    if (!res.ok()) {
-      throw new Error(`プリンター作成失敗: ${res.status()} ${await res.text()}`);
-    }
-    const body = await res.json();
-    return body.printer.id as string;
-  };
-
-  const availableName = `E2E 稼働 ${tag}`;
-  const maintenanceName = `E2E メンテ ${tag}`;
-  const availableId = await createPrinter(availableName);
-  const maintenanceId = await createPrinter(maintenanceName);
-
-  const statusRes = await request.patch(`/api/3dprint/admin/printers/${maintenanceId}`, {
-    data: { status: "maintenance" },
-  });
-  if (!statusRes.ok()) {
-    throw new Error(`メンテステータス更新失敗: ${statusRes.status()}`);
-  }
-
-  const homeroom =
-    VALID_HOMEROOMS[parseInt(tag.slice(-1), 36) % VALID_HOMEROOMS.length];
-  const studentNumber = (Date.now() % 45) + 1;
-
-  const memberRes = await request.post("/api/3dprint/admin/members", {
-    data: {
-      homeroom,
-      student_number: studentNumber,
-      name: `E2E担当-${tag}`,
-    },
-  });
-  if (!memberRes.ok() && memberRes.status() !== 409) {
-    throw new Error(`メンバー作成失敗: ${memberRes.status()}`);
-  }
-
-  let memberId: string;
-  if (memberRes.ok()) {
-    const { member } = await memberRes.json();
-    memberId = member.id as string;
-  } else {
-    const listRes = await request.get("/api/3dprint/admin/members");
-    if (!listRes.ok()) {
-      throw new Error(`メンバー一覧取得失敗: ${listRes.status()}`);
-    }
-    const list = (await listRes.json()) as { members?: { id: string }[] };
-    memberId = list.members?.[0]?.id ?? "";
-    if (!memberId) throw new Error("印刷担当メンバーが見つかりません");
-  }
-
-  const staffShift = await request.put("/api/3dprint/admin/shifts/availability", {
-    data: {
-      member_id: memberId,
-      dates: [bookableDate],
-      available: true,
-    },
-  });
-  if (!staffShift.ok()) {
-    throw new Error(`担当シフト設定失敗: ${staffShift.status()}`);
-  }
-
-  for (const printerId of [availableId, maintenanceId]) {
-    const printerShift = await request.put(
-      "/api/3dprint/admin/shifts/printer-availability",
-      {
-        data: {
-          printer_id: printerId,
-          dates: [bookableDate],
-          available: true,
-        },
-      },
-    );
-    if (!printerShift.ok()) {
-      throw new Error(`プリンターシフト設定失敗: ${printerShift.status()}`);
-    }
-  }
-
-  return {
-    availableId,
-    maintenanceId,
-    availableName,
-    maintenanceName,
-  };
 }
