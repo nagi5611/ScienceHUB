@@ -81,6 +81,8 @@ let editingPrinterId = null;
 let currentYear;
 let currentMonth;
 let activePanel = 'dashboard';
+/** @type {HTMLElement | null} */
+let detailModalTriggerEl = null;
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 
 /** Returns whether the compact mobile admin layout is active. */
@@ -139,9 +141,15 @@ async function init() {
     window.location.href = '/';
   });
 
-  modalClose.addEventListener('click', () => modal.classList.remove('open'));
+  modalClose.addEventListener('click', () => closeDetailModal());
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.classList.remove('open');
+    if (e.target === modal) closeDetailModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeDetailModal();
   });
 
   saveBtn.addEventListener('click', saveReservation);
@@ -1235,8 +1243,22 @@ function bindDetailButtons(container) {
   });
 }
 
+/** Closes the reservation detail modal and restores focus to the opener. */
+function closeDetailModal() {
+  const modal = document.getElementById('detail-modal');
+  if (!modal?.classList.contains('open')) return;
+  modal.classList.remove('open');
+  const trigger = detailModalTriggerEl;
+  detailModalTriggerEl = null;
+  if (trigger && typeof trigger.focus === 'function') {
+    trigger.focus();
+  }
+}
+
 /** Opens the reservation detail modal. */
 async function openDetail(id) {
+  detailModalTriggerEl =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
   currentReservationId = id;
   const modal = document.getElementById('detail-modal');
   const body = document.getElementById('modal-body');
