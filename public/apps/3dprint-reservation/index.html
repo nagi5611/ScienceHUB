@@ -122,6 +122,12 @@
           <h3 class="form-section-title">印刷機種を選択</h3>
           <p class="hint" id="form-step-printer-hint">使用する3Dプリンターの機種を選んでください。表示されている「予約待ち」は、選択した日の申請中（受領待ち）件数です。メンテナンス中・印刷不能の機種は選択できません。</p>
           <div id="printer-picker" class="printer-picker" role="listbox" aria-label="印刷機種"></div>
+          <button
+            type="button"
+            class="btn btn-link btn-sm printer-picker-show-unavailable hidden"
+            id="printer-picker-show-unavailable"
+            aria-expanded="false"
+          ></button>
           <p class="hint hidden" id="printer-picker-empty">利用可能なプリンターが登録されていません。管理者にお問い合わせください。</p>
           <p class="hint hidden" id="printer-picker-all-unavailable">現在、予約可能なプリンターがありません。しばらくしてから再度お試しください。</p>
         </section>
