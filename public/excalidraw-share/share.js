@@ -9,6 +9,7 @@ import { createExcalidrawMainMenu } from "../js/excalidraw-menu.js";
 import {
   buildCollaboratorsFromPeers,
   createCollabConnection,
+  EXCALIDRAW_COLLAB_UNAVAILABLE_LABEL,
   pickPersistAppState,
   sceneSyncFingerprint,
 } from "../js/excalidraw-collab-utils.js";
@@ -179,10 +180,15 @@ function connectCollab() {
       peersEl.textContent = "接続中";
     },
     onClose: () => {
+      if (collab?.isReconnectDisabled()) return;
       peersEl.textContent = "再接続中…";
     },
     onError: () => {
+      if (collab?.isReconnectDisabled()) return;
       peersEl.textContent = "接続エラー";
+    },
+    onUnavailable: () => {
+      peersEl.textContent = EXCALIDRAW_COLLAB_UNAVAILABLE_LABEL;
     },
     onPeersChange: updatePeers,
   });

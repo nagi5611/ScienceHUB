@@ -167,6 +167,36 @@ export function updateCollaboratorPointer(excalidrawAPI, from, data) {
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
+/** peers-status 用（共同編集 DO 未設定など） */
+export const EXCALIDRAW_COLLAB_UNAVAILABLE_LABEL =
+  "共同編集は利用不可（単独編集は保存されます）";
+
+/** WebSocket URL を HTTP プローブ用 URL に変換 */
+export function collabWsUrlToHttpProbeUrl(wsUrl) {
+  return wsUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
+}
+
+/**
+ * 共同編集 API の稼働確認（Upgrade なし GET）
+ * @returns {Promise<{ available: boolean, message?: string }>}
+ */
+export async function probeExcalidrawCollabEndpoint(httpUrl) {
+  try {
+    const response = await fetch(httpUrl, { credentials: "same-origin" });
+    if (response.status === 503) {
+      const data = await response.json().catch(() => ({}));
+      const message =
+        typeof data.error === "string" && data.error.trim()
+          ? data.error.trim()
+          : "共同編集サービスが未設定です";
+      return { available: false, message };
+    }
+    return { available: true };
+  } catch {
+    return { available: true };
+  }
+}
+
 /**
  * 共同編集 WebSocket 接続を管理
  */
@@ -180,6 +210,7 @@ export function createCollabConnection(options) {
     onClose,
     onError,
     onPeersChange,
+    onUnavailable,
   } = options;
 
   let socket = null;
@@ -187,6 +218,7 @@ export function createCollabConnection(options) {
   let reconnectAttempt = 0;
   let reconnectTimer = null;
   let intentionalClose = false;
+  let reconnectDisabled = false;
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -195,8 +227,26 @@ export function createCollabConnection(options) {
     }
   }
 
+  async function markCollabUnavailable(message) {
+    if (reconnectDisabled) return;
+    reconnectDisabled = true;
+    clearReconnectTimer();
+    onUnavailable?.(message ?? EXCALIDRAW_COLLAB_UNAVAILABLE_LABEL);
+  }
+
+  async function probeCollabService() {
+    const probe = await probeExcalidrawCollabEndpoint(
+      collabWsUrlToHttpProbeUrl(buildUrl())
+    );
+    if (!probe.available) {
+      await markCollabUnavailable(probe.message);
+      return false;
+    }
+    return true;
+  }
+
   function scheduleReconnect() {
-    if (intentionalClose) return;
+    if (intentionalClose || reconnectDisabled) return;
     clearReconnectTimer();
     const delay = Math.min(
       RECONNECT_BASE_MS * 2 ** reconnectAttempt,
@@ -260,8 +310,40 @@ export function createCollabConnection(options) {
     }
   }
 
+  function openWebSocket() {
+    const ws = new WebSocket(buildUrl());
+    socket = ws;
+    let opened = false;
+
+    ws.addEventListener("open", () => {
+      opened = true;
+      reconnectAttempt = 0;
+      onOpen?.();
+    });
+
+    ws.addEventListener("message", handleMessage);
+
+    ws.addEventListener("close", () => {
+      socket = null;
+      if (reconnectDisabled) return;
+      void (async () => {
+        if (!opened) {
+          const ok = await probeCollabService();
+          if (!ok) return;
+        }
+        onClose?.();
+        scheduleReconnect();
+      })();
+    });
+
+    ws.addEventListener("error", () => {
+      if (!reconnectDisabled) onError?.();
+    });
+  }
+
   function connect() {
     clearReconnectTimer();
+    if (reconnectDisabled) return;
     if (socket) {
       try {
         socket.close();
@@ -271,25 +353,11 @@ export function createCollabConnection(options) {
       socket = null;
     }
 
-    const ws = new WebSocket(buildUrl());
-    socket = ws;
-
-    ws.addEventListener("open", () => {
-      reconnectAttempt = 0;
-      onOpen?.();
-    });
-
-    ws.addEventListener("message", handleMessage);
-
-    ws.addEventListener("close", () => {
-      socket = null;
-      onClose?.();
-      scheduleReconnect();
-    });
-
-    ws.addEventListener("error", () => {
-      onError?.();
-    });
+    void (async () => {
+      const ok = await probeCollabService();
+      if (!ok || reconnectDisabled || intentionalClose) return;
+      openWebSocket();
+    })();
   }
 
   return {
@@ -326,6 +394,9 @@ export function createCollabConnection(options) {
     },
     isOpen() {
       return socket?.readyState === WebSocket.OPEN;
+    },
+    isReconnectDisabled() {
+      return reconnectDisabled;
     },
   };
 }
