@@ -1150,6 +1150,30 @@ function showEditAlert(message, type) {
     `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
 }
 
+/** Opens read-only preview for another user's calendar slot (no API). */
+function openCalendarReservationPreview(r) {
+  const modal = document.getElementById('detail-modal');
+  const body = document.getElementById('detail-modal-body');
+  currentDetailId = null;
+  currentEditSnapshot = null;
+
+  const status = r.status || 'applied';
+  document.getElementById('detail-modal-title').textContent = '予約（参照のみ）';
+  document.getElementById('detail-edit-toggle-btn').classList.add('hidden');
+  document.getElementById('detail-cancel-toggle-btn').classList.add('hidden');
+
+  body.innerHTML = `
+    <p class="hint">他人の予約です。詳細の確認や取り消しはできません。</p>
+    <div class="detail-grid">
+      <div class="detail-row"><span class="detail-label">希望印刷日</span><span>${escapeHtml(r.desired_date)}</span></div>
+      <div class="detail-row"><span class="detail-label">印刷規模</span><span>${escapeHtml(SCALE_LABELS[r.print_scale] ?? r.print_scale)}</span></div>
+      <div class="detail-row"><span class="detail-label">ステータス</span><span class="status-badge status-${status}">${escapeHtml(STATUS_LABELS[status] || status)}</span></div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+}
+
 /** Opens reservation detail view (PII hidden). */
 async function openReservationDetail(id) {
   const modal = document.getElementById('detail-modal');
@@ -1163,6 +1187,7 @@ async function openReservationDetail(id) {
 
     document.getElementById('detail-modal-title').textContent = escapeHtml(r.title);
     document.getElementById('detail-edit-toggle-btn').classList.toggle('hidden', !r.editable);
+    document.getElementById('detail-cancel-toggle-btn').classList.remove('hidden');
 
     body.innerHTML = `
       <div class="detail-grid">
@@ -1611,9 +1636,12 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
       const slot = document.createElement('button');
       slot.type = 'button';
       const status = r.status || 'applied';
-      slot.className = `calendar-slot status-${status}`;
+      const owned = r.owned === true;
+      slot.className = `calendar-slot status-${status}${owned ? '' : ' calendar-slot-title'}`;
       const staffLine = r.print_staff ? `\n担当者: ${r.print_staff}` : '';
-      slot.title = `${STATUS_LABELS[status] || status} / ${SCALE_LABELS[r.print_scale]} / ${r.title}${staffLine}`;
+      slot.title = owned
+        ? `${STATUS_LABELS[status] || status} / ${SCALE_LABELS[r.print_scale]} / ${r.title}${staffLine}`
+        : `${STATUS_LABELS[status] || status} / ${SCALE_LABELS[r.print_scale]}（他人の予約・参照のみ）`;
 
       if (isMobileCalendarView()) {
         slot.classList.add('calendar-slot-compact');
@@ -1624,7 +1652,11 @@ function createDayCell(dayNum, otherMonth, reservationsByDate, todayStr, dateStr
 
       slot.addEventListener('click', (e) => {
         e.stopPropagation();
-        openReservationDetail(r.id);
+        if (owned) {
+          openReservationDetail(r.id);
+        } else {
+          openCalendarReservationPreview(r);
+        }
       });
       slotsWrap.appendChild(slot);
     }
