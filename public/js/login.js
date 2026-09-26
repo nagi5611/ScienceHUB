@@ -8,7 +8,7 @@ import { GOOGLE_ICON, MICROSOFT_ICON } from "./oauth-icons.js";
 function showAlert(message, type = "error") {
   const el = document.getElementById("auth-alert");
   if (!el) return;
-  el.innerHTML = `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+  el.innerHTML = `<div class="alert alert-${type}" role="alert">${escapeHtml(message)}</div>`;
 }
 
 /** HTML エスケープ */
@@ -105,9 +105,21 @@ async function handleLoginSubmit(event) {
   event.preventDefault();
   document.getElementById("auth-alert").innerHTML = "";
 
+  const loginForm = document.getElementById("login-form");
   const email = document.getElementById("login-email")?.value.trim() ?? "";
   const password = document.getElementById("login-password")?.value ?? "";
   const submitBtn = document.getElementById("login-submit-btn");
+
+  if (loginForm instanceof HTMLFormElement && !loginForm.checkValidity()) {
+    loginForm.reportValidity();
+    showAlert("必須項目を入力してください");
+    return;
+  }
+
+  if (!email || !password) {
+    showAlert("メールアドレスとパスワードを入力してください");
+    return;
+  }
 
   if (submitBtn instanceof HTMLButtonElement) {
     submitBtn.disabled = true;
@@ -144,6 +156,7 @@ async function handleSignupSubmit(event) {
   event.preventDefault();
   document.getElementById("auth-alert").innerHTML = "";
 
+  const signupForm = document.getElementById("signup-form");
   const username = document.getElementById("signup-username")?.value.trim() ?? "";
   const displayName = document.getElementById("signup-display-name")?.value.trim() ?? "";
   const email = document.getElementById("signup-email")?.value.trim() ?? "";
@@ -151,8 +164,14 @@ async function handleSignupSubmit(event) {
   const passwordConfirm = document.getElementById("signup-password-confirm")?.value ?? "";
   const submitBtn = document.getElementById("signup-submit-btn");
 
-  if (!displayName) {
-    showAlert("表示名を入力してください");
+  if (signupForm instanceof HTMLFormElement && !signupForm.checkValidity()) {
+    signupForm.reportValidity();
+    showAlert("必須項目を入力してください");
+    return;
+  }
+
+  if (!username || !displayName || !email || !password) {
+    showAlert("すべての必須項目を入力してください");
     return;
   }
 
