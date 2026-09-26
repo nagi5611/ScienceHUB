@@ -326,6 +326,18 @@ function updateAdminTodayButton() {
   dayNum.textContent = String(Number(getTodayJst().split('-')[2]));
 }
 
+/** Applies year rollover when picking a month chip (e.g. December → January). */
+function navigateAdminToMonthChip(month) {
+  if (currentMonth === month) return;
+  let year = currentYear;
+  if (month < currentMonth && currentMonth === 12 && month === 1) {
+    year += 1;
+  }
+  currentYear = year;
+  currentMonth = month;
+  renderAdminCalendar();
+}
+
 /** Renders horizontal month chips for admin mobile calendar. */
 function renderAdminMonthChips() {
   const container = document.getElementById('admin-calendar-month-chips');
@@ -340,11 +352,7 @@ function renderAdminMonthChips() {
     chip.setAttribute('aria-selected', month === currentMonth ? 'true' : 'false');
     if (month === currentMonth) chip.classList.add('active');
     chip.textContent = `${month}月`;
-    chip.addEventListener('click', () => {
-      if (currentMonth === month) return;
-      currentMonth = month;
-      renderAdminCalendar();
-    });
+    chip.addEventListener('click', () => navigateAdminToMonthChip(month));
     container.appendChild(chip);
   }
 
