@@ -36,6 +36,15 @@ async function init() {
     if (!metaRes.ok) {
       loading.hidden = true;
       denied.hidden = false;
+      const deniedMsg = denied.querySelector("p");
+      if (deniedMsg) {
+        if (metaRes.status === 404) {
+          deniedMsg.textContent = "アプリが見つかりません。";
+        } else if (metaRes.status === 403) {
+          deniedMsg.textContent =
+            "このアプリを表示する権限がありません。";
+        }
+      }
       return;
     }
 
