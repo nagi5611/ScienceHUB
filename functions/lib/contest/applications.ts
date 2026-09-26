@@ -191,30 +191,6 @@ async function fetchMembersForApplication(
   return result.results ?? [];
 }
 
-const CONTEST_STL_SUBMIT_BLOCKED_RESERVATION_STATUSES: PrintReservation['status'][] = [
-  'delivered',
-  'failed',
-  'cancelled',
-];
-
-/** School-printer contest entries: whether STL upload / re-upload is allowed. */
-export function contestApplicationCanSubmitStl(
-  app: Pick<ContestApplication, 'status' | 'self_print' | 'stl_submitted_at'>,
-  active: Reservation | null,
-  reservation: ContestApplicationReservationSummary | null
-): boolean {
-  if (app.status !== 'approved') return false;
-  if (app.self_print && app.stl_submitted_at != null) return false;
-  if (active?.status === 'printing') return true;
-  if (active != null) return false;
-  if (reservation == null) return true;
-  if (reservation.stl_filename) return false;
-  if (CONTEST_STL_SUBMIT_BLOCKED_RESERVATION_STATUSES.includes(reservation.status)) {
-    return false;
-  }
-  return false;
-}
-
 export async function fetchLatestContestReservationForApplication(
   db: D1Database,
   applicationId: string
@@ -316,8 +292,8 @@ async function enrichApplication(
 ): Promise<ContestApplicationWithDetails> {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   const activeBlocksSubmit = active != null && active.status !== 'printing';
-  const latestSubmission = await getLatestContestStlSubmissionForApplication(db, app.id);
-  const stlMeta = resolveSubmittedStlMeta(app, reservation, latestSubmission);
+  const deliveredBlocksSubmit = reservation?.status === 'delivered';
+  const stlMeta = resolveSubmittedStlMeta(app, reservation);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
     ...app,
@@ -325,7 +301,11 @@ async function enrichApplication(
     reservation,
     stl_file_limit: contestApplicationStlFileLimit(app),
     stl_extra_parts: stlExtraParts,
-    can_submit_stl: contestApplicationCanSubmitStl(app, active, reservation),
+    can_submit_stl:
+      app.status === 'approved' &&
+      !activeBlocksSubmit &&
+      !selfPrintSubmitted &&
+      !deliveredBlocksSubmit,
     can_withdraw: canWithdraw,
     ...stlMeta,
   };
@@ -567,8 +547,8 @@ async function assertCanUpdateContestMultiPartSettings(
   if (app.self_print && app.stl_submitted_at) {
     throw new Error('提出済みの作品はパーツ設定を変更できません');
   }
-  const active = await getActiveContestReservationForApplication(db, app.id);
-  if (active) {
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
+  if (reservation?.stl_filename) {
     throw new Error('STL 提出後はパーツ設定を変更できません');
   }
   const reservation = await fetchLatestReservationForApplication(db, app.id);
