@@ -35,7 +35,8 @@
     "test:video-converter": "playwright test tests/video-converter",
     "test:video-editor": "playwright test tests/video-editor",
     "test:video-editor:ui": "playwright test tests/video-editor --ui",
-    "test:website-publish": "playwright test tests/website-publish"
+    "test:website-publish": "playwright test tests/website-publish",
+    "test:contest": "playwright test tests/contest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260722.1",
