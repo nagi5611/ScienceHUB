@@ -1,6 +1,7 @@
 ﻿// functions/api/lib/google-calendar.ts
 import type { Member, Reservation } from './reservations';
 import { formatMemberLabel } from './reservations';
+import { resolveReservationCalendarEndDate } from './calendar-span';
 import type { PrintScale } from './slots';
 
 export interface GoogleCalendarEnv {
@@ -122,7 +123,11 @@ export async function createCalendarEventForReservation(
           summary,
           description,
           start: { date: reservation.desired_date },
-          end: { date: nextIsoDate(reservation.desired_date) },
+          end: {
+            date: nextIsoDate(
+              resolveReservationCalendarEndDate(reservation)
+            ),
+          },
         }),
       }
     );
