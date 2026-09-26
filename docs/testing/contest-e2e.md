@@ -1,36 +1,15 @@
-# コンテスト機能 — ローカル E2E 認証
+# コンテスト管理 — メンバー一覧のローカルテスト
 
-本番 (`s.mmh-virtual.jp`) の OAuth テスト用アカウントはリポジトリに含めません。Playwright は **ローカル `wrangler pages dev`** で認証を完結させます。
+本番では Google/Microsoft ログインが必要なため、メンバー一覧の自動テストは **ローカル Playwright + 管理者セッション** で行います。
 
-## 前提
+## 手順
+
+1. [contest-e2e.md](./contest-e2e.md) の環境準備（#101）
+2. `loginAsAdmin()` 後に `/apps/contest-management/` を開く
+3. メンバー一覧タブの表示・検索を手動または spec で確認
 
 ```bash
-cp .dev.vars.example .dev.vars   # 初回のみ
-npm run db:migrate:local
-npm run test:contest             # または個別 spec
+npm run test:contest
 ```
 
-`playwright.config.ts` の `webServer` が port 8788 で Pages を起動します（`AGENTS.md` の D1/R2 オーバーライドが必要な環境では手動で `npm run dev` を起動し `reuseExistingServer` を利用）。
-
-## 管理者（参加申請一覧・メンバー一覧）
-
-ローカル D1 の既定管理者:
-
-| 項目 | 値 |
-|------|-----|
-| ユーザー名 | `admin` |
-| パスワード | `mmh@2048@5431` |
-
-Playwright では `tests/website-publish/helpers.ts` の `loginAsAdmin()` が `/api/auth/login` に POST し、セッション Cookie を付与します。
-
-未認証で `/apps/contest-management/applications` にアクセスすると `/login/?next=...` へリダイレクトされます（本番と同様）。
-
-## 一般ユーザー
-
-`/login/?tab=signup` または API `POST /api/auth/signup` でゲスト作成（`tests/contest/helpers.ts` の `signupGuest`）。
-
-## 関連 Issue
-
-- #101 参加申請一覧（admin）
-- #107 メンバー一覧
-- #106 contest-entry 認証
+`tests/contest/contest-management-auth.spec.ts` で未認証リダイレクトと管理者アクセスを確認します。
