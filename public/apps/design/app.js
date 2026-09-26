@@ -4557,6 +4557,19 @@ async function initApp() {
       }).observe(canvasWrapEl);
     }
 
+    const projectIdParam = new URLSearchParams(location.search).get("projectId");
+    if (projectIdParam) {
+      try {
+        await openProject(projectIdParam);
+        loadingEl.hidden = true;
+        history.replaceState(null, "", location.pathname);
+        return;
+      } catch (err) {
+        console.error(err);
+        alert("指定されたプロジェクトを開けませんでした");
+      }
+    }
+
     const storagePath = new URLSearchParams(location.search).get("storagePath");
     if (storagePath) {
       try {
