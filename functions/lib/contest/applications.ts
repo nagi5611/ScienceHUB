@@ -288,6 +288,7 @@ async function enrichApplication(
 ): Promise<ContestApplicationWithDetails> {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   const activeBlocksSubmit = active != null && active.status !== 'printing';
+  const deliveredBlocksSubmit = reservation?.status === 'delivered';
   const stlMeta = resolveSubmittedStlMeta(app, reservation);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
@@ -297,7 +298,10 @@ async function enrichApplication(
     stl_file_limit: contestApplicationStlFileLimit(app),
     stl_extra_parts: stlExtraParts,
     can_submit_stl:
-      app.status === 'approved' && !activeBlocksSubmit && !selfPrintSubmitted,
+      app.status === 'approved' &&
+      !activeBlocksSubmit &&
+      !selfPrintSubmitted &&
+      !deliveredBlocksSubmit,
     can_withdraw: canWithdraw,
     ...stlMeta,
   };
