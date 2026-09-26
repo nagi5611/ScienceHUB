@@ -18,7 +18,11 @@ import {
   nozzleSizesToInputValue,
   parseNozzleSizesInput,
 } from '../../3dprint-reservation/js/printer-capabilities.js';
-import { buildPrinterStatusBadge } from '../../3dprint-reservation/js/printer-status.js';
+import {
+  buildPrinterStatusBadge,
+  getPrinterStatusLabel,
+  isPrinterBookable,
+} from '../../3dprint-reservation/js/printer-status.js';
 import {
   initPrintVideoFolderPicker,
   openPrintVideoFolderPicker,
@@ -1421,12 +1425,34 @@ function populateAdminPrinterSelect(selectedId = '') {
     return;
   }
 
-  select.disabled = false;
-  select.innerHTML = allPrinters
-    .map(
-      (p) =>
-        `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
-    )
+  const options = [];
+  for (const printer of allPrinters) {
+    const bookable = isPrinterBookable(printer);
+    if (!bookable && printer.id !== selectedId) continue;
+
+    const label = bookable
+      ? printer.name
+      : `${printer.name} (${getPrinterStatusLabel(printer.status ?? 'unavailable')})`;
+    options.push({ id: printer.id, label, bookable });
+  }
+
+  if (!options.length) {
+    select.innerHTML = '<option value="">予約可能なプリンターがありません</option>';
+    select.disabled = true;
+    return;
+  }
+
+  const resolvedSelectedId = options.some((o) => o.id === selectedId)
+    ? selectedId
+    : (options.find((o) => o.bookable)?.id ?? '');
+
+  select.disabled = !options.some((o) => o.bookable);
+  select.innerHTML = options
+    .map((o) => {
+      const selected = o.id === resolvedSelectedId ? ' selected' : '';
+      const disabled = o.bookable ? '' : ' disabled';
+      return `<option value="${escapeHtml(o.id)}"${selected}${disabled}>${escapeHtml(o.label)}</option>`;
+    })
     .join('');
 }
 
