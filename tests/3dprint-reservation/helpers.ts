@@ -1,28 +1,13 @@
-// tests/3dprint-reservation/helpers.ts
-import type { APIRequestContext, BrowserContext, Page } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { loginAsAdmin } from "../website-publish/helpers";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export const FIXTURES_DIR = path.join(__dirname, "fixtures");
-export const MINIMAL_STL_PATH = path.join(FIXTURES_DIR, "minimal.stl");
+import type { APIRequestContext } from "@playwright/test";
 
 const LEAD_TIME_DAYS = 2;
-const VALID_HOMEROOMS = ["101", "301"];
 
-/** Returns today's date in JST (YYYY-MM-DD). */
-export function getTodayJst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+/** JST の今日 (YYYY-MM-DD) */
+export function todayJst(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
 }
 
-/** Adds days to an ISO date string. */
+/** ISO 日付に日数を加算 */
 export function addDays(isoDate: string, days: number): string {
   const [y, m, d] = isoDate.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -30,126 +15,90 @@ export function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Earliest public reservation date (today JST + lead time). */
-export function getEarliestBookableDate(): string {
-  return addDays(getTodayJst(), LEAD_TIME_DAYS);
+/** 一般ユーザーがカレンダーから選べる最早日 */
+export function earliestUserBookableDate(): string {
+  return addDays(todayJst(), LEAD_TIME_DAYS);
 }
 
-/** Syncs API login cookies into the browser context. */
-export async function syncAdminSession(
-  context: BrowserContext,
+/** 予約可能日からのオフセット日 */
+export function bookableDateWithOffset(offsetDays: number): string {
+  return addDays(earliestUserBookableDate(), offsetDays);
+}
+
+export interface TestPrinterPair {
+  availableId: string;
+  maintenanceId: string;
+}
+
+/** E2E 用プリンター2台（稼働可・メンテ）を用意 */
+export async function ensureTestPrinters(
   request: APIRequestContext,
-) {
-  await loginAsAdmin(request);
-  const { cookies } = await request.storageState();
-  await context.addCookies(cookies);
-}
+  label: string
+): Promise<TestPrinterPair> {
+  const suffix = `${label}-${Date.now().toString(36)}`;
+  const create = async (name: string) => {
+    const res = await request.post("/api/3dprint/admin/printers", {
+      data: { name },
+    });
+    if (!res.ok()) {
+      throw new Error(`プリンター作成失敗: ${res.status()} ${await res.text()}`);
+    }
+    const body = await res.json();
+    return body.printer.id as string;
+  };
 
-/** Ensures the logged-in user has a complete print profile. */
-export async function ensureAdminPrintProfile(request: APIRequestContext) {
-  const res = await request.patch("/api/auth/profile", {
-    data: {
-      homeroom: "301",
-      student_number: 1,
-      student_name: "E2E予約テスト",
-    },
+  const availableId = await create(`E2E 稼働 ${suffix}`);
+  const maintenanceId = await create(`E2E メンテ ${suffix}`);
+
+  const patchRes = await request.patch(`/api/3dprint/admin/printers/${maintenanceId}`, {
+    data: { status: "maintenance" },
   });
-  if (!res.ok()) {
-    throw new Error(`プロフィール更新失敗: ${res.status()}`);
+  if (!patchRes.ok()) {
+    throw new Error(`プリンターステータス更新失敗: ${patchRes.status()}`);
   }
+
+  return { availableId, maintenanceId };
 }
 
-export interface PrintDaySetup {
-  bookableDate: string;
-  printerId: string;
-  printerName: string;
-  memberId: string;
-}
-
-/** Creates a printer, staff member, and shift rows for the given bookable date. */
-export async function preparePrintReservationDay(
+/** 指定日のスタッフ・プリンターシフトを有効化 */
+export async function enableShiftsForDate(
   request: APIRequestContext,
-  bookableDate: string,
-): Promise<PrintDaySetup> {
-  const tag = Date.now().toString(36);
-  const printerName = `E2Eプリンター-${tag}`;
-
-  const printerRes = await request.post("/api/3dprint/admin/printers", {
-    data: { name: printerName },
-  });
-  if (!printerRes.ok()) {
-    throw new Error(`プリンター作成失敗: ${printerRes.status()}`);
-  }
-  const { printer } = await printerRes.json();
-  const printerId = printer.id as string;
-
-  const homeroom =
-    VALID_HOMEROOMS[parseInt(tag.slice(-1), 36) % VALID_HOMEROOMS.length];
-  const studentNumber = (Date.now() % 45) + 1;
-
+  date: string,
+  printerIds: string[]
+): Promise<void> {
   const memberRes = await request.post("/api/3dprint/admin/members", {
     data: {
-      homeroom,
-      student_number: studentNumber,
-      name: `E2E担当-${tag}`,
+      homeroom: "301",
+      student_number: Math.floor(Math.random() * 40) + 1,
+      name: `E2E Staff ${Date.now().toString(36)}`,
     },
   });
   if (!memberRes.ok()) {
-    throw new Error(`メンバー作成失敗: ${memberRes.status()}`);
+    throw new Error(`メンバー作成失敗: ${memberRes.status()} ${await memberRes.text()}`);
   }
   const { member } = await memberRes.json();
-  const memberId = member.id as string;
 
-  const staffShift = await request.put("/api/3dprint/admin/shifts/availability", {
+  const staffRes = await request.put("/api/3dprint/admin/shifts/availability", {
     data: {
-      member_id: memberId,
-      dates: [bookableDate],
+      member_id: member.id,
+      dates: [date],
       available: true,
     },
   });
-  if (!staffShift.ok()) {
-    throw new Error(`担当シフト設定失敗: ${staffShift.status()}`);
+  if (!staffRes.ok()) {
+    throw new Error(`スタッフシフト失敗: ${staffRes.status()}`);
   }
 
-  const printerShift = await request.put(
-    "/api/3dprint/admin/shifts/printer-availability",
-    {
+  for (const printerId of printerIds) {
+    const printerRes = await request.put("/api/3dprint/admin/shifts/printer-availability", {
       data: {
         printer_id: printerId,
-        dates: [bookableDate],
+        dates: [date],
         available: true,
       },
-    },
-  );
-  if (!printerShift.ok()) {
-    throw new Error(`プリンターシフト設定失敗: ${printerShift.status()}`);
+    });
+    if (!printerRes.ok()) {
+      throw new Error(`プリンターシフト失敗: ${printerRes.status()}`);
+    }
   }
-
-  return {
-    bookableDate,
-    printerId,
-    printerName,
-    memberId,
-  };
-}
-
-/** Opens the reservation app after admin auth. */
-export async function openReservationApp(page: Page) {
-  await page.goto("/apps/3dprint-reservation/");
-  await page.waitForSelector("#calendar-grid .calendar-day", { timeout: 30_000 });
-}
-
-/** Navigates the calendar to the month that contains `dateStr`. */
-export async function goToCalendarMonth(page: Page, dateStr: string) {
-  const [year, month] = dateStr.split("-").map(Number);
-  const targetLabel = `${year}年${month}月`;
-
-  for (let attempt = 0; attempt < 14; attempt++) {
-    const label = await page.locator("#calendar-month-label").textContent();
-    if (label?.includes(targetLabel)) return;
-    await page.locator("#prev-month").click();
-    await page.waitForTimeout(150);
-  }
-
-  throw new Error(`カレンダーを ${targetLabel} に移動できませんでした`);
 }

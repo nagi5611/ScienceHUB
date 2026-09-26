@@ -1,15 +1,15 @@
-# コンテスト管理 — メンバー一覧のローカルテスト
+# コンテスト entry — ローカル E2E
 
-本番では Google/Microsoft ログインが必要なため、メンバー一覧の自動テストは **ローカル Playwright + 管理者セッション** で行います。
+本番 URL への未認証アクセスはログインへリダイレクトされるため、E2E はローカルで実行します。詳細は [contest-e2e.md](./contest-e2e.md)（#101 で追加）を参照。
 
-## 手順
+## contest-entry 用クイック手順
 
-1. [contest-e2e.md](./contest-e2e.md) の環境準備（#101）
-2. `loginAsAdmin()` 後に `/apps/contest-management/` を開く
-3. メンバー一覧タブの表示・検索を手動または spec で確認
+1. `npm run db:migrate:local`
+2. `loginAsAdmin()` でセッション取得（管理者は全アプリにアクセス可）
+3. `page.goto("/apps/contest-entry/")` — 申請一覧 UI を検証
 
 ```bash
 npm run test:contest
 ```
 
-`tests/contest/contest-management-auth.spec.ts` で未認証リダイレクトと管理者アクセスを確認します。
+`tests/contest/contest-entry-auth.spec.ts` でリダイレクトとログイン後アクセスを確認します。

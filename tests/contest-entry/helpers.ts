@@ -1,18 +1,19 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loginAsAdmin } from "../website-publish/helpers";
+import { bookableDateWithOffset, ensureTestPrinters } from "../3dprint-reservation/helpers";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export { loginAsAdmin };
 
-export const STL_FIXTURE_PATH = path.join(__dirname, "fixtures", "minimal.stl");
+export { loginAsAdmin };
 
-/** 一意な作品タイトル */
+export { loginAsAdmin };
+
 export function uniqueContestTitle(prefix = "e2e") {
   return `${prefix}-${Date.now().toString(36)}`;
 }
 
-/** 管理者セッションで contest-entry を開く（page.request で Cookie を共有） */
 export async function openContestEntry(page: Page) {
   await loginAsAdmin(page.request);
   const applicationsLoaded = page.waitForResponse(
@@ -22,104 +23,173 @@ export async function openContestEntry(page: Page) {
       res.ok(),
     { timeout: 20_000 }
   );
-  const response = await page.goto("/apps/contest-entry/", {
-    waitUntil: "domcontentloaded",
-  });
+  const response = await page.goto("/apps/contest-entry/", { waitUntil: "domcontentloaded" });
   if (!response?.ok()) {
     throw new Error(`contest-entry 読み込み失敗: ${response?.status()}`);
   }
   await applicationsLoaded.catch(() => {});
-  await page.waitForSelector("#auth-user-label:not(:empty)", { timeout: 15_000 });
+  await page.waitForSelector("#view-list:not(.hidden)", { timeout: 20_000 });
   await page.waitForSelector("#btn-new-application", { state: "visible" });
 }
 
-/** 一覧からタイトルでカードを取得 */
+export async function ensureContestListView(page: Page) {
+  if (await page.locator("#view-list:not(.hidden)").isVisible()) {
+    return;
+  }
+  const backSubmit = page.locator("#btn-back-from-submit");
+  if (await backSubmit.isVisible()) {
+    await backSubmit.click();
+  }
+  const backApply = page.locator("#btn-back-from-apply");
+  if (await backApply.isVisible()) {
+    await backApply.click();
+  }
+  await page.waitForSelector("#view-list:not(.hidden)", { timeout: 10_000 });
+}
+
+export async function openNewApplicationForm(page: Page) {
+  await ensureContestListView(page);
+  await page.locator("#btn-new-application").click();
+  await page.waitForSelector("#view-apply:not(.hidden)", { timeout: 15_000 });
+  await expect(page.locator("#apply-heading")).toHaveText("参加申請");
+}
+
+function applyFormRoot(page: Page) {
+  return page.locator("#view-apply:not(.hidden)");
+}
+
+export async function fillPrimaryParticipant(
+  page: Page,
+  opts: { homeroom?: string; number?: string; name?: string } = {}
+) {
+  const homeroom = opts.homeroom ?? "101";
+  const number = opts.number ?? "1";
+  const name = opts.name ?? "テスト太郎";
+  const root = applyFormRoot(page);
+  await expect(root).toBeVisible({ timeout: 10_000 });
+  const row = root.locator(".contest-participant-row").first();
+  await row.locator(".participant-homeroom").fill(homeroom);
+  await row.locator(".participant-number").fill(number);
+  await row.locator(".participant-name").fill(name);
+}
+
+async function expectSubmitEnabled(page: Page) {
+  await page.waitForFunction(() => {
+    const btn = document.getElementById("application-submit-btn");
+    return btn instanceof HTMLButtonElement && !btn.disabled;
+  });
+}
+
+export async function submitNewApplication(
+  page: Page,
+  opts: {
+    title: string;
+    selfPrint?: boolean;
+    impressions?: string;
+  }
+) {
+  if (!(await applyFormRoot(page).isVisible())) {
+    await openNewApplicationForm(page);
+  }
+  const root = applyFormRoot(page);
+  await fillPrimaryParticipant(page);
+  await root.locator("#title").fill(opts.title);
+  if (opts.impressions) {
+    await root.locator("#impressions").fill(opts.impressions);
+  }
+  const selfPrint = root.locator("#self_print");
+  if (opts.selfPrint) {
+    await selfPrint.check();
+  } else {
+    await selfPrint.uncheck();
+  }
+  await expectSubmitEnabled(page);
+  await root.locator("#application-submit-btn").click();
+  await page.waitForSelector("#view-list:not(.hidden)");
+  await page.waitForSelector("#page-toast:not(.hidden)", { timeout: 10_000 }).catch(() => {});
+}
+
 export function applicationCardByTitle(page: Page, title: string) {
   return page.locator(".contest-application-card", {
     has: page.locator(".contest-application-title", { hasText: title }),
   });
 }
 
-/** 自己印刷の参加申請を API で作成し一覧を更新する */
-export async function createSelfPrintApplicationViaApi(
-  page: Page,
-  title: string
-): Promise<string> {
-  const res = await page.request.post("/api/contest/applications", {
-    data: {
-      schedule_type: "full_time",
-      title,
-      participants: [
-        {
-          homeroom: "101",
-          student_number: 1,
-          student_name: "テスト太郎",
-        },
-      ],
-      self_print: true,
-    },
-  });
-  expect(res.ok()).toBeTruthy();
-  const { application } = await res.json();
-  const applicationId = String(application.id);
-  const applicationsLoaded = page.waitForResponse(
-    (r) =>
-      r.url().includes("/api/contest/applications") &&
-      r.request().method() === "GET" &&
-      r.ok(),
-    { timeout: 20_000 }
-  );
-  await page.goto("/apps/contest-entry/", { waitUntil: "domcontentloaded" });
-  await applicationsLoaded;
-  await expect(applicationCardByTitle(page, title)).toBeVisible({ timeout: 15_000 });
-  return applicationId;
+export async function openSubmitViewForTitle(page: Page, title: string) {
+  const card = applicationCardByTitle(page, title);
+  await expect(card.locator(".contest-card-submit")).toBeVisible({ timeout: 10_000 });
+  await card.locator(".contest-card-submit").click();
+  await page.waitForSelector("#view-submit:not(.hidden)", { timeout: 15_000 });
 }
 
-/** 作品 ID から STL 提出画面を開く */
-export async function openSubmitViewForApplicationId(
-  page: Page,
-  applicationId: string
-) {
-  const submit = page.locator(`.contest-card-submit[data-id="${applicationId}"]`);
-  await expect(submit).toBeVisible();
-  await submit.click();
-  await expect(page.locator("#view-list")).toHaveClass(/hidden/, { timeout: 15_000 });
-  await expect(page.getByRole("button", { name: "パーツを追加" })).toBeVisible({
-    timeout: 15_000,
-  });
-}
-
-/** 指定インデックスの STL パーツ行にファイルをアップロードする */
 export async function uploadStlPartAt(
   page: Page,
   index: number,
   filePath: string = STL_FIXTURE_PATH
 ) {
-  const row = page.locator(".contest-stl-part-row").nth(index);
-  await row.locator(".stl-part-file-input").setInputFiles(filePath);
-  await expect(page.locator("#print-flow-overlay")).toHaveClass(/hidden/, {
-    timeout: 45_000,
-  });
-  await expect(row.locator(".stl-part-file-name")).toHaveClass(/stl-part-file-name--done/, {
-    timeout: 45_000,
-  });
-  await expect(row.locator(".stl-part-file-name")).toContainText(/\.stl$/i);
+  const root = page.locator("#view-submit:not(.hidden)");
+  await expect(root).toBeVisible({ timeout: 10_000 });
+  const row = root.locator(".contest-stl-part-row").nth(index);
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    row.locator(".stl-part-choose-file").click(),
+  ]);
+  await fileChooser.setFiles(filePath);
+  await expect(row.locator(".stl-part-file-name--done")).toContainText(
+    path.basename(filePath),
+    { timeout: 45_000 }
+  );
 }
 
-/** 提出フォームを送信（全パーツアップロード済み前提） */
 export async function submitStlForm(page: Page) {
   const btn = page.locator("#submit-btn");
-  await expect(btn).toBeEnabled({ timeout: 30_000 });
-  const entryPost = page.waitForResponse(
-    (res) =>
-      res.url().includes("/api/contest/entries") &&
-      res.request().method() === "POST" &&
-      res.ok(),
-    { timeout: 60_000 }
-  );
-  await page.evaluate(() => {
-    document.getElementById("submit-form")?.requestSubmit();
-  });
-  await entryPost;
+  await expect(btn).toBeEnabled({ timeout: 15_000 });
+  await btn.click();
   await page.waitForSelector("#view-list:not(.hidden)", { timeout: 30_000 });
+}
+
+export async function ensureContestAutoScheduleSlots(
+  request: APIRequestContext,
+  label: string,
+  dayCount = 14
+): Promise<{ printerId: string; staffMemberId: string }> {
+  const printers = await ensureTestPrinters(request, label);
+  const dates = Array.from({ length: dayCount }, (_, i) => bookableDateWithOffset(i));
+
+  const memberRes = await request.post("/api/3dprint/admin/members", {
+    data: {
+      homeroom: "301",
+      student_number: Math.floor(Math.random() * 40) + 1,
+      name: `E2E Contest ${label} ${Date.now().toString(36)}`,
+    },
+  });
+  if (!memberRes.ok()) {
+    throw new Error(`メンバー作成失敗: ${memberRes.status()} ${await memberRes.text()}`);
+  }
+  const { member } = await memberRes.json();
+  const staffMemberId = member.id as string;
+
+  const staffRes = await request.put("/api/3dprint/admin/shifts/availability", {
+    data: {
+      member_id: staffMemberId,
+      dates,
+      available: true,
+    },
+  });
+  if (!staffRes.ok()) {
+    throw new Error(`スタッフシフト失敗: ${staffRes.status()}`);
+  }
+
+  const printerRes = await request.put("/api/3dprint/admin/shifts/printer-availability", {
+    data: {
+      printer_id: printers.availableId,
+      dates,
+      available: true,
+    },
+  });
+  if (!printerRes.ok()) {
+    throw new Error(`プリンターシフト失敗: ${printerRes.status()}`);
+  }
+
+  return { printerId: printers.availableId, staffMemberId };
 }
