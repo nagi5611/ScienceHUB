@@ -47,9 +47,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   let obj = await bucket.get(r2Key);
   if (!obj && relativePath !== "index.html") {
-    obj = await bucket.get(`${site.r2_prefix}index.html`);
-    if (obj) {
-      return r2ObjectResponse(obj, "index.html");
+    const requested = parsed.relativePath.trim();
+    const allowRootIndexFallback =
+      requested === "" || requested.endsWith("/");
+    if (allowRootIndexFallback) {
+      obj = await bucket.get(`${site.r2_prefix}index.html`);
+      if (obj) {
+        return r2ObjectResponse(obj, "index.html");
+      }
     }
   }
 

@@ -369,7 +369,7 @@ function renderAdminWeekdayHeaders() {
   });
 }
 
-/** Renders admin reservation calendar (removed from UI; no-op). */
+/** Renders admin reservation calendar on the dashboard panel. */
 async function renderAdminCalendar() {
   const grid = document.getElementById('calendar-grid');
   if (!grid) return;

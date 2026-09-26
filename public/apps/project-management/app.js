@@ -3688,11 +3688,19 @@ async function handleCompleteTask(taskId) {
   }
 }
 
+/** プロジェクト追加ダイアログを開く */
+function openCreateProjectDialog() {
+  const dialog = document.getElementById("pm-create-project-dialog");
+  const input = document.getElementById("pm-create-project-name-input");
+  if (!dialog || !input) return;
+  input.value = "";
+  dialog.showModal();
+  input.focus();
+}
+
 /** プロジェクト追加 */
-async function handleAddProject() {
+async function submitCreateProject(name) {
   if (!selectedGroupId || !isAdmin()) return;
-  const name = window.prompt("プロジェクト名");
-  if (name === null) return;
   const trimmed = name.trim();
   if (!trimmed) {
     showToast("名前を入力してください", true);
@@ -3714,9 +3722,16 @@ async function handleAddProject() {
     dashboard.projects = data.projects ?? [];
     await loadDashboard(selectedGroupId);
     showToast("プロジェクトを追加しました");
+    document.getElementById("pm-create-project-dialog")?.close();
   } catch {
     showToast("作成に失敗しました", true);
   }
+}
+
+/** プロジェクト追加（ダイアログ） */
+function handleAddProject() {
+  if (!selectedGroupId || !isAdmin()) return;
+  openCreateProjectDialog();
 }
 
 /** プロジェクト削除 */
@@ -3859,6 +3874,15 @@ function bindEvents() {
   document
     .getElementById("pm-add-project")
     ?.addEventListener("click", handleAddProject);
+
+  document.getElementById("pm-create-project-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = document.getElementById("pm-create-project-name-input");
+    void submitCreateProject(input?.value ?? "");
+  });
+  document.getElementById("pm-create-project-cancel")?.addEventListener("click", () => {
+    document.getElementById("pm-create-project-dialog")?.close();
+  });
 
   document
     .getElementById("pm-go-members")

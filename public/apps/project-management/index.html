@@ -239,6 +239,25 @@
     </div>
   </div>
 
+  <dialog class="pm-dialog" id="pm-create-project-dialog">
+    <form method="dialog" class="pm-dialog-form" id="pm-create-project-form">
+      <h3 class="pm-dialog-title">新規プロジェクト</h3>
+      <label class="pm-field-label" for="pm-create-project-name-input">プロジェクト名</label>
+      <input
+        type="text"
+        id="pm-create-project-name-input"
+        class="pm-field-input"
+        required
+        maxlength="200"
+        autocomplete="off"
+      >
+      <div class="pm-dialog-actions">
+        <button type="submit" class="pm-btn pm-btn--primary" value="confirm">作成</button>
+        <button type="button" class="pm-btn pm-btn--ghost" id="pm-create-project-cancel">キャンセル</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="pm-dialog pm-dialog--wide" id="pm-edit-project-dialog">
     <form method="dialog" class="pm-dialog-form" id="pm-edit-project-form">
       <h3 class="pm-dialog-title">プロジェクトの編集</h3>

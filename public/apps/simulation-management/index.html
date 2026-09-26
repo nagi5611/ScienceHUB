@@ -120,25 +120,63 @@
       <div class="admin-main">
         <p class="contact-notice admin-contact-strip">運用の連絡先: <a href="mailto:nagi@mmh-virtual.jp">nagi@mmh-virtual.jp</a></p>
         <div class="admin-panel" id="panel-dashboard">
-          <h1 class="page-heading">ダッシュボード</h1>
-          <p class="page-subheading">本日の実行タスクを確認できます。予約の詳細は依頼履歴から開いてください。</p>
+          <h1 class="page-heading">予約カレンダー</h1>
+          <p class="page-subheading">空いている日付をクリックして新規予約を追加できます。本日のタスクは下の一覧で確認できます。</p>
 
-          <div class="admin-calendar-user-filter admin-calendar-user-filter--dashboard">
-            <label class="admin-calendar-user-filter-label" for="admin-calendar-user-filter">依頼者</label>
-            <input
-              type="search"
-              id="admin-calendar-user-filter"
-              class="admin-calendar-user-filter-input"
-              list="admin-calendar-user-filter-options"
-              placeholder="名前・クラス・作品名で絞り込み"
-              autocomplete="off"
-            >
-            <datalist id="admin-calendar-user-filter-options"></datalist>
-            <button type="button" class="btn btn-secondary btn-sm" id="admin-calendar-user-filter-clear">クリア</button>
-            <p class="hint admin-calendar-user-filter-status" id="admin-calendar-user-filter-status" hidden></p>
-          </div>
+          <section class="card" id="admin-calendar-section">
+            <div class="calendar-sticky-header">
+              <div class="calendar-toolbar">
+                <div class="calendar-header calendar-header-desktop">
+                  <button class="btn btn-secondary btn-sm" id="prev-month" type="button">← 前月</button>
+                  <span class="calendar-month-label" id="calendar-month-label"></span>
+                  <button class="btn btn-secondary btn-sm" id="next-month" type="button">翌月 →</button>
+                </div>
 
-          <section class="card admin-list-section">
+                <div class="calendar-header-mobile">
+                  <button class="calendar-nav-btn" id="admin-prev-month-mobile" type="button" aria-label="前月">‹</button>
+                  <button class="calendar-mobile-month" id="admin-calendar-month-label-mobile" type="button">
+                    <span id="admin-calendar-month-label-mobile-text"></span>
+                    <span class="calendar-mobile-month-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <div class="calendar-mobile-actions">
+                    <div class="calendar-today-group">
+                      <span class="calendar-today-label">今日：</span>
+                      <button class="calendar-today-btn" id="admin-go-today-btn" type="button" aria-label="今月へ">
+                        <span class="calendar-today-icon" aria-hidden="true"></span>
+                        <span id="admin-today-day-num"></span>
+                      </button>
+                    </div>
+                    <button class="calendar-nav-btn" id="admin-next-month-mobile" type="button" aria-label="翌月">›</button>
+                  </div>
+                </div>
+
+                <div class="calendar-month-chips" id="admin-calendar-month-chips" role="tablist" aria-label="月を選択"></div>
+
+                <div class="admin-calendar-user-filter admin-calendar-user-filter--dashboard">
+                  <label class="admin-calendar-user-filter-label" for="admin-calendar-user-filter">依頼者</label>
+                  <input
+                    type="search"
+                    id="admin-calendar-user-filter"
+                    class="admin-calendar-user-filter-input"
+                    list="admin-calendar-user-filter-options"
+                    placeholder="名前・クラス・作品名で絞り込み"
+                    autocomplete="off"
+                  >
+                  <datalist id="admin-calendar-user-filter-options"></datalist>
+                  <button type="button" class="btn btn-secondary btn-sm" id="admin-calendar-user-filter-clear">クリア</button>
+                  <p class="hint admin-calendar-user-filter-status" id="admin-calendar-user-filter-status" hidden></p>
+                </div>
+              </div>
+
+              <div class="calendar-weekdays-row" id="admin-calendar-weekdays-row"></div>
+            </div>
+
+            <div class="calendar-grid-wrap">
+              <div class="calendar-grid" id="calendar-grid"></div>
+            </div>
+          </section>
+
+          <section class="card admin-list-section" style="margin-top:1.5rem">
             <h2 class="section-heading">本日のタスク</h2>
             <div id="today-tasks-mount">
               <p class="hint">読み込み中...</p>
@@ -557,12 +595,12 @@
           </div>
 
           <div class="form-group">
-            <label>ファイル（STL / g-code）</label>
+            <label for="admin-print-file">添付ファイル（任意）</label>
             <div class="upload-zone" id="admin-upload-zone">
-              <input type="file" id="admin-print-file" accept=".stl,.gcode,.gco,.nc" />
+              <input type="file" id="admin-print-file" accept=".stl,.gcode,.gco,.nc,.fds,.foam,.zip" />
               <div class="upload-icon">📁</div>
               <p>クリックまたはドラッグ&ドロップでファイルを選択</p>
-              <p class="upload-info">.stl / .gcode / .gco / .nc 対応 / 最大200MB</p>
+              <p class="upload-info">3Dプリント用 STL/g-code またはシミュレーション入力（.fds 等）/ 最大200MB</p>
             </div>
             <div class="progress-bar hidden" id="admin-upload-progress">
               <div class="progress-bar-fill" id="admin-upload-progress-fill"></div>
