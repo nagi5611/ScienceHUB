@@ -176,6 +176,31 @@ function getMonthRange(year: number, month: number): { start: string; end: strin
   return { start, end };
 }
 
+/** Returns trailing next-month padding day count for a month grid. */
+function getCalendarTrailingPaddingDays(year: number, month: number): number {
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0).getDate();
+  const startWeekday = firstDay.getDay();
+  const totalCells = startWeekday + lastDay;
+  return totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+}
+
+/** Extends month range through shift-calendar trailing padding days. */
+function getMonthRangeWithTrailingPadding(year: number, month: number): { start: string; end: string } {
+  const { start, end: monthEnd } = getMonthRange(year, month);
+  const trailing = getCalendarTrailingPaddingDays(year, month);
+  if (trailing === 0) return { start, end: monthEnd };
+
+  let nextYear = year;
+  let nextMonth = month + 1;
+  if (nextMonth > 12) {
+    nextMonth = 1;
+    nextYear += 1;
+  }
+  const end = `${nextYear}-${String(nextMonth).padStart(2, "0")}-${String(trailing).padStart(2, "0")}`;
+  return { start, end };
+}
+
 /** Requires ScienceHUB login and app access. */
 async function requireAppAccess(
   request: Request,
@@ -1703,7 +1728,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const month = parseInt(url.searchParams.get("month") ?? "", 10);
       if (!year || !month) return error("year と month が必要です");
 
-      const { start, end } = getMonthRange(year, month);
+      const { start, end } = getMonthRangeWithTrailingPadding(year, month);
       const members = await getAllMembers(db);
       const availability = await getAvailabilityInRange(db, start, end);
       const printers = await getAllPrinters(db);
