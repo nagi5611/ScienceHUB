@@ -1591,6 +1591,11 @@ function setupPrinterEditModal() {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
   });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    closeModal();
+  });
 
   form.addEventListener('submit', handlePrinterEditSave);
 }
