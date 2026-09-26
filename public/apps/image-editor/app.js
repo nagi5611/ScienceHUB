@@ -13,8 +13,19 @@ const resetBtn = document.getElementById("reset-btn");
 const downloadBtn = document.getElementById("download-btn");
 const placeholder = document.getElementById("placeholder");
 
+const PLACEHOLDER_DEFAULT = "画像を選択してください";
+const PLACEHOLDER_LOAD_ERROR =
+  "画像を読み込めませんでした。別のファイルをお試しください。";
+
 let sourceImage = null;
+let sourceFileName = null;
 let rotation = 0;
+
+/** ダウンロード用ファイル名を生成 */
+function buildDownloadName(originalName) {
+  const base = (originalName || "image").replace(/\.[^.]+$/, "") || "image";
+  return `${base}-edited.png`;
+}
 
 /** アクセス権を確認 */
 async function checkAccess() {
@@ -69,14 +80,37 @@ function renderCanvas() {
   downloadBtn.disabled = false;
 }
 
+/** 画像の読み込み失敗をユーザーに伝える */
+function showImageLoadError() {
+  placeholder.textContent = PLACEHOLDER_LOAD_ERROR;
+  placeholder.hidden = false;
+  if (!sourceImage) {
+    downloadBtn.disabled = true;
+  }
+  fileInput.value = "";
+}
+
 /** 画像ファイルを読み込む */
 function loadImageFile(file) {
   if (!file || !file.type.startsWith("image/")) return;
 
+  sourceFileName = file.name;
   const reader = new FileReader();
+  reader.onerror = () => {
+    showImageLoadError();
+  };
   reader.onload = () => {
+    if (typeof reader.result !== "string") {
+      showImageLoadError();
+      return;
+    }
+
     const img = new Image();
+    img.onerror = () => {
+      showImageLoadError();
+    };
     img.onload = () => {
+      placeholder.textContent = PLACEHOLDER_DEFAULT;
       sourceImage = img;
       rotation = 0;
       brightnessInput.value = "100";
@@ -92,12 +126,14 @@ function loadImageFile(file) {
 /** 状態をリセット */
 function resetEditor() {
   sourceImage = null;
+  sourceFileName = null;
   rotation = 0;
   brightnessInput.value = "100";
   brightnessValue.textContent = "100";
   grayscaleInput.checked = false;
   fileInput.value = "";
   downloadBtn.disabled = true;
+  placeholder.textContent = PLACEHOLDER_DEFAULT;
   placeholder.hidden = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
@@ -124,7 +160,7 @@ resetBtn.addEventListener("click", resetEditor);
 downloadBtn.addEventListener("click", () => {
   if (!sourceImage) return;
   const link = document.createElement("a");
-  link.download = "edited-image.png";
+  link.download = buildDownloadName(sourceFileName);
   link.href = canvas.toDataURL("image/png");
   link.click();
 });
