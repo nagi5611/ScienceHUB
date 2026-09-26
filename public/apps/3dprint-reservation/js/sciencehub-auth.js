@@ -164,7 +164,7 @@ export function setupProfileGateForm(setupHomeroomCombobox) {
   const closeBtn = document.getElementById("profile-gate-close");
 
   closeBtn?.addEventListener("click", () => {
-    if (hubUser?.print_profile_complete) closeProfileGateModal();
+    closeProfileGateModal();
   });
 
   form?.addEventListener("submit", async (e) => {
