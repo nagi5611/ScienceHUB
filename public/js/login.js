@@ -20,13 +20,29 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/** タブパネルの表示状態を同期（非表示パネルは hidden） */
+function setAuthPanelVisible(panelId, visible) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  panel.classList.toggle("is-inactive", !visible);
+  if (visible) {
+    panel.removeAttribute("hidden");
+    panel.setAttribute("aria-hidden", "false");
+  } else {
+    panel.setAttribute("hidden", "hidden");
+    panel.setAttribute("aria-hidden", "true");
+  }
+}
+
 /** タブ切替 */
 function switchTab(tab) {
   document.querySelectorAll(".auth-tab").forEach((el) => {
-    el.classList.toggle("active", el.dataset.authTab === tab);
+    const active = el.dataset.authTab === tab;
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-selected", active ? "true" : "false");
   });
-  document.getElementById("login-panel")?.classList.toggle("is-inactive", tab !== "login");
-  document.getElementById("signup-panel")?.classList.toggle("is-inactive", tab !== "signup");
+  setAuthPanelVisible("login-panel", tab === "login");
+  setAuthPanelVisible("signup-panel", tab === "signup");
   document.getElementById("auth-alert").innerHTML = "";
 }
 

@@ -54,8 +54,8 @@
         <div class="auth-page-wrap">
           <div id="auth-main-card">
             <div class="auth-tabs" role="tablist">
-              <button type="button" class="auth-tab active" data-auth-tab="login" role="tab">ログイン</button>
-              <button type="button" class="auth-tab" data-auth-tab="signup" role="tab">サインアップ</button>
+              <button type="button" class="auth-tab active" data-auth-tab="login" role="tab" aria-selected="true">ログイン</button>
+              <button type="button" class="auth-tab" data-auth-tab="signup" role="tab" aria-selected="false">サインアップ</button>
             </div>
 
             <div class="auth-card">
@@ -83,7 +83,7 @@
                   </form>
                 </div>
 
-                <div id="signup-panel" class="auth-tab-panel is-inactive">
+                <div id="signup-panel" class="auth-tab-panel is-inactive" hidden aria-hidden="true">
                   <form id="signup-form" class="auth-form">
                     <div class="form-row">
                       <div class="form-group">
