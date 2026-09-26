@@ -23,6 +23,8 @@ async function checkAccess() {
 
   if (!response.ok) {
     document.getElementById("access-denied").hidden = false;
+    document.getElementById("app-main")?.setAttribute("hidden", "");
+    document.querySelector("header")?.setAttribute("hidden", "");
     return false;
   }
 

@@ -8,7 +8,7 @@ import { GOOGLE_ICON, MICROSOFT_ICON } from "./oauth-icons.js";
 function showAlert(message, type = "error") {
   const el = document.getElementById("auth-alert");
   if (!el) return;
-  el.innerHTML = `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+  el.innerHTML = `<div class="alert alert-${type}" role="alert">${escapeHtml(message)}</div>`;
 }
 
 /** HTML エスケープ */
@@ -20,13 +20,29 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/** タブパネルの表示状態を同期（非表示パネルは hidden） */
+function setAuthPanelVisible(panelId, visible) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  panel.classList.toggle("is-inactive", !visible);
+  if (visible) {
+    panel.removeAttribute("hidden");
+    panel.setAttribute("aria-hidden", "false");
+  } else {
+    panel.setAttribute("hidden", "hidden");
+    panel.setAttribute("aria-hidden", "true");
+  }
+}
+
 /** タブ切替 */
 function switchTab(tab) {
   document.querySelectorAll(".auth-tab").forEach((el) => {
-    el.classList.toggle("active", el.dataset.authTab === tab);
+    const active = el.dataset.authTab === tab;
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-selected", active ? "true" : "false");
   });
-  document.getElementById("login-panel")?.classList.toggle("is-inactive", tab !== "login");
-  document.getElementById("signup-panel")?.classList.toggle("is-inactive", tab !== "signup");
+  setAuthPanelVisible("login-panel", tab === "login");
+  setAuthPanelVisible("signup-panel", tab === "signup");
   document.getElementById("auth-alert").innerHTML = "";
 }
 
@@ -89,9 +105,21 @@ async function handleLoginSubmit(event) {
   event.preventDefault();
   document.getElementById("auth-alert").innerHTML = "";
 
+  const loginForm = document.getElementById("login-form");
   const email = document.getElementById("login-email")?.value.trim() ?? "";
   const password = document.getElementById("login-password")?.value ?? "";
   const submitBtn = document.getElementById("login-submit-btn");
+
+  if (loginForm instanceof HTMLFormElement && !loginForm.checkValidity()) {
+    loginForm.reportValidity();
+    showAlert("必須項目を入力してください");
+    return;
+  }
+
+  if (!email || !password) {
+    showAlert("メールアドレスとパスワードを入力してください");
+    return;
+  }
 
   if (submitBtn instanceof HTMLButtonElement) {
     submitBtn.disabled = true;
@@ -128,6 +156,7 @@ async function handleSignupSubmit(event) {
   event.preventDefault();
   document.getElementById("auth-alert").innerHTML = "";
 
+  const signupForm = document.getElementById("signup-form");
   const username = document.getElementById("signup-username")?.value.trim() ?? "";
   const displayName = document.getElementById("signup-display-name")?.value.trim() ?? "";
   const email = document.getElementById("signup-email")?.value.trim() ?? "";
@@ -135,8 +164,14 @@ async function handleSignupSubmit(event) {
   const passwordConfirm = document.getElementById("signup-password-confirm")?.value ?? "";
   const submitBtn = document.getElementById("signup-submit-btn");
 
-  if (!displayName) {
-    showAlert("表示名を入力してください");
+  if (signupForm instanceof HTMLFormElement && !signupForm.checkValidity()) {
+    signupForm.reportValidity();
+    showAlert("必須項目を入力してください");
+    return;
+  }
+
+  if (!username || !displayName || !email || !password) {
+    showAlert("すべての必須項目を入力してください");
     return;
   }
 
@@ -193,6 +228,13 @@ function init() {
   const error = params.get("error");
   if (error) {
     showAlert(decodeURIComponent(error));
+  }
+
+  if (params.get("hint") === "oauth_profile") {
+    showAlert(
+      "このページは外部ログイン（Google / Microsoft）のサインアップ途中専用です。通常のログインまたはサインアップをご利用ください。",
+      "error"
+    );
   }
 
   bindOAuthButtons();

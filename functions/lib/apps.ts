@@ -572,9 +572,18 @@ export async function canUserAccessApp(
   if (enabledGroupIds.size === 0) return false;
 
   const memberships = await getUserGroupMemberships(db, userId);
-  return memberships.some((m) =>
+  const allowed = memberships.some((m) =>
     membershipCanAccessApp(m, enabledGroupIds, roleRestrictions)
   );
+  if (!allowed) {
+    console.warn("Access denied:", {
+      userId,
+      appSlug,
+      reason: "no_group_membership",
+      timestamp: new Date().toISOString(),
+    });
+  }
+  return allowed;
 }
 
 /** ダッシュボード用: ユーザーが見られるグループとアプリ */
