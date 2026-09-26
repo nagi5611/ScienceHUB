@@ -6,6 +6,7 @@ import { HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
 import { checkAppAccess, initAuth } from './contest-auth.js';
 import {
   applyContestDraft,
+  clearContestDraft,
   extractContestDraft,
   loadContestDraft,
   parseScheduleType,
@@ -747,7 +748,7 @@ async function handleApplicationSubmit(e) {
           self_print: form.querySelector('#self_print')?.checked === true,
         }),
       });
-      persistApplicationDraft();
+      clearContestDraft();
       showToast('参加申請を受け付けました。STL を提出してください', 'success');
     }
     showView('list');
@@ -1103,6 +1104,22 @@ function formatStaffMessageDate(iso) {
   }
 }
 
+const STAFF_MESSAGES_EMPTY_TEXT = 'まだメッセージはありません。';
+
+function showStaffMessagesLoadError() {
+  const section = document.getElementById('contest-staff-messages-section');
+  const list = document.getElementById('contest-staff-messages-list');
+  const empty = document.getElementById('contest-staff-messages-empty');
+  if (!section || !list) return;
+  section.classList.remove('hidden');
+  list.innerHTML = '';
+  if (empty) {
+    empty.classList.remove('hidden');
+    empty.textContent =
+      '担当者メッセージを読み込めませんでした。しばらくしてから再度お試しください。';
+  }
+}
+
 function renderStaffMessages() {
   const section = document.getElementById('contest-staff-messages-section');
   const list = document.getElementById('contest-staff-messages-list');
@@ -1111,8 +1128,10 @@ function renderStaffMessages() {
 
   if (!staffMessages.length) {
     list.innerHTML = '';
-    empty?.classList.add('hidden');
-    section.classList.add('hidden');
+    if (empty) {
+      empty.textContent = STAFF_MESSAGES_EMPTY_TEXT;
+      empty.classList.remove('hidden');
+    }
     return;
   }
 
@@ -1147,10 +1166,10 @@ async function loadStaffMessages() {
 }
 
 function startStaffMessagesPolling() {
-  loadStaffMessages().catch(() => {});
+  loadStaffMessages().catch(showStaffMessagesLoadError);
   if (staffMessagesPollTimer) clearInterval(staffMessagesPollTimer);
   staffMessagesPollTimer = setInterval(() => {
-    loadStaffMessages().catch(() => {});
+    loadStaffMessages().catch(showStaffMessagesLoadError);
   }, 5000);
 }
 
