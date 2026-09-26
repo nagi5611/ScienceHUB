@@ -26,8 +26,8 @@
 
   <main class="uv-main" id="app-main" hidden>
     <nav class="uv-tabs" role="tablist" aria-label="機能切替">
-      <button type="button" class="uv-tab is-active" data-tab="tidy" role="tab" aria-selected="true">台形補正</button>
-      <button type="button" class="uv-tab" data-tab="combine" role="tab" aria-selected="false">画像結合</button>
+      <button type="button" class="uv-tab is-active" id="tab-tidy" data-tab="tidy" role="tab" aria-selected="true" aria-controls="panel-tidy">台形補正</button>
+      <button type="button" class="uv-tab" id="tab-combine" data-tab="combine" role="tab" aria-selected="false" aria-controls="panel-combine">画像結合</button>
     </nav>
 
     <!-- 台形補正（Algo Zoo Tidy 相当） -->
