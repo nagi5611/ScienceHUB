@@ -3,7 +3,8 @@
  */
 
 function handleUnauthorized() {
-  window.location.href = "/?next=" + encodeURIComponent(window.location.pathname);
+  const returnTo = window.location.pathname + window.location.search + window.location.hash;
+  window.location.href = "/?next=" + encodeURIComponent(returnTo);
   throw new Error("ログインが必要です");
 }
 
