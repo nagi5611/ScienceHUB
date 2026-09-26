@@ -23,7 +23,7 @@ async function loadPendingProfile() {
   const response = await fetch("/api/auth/oauth/pending", { credentials: "same-origin" });
 
   if (!response.ok) {
-    window.location.href = "/login/?error=" + encodeURIComponent("登録セッションが無効です。もう一度ログインしてください。");
+    window.location.href = "/login/?hint=oauth_profile";
     return null;
   }
 

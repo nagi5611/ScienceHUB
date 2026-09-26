@@ -16,6 +16,10 @@ import {
   normalizeSimulatorCapabilities,
 } from '../../simulation-request/js/simulator-capabilities.js';
 import { buildSimulatorStatusBadge } from '../../simulation-request/js/simulator-status.js';
+import {
+  SIMULATOR_PLACEHOLDER_SVG,
+  simulatorPlaceholderHtml,
+} from '../../simulation-request/js/simulator-placeholder-icon.js';
 import { initFdsTestPanel, renderFdsTestPanel, stopFdsLivePolling } from './fds-test.js';
 import {
   initOpenfoamTestPanel,
@@ -1413,7 +1417,7 @@ function simulatorAdminCardHtml(simulator) {
   const caps = normalizeSimulatorCapabilities(simulator.capabilities);
   const imageHtml = simulator.image_url
     ? `<img class="simulator-admin-image" src="${escapeHtml(simulator.image_url)}" alt="" loading="lazy" />`
-    : `<div class="simulator-admin-image simulator-admin-image-placeholder" aria-hidden="true">🖨️</div>`;
+    : simulatorPlaceholderHtml('div', 'simulator-admin-image simulator-admin-image-placeholder');
 
   const statusBadge = buildSimulatorStatusBadge(simulator.status ?? 'available', { escapeHtml });
   const specLine = caps.ec2_instance_type
@@ -1479,7 +1483,7 @@ function openSimulatorEditModal(id) {
   if (simulator.image_url) {
     preview.innerHTML = `<img src="${escapeHtml(simulator.image_url)}" alt="" />`;
   } else {
-    preview.textContent = '🖨️';
+    preview.innerHTML = SIMULATOR_PLACEHOLDER_SVG;
   }
 
   document.getElementById('simulator-edit-modal-title').textContent = `${simulator.name} を編集`;
