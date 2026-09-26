@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * 音声変換アプリ — クライアントサイド（ffmpeg.wasm）
  */
@@ -81,7 +82,7 @@ async function checkAccess() {
   }
 
   if (response.status === 404) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     const denied = document.getElementById("access-denied");
     if (denied) {
       const p = denied.querySelector("p");
@@ -94,7 +95,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 

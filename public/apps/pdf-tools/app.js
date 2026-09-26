@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * PDF結合・分割アプリ — クライアントサイド
  */
@@ -66,7 +67,7 @@ async function checkAccess() {
   }
 
   if (response.status === 404) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     const denied = document.getElementById("access-denied");
     if (denied) {
       const p = denied.querySelector("p");
@@ -79,7 +80,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 
@@ -469,14 +470,23 @@ function clearMerge() {
   renderMergeList();
 }
 
-/** 分割モード UI */
+/** 分割モード UI と分割ボタン有効状態 */
 function updateSplitModeFields() {
   const mode = splitModeSelect?.value ?? "all-pages";
   if (splitRangesField) splitRangesField.hidden = mode !== "ranges";
   if (splitFixedField) splitFixedField.hidden = mode !== "fixed";
+
+  if (!splitBtn || !splitFile || isBusy) return;
+
+  if (mode === "ranges") {
+    splitBtn.disabled = !(splitRangesInput?.value ?? "").trim();
+  } else {
+    splitBtn.disabled = false;
+  }
 }
 
 splitModeSelect?.addEventListener("change", updateSplitModeFields);
+splitRangesInput?.addEventListener("input", updateSplitModeFields);
 
 /** 分割プレビュー描画 */
 async function loadSplitPreview(file) {
@@ -495,7 +505,7 @@ async function loadSplitPreview(file) {
     splitPageCount = pdf.numPages;
     splitPreviewMeta.hidden = false;
     splitPreviewMeta.textContent = `${file.name} · ${formatBytes(file.size)} · ${splitPageCount} ページ`;
-    splitBtn.disabled = isBusy;
+    updateSplitModeFields();
 
     showProcessing("サムネイルを生成しています…", `0 / ${splitPageCount}`);
     const thumbnails = await renderAllThumbnails(pdf, ({ current, total }) => {
@@ -606,7 +616,7 @@ async function handleSplit() {
   } finally {
     isBusy = false;
     hideProcessing();
-    if (splitFile) splitBtn.disabled = false;
+    updateSplitModeFields();
   }
 }
 

@@ -1509,7 +1509,7 @@ function bindEvents() {
     showGallery();
     loadGallery().catch(() => {});
   });
-  document.getElementById("refresh-preview-btn").addEventListener("click", refreshPreview);
+  document.getElementById("refresh-preview-btn")?.setAttribute("hidden", "");
   const canvasRefresh = document.getElementById("canvas-refresh-preview");
   if (canvasRefresh) {
     canvasRefresh.addEventListener("click", refreshPreview);
