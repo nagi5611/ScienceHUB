@@ -897,6 +897,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         let status = 400;
         if (message.includes("自動で割り当て")) status = 409;
         if (message.includes("進行中")) status = 409;
+        if (message.includes("提出済み")) status = 409;
         return error(message, status);
       }
     }
