@@ -96,9 +96,11 @@ export async function initPhoneVerification() {
 
   phoneFlow.init();
 
-  document.getElementById('phone-verification-open-btn')?.addEventListener('click', () => {
-    openPhoneVerificationModal();
-  });
+  for (const btnId of ['phone-verification-open-btn', 'openfoam-phone-verification-open-btn']) {
+    document.getElementById(btnId)?.addEventListener('click', () => {
+      openPhoneVerificationModal();
+    });
+  }
 
   try {
     await refreshPhoneVerificationStatus();
