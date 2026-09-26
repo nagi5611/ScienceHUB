@@ -1,44 +1,106 @@
 import { test, expect } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { openContestEntry, syncAdminSession } from "./helpers";
+import {
+  applicationCardByTitle,
+  ensureContestAutoScheduleSlots,
+  openContestEntry,
+  openNewApplicationForm,
+  openSubmitViewForTitle,
+  submitNewApplication,
+  submitStlForm,
+  uniqueContestTitle,
+  uploadStlPartAt,
+} from "./helpers";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MINIMAL_STL = path.join(__dirname, "fixtures/minimal.stl");
-
-test.describe("contest-entry — STL カード", () => {
-  test.beforeEach(async ({ context, request }) => {
-    await syncAdminSession(context, request);
+test.describe("造形物コンテスト — STL 提出・再提出", () => {
+  test.beforeEach(async ({ page }) => {
+    await openContestEntry(page);
   });
 
-  test("自己印刷で STL 提出後にダウンロードリンクが出る", async ({ page, request }) => {
-    const title = `E2E-STL-${Date.now().toString(36)}`;
-    const createRes = await request.post("/api/contest/applications", {
-      data: {
-        title,
-        schedule_type: "full_time",
-        homeroom: "301",
-        student_number: 4,
-        student_name: "STLテスト",
-        self_print: true,
-        members: [],
-      },
-    });
-    expect(createRes.ok()).toBeTruthy();
-    const { application } = await createRes.json();
-    await request.patch(`/api/contest/applications/${application.id}`, {
-      data: { status: "approved" },
+  test("自己印刷で STL を提出すると提出済みステータスとダウンロードリンクが出る", async ({
+    page,
+  }) => {
+    const title = uniqueContestTitle("stl-self");
+    await openNewApplicationForm(page);
+    await submitNewApplication(page, { title, selfPrint: true });
+
+    const card = applicationCardByTitle(page, title);
+    await expect(card.locator(".contest-application-submission")).toHaveText("STL 未提出");
+    await expect(card.locator(".contest-card-submit")).toHaveText("STL を提出");
+
+    await openSubmitViewForTitle(page, title);
+    await expect(page.locator("#submit-btn")).toContainText("STL を提出する");
+    await uploadStlPartAt(page, 0);
+    await submitStlForm(page);
+
+    await expect(page.locator("#page-toast")).toContainText("STL を提出しました", {
+      timeout: 15_000,
     });
 
-    await openContestEntry(page);
-    await page.locator(`.contest-card-submit[data-id="${application.id}"]`).click();
-    await page.locator("#stl-file-input").setInputFiles(MINIMAL_STL);
-    await page.locator("#submit-btn").click();
-    await expect(page.locator("#page-toast")).toContainText(/提出|完了/, { timeout: 30_000 });
+    const updated = applicationCardByTitle(page, title);
+    await expect(updated.locator(".contest-application-submission")).toHaveText(
+      "提出済み（自己印刷）"
+    );
+    await expect(updated.locator('a[download]:has-text("提出 STL を確認")')).toBeVisible();
+    await expect(updated.locator(".contest-card-submit")).toHaveCount(0);
+  });
 
-    await openContestEntry(page);
-    const card = page.locator(".contest-application-card", { hasText: title });
-    await expect(card.getByRole("link", { name: /提出 STL/ })).toBeVisible();
-    await expect(card).toContainText(/自己印刷|提出済/);
+  test("学校印刷で STL 提出後に再提出できる（印刷中）", async ({ page }) => {
+    const { staffMemberId } = await ensureContestAutoScheduleSlots(page.request, "contest-stl");
+
+    const title = uniqueContestTitle("stl-facility");
+    await openNewApplicationForm(page);
+    await submitNewApplication(page, { title, selfPrint: false });
+
+    await openSubmitViewForTitle(page, title);
+    await uploadStlPartAt(page, 0);
+    await submitStlForm(page);
+    await expect(page.locator("#page-toast")).toContainText("印刷依頼を受け付けました", {
+      timeout: 15_000,
+    });
+
+    const card = applicationCardByTitle(page, title);
+    await expect(card.locator(".contest-application-submission")).toHaveText("申請中");
+
+    const listRes = await page.request.get("/api/contest/applications");
+    const { applications } = await listRes.json();
+    const app = applications.find((a: { title: string }) => a.title === title);
+    const reservationId = app?.reservation?.id as string | undefined;
+    expect(reservationId).toBeTruthy();
+
+    const acceptRes = await page.request.post(
+      `/api/contest/admin/reservations/${reservationId}/accept`,
+      { data: { print_staff_member_id: staffMemberId } }
+    );
+    expect(acceptRes.ok()).toBeTruthy();
+
+    const printingRes = await page.request.patch(
+      `/api/contest/admin/reservations/${reservationId}`,
+      { data: { status: "printing" } }
+    );
+    expect(printingRes.ok()).toBeTruthy();
+
+    const applicationsLoaded = page.waitForResponse(
+      (res) =>
+        res.url().includes("/api/contest/applications") &&
+        res.request().method() === "GET" &&
+        res.ok(),
+      { timeout: 20_000 }
+    );
+    await page.reload();
+    await applicationsLoaded;
+    await page.waitForSelector("#view-list:not(.hidden)", { timeout: 15_000 });
+
+    const printingCard = applicationCardByTitle(page, title);
+    await expect(printingCard.locator(".contest-card-submit")).toHaveText("STL を再提出");
+    await expect(printingCard.locator(".contest-application-submission")).toHaveText("印刷中");
+
+    await openSubmitViewForTitle(page, title);
+    await expect(page.locator("#existing-submission-panel:not(.hidden)")).toBeVisible();
+    await expect(page.locator("#submit-btn")).toContainText("印刷予約");
+    await uploadStlPartAt(page, 0);
+    await submitStlForm(page);
+    await expect(page.locator("#page-toast")).toContainText("印刷依頼を受け付けました", {
+      timeout: 15_000,
+    });
   });
 });
