@@ -1976,18 +1976,23 @@ function bindEvents() {
 
 /** クラウドモーダル初期化 */
 function initCloudModals() {
+  const veE2eHarness =
+    /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
   const saveDialog = document.getElementById("ve-cloud-save-dialog");
   const openDialog = document.getElementById("ve-cloud-open-dialog");
   if (saveDialog instanceof HTMLDialogElement) {
     cloudSaveModal = createCloudSaveModal(saveDialog, {
       idPrefix: "ve-cloud-save",
       loginNext: "/apps/video-editor/",
+      // E2E ハーネスでは未ログイン時もページを維持しモーダル内 denied を検証する
+      skipLoginRedirect: veE2eHarness,
     });
   }
   if (openDialog instanceof HTMLDialogElement) {
     cloudOpenModal = createCloudOpenModal(openDialog, {
       idPrefix: "ve-cloud-open",
       loginNext: "/apps/video-editor/",
+      redirectOn401: !veE2eHarness,
     });
   }
 }
