@@ -226,6 +226,9 @@ export function createCloudSaveModal(dialogEl, options = {}) {
     roots = data.roots ?? [];
     currentPath = roots[0]?.path ?? "";
     renderRoots();
+    if (!roots.length && els.roots) {
+      els.roots.innerHTML = '<p class="cloud-save-folders-status">保存先ルートがありません。クラウドストレージへのアクセス権限を確認してください。</p>';
+    }
     await loadFolders();
     if (els.submit) els.submit.disabled = !currentPath;
   }

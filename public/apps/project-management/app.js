@@ -1011,7 +1011,14 @@ async function loadDashboard(groupId = null) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      showToast(err.error || "データの取得に失敗しました", true);
+      const message = err.error || "データの取得に失敗しました";
+      if (response.status === 400 && /グループ/.test(message)) {
+        document.getElementById("app-main").hidden = true;
+        document.getElementById("access-denied").hidden = false;
+        document.querySelector(".pm-header")?.setAttribute("hidden", "");
+        return;
+      }
+      showToast(message, true);
       return;
     }
 

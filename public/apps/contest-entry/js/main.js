@@ -1117,14 +1117,14 @@ function renderStaffMessages() {
   const empty = document.getElementById('contest-staff-messages-empty');
   if (!section || !list) return;
 
-  section.classList.remove('hidden');
-
   if (!staffMessages.length) {
     list.innerHTML = '';
-    empty?.classList.remove('hidden');
+    empty?.classList.add('hidden');
+    section.classList.add('hidden');
     return;
   }
 
+  section.classList.remove('hidden');
   empty?.classList.add('hidden');
   list.innerHTML = staffMessages
     .map((msg) => {

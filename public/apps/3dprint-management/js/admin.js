@@ -476,6 +476,28 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   return cell;
 }
 
+const ADMIN_FORM_MODAL_TITLE_ID = 'admin-form-modal-title';
+
+/** Toggles accessible dialog semantics on the admin reservation form overlay. */
+function syncAdminFormModalA11y(modal, open) {
+  if (open) {
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', ADMIN_FORM_MODAL_TITLE_ID);
+    return;
+  }
+  modal.removeAttribute('role');
+  modal.removeAttribute('aria-modal');
+  modal.removeAttribute('aria-labelledby');
+}
+
+/** Opens the admin reservation form modal with dialog ARIA attributes. */
+function openAdminFormModal() {
+  const modal = document.getElementById('admin-form-modal');
+  modal.classList.add('open');
+  syncAdminFormModalA11y(modal, true);
+}
+
 /** Sets up the admin new-reservation form modal. */
 function setupAdminFormModal() {
   const modal = document.getElementById('admin-form-modal');
@@ -492,6 +514,7 @@ function setupAdminFormModal() {
 
   const closeModal = () => {
     modal.classList.remove('open');
+    syncAdminFormModalA11y(modal, false);
     adminSelectedDate = '';
     adminFormMode = 'create';
     document.querySelectorAll('#calendar-grid .calendar-day.selected').forEach((el) => {
@@ -504,6 +527,11 @@ function setupAdminFormModal() {
   cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeModal();
   });
 
   purposeInputs.forEach((input) => {
@@ -774,7 +802,7 @@ async function openAdminFormForDate(dateStr) {
     hint.classList.add('hidden');
   }
 
-  document.getElementById('admin-form-modal').classList.add('open');
+  openAdminFormModal();
   populateAdminPrinterSelect();
   updateDraftRestoreButton(
     document.getElementById('admin-restore-draft-btn'),
@@ -836,7 +864,7 @@ async function openAdminEditForm(r) {
   document.getElementById('admin-form-modal-title').textContent = `${r.title} を修正`;
   document.getElementById('admin-submit-btn').textContent = '修正を保存';
   populateAdminPrinterSelect(r.printer_id);
-  document.getElementById('admin-form-modal').classList.add('open');
+  openAdminFormModal();
 }
 
 /** Enables/disables print scale options in the admin form. */
@@ -1597,6 +1625,11 @@ function setupPrinterEditModal() {
   cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    closeModal();
   });
 
   form.addEventListener('submit', handlePrinterEditSave);
