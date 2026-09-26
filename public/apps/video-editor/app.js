@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * 動画編集アプリ — online-video-cutter 相当（ブラウザ内 ffmpeg.wasm）
  */
@@ -417,7 +418,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 
@@ -1975,18 +1976,22 @@ function bindEvents() {
 
 /** クラウドモーダル初期化 */
 function initCloudModals() {
+  const veE2eHarness =
+    /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
   const saveDialog = document.getElementById("ve-cloud-save-dialog");
   const openDialog = document.getElementById("ve-cloud-open-dialog");
   if (saveDialog instanceof HTMLDialogElement) {
     cloudSaveModal = createCloudSaveModal(saveDialog, {
       idPrefix: "ve-cloud-save",
       loginNext: "/apps/video-editor/",
+      skipLoginRedirect: veE2eHarness,
     });
   }
   if (openDialog instanceof HTMLDialogElement) {
     cloudOpenModal = createCloudOpenModal(openDialog, {
       idPrefix: "ve-cloud-open",
       loginNext: "/apps/video-editor/",
+      redirectOn401: !veE2eHarness,
     });
   }
 }

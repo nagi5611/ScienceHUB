@@ -18,7 +18,11 @@ import {
   nozzleSizesToInputValue,
   parseNozzleSizesInput,
 } from '../../3dprint-reservation/js/printer-capabilities.js';
-import { buildPrinterStatusBadge } from '../../3dprint-reservation/js/printer-status.js';
+import {
+  buildPrinterStatusBadge,
+  getPrinterStatusLabel,
+  isPrinterBookable,
+} from '../../3dprint-reservation/js/printer-status.js';
 import {
   initPrintVideoFolderPicker,
   openPrintVideoFolderPicker,
@@ -77,6 +81,8 @@ let editingPrinterId = null;
 let currentYear;
 let currentMonth;
 let activePanel = 'dashboard';
+/** @type {HTMLElement | null} */
+let detailModalTriggerEl = null;
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 
 /** Returns whether the compact mobile admin layout is active. */
@@ -106,6 +112,11 @@ function updateAdminStickyOffsets() {
     return;
   }
   if (topbar) {
+    if (isMobileAdminView()) {
+      topbar.removeAttribute('aria-hidden');
+    } else {
+      topbar.setAttribute('aria-hidden', 'true');
+    }
     document.documentElement.style.setProperty('--admin-topbar-offset', `${topbar.offsetHeight}px`);
   }
   if (nav) {
@@ -135,9 +146,15 @@ async function init() {
     window.location.href = '/';
   });
 
-  modalClose.addEventListener('click', () => modal.classList.remove('open'));
+  modalClose.addEventListener('click', () => closeDetailModal());
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.classList.remove('open');
+    if (e.target === modal) closeDetailModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeDetailModal();
   });
 
   saveBtn.addEventListener('click', saveReservation);
@@ -309,6 +326,18 @@ function updateAdminTodayButton() {
   dayNum.textContent = String(Number(getTodayJst().split('-')[2]));
 }
 
+/** Applies year rollover when picking a month chip (e.g. December → January). */
+function navigateAdminToMonthChip(month) {
+  if (currentMonth === month) return;
+  let year = currentYear;
+  if (month < currentMonth && currentMonth === 12 && month === 1) {
+    year += 1;
+  }
+  currentYear = year;
+  currentMonth = month;
+  renderAdminCalendar();
+}
+
 /** Renders horizontal month chips for admin mobile calendar. */
 function renderAdminMonthChips() {
   const container = document.getElementById('admin-calendar-month-chips');
@@ -323,11 +352,7 @@ function renderAdminMonthChips() {
     chip.setAttribute('aria-selected', month === currentMonth ? 'true' : 'false');
     if (month === currentMonth) chip.classList.add('active');
     chip.textContent = `${month}月`;
-    chip.addEventListener('click', () => {
-      if (currentMonth === month) return;
-      currentMonth = month;
-      renderAdminCalendar();
-    });
+    chip.addEventListener('click', () => navigateAdminToMonthChip(month));
     container.appendChild(chip);
   }
 
@@ -383,6 +408,8 @@ async function renderAdminCalendar() {
   const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
   const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
   const prevMonthLast = new Date(currentYear, currentMonth - 1, 0).getDate();
+  const prevMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+  const prevMonthNum = currentMonth === 1 ? 12 : currentMonth - 1;
   for (let i = startWeekday - 1; i >= 0; i--) {
     const dayNum = prevMonthLast - i;
     const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
@@ -434,7 +461,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
       cell.classList.add('disabled');
     } else if (isFull) {
       cell.classList.add('full');
-      cell.addEventListener('click', () => alert('この日はもう満杯です'));
+      cell.addEventListener('click', () => showPageToast('この日はもう満杯です'));
     } else {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openAdminFormForDate(dateStr));
@@ -893,6 +920,16 @@ function showAdminFormAlert(message, type) {
     `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
 }
 
+/** Shows a temporary page-level toast. */
+function showPageToast(message) {
+  const toast = document.getElementById('page-toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  clearTimeout(showPageToast._timer);
+  showPageToast._timer = setTimeout(() => toast.classList.add('hidden'), 3500);
+}
+
 /** Formats a date string for Japanese display. */
 function formatDateJa(isoDate) {
   const [y, m, d] = isoDate.split('-');
@@ -1221,8 +1258,22 @@ function bindDetailButtons(container) {
   });
 }
 
+/** Closes the reservation detail modal and restores focus to the opener. */
+function closeDetailModal() {
+  const modal = document.getElementById('detail-modal');
+  if (!modal?.classList.contains('open')) return;
+  modal.classList.remove('open');
+  const trigger = detailModalTriggerEl;
+  detailModalTriggerEl = null;
+  if (trigger && typeof trigger.focus === 'function') {
+    trigger.focus();
+  }
+}
+
 /** Opens the reservation detail modal. */
 async function openDetail(id) {
+  detailModalTriggerEl =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
   currentReservationId = id;
   const modal = document.getElementById('detail-modal');
   const body = document.getElementById('modal-body');
@@ -1411,12 +1462,34 @@ function populateAdminPrinterSelect(selectedId = '') {
     return;
   }
 
-  select.disabled = false;
-  select.innerHTML = allPrinters
-    .map(
-      (p) =>
-        `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
-    )
+  const options = [];
+  for (const printer of allPrinters) {
+    const bookable = isPrinterBookable(printer);
+    if (!bookable && printer.id !== selectedId) continue;
+
+    const label = bookable
+      ? printer.name
+      : `${printer.name} (${getPrinterStatusLabel(printer.status ?? 'unavailable')})`;
+    options.push({ id: printer.id, label, bookable });
+  }
+
+  if (!options.length) {
+    select.innerHTML = '<option value="">予約可能なプリンターがありません</option>';
+    select.disabled = true;
+    return;
+  }
+
+  const resolvedSelectedId = options.some((o) => o.id === selectedId)
+    ? selectedId
+    : (options.find((o) => o.bookable)?.id ?? '');
+
+  select.disabled = !options.some((o) => o.bookable);
+  select.innerHTML = options
+    .map((o) => {
+      const selected = o.id === resolvedSelectedId ? ' selected' : '';
+      const disabled = o.bookable ? '' : ' disabled';
+      return `<option value="${escapeHtml(o.id)}"${selected}${disabled}>${escapeHtml(o.label)}</option>`;
+    })
     .join('');
 }
 

@@ -6,6 +6,7 @@ import { HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
 import { checkAppAccess, initAuth } from './contest-auth.js';
 import {
   applyContestDraft,
+  clearContestDraft,
   extractContestDraft,
   loadContestDraft,
   parseScheduleType,
@@ -490,7 +491,7 @@ function renderApplicationsList() {
     li.className = 'contest-application-card';
     const memberCount = app.members?.length ?? 0;
     const memberLine =
-      memberCount > 0
+      memberCount > 1
         ? `<p class="hint">参加者: ${escapeHtml(formatParticipantSummary(app.members))}</p>`
         : '';
     const selfPrintLine = app.self_print
@@ -508,9 +509,7 @@ function renderApplicationsList() {
       : '';
     const submitBtn = app.can_submit_stl
       ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">${app.can_download_submitted_stl ? 'STL を再提出' : 'STL を提出'}</button>`
-      : !app.can_download_submitted_stl
-        ? `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`
-        : '';
+      : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
     const editBtn =
       app.status === 'approved'
         ? `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`
@@ -687,17 +686,11 @@ function updateSubmitButtonLabel(btn, app) {
     btn.textContent = '提出する';
     return;
   }
-  if (app.self_print) {
-    btn.textContent =
-      uploaded >= limit
-        ? `STL を提出する（${limit} 件）`
-        : `STL を提出する（${uploaded} / ${limit} 件）`;
-    return;
-  }
+  const verb = app.can_download_submitted_stl ? 'STL を再提出する' : 'STL を提出する';
   btn.textContent =
     uploaded >= limit
-      ? `印刷予約する（${limit} パーツ）`
-      : `印刷予約（${uploaded} / ${limit} 件の STL）`;
+      ? `${verb}（${limit} 件）`
+      : `${verb}（${uploaded} / ${limit} 件）`;
 }
 
 function updateSubmitState() {
@@ -755,7 +748,7 @@ async function handleApplicationSubmit(e) {
           self_print: form.querySelector('#self_print')?.checked === true,
         }),
       });
-      persistApplicationDraft();
+      clearContestDraft();
       showToast('参加申請を受け付けました。STL を提出してください', 'success');
     }
     showView('list');
@@ -1111,6 +1104,22 @@ function formatStaffMessageDate(iso) {
   }
 }
 
+const STAFF_MESSAGES_EMPTY_TEXT = 'まだメッセージはありません。';
+
+function showStaffMessagesLoadError() {
+  const section = document.getElementById('contest-staff-messages-section');
+  const list = document.getElementById('contest-staff-messages-list');
+  const empty = document.getElementById('contest-staff-messages-empty');
+  if (!section || !list) return;
+  section.classList.remove('hidden');
+  list.innerHTML = '';
+  if (empty) {
+    empty.classList.remove('hidden');
+    empty.textContent =
+      '担当者メッセージを読み込めませんでした。しばらくしてから再度お試しください。';
+  }
+}
+
 function renderStaffMessages() {
   const section = document.getElementById('contest-staff-messages-section');
   const list = document.getElementById('contest-staff-messages-list');
@@ -1119,8 +1128,10 @@ function renderStaffMessages() {
 
   if (!staffMessages.length) {
     list.innerHTML = '';
-    empty?.classList.add('hidden');
-    section.classList.add('hidden');
+    if (empty) {
+      empty.textContent = STAFF_MESSAGES_EMPTY_TEXT;
+      empty.classList.remove('hidden');
+    }
     return;
   }
 
@@ -1155,10 +1166,10 @@ async function loadStaffMessages() {
 }
 
 function startStaffMessagesPolling() {
-  loadStaffMessages().catch(() => {});
+  loadStaffMessages().catch(showStaffMessagesLoadError);
   if (staffMessagesPollTimer) clearInterval(staffMessagesPollTimer);
   staffMessagesPollTimer = setInterval(() => {
-    loadStaffMessages().catch(() => {});
+    loadStaffMessages().catch(showStaffMessagesLoadError);
   }, 5000);
 }
 
