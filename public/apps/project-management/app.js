@@ -3042,7 +3042,7 @@ async function handleSaveEditProject() {
     }
 
     await loadDashboard(selectedGroupId);
-    showToast("タスクを更新しました");
+    showToast("プロジェクトを更新しました");
   } catch {
     showToast("更新に失敗しました", true);
   } finally {
