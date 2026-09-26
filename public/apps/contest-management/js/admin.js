@@ -641,6 +641,12 @@ function setupAdminFormModal() {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
   });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeModal();
+  });
 
   purposeInputs.forEach((input) => {
     input.addEventListener('change', () => {
