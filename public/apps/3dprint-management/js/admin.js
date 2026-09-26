@@ -477,28 +477,6 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   return cell;
 }
 
-const ADMIN_FORM_MODAL_TITLE_ID = 'admin-form-modal-title';
-
-/** Toggles accessible dialog semantics on the admin reservation form overlay. */
-function syncAdminFormModalA11y(modal, open) {
-  if (open) {
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-modal', 'true');
-    modal.setAttribute('aria-labelledby', ADMIN_FORM_MODAL_TITLE_ID);
-    return;
-  }
-  modal.removeAttribute('role');
-  modal.removeAttribute('aria-modal');
-  modal.removeAttribute('aria-labelledby');
-}
-
-/** Opens the admin reservation form modal with dialog ARIA attributes. */
-function openAdminFormModal() {
-  const modal = document.getElementById('admin-form-modal');
-  modal.classList.add('open');
-  syncAdminFormModalA11y(modal, true);
-}
-
 /** Sets up the admin new-reservation form modal. */
 function setupAdminFormModal() {
   const modal = document.getElementById('admin-form-modal');
