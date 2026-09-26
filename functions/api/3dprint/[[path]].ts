@@ -1470,6 +1470,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("申請中の予約は「予約を受領」ボタンから受領してください", 400);
       }
 
+      if (
+        existing.status === "applied" &&
+        body.status &&
+        (body.status === "printing" || body.status === "delivered")
+      ) {
+        return error(
+          "申請中の予約は「予約を受領」から受領してからステータスを変更してください",
+          400
+        );
+      }
+
+      const effectiveStaffId =
+        body.print_staff_member_id !== undefined
+          ? body.print_staff_member_id
+          : existing.print_staff_member_id;
+
+      if (
+        body.status &&
+        (body.status === "printing" || body.status === "delivered") &&
+        !effectiveStaffId
+      ) {
+        return error("印刷中・配布済みにするには印刷担当者を割り当ててください", 400);
+      }
+
       if (body.print_staff_member_id) {
         const member = await getMemberById(db, body.print_staff_member_id);
         if (!member) return error("指定されたメンバーが見つかりません", 400);
