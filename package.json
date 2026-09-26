@@ -36,7 +36,7 @@
     "test:video-editor": "playwright test tests/video-editor",
     "test:video-editor:ui": "playwright test tests/video-editor --ui",
     "test:website-publish": "playwright test tests/website-publish",
-    "test:3dprint-reservation": "playwright test -c playwright.3dprint.config.ts"
+    "test:contest-entry": "playwright test tests/contest-entry"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260722.1",
