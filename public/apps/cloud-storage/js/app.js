@@ -2312,7 +2312,7 @@ async function checkAccess() {
     credentials: "same-origin",
   });
   if (res.status === 401) {
-    window.location.href = "/?next=" + encodeURIComponent(window.location.pathname);
+    window.location.href = "/login/?next=" + encodeURIComponent(window.location.pathname + window.location.search);
     return false;
   }
   const data = await res.json().catch(() => ({}));
