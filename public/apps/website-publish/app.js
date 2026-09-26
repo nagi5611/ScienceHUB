@@ -651,15 +651,20 @@ async function handleCreateSite(event) {
   if (!title || !pathSlug) return;
 
   setStatus("サイトを作成中…");
-  await api("sites", {
-    method: "POST",
-    body: JSON.stringify({ title, path_slug: pathSlug }),
-  });
-  createDialog.close();
-  createTitle.value = "";
-  createPath.value = "";
-  await loadSites();
-  setStatus("サイトを作成しました");
+  try {
+    await api("sites", {
+      method: "POST",
+      body: JSON.stringify({ title, path_slug: pathSlug }),
+    });
+    createDialog.close();
+    createTitle.value = "";
+    createPath.value = "";
+    await loadSites();
+    setStatus("サイトを作成しました");
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "サイトの作成に失敗しました", true);
+    createDialog.close();
+  }
 }
 
 /** サイト削除 */
