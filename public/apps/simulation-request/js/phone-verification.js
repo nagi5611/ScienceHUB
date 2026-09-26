@@ -108,8 +108,8 @@ export async function initPhoneVerification() {
 
   phoneFlow.init();
 
-  for (const openBtnId of ['phone-verification-open-btn', 'openfoam-phone-verification-open-btn']) {
-    document.getElementById(openBtnId)?.addEventListener('click', () => {
+  for (const btnId of ['phone-verification-open-btn', 'openfoam-phone-verification-open-btn']) {
+    document.getElementById(btnId)?.addEventListener('click', () => {
       openPhoneVerificationModal();
     });
   }
