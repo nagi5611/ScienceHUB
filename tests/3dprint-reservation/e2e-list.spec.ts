@@ -4,15 +4,17 @@ import {
   createPrinter,
   earliestBookableDate,
   enableShiftsForDates,
+  ensureAdminPrintProfile,
   forceReservation,
   getCurrentUserId,
-  loginAsPrintReservationUser,
   openReservationApp,
+  syncAdminSession,
 } from "./helpers";
 
 test.describe("3D印刷予約 E2E — 一覧・取消・プリンターステータス", () => {
-  test.beforeEach(async ({ page }) => {
-    await loginAsPrintReservationUser(page.request);
+  test.beforeEach(async ({ context, page }) => {
+    await syncAdminSession(context, page.request);
+    await ensureAdminPrintProfile(page.request);
   });
 
   test("直近一覧に自分の予約が表示される", async ({ page }) => {
