@@ -381,8 +381,12 @@ async function renderAdminCalendar() {
   const todayStr = getTodayJst();
 
   const prevMonthLast = new Date(currentYear, currentMonth - 1, 0).getDate();
+  const prevMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+  const prevMonthNum = currentMonth === 1 ? 12 : currentMonth - 1;
   for (let i = startWeekday - 1; i >= 0; i--) {
-    grid.appendChild(createAdminDayCell(prevMonthLast - i, true, {}, todayStr));
+    const dayNum = prevMonthLast - i;
+    const dateStr = `${prevMonthYear}-${String(prevMonthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    grid.appendChild(createAdminDayCell(dayNum, true, byDate, todayStr, dateStr));
   }
 
   for (let day = 1; day <= lastDay; day++) {
@@ -392,8 +396,11 @@ async function renderAdminCalendar() {
 
   const totalCells = startWeekday + lastDay;
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  const nextMonthYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+  const nextMonthNum = currentMonth === 12 ? 1 : currentMonth + 1;
   for (let day = 1; day <= remaining; day++) {
-    grid.appendChild(createAdminDayCell(day, true, {}, todayStr));
+    const dateStr = `${nextMonthYear}-${String(nextMonthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    grid.appendChild(createAdminDayCell(day, true, byDate, todayStr, dateStr));
   }
 
   updateAdminStickyOffsets();
@@ -421,13 +428,13 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
   const smallCount = dayReservations.filter((r) => r.print_scale === 'small').length;
   const isFull = hasMediumOrLarge || smallCount >= 2;
 
-  if (dateStr && !otherMonth) {
+  if (dateStr) {
     cell.dataset.date = dateStr;
     if (dateStr < todayStr) {
       cell.classList.add('disabled');
     } else if (isFull) {
       cell.classList.add('full');
-      cell.addEventListener('click', () => alert('この日はもう満杯です'));
+      cell.addEventListener('click', () => showPageToast('この日はもう満杯です'));
     } else {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openAdminFormForDate(dateStr));
@@ -884,6 +891,16 @@ function setAdminScaleOptions(availableScales) {
 function showAdminFormAlert(message, type) {
   document.getElementById('admin-form-alert').innerHTML =
     `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+}
+
+/** Shows a temporary page-level toast. */
+function showPageToast(message) {
+  const toast = document.getElementById('page-toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  clearTimeout(showPageToast._timer);
+  showPageToast._timer = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
 /** Formats a date string for Japanese display. */
@@ -1618,6 +1635,11 @@ function setupPrinterEditModal() {
   cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    closeModal();
   });
 
   form.addEventListener('submit', handlePrinterEditSave);
