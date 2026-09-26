@@ -452,6 +452,9 @@ function showEmptyEditor() {
   previewPlaceholder.textContent = "「動画を追加」からメディアを読み込んでください";
   timelineView?.render();
   updateUndoRedoUi();
+  if (/** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true) {
+    /** @type {Window & { __VE_E2E_READY__?: boolean }} */ (window).__VE_E2E_READY__ = true;
+  }
 }
 
 /** 左パネル表示 */
