@@ -14,7 +14,14 @@ const downloadBtn = document.getElementById("download-btn");
 const placeholder = document.getElementById("placeholder");
 
 let sourceImage = null;
+let sourceFileName = null;
 let rotation = 0;
+
+/** ダウンロード用ファイル名を生成 */
+function buildDownloadName(originalName) {
+  const base = (originalName || "image").replace(/\.[^.]+$/, "") || "image";
+  return `${base}-edited.png`;
+}
 
 /** アクセス権を確認 */
 async function checkAccess() {
@@ -73,6 +80,7 @@ function renderCanvas() {
 function loadImageFile(file) {
   if (!file || !file.type.startsWith("image/")) return;
 
+  sourceFileName = file.name;
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
@@ -92,6 +100,7 @@ function loadImageFile(file) {
 /** 状態をリセット */
 function resetEditor() {
   sourceImage = null;
+  sourceFileName = null;
   rotation = 0;
   brightnessInput.value = "100";
   brightnessValue.textContent = "100";
@@ -124,7 +133,7 @@ resetBtn.addEventListener("click", resetEditor);
 downloadBtn.addEventListener("click", () => {
   if (!sourceImage) return;
   const link = document.createElement("a");
-  link.download = "edited-image.png";
+  link.download = buildDownloadName(sourceFileName);
   link.href = canvas.toDataURL("image/png");
   link.click();
 });
