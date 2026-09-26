@@ -4577,7 +4577,10 @@ async function initApp() {
     }
 
     if (!projects.length) {
-      await createProject();
+      listView.hidden = false;
+      editorView.hidden = true;
+      if (listEmptyEl) listEmptyEl.hidden = false;
+      loadingEl.hidden = true;
       return;
     }
 
