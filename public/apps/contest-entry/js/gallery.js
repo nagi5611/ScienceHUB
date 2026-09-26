@@ -39,16 +39,15 @@ async function loadPreviewIntoCard(cardEl, entry) {
   try {
     const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) {
-      throw new Error(`プレビュー取得に失敗しました (${res.status})`);
+      throw new Error('プレビューを表示できませんでした');
     }
     const rawBlob = await res.blob();
     const blob = ensureModelBlobType(rawBlob, entry.model_filename);
     const objectUrl = URL.createObjectURL(blob);
     await mountModel3dPreview(previewHost, objectUrl, entry.model_filename);
-  } catch (err) {
-    previewHost.innerHTML = `<p class="hint contest-gallery-preview-error">${escapeHtml(
-      err.message || 'プレビューを表示できません'
-    )}</p>`;
+  } catch {
+    previewHost.innerHTML =
+      '<p class="hint contest-gallery-preview-error">プレビューを表示できませんでした</p>';
   }
 }
 

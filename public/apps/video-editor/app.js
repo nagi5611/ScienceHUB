@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * 動画編集アプリ — online-video-cutter 相当（ブラウザ内 ffmpeg.wasm）
  */
@@ -417,7 +418,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 
@@ -452,6 +453,9 @@ function showEmptyEditor() {
   previewPlaceholder.textContent = "「動画を追加」からメディアを読み込んでください";
   timelineView?.render();
   updateUndoRedoUi();
+  if (/** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true) {
+    /** @type {Window & { __VE_E2E_READY__?: boolean }} */ (window).__VE_E2E_READY__ = true;
+  }
 }
 
 /** 左パネル表示 */
