@@ -165,12 +165,15 @@ function truncateForCell(text, maxLen = 6) {
 function updateAdminStickyOffsets() {
   const topbar = document.getElementById('admin-mobile-topbar');
   const nav = document.getElementById('admin-mobile-nav');
-  if (!isMobileAdminView()) {
+  const mobile = isMobileAdminView();
+  if (!mobile) {
     document.documentElement.style.removeProperty('--admin-topbar-offset');
     document.documentElement.style.removeProperty('--admin-nav-offset');
+    if (topbar) topbar.setAttribute('aria-hidden', 'true');
     return;
   }
   if (topbar) {
+    topbar.setAttribute('aria-hidden', 'false');
     document.documentElement.style.setProperty('--admin-topbar-offset', `${topbar.offsetHeight}px`);
   }
   if (nav) {
