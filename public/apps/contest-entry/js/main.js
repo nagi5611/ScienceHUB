@@ -508,9 +508,7 @@ function renderApplicationsList() {
       : '';
     const submitBtn = app.can_submit_stl
       ? `<button type="button" class="btn btn-primary btn-sm contest-card-submit" data-id="${escapeHtml(app.id)}">${app.can_download_submitted_stl ? 'STL を再提出' : 'STL を提出'}</button>`
-      : !app.can_download_submitted_stl
-        ? `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`
-        : '';
+      : `<span class="contest-card-status">${escapeHtml(submissionStatusLabel(app))}</span>`;
     const editBtn =
       app.status === 'approved'
         ? `<button type="button" class="btn btn-secondary btn-sm contest-card-edit" data-id="${escapeHtml(app.id)}">編集</button>`
