@@ -52,7 +52,16 @@ WHERE ca.status = 'approved'
     (ca.self_print = 1 AND ca.stl_r2_key IS NOT NULL AND ca.stl_submitted_at IS NOT NULL)
     OR (ca.self_print = 0 AND pr.stl_r2_key IS NOT NULL)
   )
-ORDER BY COALESCE(ca.stl_submitted_at, pr.created_at, ca.created_at) DESC
+ORDER BY COALESCE(
+  ca.stl_submitted_at,
+  (
+    SELECT MAX(l.uploaded_at)
+    FROM contest_stl_submission_logs l
+    WHERE l.contest_application_id = ca.id
+  ),
+  pr.created_at,
+  ca.created_at
+) DESC
 LIMIT 500
 `;
 

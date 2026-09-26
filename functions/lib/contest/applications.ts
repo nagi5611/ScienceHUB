@@ -31,7 +31,9 @@ import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 import {
   formatContestStlSubmissionLogForAdmin,
+  getLatestContestStlSubmissionForApplication,
   listContestStlSubmissionLogsForApplication,
+  type ContestStlSubmissionLog,
 } from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
@@ -189,7 +191,7 @@ async function fetchMembersForApplication(
   return result.results ?? [];
 }
 
-async function fetchLatestReservationForApplication(
+export async function fetchLatestContestReservationForApplication(
   db: D1Database,
   applicationId: string
 ): Promise<ContestApplicationReservationSummary | null> {
@@ -251,7 +253,8 @@ async function hasBlockingReservationForWithdraw(
 
 function resolveSubmittedStlMeta(
   app: ContestApplication,
-  reservation: ContestApplicationReservationSummary | null
+  reservation: ContestApplicationReservationSummary | null,
+  latestSubmission: ContestStlSubmissionLog | null
 ): {
   can_download_submitted_stl: boolean;
   submitted_stl_at: string | null;
@@ -267,8 +270,9 @@ function resolveSubmittedStlMeta(
   if (reservation?.stl_filename) {
     return {
       can_download_submitted_stl: true,
-      submitted_stl_at: reservation.created_at,
-      submitted_stl_filename: reservation.stl_filename,
+      submitted_stl_at: latestSubmission?.uploaded_at ?? reservation.created_at,
+      submitted_stl_filename:
+        latestSubmission?.stl_filename ?? reservation.stl_filename,
     };
   }
   return {
@@ -288,6 +292,7 @@ async function enrichApplication(
 ): Promise<ContestApplicationWithDetails> {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   const activeBlocksSubmit = active != null && active.status !== 'printing';
+  const deliveredBlocksSubmit = reservation?.status === 'delivered';
   const stlMeta = resolveSubmittedStlMeta(app, reservation);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
@@ -297,7 +302,10 @@ async function enrichApplication(
     stl_file_limit: contestApplicationStlFileLimit(app),
     stl_extra_parts: stlExtraParts,
     can_submit_stl:
-      app.status === 'approved' && !activeBlocksSubmit && !selfPrintSubmitted,
+      app.status === 'approved' &&
+      !activeBlocksSubmit &&
+      !selfPrintSubmitted &&
+      !deliveredBlocksSubmit,
     can_withdraw: canWithdraw,
     ...stlMeta,
   };
@@ -480,7 +488,7 @@ export async function listContestApplicationsForUser(
   const enriched: ContestApplicationWithDetails[] = [];
   for (const app of apps) {
     const members = await fetchMembersForApplication(db, app.id);
-    const reservation = await fetchLatestReservationForApplication(db, app.id);
+    const reservation = await fetchLatestContestReservationForApplication(db, app.id);
     const active = await getActiveContestReservationForApplication(db, app.id);
     const canWithdraw =
       app.status === 'approved' &&
@@ -512,7 +520,7 @@ export async function getContestApplicationForUser(
   const app = await getApplicationRow(db, applicationId);
   if (!app || app.user_id !== userId) return null;
   const members = await fetchMembersForApplication(db, app.id);
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' &&
@@ -539,10 +547,18 @@ async function assertCanUpdateContestMultiPartSettings(
   if (app.self_print && app.stl_submitted_at) {
     throw new Error('提出済みの作品はパーツ設定を変更できません');
   }
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   if (reservation?.stl_filename) {
     throw new Error('STL 提出後はパーツ設定を変更できません');
   }
+  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  if (!reservation?.stl_filename) {
+    return;
+  }
+  if (reservation.status === 'failed' || reservation.status === 'cancelled') {
+    return;
+  }
+  throw new Error('STL 提出後はパーツ設定を変更できません');
 }
 
 /** Updates title, impressions, and/or additional members (primary row is fixed). */
@@ -643,7 +659,7 @@ export async function patchContestApplicationForUser(
     part_count: partCount,
     updated_at: now,
   };
-  const reservation = await fetchLatestReservationForApplication(db, applicationId);
+  const reservation = await fetchLatestContestReservationForApplication(db, applicationId);
   const canWithdraw =
     updated.status === 'approved' &&
     !(await hasBlockingReservationForWithdraw(db, applicationId));
@@ -900,7 +916,7 @@ async function enrichContestApplicationAdminRow(
   const { applicant_email, ...appFields } = rawApp;
   const app = mapContestApplicationRow(appFields);
   const members = await fetchMembersForApplication(db, app.id);
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   const reservations = await fetchContestReservationsForApplicationAdmin(db, app.id);
   const stlLogs = await listContestStlSubmissionLogsForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
