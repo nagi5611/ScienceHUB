@@ -31,7 +31,9 @@ import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 import {
   formatContestStlSubmissionLogForAdmin,
+  getLatestContestStlSubmissionForApplication,
   listContestStlSubmissionLogsForApplication,
+  type ContestStlSubmissionLog,
 } from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
@@ -251,7 +253,8 @@ async function hasBlockingReservationForWithdraw(
 
 function resolveSubmittedStlMeta(
   app: ContestApplication,
-  reservation: ContestApplicationReservationSummary | null
+  reservation: ContestApplicationReservationSummary | null,
+  latestSubmission: ContestStlSubmissionLog | null
 ): {
   can_download_submitted_stl: boolean;
   submitted_stl_at: string | null;
@@ -267,8 +270,9 @@ function resolveSubmittedStlMeta(
   if (reservation?.stl_filename) {
     return {
       can_download_submitted_stl: true,
-      submitted_stl_at: reservation.created_at,
-      submitted_stl_filename: reservation.stl_filename,
+      submitted_stl_at: latestSubmission?.uploaded_at ?? reservation.created_at,
+      submitted_stl_filename:
+        latestSubmission?.stl_filename ?? reservation.stl_filename,
     };
   }
   return {
@@ -547,6 +551,14 @@ async function assertCanUpdateContestMultiPartSettings(
   if (reservation?.stl_filename) {
     throw new Error('STL 提出後はパーツ設定を変更できません');
   }
+  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  if (!reservation?.stl_filename) {
+    return;
+  }
+  if (reservation.status === 'failed' || reservation.status === 'cancelled') {
+    return;
+  }
+  throw new Error('STL 提出後はパーツ設定を変更できません');
 }
 
 /** Updates title, impressions, and/or additional members (primary row is fixed). */

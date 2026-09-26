@@ -1,20 +1,55 @@
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, BrowserContext, Page } from "@playwright/test";
 import fs from "node:fs/promises";
-import path from "node:path";import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { loginAsAdmin } from "../website-publish/helpers";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const FIXTURES_DIR = path.join(__dirname, "fixtures");
 
+const MOCK_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+/** API ログインの Cookie をブラウザコンテキストへ同期 */
+export async function syncAuthCookies(
+  context: BrowserContext,
+  request: APIRequestContext,
+) {
+  await loginAsAdmin(request);
+  const { cookies } = await request.storageState();
+  await context.addCookies(cookies);
+}
+
+/** サーバー変換 API をモック */
+export async function mockImageConverterConvertRoute(page: Page) {
+  await page.route("**/api/image-converter/convert", async (route) => {
+    await route.fulfill({ status: 200, contentType: "image/png", body: MOCK_PNG });
+  });
+}
+
+/** 本番 `/apps/image-converter/`（PWA 登録込み）を開く */
+export async function openImageConverterApp(
+  page: Page,
+  context: BrowserContext,
+  request: APIRequestContext,
+) {
+  await syncAuthCookies(context, request);
+  await mockImageConverterConvertRoute(page);
+  await page.goto("/apps/image-converter/");
+  await page.waitForSelector("#app-main:not([hidden])", { timeout: 20_000 });
+  await page.waitForSelector("#drop-zone", { timeout: 15_000 });
+  await page.waitForFunction(
+    () => typeof window.__scienceHubFlushPwaReload === "function",
+    undefined,
+    { timeout: 10_000 },
+  );
+}
+
 /** アクセス権を確認して E2E ハーネスを開く */
 export async function openImageConverter(page: Page) {
-  await page.route("**/api/image-converter/convert", async (route) => {
-    const png = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-      "base64",
-    );
-    await route.fulfill({ status: 200, contentType: "image/png", body: png });
-  });
-
+  await mockImageConverterConvertRoute(page);
   await page.goto("/image-converter-e2e.html");
   await page.waitForSelector("#app-main #drop-zone", { timeout: 15_000 });
 }
@@ -65,7 +100,7 @@ export async function hasMp4Fixture() {
   }
 }
 
-/** サーバー変換 API をモック */
+/** サーバー変換 API をモック（HEIC 等向け・リクエスト検証あり） */
 export async function mockServerConvert(page: Page) {
   await page.route("**/api/image-converter/convert", async (route) => {
     const request = route.request();
@@ -74,15 +109,17 @@ export async function mockServerConvert(page: Page) {
       await route.fulfill({ status: 400, body: JSON.stringify({ error: "no body" }) });
       return;
     }
-    // 1x1 PNG を返す
-    const png = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-      "base64",
-    );
     await route.fulfill({
       status: 200,
       contentType: "image/png",
-      body: png,
+      body: MOCK_PNG,
     });
+  });
+}
+
+/** Service Worker 更新相当の controllerchange を発火 */
+export async function dispatchPwaControllerChange(page: Page) {
+  await page.evaluate(() => {
+    navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
   });
 }
