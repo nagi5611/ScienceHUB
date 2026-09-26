@@ -539,10 +539,18 @@ async function assertCanUpdateContestMultiPartSettings(
   if (app.self_print && app.stl_submitted_at) {
     throw new Error('提出済みの作品はパーツ設定を変更できません');
   }
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
-  if (reservation?.stl_filename) {
+  const active = await getActiveContestReservationForApplication(db, app.id);
+  if (active) {
     throw new Error('STL 提出後はパーツ設定を変更できません');
   }
+  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  if (!reservation?.stl_filename) {
+    return;
+  }
+  if (reservation.status === 'failed' || reservation.status === 'cancelled') {
+    return;
+  }
+  throw new Error('STL 提出後はパーツ設定を変更できません');
 }
 
 /** Updates title, impressions, and/or additional members (primary row is fixed). */
