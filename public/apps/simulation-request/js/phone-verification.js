@@ -58,31 +58,43 @@ export function ensureSimPhoneVerified() {
 /** Updates banner and form disabled state from verification status. */
 export function applyPhoneVerificationUi() {
   const banner = document.getElementById('phone-verification-banner');
+  const openfoamBanner = document.getElementById('openfoam-phone-verification-banner');
   const intro = document.getElementById('phone-verification-banner-intro');
+  const openfoamIntro = document.getElementById('openfoam-phone-verification-banner-intro');
   const panel = document.getElementById('fds-request-panel');
+  const openfoamPanel = document.getElementById('openfoam-request-panel');
   const openBtn = document.getElementById('phone-verification-open-btn');
+  const openfoamOpenBtn = document.getElementById('openfoam-phone-verification-open-btn');
   const phoneVerified = phoneFlow.isVerified();
   const phoneVerificationExpired = phoneFlow.isExpired();
 
-  if (intro) {
+  const expiredIntro =
+    '電話番号の認証の有効期限（1年）が切れています。シミュレーション依頼の前に再度 SMS 認証してください（日本国内番号のみ）。';
+  const defaultIntro =
+    'シミュレーション依頼の前に携帯電話番号の SMS 認証が必要です（日本国内番号のみ）。認証の有効期限は <strong>1年</strong>で、期限後は再認証が必要です。';
+
+  for (const el of [intro, openfoamIntro]) {
+    if (!el) continue;
     if (phoneVerificationExpired) {
-      intro.textContent =
-        '電話番号の認証の有効期限（1年）が切れています。FDS 依頼の前に再度 SMS 認証してください（日本国内番号のみ）。';
+      el.textContent = expiredIntro;
     } else {
-      intro.innerHTML =
-        'FDS 依頼の前に携帯電話番号の SMS 認証が必要です（日本国内番号のみ）。認証の有効期限は <strong>1年</strong>で、期限後は再認証が必要です。';
+      el.innerHTML = defaultIntro;
     }
   }
 
-  if (banner) {
-    banner.classList.toggle('hidden', phoneVerified);
+  for (const el of [banner, openfoamBanner]) {
+    if (el) el.classList.toggle('hidden', phoneVerified);
   }
-  if (openBtn) {
-    openBtn.classList.toggle('hidden', phoneVerified);
-    openBtn.textContent = phoneVerificationExpired ? '電話番号を再認証する' : '電話番号を認証する';
+  for (const btn of [openBtn, openfoamOpenBtn]) {
+    if (!btn) continue;
+    btn.classList.toggle('hidden', phoneVerified);
+    btn.textContent = phoneVerificationExpired ? '電話番号を再認証する' : '電話番号を認証する';
   }
   if (panel) {
     panel.classList.toggle('fds-panel--locked', !phoneVerified);
+  }
+  if (openfoamPanel) {
+    openfoamPanel.classList.toggle('fds-panel--locked', !phoneVerified);
   }
 }
 
@@ -96,9 +108,11 @@ export async function initPhoneVerification() {
 
   phoneFlow.init();
 
-  document.getElementById('phone-verification-open-btn')?.addEventListener('click', () => {
-    openPhoneVerificationModal();
-  });
+  for (const btnId of ['phone-verification-open-btn', 'openfoam-phone-verification-open-btn']) {
+    document.getElementById(btnId)?.addEventListener('click', () => {
+      openPhoneVerificationModal();
+    });
+  }
 
   try {
     await refreshPhoneVerificationStatus();

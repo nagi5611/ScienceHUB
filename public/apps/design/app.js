@@ -170,7 +170,7 @@ let collab = null;
 let lastCollabPeers = [];
 /** @type {string | null} */
 let lastCollabClientId = null;
-/** @type {"idle" | "connecting" | "connected" | "reconnecting" | "error"} */
+/** @type {"idle" | "connecting" | "connected" | "reconnecting" | "error" | "unavailable"} */
 let collabConnectionState = "idle";
 let peersPopoverOpen = false;
 /** @type {Map<string, { username: string, color: string, x: number, y: number, selectedIds: string[], updatedAt: number }>} */
@@ -2963,6 +2963,12 @@ function renderPeersStatus() {
     closePeersPopover();
     return;
   }
+  if (collabConnectionState === "unavailable") {
+    peersStatusEl.textContent = "共同編集オフ（自動保存は有効）";
+    peersStatusEl.disabled = true;
+    closePeersPopover();
+    return;
+  }
 
   const others = lastCollabPeers.filter(
     (p) => p.clientId !== lastCollabClientId
@@ -3062,11 +3068,13 @@ function connectCollab({ projectId, token } = {}) {
       renderPeersStatus();
     },
     onClose: () => {
+      if (collabConnectionState === "unavailable") return;
       collabConnectionState = "reconnecting";
       renderPeersStatus();
     },
-    onError: () => {
-      collabConnectionState = "error";
+    onUnavailable: () => {
+      collabConnectionState = "unavailable";
+      stopCollabFullSyncTimer();
       renderPeersStatus();
     },
     onPeersChange: updateCollabPeers,
@@ -4557,6 +4565,19 @@ async function initApp() {
       }).observe(canvasWrapEl);
     }
 
+    const projectIdParam = new URLSearchParams(location.search).get("projectId");
+    if (projectIdParam) {
+      try {
+        await openProject(projectIdParam);
+        loadingEl.hidden = true;
+        history.replaceState(null, "", location.pathname);
+        return;
+      } catch (err) {
+        console.error(err);
+        alert("指定されたプロジェクトを開けませんでした");
+      }
+    }
+
     const storagePath = new URLSearchParams(location.search).get("storagePath");
     if (storagePath) {
       try {
@@ -4577,7 +4598,10 @@ async function initApp() {
     }
 
     if (!projects.length) {
-      await createProject();
+      listView.hidden = false;
+      editorView.hidden = true;
+      if (listEmptyEl) listEmptyEl.hidden = false;
+      loadingEl.hidden = true;
       return;
     }
 

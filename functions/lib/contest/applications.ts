@@ -31,7 +31,9 @@ import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 import {
   formatContestStlSubmissionLogForAdmin,
+  getLatestContestStlSubmissionForApplication,
   listContestStlSubmissionLogsForApplication,
+  type ContestStlSubmissionLog,
 } from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
@@ -189,7 +191,31 @@ async function fetchMembersForApplication(
   return result.results ?? [];
 }
 
-async function fetchLatestReservationForApplication(
+const CONTEST_STL_SUBMIT_BLOCKED_RESERVATION_STATUSES: PrintReservation['status'][] = [
+  'delivered',
+  'failed',
+  'cancelled',
+];
+
+/** School-printer contest entries: whether STL upload / re-upload is allowed. */
+export function contestApplicationCanSubmitStl(
+  app: Pick<ContestApplication, 'status' | 'self_print' | 'stl_submitted_at'>,
+  active: Reservation | null,
+  reservation: ContestApplicationReservationSummary | null
+): boolean {
+  if (app.status !== 'approved') return false;
+  if (app.self_print && app.stl_submitted_at != null) return false;
+  if (active?.status === 'printing') return true;
+  if (active != null) return false;
+  if (reservation == null) return true;
+  if (reservation.stl_filename) return false;
+  if (CONTEST_STL_SUBMIT_BLOCKED_RESERVATION_STATUSES.includes(reservation.status)) {
+    return false;
+  }
+  return false;
+}
+
+export async function fetchLatestContestReservationForApplication(
   db: D1Database,
   applicationId: string
 ): Promise<ContestApplicationReservationSummary | null> {
@@ -251,7 +277,8 @@ async function hasBlockingReservationForWithdraw(
 
 function resolveSubmittedStlMeta(
   app: ContestApplication,
-  reservation: ContestApplicationReservationSummary | null
+  reservation: ContestApplicationReservationSummary | null,
+  latestSubmission: ContestStlSubmissionLog | null
 ): {
   can_download_submitted_stl: boolean;
   submitted_stl_at: string | null;
@@ -267,8 +294,9 @@ function resolveSubmittedStlMeta(
   if (reservation?.stl_filename) {
     return {
       can_download_submitted_stl: true,
-      submitted_stl_at: reservation.created_at,
-      submitted_stl_filename: reservation.stl_filename,
+      submitted_stl_at: latestSubmission?.uploaded_at ?? reservation.created_at,
+      submitted_stl_filename:
+        latestSubmission?.stl_filename ?? reservation.stl_filename,
     };
   }
   return {
@@ -288,7 +316,8 @@ async function enrichApplication(
 ): Promise<ContestApplicationWithDetails> {
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   const activeBlocksSubmit = active != null && active.status !== 'printing';
-  const stlMeta = resolveSubmittedStlMeta(app, reservation);
+  const latestSubmission = await getLatestContestStlSubmissionForApplication(db, app.id);
+  const stlMeta = resolveSubmittedStlMeta(app, reservation, latestSubmission);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
     ...app,
@@ -296,8 +325,7 @@ async function enrichApplication(
     reservation,
     stl_file_limit: contestApplicationStlFileLimit(app),
     stl_extra_parts: stlExtraParts,
-    can_submit_stl:
-      app.status === 'approved' && !activeBlocksSubmit && !selfPrintSubmitted,
+    can_submit_stl: contestApplicationCanSubmitStl(app, active, reservation),
     can_withdraw: canWithdraw,
     ...stlMeta,
   };
@@ -480,7 +508,7 @@ export async function listContestApplicationsForUser(
   const enriched: ContestApplicationWithDetails[] = [];
   for (const app of apps) {
     const members = await fetchMembersForApplication(db, app.id);
-    const reservation = await fetchLatestReservationForApplication(db, app.id);
+    const reservation = await fetchLatestContestReservationForApplication(db, app.id);
     const active = await getActiveContestReservationForApplication(db, app.id);
     const canWithdraw =
       app.status === 'approved' &&
@@ -512,7 +540,7 @@ export async function getContestApplicationForUser(
   const app = await getApplicationRow(db, applicationId);
   if (!app || app.user_id !== userId) return null;
   const members = await fetchMembersForApplication(db, app.id);
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);
   const canWithdraw =
     app.status === 'approved' &&
@@ -651,7 +679,7 @@ export async function patchContestApplicationForUser(
     part_count: partCount,
     updated_at: now,
   };
-  const reservation = await fetchLatestReservationForApplication(db, applicationId);
+  const reservation = await fetchLatestContestReservationForApplication(db, applicationId);
   const canWithdraw =
     updated.status === 'approved' &&
     !(await hasBlockingReservationForWithdraw(db, applicationId));
@@ -908,7 +936,7 @@ async function enrichContestApplicationAdminRow(
   const { applicant_email, ...appFields } = rawApp;
   const app = mapContestApplicationRow(appFields);
   const members = await fetchMembersForApplication(db, app.id);
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
+  const reservation = await fetchLatestContestReservationForApplication(db, app.id);
   const reservations = await fetchContestReservationsForApplicationAdmin(db, app.id);
   const stlLogs = await listContestStlSubmissionLogsForApplication(db, app.id);
   const active = await getActiveContestReservationForApplication(db, app.id);

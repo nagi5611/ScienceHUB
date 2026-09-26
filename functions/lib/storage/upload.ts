@@ -63,6 +63,12 @@ export interface StorageUploadSession {
   created_at: number;
 }
 
+function storageSessionDisplayPath(session: StorageUploadSession): string {
+  return session.logical_dir
+    ? `${session.logical_dir}/${session.resolved_filename}`
+    : session.resolved_filename;
+}
+
 export interface UploadPlan {
   partSize: number;
   parallel: number;
@@ -465,10 +471,10 @@ export async function simpleStorageUpload(
   contentType?: string
 ): Promise<{ path: string; size: number }> {
   const session = await getUploadSession(db, sessionId);
-  if (!session || session.status !== "in_progress") {
+  if (!session || session.user_id !== user.id) {
     throw new Error("アップロードセッションが見つかりません");
   }
-  if (session.user_id !== user.id) {
+  if (session.status !== "in_progress") {
     throw new Error("アップロードセッションが見つかりません");
   }
   if (session.upload_id) {
@@ -505,10 +511,13 @@ export async function completeStorageUpload(
   directUpload = false
 ): Promise<{ path: string; size: number }> {
   const session = await getUploadSession(db, sessionId);
-  if (!session || session.status !== "in_progress") {
+  if (!session || session.user_id !== user.id) {
     throw new Error("アップロードセッションが見つかりません");
   }
-  if (session.user_id !== user.id) {
+  if (session.status === "completed") {
+    return { path: storageSessionDisplayPath(session), size: session.total_size };
+  }
+  if (session.status !== "in_progress") {
     throw new Error("アップロードセッションが見つかりません");
   }
 
