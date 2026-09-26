@@ -18,8 +18,8 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: `node scripts/upload-ffmpeg-core.mjs --local && npx wrangler pages dev public -c wrangler.jsonc -c workers/image-converter/wrangler.jsonc --port ${PORT} --d1 sciencehub_db=sciencehub-db --r2 sciencehub_files=sciencehub-files`,
-    url: `${BASE_URL}/login/`,
+    command: `node scripts/upload-ffmpeg-core.mjs --local && npx wrangler pages dev public -c wrangler.jsonc -c workers/image-converter/wrangler.jsonc --ip 127.0.0.1 --port ${PORT} --d1 sciencehub_db=sciencehub-db --r2 sciencehub_files=sciencehub-files`,
+    url: `${BASE_URL}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,
   },
