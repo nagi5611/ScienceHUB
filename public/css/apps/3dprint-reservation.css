@@ -514,6 +514,10 @@ textarea {
   box-shadow: none;
 }
 
+.printer-picker-show-unavailable {
+  margin-top: 0.5rem;
+}
+
 .printer-picker-unavailable-note {
   margin: 0;
   font-size: 0.8rem;
