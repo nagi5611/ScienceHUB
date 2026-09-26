@@ -18,7 +18,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: `node scripts/upload-ffmpeg-core.mjs --local && npx wrangler pages dev public -c wrangler.jsonc -c workers/image-converter/wrangler.jsonc --port ${PORT}`,
+    command: `node scripts/upload-ffmpeg-core.mjs --local && npx wrangler pages dev public -c wrangler.jsonc -c workers/image-converter/wrangler.jsonc --port ${PORT} --d1 sciencehub_db=sciencehub-db --r2 sciencehub_files=sciencehub-files`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
