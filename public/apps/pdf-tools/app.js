@@ -184,6 +184,17 @@ function switchTab(tab) {
 tabMerge?.addEventListener("click", () => switchTab("merge"));
 tabSplit?.addEventListener("click", () => switchTab("split"));
 
+const pdfTablist = document.querySelector('[role="tablist"]');
+pdfTablist?.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const tabs = [tabMerge, tabSplit].filter(Boolean);
+  const idx = tabs.findIndex((el) => el.getAttribute("aria-selected") === "true");
+  const next = event.key === "ArrowRight" ? (idx + 1) % tabs.length : (idx - 1 + tabs.length) % tabs.length;
+  switchTab(next === 0 ? "merge" : "split");
+  tabs[next]?.focus();
+});
+
 /** pdf-lib でページ数取得 */
 async function countPdfPages(file) {
   const { PDFDocument } = await import("pdf-lib");
