@@ -366,7 +366,7 @@ async function checkManagementAccess() {
   }
   if (response.status === 403) {
     document.body.innerHTML =
-      '<main style="padding:2rem;font-family:Inter,sans-serif"><h1>アクセス拒否</h1><p>3D印刷管理アプリを利用する権限がありません。</p><p><a href="/">ダッシュボードに戻る</a></p></main>';
+      '<main style="padding:2rem;font-family:Inter,sans-serif"><h1>アクセス拒否</h1><p>造形物コンテスト管理アプリを利用する権限がありません。</p><p><a href="/">ダッシュボードに戻る</a></p></main>';
     return false;
   }
   return response.ok;
@@ -640,6 +640,12 @@ function setupAdminFormModal() {
   cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeModal();
   });
 
   purposeInputs.forEach((input) => {
