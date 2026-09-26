@@ -6,6 +6,7 @@ import { HOMEROOMS } from '../../3dprint-reservation/js/homeroom.js';
 import { checkAppAccess, initAuth } from './contest-auth.js';
 import {
   applyContestDraft,
+  clearContestDraft,
   extractContestDraft,
   loadContestDraft,
   parseScheduleType,
@@ -747,7 +748,7 @@ async function handleApplicationSubmit(e) {
           self_print: form.querySelector('#self_print')?.checked === true,
         }),
       });
-      persistApplicationDraft();
+      clearContestDraft();
       showToast('参加申請を受け付けました。STL を提出してください', 'success');
     }
     showView('list');
