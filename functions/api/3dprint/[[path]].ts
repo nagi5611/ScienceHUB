@@ -50,6 +50,7 @@ import {
   type Reservation,
 } from "../../lib/3dprint/reservations";
 import { adminRescheduleReservation } from "../../lib/3dprint/reschedule";
+import { syncReservationCalendarAfterAdminPatch } from "../../lib/3dprint/admin-calendar-sync";
 import { retryFailedReservation } from "../../lib/3dprint/retry-reservation";
 import {
   checkShiftRemovalBlocked,
@@ -1519,11 +1520,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         ...body,
         status_comment: statusComment,
       });
-      const updated = await getReservationById(db, segments[2]);
+      let updated = await getReservationById(db, segments[2]);
+      let calendar: { ok: boolean; error?: string } | null = null;
+      if (updated) {
+        calendar = await syncReservationCalendarAfterAdminPatch(env, existing, updated, body);
+        if (calendar) {
+          updated = await getReservationById(db, segments[2]);
+        }
+      }
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
         reservation: updated ? enrichReservationForAdmin(updated, memberMap, printerMap) : null,
+        ...(calendar ? { calendar } : {}),
       });
     }
 
