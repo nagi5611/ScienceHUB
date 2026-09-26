@@ -608,3 +608,7 @@
   outline: 2px solid var(--wsp-accent);
   outline-offset: 1px;
 }
+
+@media (hover: none) {
+  .wsp-file-name::after { content: " ⋮"; opacity: 0.6; }
+}
