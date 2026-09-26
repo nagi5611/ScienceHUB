@@ -1,32 +1,36 @@
 import { test, expect } from "@playwright/test";
-import { openContestEntry, syncAdminSession } from "./helpers";
+import {
+  applicationCardByTitle,
+  openContestEntry,
+  openNewApplicationForm,
+  submitNewApplication,
+  uniqueContestTitle,
+} from "./helpers";
 
-test.describe("contest-entry — 参加取り消し", () => {
-  test.beforeEach(async ({ context, request }) => {
-    await syncAdminSession(context, request);
+test.describe("造形物コンテスト（contest-entry）E2E", () => {
+  test.beforeEach(async ({ page }) => {
+    await openContestEntry(page);
   });
 
-  test("参加取り消しで一覧から消える", async ({ page, request }) => {
-    const title = `E2E-Cancel-${Date.now().toString(36)}`;
-    const createRes = await request.post("/api/contest/applications", {
-      data: {
-        title,
-        schedule_type: "full_time",
-        homeroom: "301",
-        student_number: 1,
-        student_name: "取消テスト",
-        self_print: true,
-        members: [],
-      },
-    });
-    expect(createRes.ok()).toBeTruthy();
+  test("編集時は在籍区分 fieldset が読み取り専用", async ({ page }) => {
+    const title = uniqueContestTitle("edit");
+    await openNewApplicationForm(page);
+    await submitNewApplication(page, { title });
 
-    await openContestEntry(page);
-    const card = page.locator(".contest-application-card", { hasText: title });
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    page.once("dialog", (dialog) => dialog.accept());
-    await card.locator(".contest-card-withdraw").click();
-    await expect(page.locator("#page-toast")).toContainText(/取り消/, { timeout: 15_000 });
-    await expect(card).toHaveCount(0, { timeout: 15_000 });
+    const card = applicationCardByTitle(page, title);
+    await card.locator(".contest-card-edit").click();
+    await expect(page.locator("#view-apply")).toBeVisible();
+
+    await expect(page.locator("#apply-heading")).toHaveText("参加申請の編集");
+    const fieldset = page.locator("#application-form fieldset").first();
+    await expect(fieldset).toHaveClass(/contest-fieldset-readonly/);
+    await expect(page.locator('input[name="schedule_type"]').first()).toBeDisabled();
+    await expect(page.locator("#self-print-field")).toBeHidden();
+
+    const updated = `${title}-改`;
+    await page.locator("#title").fill(updated);
+    await page.locator("#application-submit-btn").click();
+    await expect(page.locator("#view-list")).toBeVisible();
+    await expect(applicationCardByTitle(page, updated)).toBeVisible();
   });
 });
