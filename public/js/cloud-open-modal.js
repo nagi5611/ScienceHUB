@@ -24,11 +24,13 @@ function formatBytes(bytes) {
 /**
  * クラウド読み込みモーダルを生成
  * @param {HTMLDialogElement} dialogEl
- * @param {{ idPrefix?: string, loginNext?: string }} [options]
+ * @param {{ idPrefix?: string, loginNext?: string, redirectOn401?: boolean }} [options]
  */
 export function createCloudOpenModal(dialogEl, options = {}) {
   const idPrefix = options.idPrefix ?? "cloud-open";
   const loginNext = options.loginNext ?? "/apps/cloud-storage/";
+  const redirectOn401 = options.redirectOn401 ?? true;
+  const defaultDeniedHtml = dialogEl.querySelector(`#${idPrefix}-denied`)?.innerHTML ?? "";
 
   /** @type {Array<{ path: string, type: string, label: string }>} */
   let roots = [];
@@ -39,6 +41,8 @@ export function createCloudOpenModal(dialogEl, options = {}) {
   let selectedPaths = new Set();
   /** @type {((files: File[]) => void) | null} */
   let onFilesLoaded = null;
+  /** @type {"unauthenticated" | "forbidden" | null} */
+  let accessDeniedReason = null;
 
   const els = {
     alert: dialogEl.querySelector(`#${idPrefix}-alert`),
@@ -219,12 +223,41 @@ export function createCloudOpenModal(dialogEl, options = {}) {
   async function ensureAccess() {
     const res = await fetch("/api/storage/access", { credentials: "same-origin" });
     if (res.status === 401) {
-      window.location.href = `/login/?next=${encodeURIComponent(loginNext)}`;
+      accessDeniedReason = "unauthenticated";
+      const veE2eHarness =
+        /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
+      if (redirectOn401 && !veE2eHarness) {
+        window.location.href = `/login/?next=${encodeURIComponent(loginNext)}`;
+      }
       return false;
     }
-    if (!res.ok) return false;
+    if (!res.ok) {
+      accessDeniedReason = "forbidden";
+      return false;
+    }
     const data = await res.json().catch(() => ({}));
-    return Boolean(data.allowed);
+    if (!data.allowed) {
+      accessDeniedReason = "forbidden";
+      return false;
+    }
+    accessDeniedReason = null;
+    return true;
+  }
+
+  function showAccessDenied() {
+    if (els.body) els.body.hidden = true;
+    if (els.denied) {
+      const veE2eHarness =
+        /** @type {Window & { __VE_E2E__?: boolean }} */ (window).__VE_E2E__ === true;
+      if (accessDeniedReason === "unauthenticated" && (!redirectOn401 || veE2eHarness)) {
+        els.denied.innerHTML = `<p>クラウドストレージを利用するにはログインが必要です。</p>
+        <a href="/login/?next=${encodeURIComponent(loginNext)}" class="cloud-save-btn">ログインして続行</a>`;
+      } else {
+        els.denied.innerHTML = defaultDeniedHtml;
+      }
+      els.denied.hidden = false;
+    }
+    if (els.submit) els.submit.disabled = true;
   }
 
   async function prepareStorage() {
@@ -234,9 +267,7 @@ export function createCloudOpenModal(dialogEl, options = {}) {
 
     accessOk = await ensureAccess();
     if (!accessOk) {
-      if (els.body) els.body.hidden = true;
-      if (els.denied) els.denied.hidden = false;
-      if (els.submit) els.submit.disabled = true;
+      showAccessDenied();
       return;
     }
 

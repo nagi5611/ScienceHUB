@@ -138,6 +138,12 @@ function initApp() {
   }
 
   $("#drop").onclick = () => $("#file").click();
+  $("#drop").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      $("#file").click();
+    }
+  });
   $("#file").onchange = (e) => e.target.files[0] && load(e.target.files[0]);
   ["dragenter", "dragover"].forEach((x) =>
     $("#drop").addEventListener(x, (e) => {
@@ -182,7 +188,10 @@ function initApp() {
   video.onseeked = draw;
   window.onresize = resize;
   $("#seek").oninput = (e) => (video.currentTime = Number(e.target.value));
-  $("#fps").onchange = (e) => (S.fps = Math.max(1, Number(e.target.value) || 30));
+  $("#fps").onchange = (e) => {
+    S.fps = Math.max(1, Number(e.target.value) || 30);
+    e.target.value = S.fps;
+  };
   $("#prev").onclick = () =>
     (video.currentTime = clamp(video.currentTime - stepT(), 0, video.duration || 0));
   $("#next").onclick = () =>
@@ -630,6 +639,11 @@ function initApp() {
       S.horizB = d.horizB;
       $("#scaleLen").value = d.scaleLength || 1;
       $("#step").value = d.frameStep || 1;
+      const videoEl = document.querySelector("video");
+      if (!videoEl || !videoEl.videoWidth) {
+        alert("先に元動画を読み込んでからプロジェクト JSON を開いてください");
+        return;
+      }
       draw();
       metrics();
       updateAS();

@@ -171,6 +171,11 @@ function updateAdminStickyOffsets() {
     return;
   }
   if (topbar) {
+    if (isMobileAdminView()) {
+      topbar.removeAttribute('aria-hidden');
+    } else {
+      topbar.setAttribute('aria-hidden', 'true');
+    }
     document.documentElement.style.setProperty('--admin-topbar-offset', `${topbar.offsetHeight}px`);
   }
   if (nav) {
@@ -640,6 +645,12 @@ function setupAdminFormModal() {
   cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeModal();
   });
 
   purposeInputs.forEach((input) => {
