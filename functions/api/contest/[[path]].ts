@@ -1398,6 +1398,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (reservation.user_id !== userId) {
         return error("この予約にアクセスする権限がありません", 403);
       }
+      if (
+        reservation.source === "contest" &&
+        (reservation.status === "printing" || reservation.status === "delivered")
+      ) {
+        return error(
+          "印刷が進行中または完了しているため、予約を取り消せません"
+        );
+      }
 
       await deleteCalendarEvent(env, reservation.google_event_id);
       await env.FILES.delete(reservation.stl_r2_key);
