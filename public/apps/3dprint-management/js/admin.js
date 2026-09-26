@@ -405,12 +405,14 @@ async function renderAdminCalendar() {
   const startWeekday = firstDay.getDay();
   const todayStr = getTodayJst();
 
+  const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+  const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
   const prevMonthLast = new Date(currentYear, currentMonth - 1, 0).getDate();
   const prevMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
   const prevMonthNum = currentMonth === 1 ? 12 : currentMonth - 1;
   for (let i = startWeekday - 1; i >= 0; i--) {
     const dayNum = prevMonthLast - i;
-    const dateStr = `${prevMonthYear}-${String(prevMonthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
     grid.appendChild(createAdminDayCell(dayNum, true, byDate, todayStr, dateStr));
   }
 
@@ -421,10 +423,10 @@ async function renderAdminCalendar() {
 
   const totalCells = startWeekday + lastDay;
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-  const nextMonthYear = currentMonth === 12 ? currentYear + 1 : currentYear;
-  const nextMonthNum = currentMonth === 12 ? 1 : currentMonth + 1;
+  const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+  const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
   for (let day = 1; day <= remaining; day++) {
-    const dateStr = `${nextMonthYear}-${String(nextMonthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dateStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     grid.appendChild(createAdminDayCell(day, true, byDate, todayStr, dateStr));
   }
 
