@@ -29,7 +29,7 @@ const SLUG_ICON = {
   "image-editor": "image",
   "image-converter": "image",
   "video-converter": "image",
-  "audio-converter": "image",
+  "audio-converter": "audio",
   "audio-editor": "audio",
   uvcreator: "layout",
   "project-management": "clipboard",
