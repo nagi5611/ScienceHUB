@@ -1,6 +1,7 @@
 // src/admin/js/shift.js — shift calendar management
 import { apiRequest, ApiError } from '../../simulation-request/js/api.js';
 import { SHIFT_COLORS, shiftColorStyle } from '../../simulation-request/js/shift-colors.js';
+import { simulatorPlaceholderHtml } from '../../simulation-request/js/simulator-placeholder-icon.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const MOBILE_SHIFT_MQ = window.matchMedia('(max-width: 768px)');
@@ -396,7 +397,7 @@ function shiftSimulatorIconHtml(simulator) {
   if (simulator.image_url) {
     return `<img class="shift-simulator-icon" src="${escapeHtml(simulator.image_url)}" alt="" loading="lazy" />`;
   }
-  return `<span class="shift-simulator-icon shift-simulator-icon-placeholder" aria-hidden="true">🖨️</span>`;
+  return simulatorPlaceholderHtml('span', 'shift-simulator-icon shift-simulator-icon-placeholder');
 }
 
 /** Renders simulator toolbar for shift editing. */
