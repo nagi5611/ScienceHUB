@@ -3,12 +3,36 @@ import { loginAsAdmin } from "../website-publish/helpers";
 
 export { loginAsAdmin };
 
+export { loginAsAdmin };
+
 /** 一意な作品タイトル */
 export function uniqueContestTitle(prefix = "e2e") {
   return `${prefix}-${Date.now().toString(36)}`;
 }
 
-/** 管理者セッションで contest-entry を開く（page.request で Cookie を共有） */
+/** JST の YYYY-MM-DD（offset 日） */
+export function jstDateOffset(days: number): string {
+  const d = new Date(Date.now() + days * 86_400_000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(d);
+}
+
+/** ゲストユーザーを API サインアップ */
+export async function signupGuest(request: APIRequestContext) {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const response = await request.post("/api/auth/signup", {
+    data: {
+      username: `e2e_${suffix}`,
+      display_name: `E2E Guest ${suffix}`,
+      email: `e2e_${suffix}@example.com`,
+      password: "testpass12345",
+    },
+  });
+  if (!response.ok()) {
+    throw new Error(`ゲストサインアップ失敗: ${response.status()} ${await response.text()}`);
+  }
+}
+
+/** 管理者セッションで contest-entry を開く */
 export async function openContestEntry(page: Page) {
   await loginAsAdmin(page.request);
   const applicationsLoaded = page.waitForResponse(
@@ -18,9 +42,7 @@ export async function openContestEntry(page: Page) {
       res.ok(),
     { timeout: 20_000 }
   );
-  const response = await page.goto("/apps/contest-entry/", {
-    waitUntil: "domcontentloaded",
-  });
+  const response = await page.goto("/apps/contest-entry/", { waitUntil: "domcontentloaded" });
   if (!response?.ok()) {
     throw new Error(`contest-entry 読み込み失敗: ${response?.status()}`);
   }
