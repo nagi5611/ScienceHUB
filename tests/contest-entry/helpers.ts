@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { loginAsAdmin } from "../website-publish/helpers";
 import { bookableDateWithOffset, ensureTestPrinters } from "../3dprint-reservation/helpers";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export { loginAsAdmin };
 
-export const STL_FIXTURE_PATH = path.join(__dirname, "fixtures", "minimal.stl");
+export { loginAsAdmin };
 
 export { loginAsAdmin };
 

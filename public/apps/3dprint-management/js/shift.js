@@ -34,6 +34,26 @@ function isMobileShiftView() {
   return MOBILE_SHIFT_MQ.matches;
 }
 
+/** Returns how many next-month padding cells the shift calendar shows. */
+function shiftCalendarTrailingPaddingDays(year, month) {
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0).getDate();
+  const startWeekday = firstDay.getDay();
+  const totalCells = startWeekday + lastDay;
+  return totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+}
+
+/** Returns the calendar month immediately after the given year/month. */
+function nextCalendarMonth(year, month) {
+  if (month >= 12) return { year: year + 1, month: 1 };
+  return { year, month: month + 1 };
+}
+
+/** Formats a calendar date as YYYY-MM-DD. */
+function formatShiftDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 /** Initializes the shift management panel. */
 export function initShiftPanel() {
   if (initialized) return;
@@ -514,13 +534,13 @@ function renderShiftCalendar() {
     grid.appendChild(createShiftDayCell(day, false, byDate, printersByDate, todayStr, dateStr));
   }
 
-  const totalCells = startWeekday + lastDay;
-  const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-  const nextMonthYear = shiftMonth === 12 ? shiftYear + 1 : shiftYear;
-  const nextMonthNum = shiftMonth === 12 ? 1 : shiftMonth + 1;
-  for (let day = 1; day <= remaining; day++) {
-    const dateStr = formatShiftDateString(nextMonthYear, nextMonthNum, day);
-    grid.appendChild(createShiftDayCell(day, true, byDate, printersByDate, todayStr, dateStr));
+  const remaining = shiftCalendarTrailingPaddingDays(shiftYear, shiftMonth);
+  if (remaining > 0) {
+    const { year: nextYear, month: nextMonth } = nextCalendarMonth(shiftYear, shiftMonth);
+    for (let day = 1; day <= remaining; day++) {
+      const dateStr = formatShiftDate(nextYear, nextMonth, day);
+      grid.appendChild(createShiftDayCell(day, true, byDate, printersByDate, todayStr, dateStr));
+    }
   }
 }
 
