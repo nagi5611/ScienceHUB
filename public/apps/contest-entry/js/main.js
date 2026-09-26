@@ -687,17 +687,11 @@ function updateSubmitButtonLabel(btn, app) {
     btn.textContent = '提出する';
     return;
   }
-  if (app.self_print) {
-    btn.textContent =
-      uploaded >= limit
-        ? `STL を提出する（${limit} 件）`
-        : `STL を提出する（${uploaded} / ${limit} 件）`;
-    return;
-  }
+  const verb = app.can_download_submitted_stl ? 'STL を再提出する' : 'STL を提出する';
   btn.textContent =
     uploaded >= limit
-      ? `印刷予約する（${limit} パーツ）`
-      : `印刷予約（${uploaded} / ${limit} 件の STL）`;
+      ? `${verb}（${limit} 件）`
+      : `${verb}（${uploaded} / ${limit} 件）`;
 }
 
 function updateSubmitState() {
