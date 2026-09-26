@@ -171,6 +171,11 @@ function updateAdminStickyOffsets() {
     return;
   }
   if (topbar) {
+    if (isMobileAdminView()) {
+      topbar.removeAttribute('aria-hidden');
+    } else {
+      topbar.setAttribute('aria-hidden', 'true');
+    }
     document.documentElement.style.setProperty('--admin-topbar-offset', `${topbar.offsetHeight}px`);
   }
   if (nav) {
@@ -366,7 +371,7 @@ async function checkManagementAccess() {
   }
   if (response.status === 403) {
     document.body.innerHTML =
-      '<main style="padding:2rem;font-family:Inter,sans-serif"><h1>アクセス拒否</h1><p>3D印刷管理アプリを利用する権限がありません。</p><p><a href="/">ダッシュボードに戻る</a></p></main>';
+      '<main style="padding:2rem;font-family:Inter,sans-serif"><h1>アクセス拒否</h1><p>造形物コンテスト管理を利用する権限がありません。</p><p><a href="/">ダッシュボードに戻る</a></p></main>';
     return false;
   }
   return response.ok;
