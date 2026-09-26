@@ -254,7 +254,13 @@
                 <input type="hidden" id="simulator-edit-id" />
 
                 <div class="simulator-edit-header">
-                  <div id="simulator-edit-image-preview" class="simulator-edit-image-preview" aria-hidden="true">🖨️</div>
+                  <div id="simulator-edit-image-preview" class="simulator-edit-image-preview" aria-hidden="true">
+                    <svg class="simulator-placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                      <path d="M6 9V3h12v6" />
+                      <rect x="6" y="14" width="12" height="8" rx="1" />
+                    </svg>
+                  </div>
                   <div class="form-group simulator-edit-name-field">
                     <label for="simulator-edit-name">シミュレーター名</label>
                     <input type="text" id="simulator-edit-name" maxlength="80" required />
@@ -408,6 +414,7 @@
               </aside>
             </div>
           </section>
+        </div>
         <div class="admin-panel hidden" id="panel-openfoam-test">
           <h1 class="page-heading">OpenFOAM</h1>
           <p class="page-subheading">依頼者からの OpenFOAM シミュレーション依頼の承認と、管理者向けテスト実行です。</p>
