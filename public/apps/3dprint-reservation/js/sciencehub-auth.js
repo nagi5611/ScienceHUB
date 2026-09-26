@@ -17,8 +17,11 @@ export async function checkAppAccess() {
     return false;
   }
   if (response.status === 403) {
-    document.body.innerHTML =
-      '<main style="padding:2rem;font-family:Inter,sans-serif"><h1>アクセス拒否</h1><p>このアプリを利用する権限がありません。</p><p><a href="/">ダッシュボードに戻る</a></p></main>';
+    document.body.classList.add("reservation-access-denied");
+    const denied = document.getElementById("access-denied");
+    if (denied) denied.hidden = false;
+    document.querySelector(".site-header")?.setAttribute("hidden", "");
+    document.querySelector("main")?.setAttribute("hidden", "");
     return false;
   }
   return response.ok;
