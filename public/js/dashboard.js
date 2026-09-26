@@ -342,7 +342,7 @@ async function renderGroups(dashboardData) {
     const defaultSection =
       defaultApps.length > 0
         ? `<div class="hub-group hub-group--default" style="--group-color:var(--cf-orange)">
-          <h2 class="hub-group-title">Default App</h2>
+          <h2 class="hub-group-title">既定のアプリ</h2>
           <div class="hub-app-grid">${defaultApps.map(renderAppTileHtml).join("")}</div>
         </div>`
         : "";
