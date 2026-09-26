@@ -19,9 +19,17 @@
 <body class="login-page-body">
   <header class="site-header login-page-header">
     <div class="header-inner login-header-inner">
-      <a href="/" class="site-title">Science<span>HUB</span></a>
+      <a href="/" class="site-title" id="login-header-brand">Science<span>HUB</span></a>
     </div>
   </header>
+  <script>
+    (function () {
+      var next = new URLSearchParams(location.search).get("next");
+      if (!next || !next.startsWith("/") || next.startsWith("//")) return;
+      var link = document.getElementById("login-header-brand");
+      if (link) link.href = "/login/?next=" + encodeURIComponent(next);
+    })();
+  </script>
 
   <main class="login-page-main">
     <div class="login-page-layout">
