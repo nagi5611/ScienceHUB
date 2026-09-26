@@ -1,10 +1,22 @@
 import type { APIRequestContext, BrowserContext, Page } from "@playwright/test";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loginAsAdmin } from "../website-publish/helpers";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const FIXTURES_DIR = path.join(__dirname, "fixtures");
+
+/** sample.mp4 など共有フィクスチャのパス（video-converter 未配置時は image-converter へフォールバック） */
+export async function resolveFixturePath(filename: string) {
+  const local = path.join(FIXTURES_DIR, filename);
+  try {
+    await fs.access(local);
+    return local;
+  } catch {
+    return path.join(path.dirname(__dirname), "image-converter", "fixtures", filename);
+  }
+}
 
 /** API ログインの Cookie をブラウザコンテキストへ同期 */
 export async function syncAuthCookies(
@@ -24,9 +36,15 @@ export async function openVideoConverter(page: Page) {
 
 /** サンプル動画を追加 */
 export async function addSampleVideo(page: Page, filename = "sample.mp4") {
-  const filePath = path.join(FIXTURES_DIR, filename);
+  const filePath = await resolveFixturePath(filename);
   await page.locator("#file-input").setInputFiles(filePath);
   await page.locator(".vcv-file").first().waitFor({ timeout: 15_000 });
+  await expectConvertReady(page);
+}
+
+/** 変換ボタンが有効になるまで待つ（動画プローブ完了後） */
+async function expectConvertReady(page: Page) {
+  await page.locator("#convert-btn:not([disabled])").waitFor({ timeout: 20_000 });
 }
 
 /** 変換完了またはエラーまで待つ */

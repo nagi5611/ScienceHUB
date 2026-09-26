@@ -1,4 +1,5 @@
 ﻿// functions/api/lib/shift-guard.ts
+import { listDatesInclusive, resolveReservationCalendarEndDate } from './calendar-span';
 import {
   getAvailableMemberIdsOnDate,
   getMemberById,
@@ -94,4 +95,17 @@ export async function requireMember(db: D1Database, memberId: string) {
   const member = await getMemberById(db, memberId);
   if (!member) throw new Error('メンバーが見つかりません');
   return member;
+}
+
+/** Ensures a member is on shift for every calendar day the reservation spans. */
+export async function isMemberAvailableOnReservationSpan(
+  db: D1Database,
+  memberId: string,
+  reservation: Pick<Reservation, 'desired_date' | 'calendar_end_date' | 'part_count'>
+): Promise<boolean> {
+  const endDate = resolveReservationCalendarEndDate(reservation);
+  for (const date of listDatesInclusive(reservation.desired_date, endDate)) {
+    if (!(await isMemberAvailableOnDate(db, memberId, date))) return false;
+  }
+  return true;
 }
