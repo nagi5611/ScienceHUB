@@ -9,6 +9,7 @@ const STROKE = 'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" 
 const ICONS = {
   app: `<rect x="3" y="3" width="7" height="7" rx="1.5" ${STROKE}/><rect x="14" y="3" width="7" height="7" rx="1.5" ${STROKE}/><rect x="3" y="14" width="7" height="7" rx="1.5" ${STROKE}/><rect x="14" y="14" width="7" height="7" rx="1.5" ${STROKE}/>`,
   image: `<rect x="3" y="5" width="18" height="14" rx="2" ${STROKE}/><circle cx="8.5" cy="10" r="1.5" ${STROKE}/><path d="M3 16l5-4 4 3 3-2 6 5" ${STROKE}/>`,
+  audio: `<path d="M11 5 6 9H3v6h3l5 4V5z" ${STROKE}/><path d="M15.5 8.5a5 5 0 0 1 0 7" ${STROKE}/><path d="M18.5 6.5a8.5 8.5 0 0 1 0 11" ${STROKE}/>`,
   layout: `<path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" ${STROKE}/><rect x="7" y="7" width="10" height="10" rx="1" ${STROKE}/>`,
   users: `<circle cx="9" cy="8" r="3" ${STROKE}/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5" ${STROKE}/><circle cx="17" cy="9" r="2.5" ${STROKE}/><path d="M15 20c.3-2.2 1.8-3.5 4-3.5" ${STROKE}/>`,
   shield: `<path d="M12 3 5 6v5.5c0 4.2 3 8.1 7 9.5 4-1.4 7-5.3 7-9.5V6l-7-3z" ${STROKE}/>`,
@@ -28,7 +29,7 @@ const SLUG_ICON = {
   "image-editor": "image",
   "image-converter": "image",
   "video-converter": "image",
-  "audio-converter": "image",
+  "audio-converter": "audio",
   uvcreator: "layout",
   "project-management": "clipboard",
   excalidraw: "edit",
