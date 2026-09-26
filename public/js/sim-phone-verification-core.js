@@ -127,11 +127,24 @@ export function createSimPhoneVerification(ids, options = {}) {
     if (container) container.replaceChildren();
   }
 
+  let phoneConfigUnavailable = false;
+
   async function loadFirebaseAuth() {
     if (firebaseAuth) return firebaseAuth;
 
     if (!verificationConfig) {
-      verificationConfig = await simPhoneApiRequest('phone-verification/config');
+      try {
+        verificationConfig = await simPhoneApiRequest('phone-verification/config');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        if (/503|設定が完了していません/.test(message)) {
+          phoneConfigUnavailable = true;
+          throw new Error(
+            '電話認証（SMS）はこの環境では未設定です。ローカル開発では Firebase 設定が必要です。管理者へ連絡するか、本番環境でお試しください。'
+          );
+        }
+        throw err;
+      }
     }
 
     const { firebase } = verificationConfig;
@@ -167,6 +180,7 @@ export function createSimPhoneVerification(ids, options = {}) {
   async function ensureRecaptchaWidget() {
     const container = el('recaptcha');
     if (!container || recaptchaVerifier) return;
+    if (phoneConfigUnavailable) return;
 
     const { auth, RecaptchaVerifier } = await loadFirebaseAuth();
 
