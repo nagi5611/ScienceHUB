@@ -2,6 +2,8 @@
  * AI エージェント用トークン管理 UI
  */
 
+import { redirectToLogin } from "./auth-redirect.js";
+
 async function agentTokenRequest(path, options = {}) {
   const response = await fetch(`/api/agent-tokens${path}`, {
     credentials: "same-origin",
@@ -13,9 +15,7 @@ async function agentTokenRequest(path, options = {}) {
   });
 
   if (response.status === 401) {
-    const returnTo = window.location.pathname + window.location.search + window.location.hash;
-    window.location.href = "/?next=" + encodeURIComponent(returnTo);
-    throw new Error("ログインが必要です");
+    redirectToLogin();
   }
 
   const data = await response.json().catch(() => ({}));

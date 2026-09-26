@@ -3,6 +3,7 @@
  */
 
 import { apiRequest, createShareLink, createShortcutLink, fetchDownloadBlob, moveStorageItems } from "./api.js";
+import { redirectToLogin } from "./auth-redirect.js";
 import { resolvePreviewBlob } from "./preview-cache.js";
 import {
   clearSessionPreviewCache,
@@ -2312,8 +2313,7 @@ async function checkAccess() {
     credentials: "same-origin",
   });
   if (res.status === 401) {
-    const returnTo = window.location.pathname + window.location.search + window.location.hash;
-    window.location.href = "/?next=" + encodeURIComponent(returnTo);
+    redirectToLogin();
     return false;
   }
   const data = await res.json().catch(() => ({}));

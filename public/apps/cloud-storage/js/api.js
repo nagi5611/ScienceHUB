@@ -2,10 +2,10 @@
  * クラウドストレージ API クライアント
  */
 
+import { redirectToLogin } from "./auth-redirect.js";
+
 function handleUnauthorized() {
-  const returnTo = window.location.pathname + window.location.search + window.location.hash;
-  window.location.href = "/?next=" + encodeURIComponent(returnTo);
-  throw new Error("ログインが必要です");
+  redirectToLogin();
 }
 
 /** ダウンロード情報（presigned またはプロキシ） */
