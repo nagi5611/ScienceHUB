@@ -45,6 +45,7 @@ const cloudOpenModal = cloudOpenDialog
   ? createCloudOpenModal(cloudOpenDialog, {
       idPrefix: "vcv-cloud-open",
       loginNext: `/apps/${APP_SLUG}/`,
+      redirectOn401: false,
     })
   : null;
 
