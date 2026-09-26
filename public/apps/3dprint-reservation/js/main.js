@@ -443,6 +443,11 @@ function setupDetailModal() {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) close();
   });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !modal.classList.contains('open')) return;
+    e.preventDefault();
+    close();
+  });
 
   document.getElementById('detail-cancel-toggle-btn').addEventListener('click', () => {
     handleLoggedInCancel();
@@ -488,6 +493,11 @@ function setupFormModal() {
   document.getElementById('form-next-btn')?.addEventListener('click', goToFormDetailsStep);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !modal.classList.contains('open')) return;
+    e.preventDefault();
+    closeModal();
   });
 
   purposeInputs.forEach((input) => {
