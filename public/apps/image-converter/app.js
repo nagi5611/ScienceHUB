@@ -1,3 +1,4 @@
+import { showHubAppAccessDenied } from "/js/hub-app-access-ui.js";
 /**
  * 画像変換アプリ — クライアントサイドのみ
  */
@@ -146,9 +147,16 @@ function showConvertOverlay(_text, _progress = 0) {}
 /** 変換オーバーレイを非表示（無効化） */
 function hideConvertOverlay() {}
 
+/** PWA の SW 更新リロードを、キュー／変換中は延期する */
+function syncPwaReloadGuard() {
+  window.__scienceHubDeferPwaReload = isBatchConverting || entries.size > 0;
+  window.__scienceHubFlushPwaReload?.();
+}
+
 /** 変換中は操作を制限 */
 function setBatchConverting(active) {
   isBatchConverting = active;
+  syncPwaReloadGuard();
   convertBtn.disabled = active || entries.size === 0;
   clearBtn.disabled = active || entries.size === 0;
   if (formatSelect) formatSelect.disabled = active;
@@ -174,7 +182,7 @@ async function checkAccess() {
   }
 
   if (!response.ok) {
-    document.getElementById("access-denied").hidden = false;
+    showHubAppAccessDenied();
     return false;
   }
 
@@ -645,6 +653,7 @@ function addFiles(fileListLike) {
 
   refreshOutputFormats();
   renderFileList();
+  syncPwaReloadGuard();
 
   if (added > 0 && skipped > 0) {
     setStatus(`${added} 件追加、${skipped} 件は非対応形式のためスキップしました`, "warn");
@@ -1012,6 +1021,7 @@ async function clearAll() {
   fileInput.value = "";
   refreshOutputFormats();
   renderFileList();
+  syncPwaReloadGuard();
   setStatus("ファイルを追加してください");
 }
 
