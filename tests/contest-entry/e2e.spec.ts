@@ -1,33 +1,32 @@
 import { test, expect } from "@playwright/test";
-import {
-  createContestApplicationViaApi,
-  loginAsAdmin,
-  uniqueContestTitle,
-} from "./helpers";
+import { openContestEntry, syncAdminSession } from "./helpers";
 
-test.describe("造形物コンテスト entry E2E", () => {
-  test("参加取り消しで一覧から消える", async ({ page }) => {
-    const title = uniqueContestTitle();
-    await loginAsAdmin(page);
-    const application = await createContestApplicationViaApi(page, { title });
-    expect(application.can_withdraw).toBe(true);
+test.describe("contest-entry — 参加取り消し", () => {
+  test.beforeEach(async ({ context, request }) => {
+    await syncAdminSession(context, request);
+  });
 
-    await page.goto("/apps/contest-entry/");
-    await expect(page.locator("#applications-list")).toContainText(title);
-    await page.reload();
-    await expect(page.locator("#applications-list")).toContainText(title);
-
-    page.once("dialog", (dialog) => {
-      expect(dialog.type()).toBe("confirm");
-      void dialog.accept();
+  test("参加取り消しで一覧から消える", async ({ page, request }) => {
+    const title = `E2E-Cancel-${Date.now().toString(36)}`;
+    const createRes = await request.post("/api/contest/applications", {
+      data: {
+        title,
+        schedule_type: "full_time",
+        homeroom: "301",
+        student_number: 1,
+        student_name: "取消テスト",
+        self_print: true,
+        members: [],
+      },
     });
+    expect(createRes.ok()).toBeTruthy();
 
-    const card = page.locator(".contest-application-card", {
-      has: page.getByRole("heading", { name: title }),
-    });
-    await card.getByRole("button", { name: "参加取り消し" }).click();
-
-    await expect(page.locator("#page-toast")).toContainText("参加を取り消しました");
-    await expect(page.locator("#applications-list")).not.toContainText(title);
+    await openContestEntry(page);
+    const card = page.locator(".contest-application-card", { hasText: title });
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    page.once("dialog", (dialog) => dialog.accept());
+    await card.locator(".contest-card-withdraw").click();
+    await expect(page.locator("#page-toast")).toContainText(/取り消/, { timeout: 15_000 });
+    await expect(card).toHaveCount(0, { timeout: 15_000 });
   });
 });

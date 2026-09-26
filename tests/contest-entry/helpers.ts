@@ -1,57 +1,45 @@
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, BrowserContext, Page } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { loginAsAdmin } from "../website-publish/helpers";
 
-const ADMIN_USERNAME = "admin";
-const ADMIN_PASSWORD = "mmh@2048@5431";
-
-/** 管理者セッションで API / ページを利用する */
-export async function loginAsAdmin(ctx: Page | APIRequestContext) {
-  const response = await ctx.request.post("/api/auth/login", {
-    data: {
-      username: ADMIN_USERNAME,
-      password: ADMIN_PASSWORD,
-    },
-  });
-  if (!response.ok()) {
-    throw new Error(`ログイン失敗: ${response.status()}`);
-  }
-}
-
-/** 参加申請タイトル用の一意文字列 */
-export function uniqueContestTitle(prefix = "E2E取消") {
-  return `${prefix}-${Date.now().toString(36)}`;
-}
-
-export type CreateContestApplicationPayload = {
-  schedule_type?: "full_time" | "part_time";
-  homeroom?: string;
-  student_number?: number;
-  student_name?: string;
-  title: string;
-  impressions?: string | null;
-  self_print?: boolean;
-};
-
-/** UI 新規作成のフレーク回避のため API で参加申請を作成する */
-export async function createContestApplicationViaApi(
-  ctx: Page | APIRequestContext,
-  payload: CreateContestApplicationPayload
+/** API ログイン Cookie をブラウザへ同期 */
+export async function syncAdminSession(
+  context: BrowserContext,
+  request: APIRequestContext,
 ) {
-  const response = await ctx.request.post("/api/contest/applications", {
-    data: {
-      schedule_type: "full_time",
-      homeroom: "301",
-      student_number: 1,
-      student_name: "E2Eテスト",
-      self_print: false,
-      ...payload,
-    },
+  await loginAsAdmin(request);
+  const { cookies } = await request.storageState();
+  await context.addCookies(cookies);
+}
+
+/** 一覧 API 応答後にコンテスト依頼アプリを開く */
+export async function openContestEntry(page: Page) {
+  const listResponse = page.waitForResponse(
+    (res) =>
+      res.url().includes("/api/contest/applications") &&
+      res.request().method() === "GET" &&
+      res.status() === 200,
+    { timeout: 30_000 },
+  );
+  await page.goto("/apps/contest-entry/");
+  await listResponse;
+  await page.waitForSelector("#app-main:not([hidden])", { timeout: 20_000 });
+}
+
+/** 新規参加申請フォームを開く */
+export async function openNewApplicationForm(page: Page) {
+  await page.locator("#btn-new-application").click();
+  await expect(page.locator("#view-apply")).not.toHaveClass(/hidden/);
+}
+
+/** 必須項目を埋めて参加申請を送信 */
+export async function submitNewApplication(page: Page, title: string) {
+  await page.locator("#title").fill(title);
+  await page.locator("#homeroom").selectOption({ index: 1 });
+  await page.locator("#student_number").fill("1");
+  await page.locator("#student_name").fill("E2Eテスト");
+  await page.locator("#application-submit-btn").click();
+  await expect(page.locator("#page-toast")).toContainText(/申請|送信|完了/, {
+    timeout: 20_000,
   });
-  if (!response.ok()) {
-    const body = await response.text();
-    throw new Error(`参加申請作成失敗: ${response.status()} ${body}`);
-  }
-  const data = (await response.json()) as {
-    application: { id: string; title: string; can_withdraw?: boolean };
-  };
-  return data.application;
 }
