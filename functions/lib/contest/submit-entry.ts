@@ -282,7 +282,6 @@ export async function submitContestEntry(
       stl_size_bytes: reservation.stl_size_bytes,
       uploaded_by_user_id: userId,
       uploader_role: 'user',
-      uploaded_at: reservation.created_at,
     });
     return {
       self_print: false,
@@ -316,6 +315,7 @@ export async function submitContestEntry(
   const span = syncReservationSpanFields(slot.desired_date, partCount);
   const [firstFile, ...restFiles] = files;
 
+  const submittedAt = new Date().toISOString();
   const reservation: Reservation = {
     id: crypto.randomUUID(),
     grade,
@@ -351,7 +351,7 @@ export async function submitContestEntry(
     contest_storage_path: null,
     contest_storage_filename: null,
     contest_application_id: application.id,
-    created_at: new Date().toISOString(),
+    created_at: submittedAt,
   };
 
   await createReservation(db, reservation);
@@ -387,7 +387,7 @@ export async function submitContestEntry(
     stl_size_bytes: reservation.stl_size_bytes,
     uploaded_by_user_id: userId,
     uploader_role: 'user',
-    uploaded_at: reservation.created_at,
+    uploaded_at: submittedAt,
   });
 
   const printerId = reservation.printer_id;

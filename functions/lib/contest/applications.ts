@@ -31,7 +31,9 @@ import { getOAuthRedirectBase } from '../oauth';
 import { deleteCalendarEvent } from '../3dprint/google-calendar';
 import {
   formatContestStlSubmissionLogForAdmin,
+  getLatestContestStlSubmissionForApplication,
   listContestStlSubmissionLogsForApplication,
+  type ContestStlSubmissionLog,
 } from './stl-submission-logs';
 
 const CONTEST_APPLICATION_SELECT = `id, user_id, schedule_type, homeroom, student_number, student_name,
@@ -275,7 +277,8 @@ async function hasBlockingReservationForWithdraw(
 
 function resolveSubmittedStlMeta(
   app: ContestApplication,
-  reservation: ContestApplicationReservationSummary | null
+  reservation: ContestApplicationReservationSummary | null,
+  latestSubmission: ContestStlSubmissionLog | null
 ): {
   can_download_submitted_stl: boolean;
   submitted_stl_at: string | null;
@@ -291,8 +294,9 @@ function resolveSubmittedStlMeta(
   if (reservation?.stl_filename) {
     return {
       can_download_submitted_stl: true,
-      submitted_stl_at: reservation.created_at,
-      submitted_stl_filename: reservation.stl_filename,
+      submitted_stl_at: latestSubmission?.uploaded_at ?? reservation.created_at,
+      submitted_stl_filename:
+        latestSubmission?.stl_filename ?? reservation.stl_filename,
     };
   }
   return {
@@ -310,7 +314,10 @@ async function enrichApplication(
   active: Reservation | null,
   canWithdraw: boolean
 ): Promise<ContestApplicationWithDetails> {
-  const stlMeta = resolveSubmittedStlMeta(app, reservation);
+  const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
+  const activeBlocksSubmit = active != null && active.status !== 'printing';
+  const latestSubmission = await getLatestContestStlSubmissionForApplication(db, app.id);
+  const stlMeta = resolveSubmittedStlMeta(app, reservation, latestSubmission);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
     ...app,

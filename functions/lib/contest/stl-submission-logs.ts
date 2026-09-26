@@ -105,6 +105,24 @@ export async function logContestStlSubmission(
   return entry;
 }
 
+/** Latest STL submission for an application (by sequence, then upload time). */
+export async function getLatestContestStlSubmissionForApplication(
+  db: D1Database,
+  applicationId: string
+): Promise<ContestStlSubmissionLog | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${LOG_SELECT}
+       FROM contest_stl_submission_logs
+       WHERE contest_application_id = ?
+       ORDER BY sequence_number DESC, uploaded_at DESC
+       LIMIT 1`
+    )
+    .bind(applicationId)
+    .first<ContestStlSubmissionLog>();
+  return row ?? null;
+}
+
 /** Lists STL submission logs for a participation application (oldest first). */
 export async function listContestStlSubmissionLogsForApplication(
   db: D1Database,
