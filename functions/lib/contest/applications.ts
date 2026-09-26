@@ -293,7 +293,8 @@ async function enrichApplication(
   const selfPrintSubmitted = app.self_print && app.stl_submitted_at != null;
   const activeBlocksSubmit = active != null && active.status !== 'printing';
   const deliveredBlocksSubmit = reservation?.status === 'delivered';
-  const stlMeta = resolveSubmittedStlMeta(app, reservation);
+  const latestSubmission = await getLatestContestStlSubmissionForApplication(db, app.id);
+  const stlMeta = resolveSubmittedStlMeta(app, reservation, latestSubmission);
   const stlExtraParts = await listContestApplicationStlParts(db, app.id);
   return {
     ...app,
@@ -548,10 +549,6 @@ async function assertCanUpdateContestMultiPartSettings(
     throw new Error('提出済みの作品はパーツ設定を変更できません');
   }
   const reservation = await fetchLatestContestReservationForApplication(db, app.id);
-  if (reservation?.stl_filename) {
-    throw new Error('STL 提出後はパーツ設定を変更できません');
-  }
-  const reservation = await fetchLatestReservationForApplication(db, app.id);
   if (!reservation?.stl_filename) {
     return;
   }
