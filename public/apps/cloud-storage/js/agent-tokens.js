@@ -13,8 +13,7 @@ async function agentTokenRequest(path, options = {}) {
   });
 
   if (response.status === 401) {
-    const returnTo = window.location.pathname + window.location.search + window.location.hash;
-    window.location.href = "/?next=" + encodeURIComponent(returnTo);
+    window.location.href = "/login/?next=" + encodeURIComponent(window.location.pathname + window.location.search);
     throw new Error("ログインが必要です");
   }
 
