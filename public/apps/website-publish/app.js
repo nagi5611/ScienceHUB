@@ -470,6 +470,16 @@ async function openSite(siteId) {
   await loadFiles();
 }
 
+async function refreshCurrentSiteFromServer() {
+  if (!currentSite) return;
+  const data = await api("sites");
+  sites = data.sites ?? [];
+  const site = sites.find((s) => s.id === currentSite.id);
+  if (!site) return;
+  currentSite = site;
+  updateStatsDisplay(site);
+}
+
 /** 統計表示 */
 function updateStatsDisplay(site) {
   siteStats.innerHTML = `
@@ -668,6 +678,12 @@ async function handleDeleteSite() {
 createSiteBtn.addEventListener("click", () => createDialog.showModal());
 createCancel.addEventListener("click", () => createDialog.close());
 createForm.addEventListener("submit", handleCreateSite);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && currentSite) {
+    refreshCurrentSiteFromServer().catch(() => {});
+  }
+});
+
 backToSites.addEventListener("click", () => {
   currentSite = null;
   filesPanel.hidden = true;
