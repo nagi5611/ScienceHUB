@@ -103,9 +103,13 @@ function updateAdminStickyOffsets() {
   if (!isMobileAdminView()) {
     document.documentElement.style.removeProperty('--admin-topbar-offset');
     document.documentElement.style.removeProperty('--admin-nav-offset');
+    if (topbar) {
+      topbar.setAttribute('aria-hidden', 'true');
+    }
     return;
   }
   if (topbar) {
+    topbar.removeAttribute('aria-hidden');
     document.documentElement.style.setProperty('--admin-topbar-offset', `${topbar.offsetHeight}px`);
   }
   if (nav) {
