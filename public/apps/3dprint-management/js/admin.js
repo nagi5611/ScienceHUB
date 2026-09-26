@@ -427,7 +427,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
       cell.classList.add('disabled');
     } else if (isFull) {
       cell.classList.add('full');
-      cell.addEventListener('click', () => alert('この日はもう満杯です'));
+      cell.addEventListener('click', () => showPageToast('この日はもう満杯です'));
     } else {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openAdminFormForDate(dateStr));
@@ -856,6 +856,16 @@ function setAdminScaleOptions(availableScales) {
 function showAdminFormAlert(message, type) {
   document.getElementById('admin-form-alert').innerHTML =
     `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+}
+
+/** Shows a temporary page-level toast. */
+function showPageToast(message) {
+  const toast = document.getElementById('page-toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  clearTimeout(showPageToast._timer);
+  showPageToast._timer = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
 /** Formats a date string for Japanese display. */
