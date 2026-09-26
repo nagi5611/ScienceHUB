@@ -1,10 +1,7 @@
-import { expect, type APIRequestContext, type Page } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { expect, type Page } from "@playwright/test";
 import { loginAsAdmin } from "../website-publish/helpers";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const STL_FIXTURE_PATH = path.join(__dirname, "fixtures", "minimal.stl");
+export { loginAsAdmin };
 
 export { loginAsAdmin };
 
@@ -70,8 +67,8 @@ export async function ensureContestListView(page: Page) {
   if (await backApply.isVisible()) {
     await backApply.click();
   }
-  await page.waitForSelector("#view-apply.hidden", { timeout: 10_000 });
-  await page.waitForSelector("#view-submit.hidden", { timeout: 10_000 });
+  await expect(page.locator("#view-apply")).toBeHidden({ timeout: 10_000 });
+  await expect(page.locator("#view-submit")).toBeHidden({ timeout: 10_000 });
 }
 
 /** 参加申請フォームを開く（新規） */
@@ -113,7 +110,7 @@ async function expectSubmitEnabled(page: Page) {
   });
 }
 
-/** 参加申請を送信（新規） */
+/** 参加申請を送信（新規・UI） */
 export async function submitNewApplication(
   page: Page,
   opts: {
@@ -135,39 +132,10 @@ export async function submitNewApplication(
   }
   await expectSubmitEnabled(page);
   await page.locator("#application-submit-btn").click();
-  await page.waitForSelector("#view-list:not(.hidden)");
-  await page.locator("#page-toast:not(.hidden)").waitFor({ timeout: 10_000 }).catch(() => {});
-}
-
-/** API で参加申請を1件作成 */
-export async function createApplicationViaApi(
-  page: Page,
-  opts: {
-    title: string;
-    selfPrint?: boolean;
-    homeroom?: string;
-    studentNumber?: number;
-    studentName?: string;
-  }
-) {
-  const res = await page.request.post("/api/contest/applications", {
-    data: {
-      schedule_type: "full_time",
-      title: opts.title,
-      participants: [
-        {
-          homeroom: opts.homeroom ?? "101",
-          student_number: opts.studentNumber ?? 1,
-          student_name: opts.studentName ?? "テスト太郎",
-        },
-      ],
-      self_print: opts.selfPrint ?? false,
-    },
+  await expect(page.locator("#view-apply")).toBeHidden({ timeout: 15_000 });
+  await expect(applicationCardByTitle(page, opts.title)).toBeVisible({
+    timeout: 15_000,
   });
-  if (!res.ok()) {
-    throw new Error(`参加申請 API 失敗: ${res.status()} ${await res.text()}`);
-  }
-  return res.json();
 }
 
 /** 一覧からタイトルでカードを取得 */
@@ -175,68 +143,4 @@ export function applicationCardByTitle(page: Page, title: string) {
   return page.locator(".contest-application-card", {
     has: page.locator(".contest-application-title", { hasText: title }),
   });
-}
-
-/** 作品カードから STL 提出画面を開く */
-export async function openSubmitViewForTitle(page: Page, title: string) {
-  const card = applicationCardByTitle(page, title);
-  await card.locator(".contest-card-submit").click();
-  await page.waitForSelector("#view-submit:not(.hidden)");
-}
-
-/** 指定インデックスの STL パーツ行にファイルをアップロードする */
-export async function uploadStlPartAt(page: Page, index: number, filePath: string = STL_FIXTURE_PATH) {
-  const row = page.locator(".contest-stl-part-row").nth(index);
-  await row.locator(".stl-part-file-input").setInputFiles(filePath);
-  await expect(row.locator(".stl-part-file-name--done")).toBeVisible({ timeout: 45_000 });
-}
-
-/** 提出フォームを送信（全パーツアップロード済み前提） */
-export async function submitStlForm(page: Page) {
-  const btn = page.locator("#submit-btn");
-  await expect(btn).toBeEnabled({ timeout: 15_000 });
-  await btn.click();
-  await page.waitForSelector("#view-list:not(.hidden)", { timeout: 30_000 });
-}
-
-/** コンテスト自動割当用にプリンター稼働日を有効化 */
-export async function ensureContestAutoScheduleSlots(
-  request: APIRequestContext,
-  dayCount = 14
-): Promise<{ printerId: string; staffMemberId: string }> {
-  const printersRes = await request.get("/api/3dprint/admin/printers");
-  if (!printersRes.ok()) {
-    throw new Error(`プリンター一覧取得失敗: ${printersRes.status()}`);
-  }
-  const printersBody = (await printersRes.json()) as {
-    printers?: Array<{ id: string; status?: string }>;
-  };
-  const printer =
-    printersBody.printers?.find((p) => p.status === "available") ?? printersBody.printers?.[0];
-  if (!printer?.id) {
-    throw new Error("テスト用プリンターが見つかりません");
-  }
-
-  const dates: string[] = [];
-  for (let i = 0; i < dayCount; i++) {
-    dates.push(jstDateOffset(i + 3));
-  }
-  const availRes = await request.put("/api/3dprint/admin/shifts/printer-availability", {
-    data: { printer_id: printer.id, dates, available: true },
-  });
-  if (!availRes.ok()) {
-    throw new Error(`シフト有効化失敗: ${availRes.status()} ${await availRes.text()}`);
-  }
-
-  const membersRes = await request.get("/api/3dprint/admin/members");
-  if (!membersRes.ok()) {
-    throw new Error(`メンバー一覧取得失敗: ${membersRes.status()}`);
-  }
-  const membersBody = (await membersRes.json()) as { members?: { id: string }[] };
-  const staffMemberId = membersBody.members?.[0]?.id;
-  if (!staffMemberId) {
-    throw new Error("シフト用スタッフメンバーが見つかりません");
-  }
-
-  return { printerId: printer.id, staffMemberId };
 }
