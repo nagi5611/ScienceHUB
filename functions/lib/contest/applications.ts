@@ -539,8 +539,16 @@ async function assertCanUpdateContestMultiPartSettings(
   if (app.self_print && app.stl_submitted_at) {
     throw new Error('提出済みの作品はパーツ設定を変更できません');
   }
+  const active = await getActiveContestReservationForApplication(db, app.id);
+  if (active) {
+    throw new Error('STL 提出後はパーツ設定を変更できません');
+  }
   const reservation = await fetchLatestReservationForApplication(db, app.id);
-  if (reservation?.stl_filename) {
+  if (
+    reservation?.stl_filename &&
+    reservation.status !== 'failed' &&
+    reservation.status !== 'cancelled'
+  ) {
     throw new Error('STL 提出後はパーツ設定を変更できません');
   }
 }
