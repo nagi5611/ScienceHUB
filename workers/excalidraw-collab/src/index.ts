@@ -90,7 +90,7 @@ function reconcileElements(
     }
   }
 
-  return [...map.values()].filter((el) => !el.isDeleted);
+  return [...map.values()];
 }
 
 export class ExcalidrawCollabRoom extends DurableObject<CollabEnv> {

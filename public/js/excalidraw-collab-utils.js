@@ -66,7 +66,12 @@ export function reconcileElements(local, remote) {
     }
   }
 
-  return [...map.values()].filter((el) => !el.isDeleted);
+  return [...map.values()];
+}
+
+/** 描画用に isDeleted 要素を除外 */
+export function visibleElements(elements) {
+  return (elements ?? []).filter((el) => el && !el.isDeleted);
 }
 
 /** files をマージ */

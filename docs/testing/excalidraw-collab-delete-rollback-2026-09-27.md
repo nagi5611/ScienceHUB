@@ -82,7 +82,14 @@ D1 本体はマージされない。再接続時の `seed`（`functions/api/exca
 WebSocket 接続ごとに D1 シーンを DO へ `seed` する（DO が空のときのみ）。  
 通常のロールバックの直接原因ではないが、D1 が古い場合の **初回同期ズレ**要因になり得る。
 
-## 修正方針（実装は未着手）
+## 実装済み（2026-09-27）
+
+1. **`reconcileElements`** — `public/js/excalidraw-collab-utils.js` と `workers/excalidraw-collab/src/index.ts` で tombstone（`isDeleted: true`）をマージ結果に保持（Excalidraw は `isDeleted` を描画側で処理）。`visibleElements` は必要時の表示用ヘルパーとして追加。
+2. **broadcast 抑制** — `public/apps/excalidraw/app.js` でリモート適用開始時に `broadcastTimer` をクリア、`broadcastScene` は `applyingRemote` 中は送信しない。
+3. **D1 保存マージ** — `functions/lib/excalidraw-reconcile.ts` を追加し、`saveAccessibleNoteScene` / `saveSharedNoteScene` で既存 `scene_json` と `reconcileElements` してから UPDATE。
+4. **E2E** — `tests/excalidraw/collab-delete-rollback.spec.ts` を修正後の期待値に更新。
+
+## 修正方針（参考・上記で対応）
 
 優先度順の案:
 

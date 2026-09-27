@@ -4,6 +4,7 @@
 
 import type { SessionUser } from "./types";
 import { createId, now } from "./types";
+import { reconcileElements } from "./excalidraw-reconcile";
 
 const APP_SLUG = "excalidraw";
 
@@ -393,7 +394,14 @@ export async function saveAccessibleNoteScene(
   const canEdit = await userCanEditNote(db, userId, row);
   if (!canEdit) return null;
 
-  const sceneJson = serializeScene(sceneInput);
+  const incoming = normalizeScene(sceneInput);
+  const existing = parseScene(row.scene_json);
+  const mergedScene: ExcalidrawScene = {
+    elements: reconcileElements(existing.elements, incoming.elements),
+    appState: { ...existing.appState, ...incoming.appState },
+    files: { ...existing.files, ...incoming.files },
+  };
+  const sceneJson = JSON.stringify(mergedScene);
   const ts = now();
   await db
     .prepare(
@@ -414,7 +422,18 @@ export async function saveSharedNoteScene(
 ): Promise<{ note_id: string } | null> {
   const share = await getShareByToken(db, token);
   if (!share) return null;
-  const sceneJson = serializeScene(sceneInput);
+  const noteRow = await db
+    .prepare(`SELECT scene_json FROM excalidraw_notes WHERE id = ?`)
+    .bind(share.note_id)
+    .first<{ scene_json: string }>();
+  const incoming = normalizeScene(sceneInput);
+  const existing = parseScene(noteRow?.scene_json ?? "{}");
+  const mergedScene: ExcalidrawScene = {
+    elements: reconcileElements(existing.elements, incoming.elements),
+    appState: { ...existing.appState, ...incoming.appState },
+    files: { ...existing.files, ...incoming.files },
+  };
+  const sceneJson = JSON.stringify(mergedScene);
   const ts = now();
   await db
     .prepare(

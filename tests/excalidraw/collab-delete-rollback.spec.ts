@@ -7,7 +7,7 @@ import {
 import { loginAsAdmin } from "../website-publish/helpers";
 
 test.describe("Excalidraw 共同編集 — 削除ロールバック", () => {
-  test("DO と同一の reconcileElements で削除が古い版により復活する", () => {
+  test("DO と同一の reconcileElements で tombstone が古い版を拒否する", () => {
     const id = "do-identical-reconcile";
     const deleted = {
       ...minimalRectangle(id, 2, 2),
@@ -16,13 +16,17 @@ test.describe("Excalidraw 共同編集 — 削除ロールバック", () => {
     const staleAlive = minimalRectangle(id, 1, 1);
 
     const doStateAfterDelete = reconcileElements([], [deleted]);
-    expect(doStateAfterDelete).toHaveLength(0);
+    expect(doStateAfterDelete).toHaveLength(1);
+    expect(doStateAfterDelete[0]?.isDeleted).toBe(true);
 
-    const doStateAfterStale = reconcileElements(doStateAfterDelete, [staleAlive]);
+    const doStateAfterStale = reconcileElements(doStateAfterDelete, [
+      staleAlive,
+    ]);
     expect(doStateAfterStale).toHaveLength(1);
+    expect(doStateAfterStale[0]?.isDeleted).toBe(true);
   });
 
-  test("D1: 削除済みシーンのあと古い PUT が上書きすると要素が復活する", async ({
+  test("D1: 削除済みシーンのあと古い PUT でも tombstone が保持される", async ({
     page,
   }) => {
     await loginAsAdmin(page.request);
@@ -60,6 +64,7 @@ test.describe("Excalidraw 共同編集 — 削除ロールバック", () => {
       note: { scene: { elements: { id: string; isDeleted?: boolean }[] } };
     };
     const stored = body.note.scene.elements.filter((el) => el.id === elementId);
-    expect(stored.some((el) => !el.isDeleted)).toBe(true);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.isDeleted).toBe(true);
   });
 });

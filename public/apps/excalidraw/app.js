@@ -481,6 +481,10 @@ function connectCollab({ noteId, token, name }) {
     getState: getCollabState,
     setApplyingRemote: (value) => {
       applyingRemote = value;
+      if (value && broadcastTimer) {
+        clearTimeout(broadcastTimer);
+        broadcastTimer = null;
+      }
     },
     onOpen: () => {
       peersEl.textContent = "接続中";
@@ -511,7 +515,7 @@ function disconnectCollab() {
 
 /** シーンを WS 送信 */
 function broadcastScene() {
-  if (!collab) return;
+  if (!collab || applyingRemote) return;
   collab.broadcastScene({
     elements: latestElements,
     appState: pickPersistAppState(latestAppState),
