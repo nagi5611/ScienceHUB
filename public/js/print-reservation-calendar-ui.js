@@ -69,12 +69,23 @@ export function createCalendarOccurrenceSlot(options) {
     escapeHtml = (t) => t,
     /** 'scale' (default) colors slots by S/M/L; 'status' colors by reservation status. */
     colorMode = 'scale',
+    /** When colorMode is 'status', optional override (e.g. contest self-print). Returns class without "status-" prefix or full suffix like "self-print". */
+    getStatusColorClass = null,
   } = options;
 
   const slot = document.createElement('button');
   slot.type = 'button';
-  const colorClass =
-    colorMode === 'status' ? `status-${r.status || 'applied'}` : occurrence.printScale;
+  let colorClass;
+  if (colorMode === 'status') {
+    const resolved =
+      typeof getStatusColorClass === 'function'
+        ? getStatusColorClass(r)
+        : r.status || 'applied';
+    colorClass = resolved.startsWith('status-') ? resolved.slice('status-'.length) : resolved;
+    colorClass = `status-${colorClass}`;
+  } else {
+    colorClass = occurrence.printScale;
+  }
   slot.className = `calendar-slot admin-calendar-slot ${colorClass}`;
   slot.classList.add(`calendar-slot--${occurrence.mode}`);
   if (occurrence.segment !== 'single' && occurrence.segment !== 'start') {

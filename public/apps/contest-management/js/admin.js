@@ -58,6 +58,40 @@ const STATUS_LABELS = {
   cancelled: 'キャンセル',
 };
 
+/** Admin calendar / list: 申請中・受領中・自己印刷(受領後) */
+function resolveContestCalendarColorClass(reservation) {
+  const app =
+    reservation.contest_application_id != null
+      ? contestApplicationById.get(reservation.contest_application_id)
+      : null;
+  if (app?.self_print && reservation.status !== 'applied') {
+    return 'self-print';
+  }
+  if (reservation.status === 'applied') return 'applied';
+  if (reservation.status === 'accepted') return 'accepted';
+  return 'accepted';
+}
+
+/** Participation application row: same three-way classification as the calendar legend. */
+function resolveContestApplicationDisplayCategory(app) {
+  if (app.self_print) {
+    if (app.stl_submitted_at) {
+      return { classKey: 'self-print', label: '自己印刷(受領後)' };
+    }
+    return { classKey: 'applied', label: '申請中' };
+  }
+  const reservationStatus = app.reservation?.status;
+  if (!reservationStatus || reservationStatus === 'applied') {
+    return { classKey: 'applied', label: '申請中' };
+  }
+  return { classKey: 'accepted', label: '受領中' };
+}
+
+function formatContestApplicationCategoryBadge(app) {
+  const cat = resolveContestApplicationDisplayCategory(app);
+  return `<span class="contest-cal-category contest-cal-category--${cat.classKey}">${escapeHtml(cat.label)}</span>`;
+}
+
 const SCALE_LABELS = { small: 'スモール', medium: 'ミディアム', large: 'ラージ' };
 const SCALE_SHORT = { small: 'S', medium: 'M', large: 'L' };
 const PURPOSE_LABELS = { ss_s_tan: 'SS・S探', club: '部活', other: 'その他' };
@@ -627,6 +661,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
         reservation: entry.reservation,
         occurrence: entry.occurrence,
         colorMode: 'status',
+        getStatusColorClass: resolveContestCalendarColorClass,
         onOpenDetail: openDetail,
         draggable: true,
         dragBusy: calendarRescheduleBusy,
@@ -1580,7 +1615,7 @@ function contestAdminApplicationTableColumns() {
           app.submission_status?.desired_date != null
             ? `<span class="contest-submission-date-inline">${escapeHtml(app.submission_status.desired_date)}</span>`
             : '';
-        return `<div class="contest-admin-status-cell">${formatContestSubmissionStatusBadge(app)}${date}</div>`;
+        return `<div class="contest-admin-status-cell">${formatContestApplicationCategoryBadge(app)}${formatContestSubmissionStatusBadge(app)}${date}</div>`;
       },
     },
     { label: '申請者', cell: (app) => escapeHtml(app.applicant_email ?? '—') },
@@ -1637,6 +1672,7 @@ function renderContestApplicationsListHtml(apps) {
         <article class="contest-admin-application-compact card">
           <div class="contest-admin-application-compact-head">
             <strong>${escapeHtml(app.title)}</strong>
+            ${formatContestApplicationCategoryBadge(app)}
             ${formatContestSubmissionStatusBadge(app)}
           </div>
           <p class="hint contest-admin-application-compact-meta">

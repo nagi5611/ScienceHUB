@@ -479,3 +479,45 @@
 #admin-calendar-section .legend-dot.status-accepted {
   background: rgba(59, 130, 246, 0.55);
 }
+
+#admin-calendar-section .calendar-slot.status-self-print {
+  background: #d1fae5 !important;
+  color: #047857 !important;
+}
+
+#admin-calendar-section .legend-dot.status-self-print {
+  background: #34d399;
+}
+
+.contest-cal-category {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.12rem 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+  margin-right: 0.35rem;
+  white-space: nowrap;
+}
+
+.contest-cal-category--applied {
+  background: #f3f4f6;
+  color: #4b5563;
+  border-color: #d1d5db;
+}
+
+.contest-cal-category--accepted {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
+.contest-cal-category--self-print {
+  background: #d1fae5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+
+.contest-admin-status-cell .contest-cal-category {
+  vertical-align: middle;
+}
