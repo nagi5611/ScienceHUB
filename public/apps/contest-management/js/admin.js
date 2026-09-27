@@ -319,6 +319,7 @@ async function init() {
   setupPrintVideoSettings();
   setupContestStorageSettings();
   document.getElementById('calendar-test-btn')?.addEventListener('click', testGoogleCalendar);
+  document.getElementById('calendar-resync-btn')?.addEventListener('click', resyncGoogleCalendar);
   document.getElementById('email-test-send-btn')?.addEventListener('click', sendReservationTestEmail);
   setupAdminFormModal();
   initShiftPanel();
@@ -1892,6 +1893,55 @@ async function testGoogleCalendar() {
     resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(data.error ?? '接続に失敗しました')}</div>`;
   } catch (err) {
     resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/** Reconciles contest reservations with Google Calendar from admin panel. */
+async function resyncGoogleCalendar() {
+  const resultEl = document.getElementById('calendar-resync-result');
+  const btn = document.getElementById('calendar-resync-btn');
+  resultEl.innerHTML = '<p class="hint">再同期中…（コンテスト予約を照合しています）</p>';
+  if (btn) btn.disabled = true;
+
+  try {
+    const data = await apiRequest('admin/calendar/resync', { method: 'POST' });
+    if (!data.configured) {
+      resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(data.error ?? 'シークレットが未設定です')}</div>`;
+      return;
+    }
+
+    const lines = [
+      `照合: ${data.scanned}件`,
+      `変更なし: ${data.unchanged}件`,
+      `作成: ${data.created}件`,
+      `更新: ${data.updated}件`,
+      `削除: ${data.deleted}件`,
+    ];
+    if (data.errors?.length) {
+      lines.push(`エラー: ${data.errors.length}件`);
+    }
+
+    const alertClass = data.ok ? 'alert-success' : 'alert-error';
+    let html = `<div class="alert ${alertClass}">${lines.map((l) => escapeHtml(l)).join('<br>')}</div>`;
+    if (data.errors?.length) {
+      const detail = data.errors
+        .slice(0, 8)
+        .map((e) => `${e.reservationId}: ${e.message}`)
+        .join('\n');
+      html += `<pre class="hint" style="margin-top:0.5rem;white-space:pre-wrap">${escapeHtml(detail)}</pre>`;
+      if (data.errors.length > 8) {
+        html += `<p class="hint">他 ${data.errors.length - 8} 件のエラーがあります</p>`;
+      }
+    }
+    resultEl.innerHTML = html;
+
+    if (data.created || data.updated || data.deleted) {
+      await refreshAll();
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

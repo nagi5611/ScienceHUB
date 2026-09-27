@@ -122,6 +122,7 @@ import {
   deleteCalendarEvent,
   testGoogleCalendarConnection,
 } from "../../lib/3dprint/google-calendar";
+import { resyncContestCalendar } from "../../lib/contest/calendar-resync";
 import {
   canEditReservation,
   validateGuestStaffAvailability,
@@ -2167,10 +2168,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
     }
 
-    // GET /api/3dprint/admin/calendar/status
+    // GET /api/contest/admin/calendar/status
     if (method === "GET" && segments[1] === "calendar" && segments[2] === "status") {
       const status = await testGoogleCalendarConnection(env);
       return json(status);
+    }
+
+    // POST /api/contest/admin/calendar/resync
+    if (method === "POST" && segments[1] === "calendar" && segments[2] === "resync") {
+      const result = await resyncContestCalendar(env);
+      return json(result, result.configured && result.errors.length === 0 ? 200 : result.configured ? 207 : 503);
     }
 
     // GET /api/3dprint/admin/members

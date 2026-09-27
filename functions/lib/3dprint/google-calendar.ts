@@ -148,6 +148,62 @@ export async function createCalendarEventForReservation(
   }
 }
 
+export interface CalendarEventDates {
+  startDate: string;
+  endDate: string;
+}
+
+/** Fetches an all-day event's start/end dates (end is exclusive, per Google API). */
+export async function getCalendarEventDates(
+  env: GoogleCalendarEnv,
+  eventId: string
+): Promise<{ ok: true; dates: CalendarEventDates } | { ok: false; missing: boolean; error?: string }> {
+  if (!isGoogleCalendarConfigured(env)) {
+    return { ok: false, missing: false, error: 'Google Calendar のシークレットが未設定です' };
+  }
+
+  try {
+    const token = await getAccessToken(env);
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(env.GOOGLE_3DPRINT_CALENDAR_ID!.trim())}/events/${encodeURIComponent(eventId)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (res.status === 404 || res.status === 410) {
+      return { ok: false, missing: true };
+    }
+
+    if (!res.ok) {
+      const detail = await res.text();
+      return {
+        ok: false,
+        missing: false,
+        error: formatGoogleApiError(res.status, detail),
+      };
+    }
+
+    const data = (await res.json()) as {
+      start?: { date?: string };
+      end?: { date?: string };
+    };
+    const startDate = data.start?.date;
+    const endDate = data.end?.date;
+    if (!startDate || !endDate) {
+      return { ok: false, missing: false, error: 'カレンダーイベントの日付を読み取れませんでした' };
+    }
+
+    return { ok: true, dates: { startDate, endDate } };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'カレンダーイベントの取得に失敗しました';
+    return { ok: false, missing: false, error: message };
+  }
+}
+
+/** Returns exclusive end date (YYYY-MM-DD) for an all-day reservation span. */
+export function calendarEventExclusiveEndDate(isoEndInclusive: string): string {
+  return nextIsoDate(isoEndInclusive);
+}
+
 /** Deletes a Google Calendar event by ID. */
 export async function deleteCalendarEvent(
   env: GoogleCalendarEnv,

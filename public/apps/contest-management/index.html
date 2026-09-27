@@ -266,8 +266,12 @@
           <section class="card" style="margin-top:1.5rem">
             <h2 class="section-heading">Googleカレンダー連携</h2>
             <p class="hint">受領時に希望印刷日をカレンダーへ追加します。表示されないときは接続テストで原因を確認してください。</p>
-            <button class="btn btn-secondary btn-sm" id="calendar-test-btn" type="button">接続テスト</button>
+            <div class="btn-row" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
+              <button class="btn btn-secondary btn-sm" id="calendar-test-btn" type="button">接続テスト</button>
+              <button class="btn btn-secondary btn-sm" id="calendar-resync-btn" type="button">Google カレンダーとの再同期</button>
+            </div>
             <div id="calendar-test-result" style="margin-top:0.75rem"></div>
+            <div id="calendar-resync-result" style="margin-top:0.75rem"></div>
           </section>
 
           <section class="card" style="margin-top:1.5rem">
