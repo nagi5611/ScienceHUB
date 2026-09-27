@@ -161,7 +161,13 @@ import {
   type Printer,
 } from "../../lib/3dprint/printers";
 import { validatePrinterCapabilitiesInput, parsePrinterCapabilities } from "../../lib/3dprint/printer-capabilities";
-import { validatePrinterStatusInput, type PrinterStatus } from "../../lib/3dprint/printer-status";
+import {
+  isPrinterBookable,
+  normalizePrinterStatus,
+  validatePrinterStatusInput,
+  type PrinterStatus,
+} from "../../lib/3dprint/printer-status";
+import { requeuePrinterReservationsAfterChange } from "../../lib/3dprint/printer-reservation-requeue";
 import {
   streamPrinterImage,
   uploadPrinterImage,
@@ -2459,6 +2465,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const printer = await getPrinterById(db, segments[2]);
       if (!printer) return error("プリンターが見つかりません", 404);
 
+      const previousBookable = isPrinterBookable(normalizePrinterStatus(printer.status));
+
       if (hasName) {
         const name = body.name?.trim() ?? "";
         if (!name) return error("プリンター名は必須です");
@@ -2484,7 +2492,27 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const updated = await getPrinterById(db, segments[2]);
-      return json({ printer: updated ? formatPrinterForApi(updated) : null });
+      if (!updated) return error("プリンターが見つかりません", 404);
+
+      const nextBookable = isPrinterBookable(normalizePrinterStatus(updated.status));
+      const becameUnbookable = hasStatus && previousBookable && !nextBookable;
+      if (hasDailyCapacity || becameUnbookable) {
+        try {
+          const requeue = await requeuePrinterReservationsAfterChange(env, segments[2], {
+            printerBookable: nextBookable,
+          });
+          return json({
+            printer: formatPrinterForApi(updated),
+            requeued_reservations: requeue.moved,
+          });
+        } catch (requeueErr) {
+          const message =
+            requeueErr instanceof Error ? requeueErr.message : "予約の再配置に失敗しました";
+          return error(message, 409);
+        }
+      }
+
+      return json({ printer: formatPrinterForApi(updated) });
     }
 
     // PUT /api/3dprint/admin/printers/:id/image

@@ -798,6 +798,44 @@ export async function updateReservationDesiredDate(
     .run();
 }
 
+/** Active reservations on a printer from a calendar date onward (inclusive span end). */
+export async function getFutureReservationsByPrinter(
+  db: D1Database,
+  printerId: string,
+  fromDate: string
+): Promise<Reservation[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM print_reservations
+       WHERE printer_id = ?
+         AND status != 'cancelled'
+         AND COALESCE(NULLIF(calendar_end_date, ''), desired_date) >= ?
+       ORDER BY desired_date ASC, created_at ASC`
+    )
+    .bind(printerId, fromDate)
+    .all<Reservation>();
+  return result.results ?? [];
+}
+
+/** Updates desired date, calendar end, and printer for admin requeue. */
+export async function updateReservationSchedule(
+  db: D1Database,
+  id: string,
+  desiredDate: string,
+  printerId: string
+): Promise<void> {
+  const existing = await getReservationById(db, id);
+  if (!existing) return;
+  const partCount = normalizePartCount(existing.part_count ?? 1);
+  const calendarEndDate = computeCalendarEndDate(desiredDate, partCount);
+  await db
+    .prepare(
+      `UPDATE print_reservations SET desired_date = ?, calendar_end_date = ?, printer_id = ? WHERE id = ?`
+    )
+    .bind(desiredDate, calendarEndDate, printerId, id)
+    .run();
+}
+
 /** Fetches today's assigned reservations for daily staff notifications. */
 export async function getAssignedReservationsByDate(
   db: D1Database,
