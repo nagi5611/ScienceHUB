@@ -163,6 +163,15 @@ import { authorizeStoragePath } from "../../lib/storage/permissions";
 
 const RESERVATION_APP = "3dprint-reservation";
 const MANAGEMENT_APP = "3dprint-management";
+const CONTEST_ENTRY_APP = "contest-entry";
+const CONTEST_MANAGEMENT_APP = "contest-management";
+
+const PRINTER_IMAGE_ACCESS_APPS = [
+  RESERVATION_APP,
+  MANAGEMENT_APP,
+  CONTEST_ENTRY_APP,
+  CONTEST_MANAGEMENT_APP,
+] as const;
 
 /** Parses route segments from the catch-all path param. */
 function parsePath(path: string | string[] | undefined): string[] {
@@ -219,6 +228,24 @@ async function requireAppAccess(
   }
 
   return { id: auth.id };
+}
+
+/** Requires login and access to any app that lists printers (shared image URL). */
+async function requirePrinterImageAccess(
+  request: Request,
+  env: Env
+): Promise<{ id: string } | Response> {
+  const auth = await requireUser(request, env);
+  if (auth instanceof Response) return auth;
+
+  const db = getDb(env);
+  for (const slug of PRINTER_IMAGE_ACCESS_APPS) {
+    if (await canUserAccessApp(db, auth.id, slug)) {
+      return { id: auth.id };
+    }
+  }
+
+  return error("このアプリへのアクセス権限がありません", 403);
 }
 
 /** Resolves print staff display label from member ID map. */
@@ -597,6 +624,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   try {
     const isAdminRoute = segments[0] === "admin";
     const isUploadRoute = segments[0] === "upload";
+    const isPrinterImageGet =
+      method === "GET" &&
+      segments[0] === "printers" &&
+      segments.length === 3 &&
+      segments[2] === "image";
 
     if (isUploadRoute) {
       const resAccess = await requireAppAccess(request, env, RESERVATION_APP);
@@ -609,6 +641,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     } else if (isAdminRoute) {
       const mgmtAccess = await requireAppAccess(request, env, MANAGEMENT_APP);
       if (mgmtAccess instanceof Response) return mgmtAccess;
+    } else if (isPrinterImageGet) {
+      const imageAccess = await requirePrinterImageAccess(request, env);
+      if (imageAccess instanceof Response) return imageAccess;
     } else if (
       segments[0] === "calendar" ||
       segments[0] === "reservations" ||
