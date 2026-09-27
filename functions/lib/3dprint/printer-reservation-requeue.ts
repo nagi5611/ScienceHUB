@@ -1,20 +1,14 @@
 // functions/lib/3dprint/printer-reservation-requeue.ts
 import { validatePrinterReservationSpan } from './availability';
 import { normalizePartCount } from './calendar-span';
-import {
-  createCalendarEventForReservation,
-  deleteCalendarEvent,
-  type GoogleCalendarEnv,
-} from './google-calendar';
+import { syncReservationCalendarAfterScheduleChange } from './admin-calendar-sync';
+import type { GoogleCalendarEnv } from './google-calendar';
 import { getAllPrinters } from './printers';
 import {
-  getAllMembers,
   getAvailableMemberIdsOnDate,
   getFutureReservationsByPrinter,
   getReservationById,
-  setGoogleEventId,
   updateReservationSchedule,
-  type Member,
   type Reservation,
 } from './reservations';
 import { addDays, getTodayJst, type PrintScale } from './slots';
@@ -162,33 +156,10 @@ async function applyReservationScheduleChange(
   newDate: string,
   newPrinterId: string
 ): Promise<void> {
-  const hadCalendarEvent =
-    (reservation.status === 'accepted' || reservation.status === 'printing') &&
-    !!reservation.google_event_id;
-
-  if (hadCalendarEvent && reservation.google_event_id) {
-    await deleteCalendarEvent(env, reservation.google_event_id);
-    await setGoogleEventId(env.DB, reservation.id, null);
-  }
-
   await updateReservationSchedule(env.DB, reservation.id, newDate, newPrinterId);
 
   const updated = await getReservationById(env.DB, reservation.id);
   if (!updated) return;
 
-  if (
-    (updated.status === 'accepted' || updated.status === 'printing') &&
-    updated.print_staff_member_id
-  ) {
-    const memberMap = await loadMemberMap(env.DB);
-    const calendarResult = await createCalendarEventForReservation(env, updated, memberMap);
-    if (calendarResult.ok && calendarResult.eventId) {
-      await setGoogleEventId(env.DB, updated.id, calendarResult.eventId);
-    }
-  }
-}
-
-async function loadMemberMap(db: D1Database): Promise<Map<string, Member>> {
-  const members = await getAllMembers(db);
-  return new Map(members.map((m) => [m.id, m]));
+  await syncReservationCalendarAfterScheduleChange(env, reservation, updated);
 }
