@@ -39,6 +39,7 @@ import {
   updateAdminCalendarUserFilterOptions,
 } from '../../../js/admin-calendar-user-filter.js';
 import {
+  buildCalendarMonthGridDays,
   createCalendarOccurrenceSlot,
   indexReservationOccurrencesByDate,
 } from '../../../js/print-reservation-calendar-ui.js';
@@ -400,34 +401,13 @@ async function renderAdminCalendar() {
     })
   );
 
-  const firstDay = new Date(currentYear, currentMonth - 1, 1);
-  const lastDay = new Date(currentYear, currentMonth, 0).getDate();
-  const startWeekday = firstDay.getDay();
   const todayStr = getTodayJst();
 
-  const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
-  const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
-  const prevMonthLast = new Date(currentYear, currentMonth - 1, 0).getDate();
-  const prevMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
-  const prevMonthNum = currentMonth === 1 ? 12 : currentMonth - 1;
-  for (let i = startWeekday - 1; i >= 0; i--) {
-    const dayNum = prevMonthLast - i;
-    const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-    grid.appendChild(createAdminDayCell(dayNum, true, byDate, todayStr, dateStr));
-  }
-
-  for (let day = 1; day <= lastDay; day++) {
-    const dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    grid.appendChild(createAdminDayCell(day, false, byDate, todayStr, dateStr));
-  }
-
-  const totalCells = startWeekday + lastDay;
-  const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-  const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
-  const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
-  for (let day = 1; day <= remaining; day++) {
-    const dateStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    grid.appendChild(createAdminDayCell(day, true, byDate, todayStr, dateStr));
+  for (const { dayNum, otherMonth, dateStr } of buildCalendarMonthGridDays(
+    currentYear,
+    currentMonth
+  )) {
+    grid.appendChild(createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr));
   }
 
   updateAdminStickyOffsets();
