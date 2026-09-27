@@ -393,6 +393,91 @@ function updateMergeControls() {
   }
 }
 
+/** 結合一覧ドラッグ時のビューポート端オートスクロール */
+const MERGE_DRAG_SCROLL_EDGE_PX = 64;
+const MERGE_DRAG_SCROLL_MAX_SPEED = 18;
+
+/** @type {number | null} */
+let mergeDragScrollRaf = null;
+/** @type {number} */
+let mergeDragScrollPointerY = 0;
+/** @type {((event: DragEvent) => void) | null} */
+let mergeDragScrollOnDragOver = null;
+
+/** 一覧のスクロール可能な祖先（なければ window スクロール） */
+function getMergeDragScrollContainer() {
+  let el = mergeFileList?.parentElement ?? null;
+  while (el) {
+    const { overflowY } = getComputedStyle(el);
+    if (
+      (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
+      el.scrollHeight > el.clientHeight
+    ) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/** ポインタ Y から 1 フレーム分の scrollTop 増分（端外は 0） */
+function mergeDragScrollDelta(clientY) {
+  const container = getMergeDragScrollContainer();
+  const top = container ? container.getBoundingClientRect().top : 0;
+  const bottom = container ? container.getBoundingClientRect().bottom : window.innerHeight;
+
+  if (clientY < top + MERGE_DRAG_SCROLL_EDGE_PX) {
+    const depth = (top + MERGE_DRAG_SCROLL_EDGE_PX - clientY) / MERGE_DRAG_SCROLL_EDGE_PX;
+    return -Math.ceil(MERGE_DRAG_SCROLL_MAX_SPEED * Math.min(1, depth));
+  }
+  if (clientY > bottom - MERGE_DRAG_SCROLL_EDGE_PX) {
+    const depth = (clientY - (bottom - MERGE_DRAG_SCROLL_EDGE_PX)) / MERGE_DRAG_SCROLL_EDGE_PX;
+    return Math.ceil(MERGE_DRAG_SCROLL_MAX_SPEED * Math.min(1, depth));
+  }
+  return 0;
+}
+
+/** オートスクロールの RAF ループ（端から外れたら停止） */
+function mergeDragScrollTick() {
+  mergeDragScrollRaf = null;
+  if (!mergeDragScrollOnDragOver) return;
+
+  const delta = mergeDragScrollDelta(mergeDragScrollPointerY);
+  if (delta === 0) return;
+
+  const container = getMergeDragScrollContainer();
+  if (container) {
+    container.scrollTop += delta;
+  } else {
+    window.scrollBy(0, delta);
+  }
+  mergeDragScrollRaf = requestAnimationFrame(mergeDragScrollTick);
+}
+
+/** ドラッグ中の document dragover で端スクロールを開始・更新 */
+function startMergeDragEdgeScroll() {
+  stopMergeDragEdgeScroll();
+  mergeDragScrollOnDragOver = (event) => {
+    mergeDragScrollPointerY = event.clientY;
+    if (mergeDragScrollRaf == null && mergeDragScrollDelta(event.clientY) !== 0) {
+      mergeDragScrollRaf = requestAnimationFrame(mergeDragScrollTick);
+    }
+  };
+  document.addEventListener("dragover", mergeDragScrollOnDragOver, true);
+}
+
+/** ドラッグ終了時にオートスクロールを止める */
+function stopMergeDragEdgeScroll() {
+  if (mergeDragScrollRaf != null) {
+    cancelAnimationFrame(mergeDragScrollRaf);
+    mergeDragScrollRaf = null;
+  }
+  if (mergeDragScrollOnDragOver) {
+    document.removeEventListener("dragover", mergeDragScrollOnDragOver, true);
+    mergeDragScrollOnDragOver = null;
+  }
+}
+
 /** ドラッグ並べ替え（ハンドルのみ） */
 function bindSortableItem(item) {
   const handle = item.querySelector(".pdf-file-drag");
@@ -402,9 +487,11 @@ function bindSortableItem(item) {
     item.classList.add("pdf-file--dragging");
     event.dataTransfer?.setData("text/plain", item.dataset.id ?? "");
     event.dataTransfer.effectAllowed = "move";
+    startMergeDragEdgeScroll();
   });
 
   handle.addEventListener("dragend", () => {
+    stopMergeDragEdgeScroll();
     item.classList.remove("pdf-file--dragging");
     mergeFileList?.querySelectorAll(".pdf-file--drop-target").forEach((el) => {
       el.classList.remove("pdf-file--drop-target");
