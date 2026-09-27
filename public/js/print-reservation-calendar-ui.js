@@ -18,11 +18,15 @@ export function createCalendarOccurrenceSlot(options) {
     compact = false,
     truncateForCell = (t) => t,
     escapeHtml = (t) => t,
+    /** 'scale' (default) colors slots by S/M/L; 'status' colors by reservation status. */
+    colorMode = 'scale',
   } = options;
 
   const slot = document.createElement('button');
   slot.type = 'button';
-  slot.className = `calendar-slot admin-calendar-slot ${occurrence.printScale}`;
+  const colorClass =
+    colorMode === 'status' ? `status-${r.status || 'applied'}` : occurrence.printScale;
+  slot.className = `calendar-slot admin-calendar-slot ${colorClass}`;
   slot.classList.add(`calendar-slot--${occurrence.mode}`);
   if (occurrence.segment !== 'single' && occurrence.segment !== 'start') {
     slot.classList.add('calendar-slot-span-continue');

@@ -581,6 +581,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
       const slot = createCalendarOccurrenceSlot({
         reservation: entry.reservation,
         occurrence: entry.occurrence,
+        colorMode: 'status',
         onOpenDetail: openDetail,
         draggable: true,
         dragBusy: calendarRescheduleBusy,

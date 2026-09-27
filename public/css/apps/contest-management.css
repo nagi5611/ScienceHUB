@@ -445,3 +445,37 @@
   color: #c2410c;
   border-color: #fed7aa;
 }
+
+/* Admin calendar: color chips by reservation status (not S/M/L scale). */
+#admin-calendar-section .calendar-slot.status-applied {
+  background: #e5e7eb !important;
+  color: #4b5563 !important;
+}
+
+#admin-calendar-section .calendar-slot.status-accepted {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
+#admin-calendar-section .calendar-slot.status-printing {
+  background: #fef3c7 !important;
+  color: #a16207 !important;
+}
+
+#admin-calendar-section .calendar-slot.status-delivered {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+#admin-calendar-section .calendar-slot.status-failed {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
+}
+
+#admin-calendar-section .legend-dot.status-applied {
+  background: #9ca3af;
+}
+
+#admin-calendar-section .legend-dot.status-accepted {
+  background: rgba(59, 130, 246, 0.55);
+}
