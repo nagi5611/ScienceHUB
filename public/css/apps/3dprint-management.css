@@ -414,6 +414,61 @@ textarea {
   overflow: hidden;
 }
 
+.calendar-drag-month-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 7;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: clamp(2rem, 8vw, 3.25rem);
+  pointer-events: none;
+  color: var(--color-muted);
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-primary) 12%, transparent),
+    transparent
+  );
+}
+
+.calendar-drag-month-edge--next {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--color-primary) 12%, transparent),
+    transparent
+  );
+}
+
+.calendar-drag-month-edge--prev {
+  left: 0;
+}
+
+.calendar-grid-wrap.is-calendar-dragging .calendar-drag-month-edge {
+  display: flex;
+  pointer-events: auto;
+}
+
+.calendar-drag-month-edge.is-hover {
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-bg));
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -2px;
+  color: var(--color-primary);
+}
+
+.calendar-drag-month-edge-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
+.calendar-drag-month-edge--next .calendar-drag-month-edge-label {
+  writing-mode: vertical-lr;
+}
+
 .calendar-day.drop-target {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;

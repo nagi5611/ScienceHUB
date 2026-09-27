@@ -38,6 +38,10 @@ import {
   createCalendarOccurrenceSlot,
   indexReservationOccurrencesByDate,
 } from '../../../js/print-reservation-calendar-ui.js';
+import {
+  calendarMonthAfterDelta,
+  setupAdminCalendarDragMonthNavigation,
+} from '../../../js/admin-calendar-drag-month.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 let contestStorageGroupSlug = '';
@@ -235,6 +239,14 @@ async function init() {
       renderTodayTasks();
     },
   });
+  setupAdminCalendarDragMonthNavigation({
+    wrapSelector: '#admin-calendar-section .calendar-grid-wrap',
+    getDraggedReservationId: () => draggedReservationId,
+    isRescheduleBusy: () => calendarRescheduleBusy,
+    getCurrentMonth: () => ({ year: currentYear, month: currentMonth }),
+    changeMonth,
+    onDropToMonth: handleAdminCalendarDropToMonth,
+  });
 
   document.querySelectorAll('.admin-menu-item[data-panel]').forEach((btn) => {
     btn.addEventListener('click', () => switchPanel(btn.dataset.panel));
@@ -379,15 +391,74 @@ async function checkManagementAccess() {
 
 /** Changes calendar month. */
 function changeMonth(delta) {
-  currentMonth += delta;
-  if (currentMonth > 12) {
-    currentMonth = 1;
-    currentYear++;
-  } else if (currentMonth < 1) {
-    currentMonth = 12;
-    currentYear--;
-  }
+  const next = calendarMonthAfterDelta(currentYear, currentMonth, delta);
+  currentYear = next.year;
+  currentMonth = next.month;
   renderAdminCalendar();
+}
+
+/** PATCHes a reservation to a new desired_date after drag-reschedule. */
+async function rescheduleAdminReservationToDate(reservationId, dateStr) {
+  const reservation = allReservations.find((r) => r.id === reservationId);
+  if (!reservation || reservation.desired_date === dateStr || calendarRescheduleBusy) return;
+
+  setCalendarRescheduleBusy(true, reservationId);
+  try {
+    await apiRequest(`admin/reservations/${reservationId}/reschedule`, {
+      method: 'PATCH',
+      body: JSON.stringify({ desired_date: dateStr }),
+    });
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setCalendarRescheduleBusy(false);
+  }
+}
+
+/** Finds the first bookable day in a month for an existing reservation (admin rules). */
+async function findEarliestAvailableDateInMonth(year, month, reservation) {
+  if (!reservation.printer_id) return null;
+
+  const todayStr = getTodayJst();
+  const lastDay = new Date(year, month, 0).getDate();
+  const scaleQuery = reservation.print_scale
+    ? `&scale=${encodeURIComponent(reservation.print_scale)}`
+    : '';
+  const printerQuery = `&printer_id=${encodeURIComponent(reservation.printer_id)}`;
+  const excludeParam = `&exclude_reservation_id=${encodeURIComponent(reservation.id)}`;
+
+  for (let day = 1; day <= lastDay; day++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    if (dateStr < todayStr) continue;
+
+    const availability = await apiRequest(
+      `admin/calendar/availability?date=${dateStr}${scaleQuery}${printerQuery}${excludeParam}`
+    );
+    if (availability.isFull || !availability.canBook) continue;
+    return dateStr;
+  }
+
+  return null;
+}
+
+/** Drops on a prev/next month edge: earliest open day in that target month. */
+async function handleAdminCalendarDropToMonth(targetYear, targetMonth, reservationId) {
+  draggedReservationId = null;
+  const reservation = allReservations.find((r) => r.id === reservationId);
+  if (!reservation || calendarRescheduleBusy) return;
+
+  const dateStr = await findEarliestAvailableDateInMonth(
+    targetYear,
+    targetMonth,
+    reservation
+  );
+  if (!dateStr) {
+    alert('移動できません');
+    return;
+  }
+
+  await rescheduleAdminReservationToDate(reservationId, dateStr);
 }
 
 /** Jumps the admin calendar to the current month. */
@@ -541,22 +612,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
       const id = e.dataTransfer.getData('text/plain') || draggedReservationId;
       draggedReservationId = null;
       if (!id || dateStr < todayStr || calendarRescheduleBusy) return;
-
-      const reservation = allReservations.find((r) => r.id === id);
-      if (reservation?.desired_date === dateStr) return;
-
-      setCalendarRescheduleBusy(true, id);
-      try {
-        await apiRequest(`admin/reservations/${id}/reschedule`, {
-          method: 'PATCH',
-          body: JSON.stringify({ desired_date: dateStr }),
-        });
-        await refreshAll();
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        setCalendarRescheduleBusy(false);
-      }
+      await rescheduleAdminReservationToDate(id, dateStr);
     });
   }
 
