@@ -94,6 +94,7 @@ const STORAGE_MIME_BY_EXT: Record<string, string> = {
   htm: "text/html; charset=utf-8",
   css: "text/css; charset=utf-8",
   js: "text/javascript; charset=utf-8",
+  jsx: "text/javascript; charset=utf-8",
   csv: "text/csv; charset=utf-8",
   zip: "application/zip",
   mp4: "video/mp4",

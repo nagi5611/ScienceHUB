@@ -9,6 +9,7 @@ const EDITABLE_EXTENSIONS = new Set([
   ".htm",
   ".css",
   ".js",
+  ".jsx",
   ".mjs",
   ".json",
   ".svg",
