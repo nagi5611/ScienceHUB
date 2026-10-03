@@ -14,6 +14,9 @@
   let saving = false;
   let dirty = false;
   let pill = null;
+  /** 再描画後に入場アニメを付けるステップ番号（0始まり） */
+  let pendingStepEnter = null;
+  const STEP_ANIM_MS = 220;
 
   /** 保存データがあればそれを使い、公開ページと同じ描画を始める */
   async function boot() {
@@ -266,6 +269,51 @@
     steps.splice(to, 0, item);
   }
 
+  function prefersReducedMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function waitStepAnim(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  /** 削除前のフェードアウト */
+  async function animateStepLeave(node) {
+    if (!node || prefersReducedMotion()) return;
+    node.classList.add('admin-step-leave');
+    await waitStepAnim(STEP_ANIM_MS);
+    node.classList.remove('admin-step-leave');
+  }
+
+  /** 入れ替え時に2ステップをずらす */
+  async function animateStepSwap(node, peer, direction) {
+    if (!node || !peer || prefersReducedMotion()) return;
+    const up = 'admin-step-nudge-up';
+    const down = 'admin-step-nudge-down';
+    if (direction === 'up') {
+      node.classList.add(up);
+      peer.classList.add(down);
+    } else {
+      node.classList.add(down);
+      peer.classList.add(up);
+    }
+    await waitStepAnim(STEP_ANIM_MS);
+    node.classList.remove(up, down);
+    peer.classList.remove(up, down);
+  }
+
+  /** 再描画後の入場ハイライト */
+  function applyPendingStepEnter(container) {
+    if (!pendingStepEnter || !container) return;
+    const nodes = [...container.querySelectorAll(':scope > .st')];
+    for (const i of pendingStepEnter) {
+      if (nodes[i]) nodes[i].classList.add('admin-step-enter');
+    }
+    pendingStepEnter = null;
+  }
+
   /** 見出し横に追加・削除・並べ替え */
   function bindStepToolbar(node, steps, index) {
     if (!node) return;
@@ -300,19 +348,29 @@
     if (up) up.disabled = index <= 0;
     if (down) down.disabled = index >= steps.length - 1;
 
-    up.addEventListener('click', (event) => {
+    up.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (index <= 0) return;
+      const list = node.parentElement;
+      const nodes = list ? [...list.querySelectorAll(':scope > .st')] : [];
+      const peer = nodes[index - 1];
+      await animateStepSwap(node, peer, 'up');
       swapSteps(steps, index, index - 1);
+      pendingStepEnter = new Set([index - 1, index]);
       rerender();
       scheduleSave();
     });
-    down.addEventListener('click', (event) => {
+    down.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (index >= steps.length - 1) return;
+      const list = node.parentElement;
+      const nodes = list ? [...list.querySelectorAll(':scope > .st')] : [];
+      const peer = nodes[index + 1];
+      await animateStepSwap(node, peer, 'down');
       swapSteps(steps, index, index + 1);
+      pendingStepEnter = new Set([index, index + 1]);
       rerender();
       scheduleSave();
     });
@@ -323,7 +381,7 @@
       rerender();
       scheduleSave();
     });
-    bar.querySelector('[data-admin-step-del]').addEventListener('click', (event) => {
+    bar.querySelector('[data-admin-step-del]').addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (steps.length <= 1) {
@@ -331,7 +389,12 @@
         return;
       }
       if (!window.confirm('このステップを削除しますか？')) return;
+      await animateStepLeave(node);
       steps.splice(index, 1);
+      if (steps.length) {
+        const enterAt = Math.min(index, steps.length - 1);
+        pendingStepEnter = new Set([enterAt]);
+      }
       rerender();
       scheduleSave();
     });
@@ -417,6 +480,7 @@
       bindStepNote(col, step);
       bindPicture(node, step, m);
     });
+    applyPendingStepEnter(container);
   }
 
   /** トラブルの質問と回答、画像を編集対象にする */

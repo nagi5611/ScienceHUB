@@ -34,6 +34,29 @@ textarea.ae-field{font-family:inherit}
 textarea.ae-field:focus{outline:none}
 
 body.admin-edit .st{position:relative}
+body.admin-edit .st.admin-step-leave{
+  transition:opacity .22s ease,transform .22s ease;
+  opacity:0;transform:scale(.985) translateY(-8px);pointer-events:none;
+}
+body.admin-edit .st.admin-step-nudge-up{
+  transition:transform .22s cubic-bezier(.2,.8,.2,1);
+  transform:translateY(-12px);
+}
+body.admin-edit .st.admin-step-nudge-down{
+  transition:transform .22s cubic-bezier(.2,.8,.2,1);
+  transform:translateY(12px);
+}
+@keyframes adminStepEnter{
+  from{opacity:.5;transform:translateY(8px)}
+  to{opacity:1;transform:none}
+}
+body.admin-edit .st.admin-step-enter{animation:adminStepEnter .28s cubic-bezier(.2,.8,.2,1) both}
+@media (prefers-reduced-motion:reduce){
+  body.admin-edit .st.admin-step-leave,
+  body.admin-edit .st.admin-step-nudge-up,
+  body.admin-edit .st.admin-step-nudge-down{transition:none;transform:none;opacity:1}
+  body.admin-edit .st.admin-step-enter{animation:none}
+}
 body.admin-edit .admin-st-head{
   display:flex;flex-wrap:wrap;align-items:center;gap:8px;
   margin-bottom:4px;
