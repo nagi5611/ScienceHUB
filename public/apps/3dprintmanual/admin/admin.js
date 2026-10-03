@@ -20,7 +20,7 @@
   async function boot() {
     pill = document.createElement('div');
     pill.className = 'admin-pill';
-    pill.title = '文字をクリックで編集。画像をクリックで差し替え。動画は枠にマウスを乗せて差し替え。';
+    pill.title = '文字をクリックで編集。画像をクリックで画像管理。動画は枠にマウスを乗せて差し替え。';
     pill.textContent = '読み込み中…';
     document.body.appendChild(pill);
 
@@ -64,7 +64,7 @@
       }
       document.body.classList.add('admin-edit');
       if (!hinted && !pill.classList.contains('err')) {
-        setPill('文字をクリックで編集、画像をクリックで差し替え');
+        setPill('文字をクリックで編集、画像をクリックで画像管理');
         hinted = true;
       }
     } else if (!hinted && !pill.classList.contains('err')) {
@@ -134,14 +134,13 @@
       bindText(sec.querySelector('.lead'), () => data.lead || '', (value) => {
         data.lead = value;
       }, 'txt');
-      const time = sec.querySelector('.sec-h .badge');
-      if (time && data.time != null) {
-        bindText(time, () => `目安 ${data.time}`, (value) => {
-          data.time = value.replace(/^目安\s*/, '');
-        }, 'text');
-      }
+      bindSectionTime(sec, data);
       if (data.patterns) bindPatterns(sec, data.patterns, m);
-      else if (data.steps) bindStepList(sec.querySelector('.L-alt'), data.steps, m);
+      else if (data.steps) {
+        const list = sec.querySelector('.L-alt');
+        bindStepList(list, data.steps, m);
+        bindStepListAdd(list, data.steps);
+      }
       if (data.trouble) bindTrouble(sec, data.trouble, m);
       sec.querySelectorAll('[data-check]').forEach((button) => {
         const i = +button.dataset.check;
@@ -202,16 +201,111 @@
         }, 'text');
         bindVideo(pane.querySelector('.vid'), option);
       }
-      bindStepList(pane.querySelector('.L-alt'), option.steps, m);
+      const list = pane.querySelector('.L-alt');
+      bindStepList(list, option.steps, m);
+      bindStepListAdd(list, option.steps);
+    });
+  }
+
+  /** セクションの目安時間を編集する（未設定でも追加できる） */
+  function bindSectionTime(sec, data) {
+    const secH = sec.querySelector('.sec-h');
+    if (!secH) return;
+    let badge = sec.querySelector('.sec-h .badge.badge-muted');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge badge-muted';
+      secH.appendChild(badge);
+      if (data.time == null) data.time = '';
+    }
+    if (badge.dataset.ae === '1') return;
+    bindText(badge, () => timeBadgeLabel(data.time), (value) => {
+      data.time = parseTimeBadge(value);
+    }, 'text');
+  }
+
+  /** 目安バッジの表示文言 */
+  function timeBadgeLabel(time) {
+    const t = typeof time === 'string' ? time.trim() : '';
+    return t ? `目安 ${t}` : '目安（未設定・クリックで入力）';
+  }
+
+  /** 目安バッジの入力を time フィールドへ戻す */
+  function parseTimeBadge(value) {
+    return String(value || '')
+      .replace(/^目安\s*/, '')
+      .replace(/（未設定・クリックで入力）/g, '')
+      .trim();
+  }
+
+  /** 新規ステップの初期データ */
+  function blankStep() {
+    return {
+      title: '新しいステップ',
+      text: '【要記入】ここに説明を書きます。',
+      img: '写真の説明',
+    };
+  }
+
+  /** 手順リストの末尾にステップ追加ボタン */
+  function bindStepListAdd(container, steps) {
+    if (!container || !steps) return;
+    let bar = container.nextElementSibling;
+    if (!bar || !bar.classList.contains('admin-step-add')) {
+      bar = document.createElement('div');
+      bar.className = 'admin-step-add';
+      bar.innerHTML = '<button type="button">＋ ステップを追加</button>';
+      container.after(bar);
+    }
+    const button = bar.querySelector('button');
+    button.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      steps.push(blankStep());
+      rerender();
+      scheduleSave();
+    };
+  }
+
+  /** 各ステップの削除・下に追加 */
+  function bindStepToolbar(node, steps, index) {
+    if (!node || node.dataset.adminStBar === '1') return;
+    node.dataset.adminStBar = '1';
+    const bar = document.createElement('div');
+    bar.className = 'admin-st-bar';
+    bar.innerHTML = `
+      <button type="button" data-admin-step-add-below>この下にステップを追加</button>
+      <button type="button" data-admin-step-del>このステップを削除</button>
+    `;
+    node.appendChild(bar);
+    bar.querySelector('[data-admin-step-add-below]').addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      steps.splice(index + 1, 0, blankStep());
+      rerender();
+      scheduleSave();
+    });
+    bar.querySelector('[data-admin-step-del]').addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (steps.length <= 1) {
+        setPill('最低1つのステップが必要です', true);
+        return;
+      }
+      if (!window.confirm('このステップを削除しますか？')) return;
+      steps.splice(index, 1);
+      rerender();
+      scheduleSave();
     });
   }
 
   /** 手順の見出し・本文・画像を編集対象にする */
   function bindStepList(container, steps, m) {
     if (!container || !steps) return;
-    [...container.children].forEach((node, index) => {
+    [...container.querySelectorAll(':scope > .st')].forEach((node, index) => {
       const step = steps[index];
       if (!step) return;
+      bindStepToolbar(node, steps, index);
       bindText(node.querySelector('h3'), () => step.title || '', (value) => {
         step.title = value;
       }, 'text');
@@ -372,7 +466,7 @@
     });
   }
 
-  /** 手順とトラブルの画像をクリックで差し替える */
+  /** 手順とトラブルの画像をクリックで管理パネルを開く */
   function bindPicture(container, owner, m) {
     const frame = container.querySelector('.ph');
     if (!frame || frame.dataset.aeMedia === '1') return;
@@ -384,31 +478,230 @@
       }, 'text');
     }
     frame.addEventListener('click', (event) => {
-      if (event.target.closest('button, .car-ft, [data-ae]')) return;
+      if (event.target.closest('button, .car-ft, [data-ae], .admin-st-bar')) return;
       if (frame._swiped) return;
       event.preventDefault();
       event.stopPropagation();
       const slide = event.target.closest('.car-slide');
       const slides = [...frame.querySelectorAll('.car-slide')];
       const index = slide ? Math.max(0, slides.indexOf(slide)) : 0;
-      const hasImage = frame.classList.contains('ph-img') || frame.classList.contains('ph-multi');
+      openImagePanel(owner, m, index);
+    });
+  }
+
+  let imagePanelEl = null;
+  let imagePanelState = null;
+
+  /** 画像の追加・差し替え・削除・複数枚追加パネル */
+  function openImagePanel(owner, m, initialIndex) {
+    closeImagePanel();
+    const info = readList(owner, m);
+    let index = Math.min(Math.max(0, initialIndex), Math.max(0, info.list.length - 1));
+    if (!info.list.length) index = 0;
+
+    const panel = document.createElement('div');
+    panel.className = 'admin-img-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.innerHTML = `
+      <div class="admin-img-panel-in">
+        <div class="admin-img-panel-h">
+          <b>画像の管理</b>
+          <button type="button" data-close aria-label="閉じる">×</button>
+        </div>
+        <div class="admin-img-thumbs" data-thumbs></div>
+        <div class="admin-img-actions" data-actions></div>
+        <div class="admin-img-meta" data-meta></div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+    imagePanelEl = panel;
+
+    const thumbs = panel.querySelector('[data-thumbs]');
+    const actions = panel.querySelector('[data-actions]');
+    const meta = panel.querySelector('[data-meta]');
+
+    const refresh = () => {
+      const cur = readList(owner, m);
+      if (index >= cur.list.length) index = Math.max(0, cur.list.length - 1);
+      imagePanelState = { owner, m, index };
+      renderImageThumbs(thumbs, cur.list, index, (i) => {
+        index = i;
+        refresh();
+      });
+      renderImageActions(actions, owner, m, cur, index, refresh, closeImagePanel);
+      renderImageMeta(meta, owner, m);
+    };
+
+    panel.addEventListener('click', (event) => {
+      if (event.target === panel) closeImagePanel();
+    });
+    panel.querySelector('[data-close]').addEventListener('click', () => closeImagePanel());
+    const onKey = (event) => {
+      if (event.key === 'Escape') closeImagePanel();
+    };
+    document.addEventListener('keydown', onKey);
+    panel._onKey = onKey;
+
+    refresh();
+  }
+
+  /** 画像パネルを閉じる */
+  function closeImagePanel() {
+    if (!imagePanelEl) return;
+    if (imagePanelEl._onKey) document.removeEventListener('keydown', imagePanelEl._onKey);
+    imagePanelEl.remove();
+    imagePanelEl = null;
+    imagePanelState = null;
+  }
+
+  /** サムネイル一覧 */
+  function renderImageThumbs(container, list, selected, onSelect) {
+    container.innerHTML = '';
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ph-mini';
+      empty.textContent = '画像はまだありません';
+      container.appendChild(empty);
+      return;
+    }
+    list.forEach((url, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.classList.toggle('on', i === selected);
+      btn.title = `画像 ${i + 1}`;
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      btn.appendChild(img);
+      btn.addEventListener('click', () => onSelect(i));
+      container.appendChild(btn);
+    });
+  }
+
+  /** 画像操作ボタン */
+  function renderImageActions(container, owner, m, info, index, refresh, close) {
+    container.innerHTML = '';
+    const hasList = info.list.length > 0;
+
+    const addOne = document.createElement('button');
+    addOne.type = 'button';
+    addOne.className = 'primary';
+    addOne.textContent = hasList ? '画像を追加（1枚）' : '画像を追加';
+    addOne.addEventListener('click', () => {
       replaceFile('image', (url) => {
-        const info = readList(owner, m);
-        const list = info.list.slice();
-        if (hasImage) {
-          if (!list.length) list.push(url);
-          else list[index] = url;
-          writeList(owner, m, info.kind, list);
-          const img = (slide || frame).querySelector('img');
-          if (img) img.src = url;
-          scheduleSave();
-          return;
-        }
-        writeList(owner, m, info.kind, [url]);
-        rerender();
+        const next = readList(owner, m);
+        const list = next.list.slice();
+        list.push(url);
+        writeListMulti(owner, m, list);
+        index = list.length - 1;
+        rerender({ keepImagePanel: true });
         scheduleSave();
+        refresh();
       });
     });
+
+    const addMany = document.createElement('button');
+    addMany.type = 'button';
+    addMany.textContent = '複数枚をまとめて追加';
+    addMany.addEventListener('click', async () => {
+      const files = await chooseFiles('image', true);
+      if (!files.length) return;
+      try {
+        setPill('アップロード中…');
+        const urls = [];
+        for (const file of files) urls.push(await uploadFile(file));
+        const next = readList(owner, m);
+        const list = next.list.concat(urls);
+        writeListMulti(owner, m, list);
+        index = list.length - urls.length;
+        rerender({ keepImagePanel: true });
+        scheduleSave();
+        refresh();
+      } catch (error) {
+        setPill(error instanceof Error ? error.message : 'アップロードに失敗しました', true);
+      }
+    });
+
+    const replace = document.createElement('button');
+    replace.type = 'button';
+    replace.textContent = hasList ? '選択中の画像を差し替え' : '画像を設定';
+    replace.addEventListener('click', () => {
+      replaceFile('image', (url) => {
+        const next = readList(owner, m);
+        const list = next.list.slice();
+        if (!list.length) list.push(url);
+        else list[index] = url;
+        writeListMulti(owner, m, list);
+        rerender({ keepImagePanel: true });
+        scheduleSave();
+        refresh();
+      });
+    });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'danger';
+    del.textContent = '選択中の画像を削除';
+    del.disabled = !hasList;
+    del.addEventListener('click', () => {
+      if (!hasList) return;
+      if (!window.confirm('この画像を削除しますか？')) return;
+      const next = readList(owner, m);
+      const list = next.list.slice();
+      list.splice(index, 1);
+      writeListMulti(owner, m, list);
+      index = Math.min(index, Math.max(0, list.length - 1));
+      rerender({ keepImagePanel: true });
+      scheduleSave();
+      refresh();
+    });
+
+    const done = document.createElement('button');
+    done.type = 'button';
+    done.textContent = '閉じる';
+    done.addEventListener('click', () => close());
+
+    container.append(addOne, addMany, replace, del, done);
+  }
+
+  /** 縦長・説明文の補助 */
+  function renderImageMeta(container, owner, m) {
+    const tall = !!owner.tall;
+    container.innerHTML = `
+      <p>画像枠をクリックするとこのパネルが開きます。カルーセルは複数枚追加で作れます。</p>
+      <label><input type="checkbox" data-tall ${tall ? 'checked' : ''}> 縦長写真として表示</label>
+    `;
+    const input = container.querySelector('[data-tall]');
+    input.addEventListener('change', () => {
+      owner.tall = input.checked;
+      rerender({ keepImagePanel: true });
+      scheduleSave();
+    });
+  }
+
+  /** 枚数に応じて src / srcs を整理して保存する */
+  function writeListMulti(owner, m, list) {
+    const cleaned = list.filter((url) => typeof url === 'string' && url);
+    if (!cleaned.length) {
+      writeField(owner, 'src', m, '');
+      if (owner.srcs != null) {
+        if (isMachineMap(owner.srcs)) owner.srcs = { ...owner.srcs, [m]: [] };
+        else owner.srcs = [];
+      }
+      return;
+    }
+    if (cleaned.length === 1) {
+      writeField(owner, 'src', m, cleaned[0]);
+      if (owner.srcs != null) {
+        if (isMachineMap(owner.srcs)) owner.srcs = { ...owner.srcs, [m]: [] };
+        else delete owner.srcs;
+      }
+      return;
+    }
+    if (isMachineMap(owner.srcs)) owner.srcs = { ...owner.srcs, [m]: cleaned };
+    else owner.srcs = cleaned;
+    writeField(owner, 'src', m, cleaned[0]);
   }
 
   /** 参考動画の差し替えボタンを付ける */
@@ -449,14 +742,23 @@
 
   /** ファイル選択ダイアログを開く */
   function chooseFile(kind) {
+    return chooseFiles(kind, false).then((files) => files[0] || null);
+  }
+
+  /** ファイル選択（複数可） */
+  function chooseFiles(kind, multiple) {
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
+      input.multiple = !!multiple;
       input.accept = kind === 'video'
         ? 'video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov'
         : 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
-      input.addEventListener('change', () => resolve(input.files && input.files[0] ? input.files[0] : null));
-      input.addEventListener('cancel', () => resolve(null));
+      input.addEventListener('change', () => {
+        const files = input.files ? [...input.files] : [];
+        resolve(files);
+      });
+      input.addEventListener('cancel', () => resolve([]));
       input.click();
     });
   }
@@ -560,7 +862,8 @@
   }
 
   /** 画像を入れたあとに、今のスクロール位置で描き直す */
-  function rerender() {
+  function rerender(options = {}) {
+    if (!options.keepImagePanel) closeImagePanel();
     const y = window.scrollY;
     if (typeof window.GUIDE_RENDER === 'function') window.GUIDE_RENDER();
     window.scrollTo(0, y);
