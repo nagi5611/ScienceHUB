@@ -32,7 +32,12 @@
       const res = await fetch('/api/3dprintmanual/content');
       const body = await readJson(res);
       if (!res.ok) throw new Error(body.error || '本文を読み込めませんでした');
-      if (body.content) adoptContent(body.content);
+      if (body.content) {
+        if (typeof window.adoptGuideContent === 'function') window.adoptGuideContent(body.content);
+        else adoptContent(body.content);
+        applyContentChrome(body.content);
+        window.__guideContentHydrated = true;
+      }
     } catch (error) {
       setPill(error instanceof Error ? error.message : '本文を読み込めませんでした', true);
     }
@@ -40,7 +45,7 @@
     applyChrome();
     window.GUIDE_AFTER_RENDER = onRendered;
     try {
-      await loadScript('/apps/3dprintmanual/js/main.js?v=20261003c');
+      await loadScript('/apps/3dprintmanual/js/main.js?v=20261005a');
     } catch {
       setPill('画面の読み込みに失敗しました', true);
       document.body.classList.remove('admin-booting');
@@ -1029,24 +1034,20 @@
     window.scrollTo(0, y);
   }
 
-  /** 保存済み本文を、いまのガイドデータへ移す */
-  function adoptContent(content) {
+  /** 保存済み chrome 文言を編集用 state に移す */
+  function applyContentChrome(content) {
     if (!content || content.version !== 1) return;
-    if (content.machines && typeof content.machines === 'object') {
-      for (const key of Object.keys(GUIDE_MACHINES)) delete GUIDE_MACHINES[key];
-      Object.assign(GUIDE_MACHINES, content.machines);
-    }
-    if (Array.isArray(content.sections)) {
-      GUIDE_SECTIONS.splice(0, GUIDE_SECTIONS.length, ...content.sections);
-    }
-    if (Array.isArray(content.checklist)) {
-      GUIDE_CHECKLIST.splice(0, GUIDE_CHECKLIST.length, ...content.checklist);
-    }
     if (content.chrome && typeof content.chrome === 'object') {
       for (const [key, value] of Object.entries(content.chrome)) {
         if (typeof value === 'string') chromeState[key] = value;
       }
     }
+  }
+
+  /** @deprecated adoptGuideContent を使う */
+  function adoptContent(content) {
+    if (typeof window.adoptGuideContent === 'function') window.adoptGuideContent(content);
+    applyContentChrome(content);
   }
 
   /** 初期表示の固定文言を控える */

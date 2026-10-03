@@ -426,12 +426,20 @@
     }, { passive: true });
   }
 
-  // ── init ──
-  window.GUIDE_RENDER = renderAll;
-  $$('[data-reserve]').forEach(a => a.href = RESERVE_URL);
-  renderToc();
-  renderAll();
-  watchToc();
-  tocSheet();
-  stepNav();
+  /** 起動時に R2 本文を取り込んでから描画する */
+  async function start() {
+    window.GUIDE_RENDER = renderAll;
+    $$('[data-reserve]').forEach((a) => { a.href = RESERVE_URL; });
+    if (!window.__guideContentHydrated && typeof window.fetchGuideContentFromApi === 'function') {
+      await window.fetchGuideContentFromApi();
+    }
+    window.__guideContentHydrated = true;
+    renderToc();
+    renderAll();
+    watchToc();
+    tocSheet();
+    stepNav();
+  }
+
+  start();
 })();
