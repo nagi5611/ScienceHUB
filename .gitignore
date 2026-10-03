@@ -19,7 +19,7 @@ blob-report/
 .wrangler/ffmpeg-core-check.wasm
 public/apps/image-converter/vendor/ffmpeg/ffmpeg-core.wasm
 
-# 3D print manual: videos are stored in R2 (upload via /apps/3dprintmanual/admin/)
+# 3D print manual: videos are stored in R2 (upload via /apps/3dprintmanual-editor/)
 public/apps/3dprintmanual/videoes/*.mp4
 .worktrees/
 .local-assets/

@@ -1,4 +1,4 @@
-// public/apps/3dprintmanual/admin/admin.js
+// public/apps/3dprintmanual-editor/editor.js
 // 公開ガイドと同じ画面で、文字クリック編集と R2 への画像・動画アップロードを行う
 (() => {
   'use strict';
