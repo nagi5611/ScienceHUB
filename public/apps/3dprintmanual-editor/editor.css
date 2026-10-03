@@ -34,16 +34,35 @@ textarea.ae-field{font-family:inherit}
 textarea.ae-field:focus{outline:none}
 
 body.admin-edit .st{position:relative}
+body.admin-edit .admin-st-head{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  margin-bottom:4px;
+}
+body.admin-edit .admin-st-head h3{
+  flex:1 1 12rem;margin:0;min-width:0;
+}
+body.admin-edit .admin-st-head .st-no{flex-shrink:0}
 .admin-st-bar{
-  display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:8px;
-  border-top:1px dashed var(--color-border);
+  display:flex;flex-wrap:wrap;gap:4px;align-items:center;
+  flex-shrink:0;
 }
 .admin-st-bar button{
-  font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border-radius:6px;
+  font:inherit;font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;
   border:1px solid var(--color-border);background:var(--color-surface);cursor:pointer;
 }
-.admin-st-bar button:hover{border-color:var(--color-primary);color:var(--color-primary-dark)}
+.admin-st-bar button:hover:not(:disabled){border-color:var(--color-primary);color:var(--color-primary-dark)}
+.admin-st-bar button:disabled{opacity:.4;cursor:not-allowed}
 .admin-st-bar button[data-admin-step-del]{color:#9a4a07;border-color:#fbc998}
+.admin-note-bar{
+  display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;
+}
+.admin-note-bar button{
+  font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border-radius:6px;
+  border:1px dashed var(--color-border);background:var(--color-surface-muted);cursor:pointer;
+}
+.admin-note-bar button:hover{border-color:var(--color-primary);color:var(--color-primary-dark)}
+.admin-note-bar button[data-note-add-warn],
+.admin-note-bar button[data-note-del]{color:#9a4a07;border-color:#fbc998}
 .admin-step-add{margin:14px 0 4px}
 .admin-step-add button{
   font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border-radius:8px;

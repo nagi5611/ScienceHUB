@@ -254,17 +254,68 @@
     };
   }
 
-  /** 各ステップの削除・下に追加 */
+  /** ステップのテキスト列（画像 .ph 以外） */
+  function stepTextCol(node) {
+    return node.querySelector(':scope > div:not(.ph)');
+  }
+
+  /** 手順配列内で2要素を入れ替える */
+  function swapSteps(steps, from, to) {
+    const item = steps[from];
+    steps.splice(from, 1);
+    steps.splice(to, 0, item);
+  }
+
+  /** 見出し横に追加・削除・並べ替え */
   function bindStepToolbar(node, steps, index) {
-    if (!node || node.dataset.adminStBar === '1') return;
-    node.dataset.adminStBar = '1';
+    if (!node) return;
+    const col = stepTextCol(node);
+    if (!col || col.dataset.adminStToolbar === '1') return;
+    col.dataset.adminStToolbar = '1';
+
+    const stNo = col.querySelector('.st-no');
+    const h3 = col.querySelector('h3');
+    if (!stNo || !h3) return;
+
+    let head = col.querySelector(':scope > .admin-st-head');
+    if (!head) {
+      head = document.createElement('div');
+      head.className = 'admin-st-head';
+      col.insertBefore(head, stNo);
+      head.append(stNo, h3);
+    }
+
     const bar = document.createElement('div');
     bar.className = 'admin-st-bar';
     bar.innerHTML = `
-      <button type="button" data-admin-step-add-below>この下にステップを追加</button>
-      <button type="button" data-admin-step-del>このステップを削除</button>
+      <button type="button" data-admin-step-up title="上へ">↑</button>
+      <button type="button" data-admin-step-down title="下へ">↓</button>
+      <button type="button" data-admin-step-add-below>下に追加</button>
+      <button type="button" data-admin-step-del>削除</button>
     `;
-    node.appendChild(bar);
+    head.appendChild(bar);
+
+    const up = bar.querySelector('[data-admin-step-up]');
+    const down = bar.querySelector('[data-admin-step-down]');
+    if (up) up.disabled = index <= 0;
+    if (down) down.disabled = index >= steps.length - 1;
+
+    up.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (index <= 0) return;
+      swapSteps(steps, index, index - 1);
+      rerender();
+      scheduleSave();
+    });
+    down.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (index >= steps.length - 1) return;
+      swapSteps(steps, index, index + 1);
+      rerender();
+      scheduleSave();
+    });
     bar.querySelector('[data-admin-step-add-below]').addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -286,12 +337,76 @@
     });
   }
 
+  /** ヒント・注意の追加・種類変更・削除 */
+  function bindStepNote(col, step) {
+    if (!col) return;
+    const p = col.querySelector('p');
+    if (!p) return;
+
+    if (step.note && typeof step.note === 'object') {
+      const noteEl = col.querySelector('.note');
+      const body = noteEl && noteEl.querySelector('div');
+      if (body) {
+        bindText(body, () => step.note.text || '', (value) => {
+          step.note.text = value;
+        }, 'txt');
+      }
+      const ctrl = document.createElement('div');
+      ctrl.className = 'admin-note-bar';
+      const isWarn = step.note.type === 'warn';
+      ctrl.innerHTML = `
+        <button type="button" data-note-toggle>${isWarn ? 'ヒントに変更' : '注意に変更'}</button>
+        <button type="button" data-note-del>ヒント・注意を削除</button>
+      `;
+      if (noteEl) noteEl.after(ctrl);
+      else p.after(ctrl);
+      ctrl.querySelector('[data-note-toggle]').addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        step.note.type = step.note.type === 'warn' ? 'tip' : 'warn';
+        rerender();
+        scheduleSave();
+      });
+      ctrl.querySelector('[data-note-del]').addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        delete step.note;
+        rerender();
+        scheduleSave();
+      });
+      return;
+    }
+
+    const bar = document.createElement('div');
+    bar.className = 'admin-note-bar';
+    bar.innerHTML = `
+      <button type="button" data-note-add-tip>ヒントを追加</button>
+      <button type="button" data-note-add-warn>注意を追加</button>
+    `;
+    p.after(bar);
+    bar.querySelector('[data-note-add-tip]').addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      step.note = { type: 'tip', text: '【要記入】' };
+      rerender();
+      scheduleSave();
+    });
+    bar.querySelector('[data-note-add-warn]').addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      step.note = { type: 'warn', text: '【要記入】' };
+      rerender();
+      scheduleSave();
+    });
+  }
+
   /** 手順の見出し・本文・画像を編集対象にする */
   function bindStepList(container, steps, m) {
     if (!container || !steps) return;
     [...container.querySelectorAll(':scope > .st')].forEach((node, index) => {
       const step = steps[index];
       if (!step) return;
+      const col = stepTextCol(node);
       bindStepToolbar(node, steps, index);
       bindText(node.querySelector('h3'), () => step.title || '', (value) => {
         step.title = value;
@@ -299,12 +414,7 @@
       bindText(node.querySelector('p'), () => textOf(step.text, m), (value) => {
         writeField(step, 'text', m, value);
       }, 'txt');
-      const note = node.querySelector('.note div');
-      if (note && step.note) {
-        bindText(note, () => step.note.text || '', (value) => {
-          step.note.text = value;
-        }, 'txt');
-      }
+      bindStepNote(col, step);
       bindPicture(node, step, m);
     });
   }
@@ -465,7 +575,7 @@
       }, 'text');
     }
     frame.addEventListener('click', (event) => {
-      if (event.target.closest('button, .car-ft, [data-ae], .admin-st-bar')) return;
+      if (event.target.closest('button, .car-ft, [data-ae], .admin-st-bar, .admin-st-head, .admin-note-bar')) return;
       if (frame._swiped) return;
       event.preventDefault();
       event.stopPropagation();
