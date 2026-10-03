@@ -7,7 +7,6 @@
   const MAX_BYTES = 512 * 1024 * 1024;
 
   const chromeState = {};
-  let isAdmin = false;
   let staticBound = false;
   let hinted = false;
   let saveTimer = 0;
@@ -25,13 +24,6 @@
     document.body.appendChild(pill);
 
     Object.assign(chromeState, captureChrome());
-    try {
-      const me = await fetch('/api/auth/me');
-      const meBody = await readJson(me);
-      isAdmin = !!(me.ok && meBody.user && meBody.user.is_admin);
-    } catch {
-      isAdmin = false;
-    }
 
     try {
       const res = await fetch('/api/3dprintmanual/content');
@@ -56,19 +48,14 @@
   function onRendered() {
     document.querySelectorAll('textarea.ae-field').forEach((field) => field.blur());
     applyDynamicChrome();
-    if (isAdmin) {
-      bindDynamic();
-      if (!staticBound) {
-        bindStatic();
-        staticBound = true;
-      }
-      document.body.classList.add('admin-edit');
-      if (!hinted && !pill.classList.contains('err')) {
-        setPill('文字をクリックで編集、画像をクリックで画像管理');
-        hinted = true;
-      }
-    } else if (!hinted && !pill.classList.contains('err')) {
-      setPill('管理者権限がないため、表示のみです');
+    bindDynamic();
+    if (!staticBound) {
+      bindStatic();
+      staticBound = true;
+    }
+    document.body.classList.add('admin-edit');
+    if (!hinted && !pill.classList.contains('err')) {
+      setPill('文字をクリックで編集、画像をクリックで画像管理');
       hinted = true;
     }
     document.body.classList.remove('admin-booting');
@@ -820,7 +807,6 @@
 
   /** 編集内容を R2 の本文へ書く */
   function scheduleSave() {
-    if (!isAdmin) return;
     dirty = true;
     setPill('編集を保存します…');
     window.clearTimeout(saveTimer);

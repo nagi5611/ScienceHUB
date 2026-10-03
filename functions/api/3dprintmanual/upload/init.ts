@@ -10,12 +10,12 @@ import {
   MANUAL_PART_SIZE,
   MANUAL_SIMPLE_MAX,
   createManualMediaKey,
-  manualAdminDenied,
+  manualEditorDenied,
   manualContentType,
 } from "../../../lib/3dprintmanual-content";
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const denied = await manualAdminDenied(context.request, context.env);
+  const denied = await manualEditorDenied(context.request, context.env);
   if (denied) return denied;
 
   let body: unknown;

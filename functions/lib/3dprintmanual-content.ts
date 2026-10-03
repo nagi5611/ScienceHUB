@@ -4,8 +4,12 @@
 
 import type { Env } from "./types";
 import { jsonError } from "./types";
-import { requireAdmin, requireUser } from "./auth";
+import { requireUser } from "./auth";
+import { canUserAccessApp } from "./apps";
+import { getDb } from "./db";
 import { getFiles } from "./r2";
+
+export const MANUAL_EDITOR_APP_SLUG = "3dprintmanual-editor";
 
 export const MANUAL_CONTENT_KEY = "3dprintmanual/content.json";
 export const MANUAL_MEDIA_PREFIX = "3dprintmanual/media/";
@@ -37,13 +41,19 @@ export interface ManualContent {
   chrome: Record<string, string>;
 }
 
-/** 管理者でなければエラーレスポンスを返す */
-export async function manualAdminDenied(
+/** 利用ガイド編集アプリに入れるユーザーでなければエラーレスポンスを返す */
+export async function manualEditorDenied(
   request: Request,
   env: Env
 ): Promise<Response | null> {
-  const admin = await requireAdmin(request, env);
-  return admin instanceof Response ? admin : null;
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+
+  const allowed = await canUserAccessApp(getDb(env), user.id, MANUAL_EDITOR_APP_SLUG);
+  if (!allowed) {
+    return jsonError("このアプリへのアクセス権限がありません", 403);
+  }
+  return null;
 }
 
 /** ログインしていなければエラーレスポンスを返す */

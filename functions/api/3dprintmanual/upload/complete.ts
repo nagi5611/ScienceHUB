@@ -7,7 +7,7 @@ import { jsonError } from "../../../lib/types";
 import { getFiles } from "../../../lib/r2";
 import {
   isManualMediaKey,
-  manualAdminDenied,
+  manualEditorDenied,
   manualMediaUrl,
 } from "../../../lib/3dprintmanual-content";
 
@@ -17,7 +17,7 @@ interface UploadedPart {
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const denied = await manualAdminDenied(context.request, context.env);
+  const denied = await manualEditorDenied(context.request, context.env);
   if (denied) return denied;
 
   let body: unknown;

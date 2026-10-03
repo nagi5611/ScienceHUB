@@ -5,7 +5,7 @@
 import type { Env } from "../../lib/types";
 import { jsonError } from "../../lib/types";
 import {
-  manualAdminDenied,
+  manualEditorDenied,
   manualUserDenied,
   parseManualContent,
   readManualContent,
@@ -26,7 +26,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
-  const denied = await manualAdminDenied(context.request, context.env);
+  const denied = await manualEditorDenied(context.request, context.env);
   if (denied) return denied;
 
   const length = Number(context.request.headers.get("content-length") ?? "0");

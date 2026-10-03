@@ -8,11 +8,11 @@ import { getFiles } from "../../../lib/r2";
 import {
   MANUAL_PART_SIZE,
   isManualMediaKey,
-  manualAdminDenied,
+  manualEditorDenied,
 } from "../../../lib/3dprintmanual-content";
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const denied = await manualAdminDenied(context.request, context.env);
+  const denied = await manualEditorDenied(context.request, context.env);
   if (denied) return denied;
 
   const key = context.request.headers.get("X-R2-Key") ?? "";

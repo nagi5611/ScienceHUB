@@ -8,13 +8,13 @@ import { getFiles } from "../../lib/r2";
 import {
   MANUAL_SIMPLE_MAX,
   createManualMediaKey,
-  manualAdminDenied,
+  manualEditorDenied,
   manualContentType,
   manualMediaUrl,
 } from "../../lib/3dprintmanual-content";
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const denied = await manualAdminDenied(context.request, context.env);
+  const denied = await manualEditorDenied(context.request, context.env);
   if (denied) return denied;
 
   const contentType = context.request.headers.get("content-type") ?? "";
