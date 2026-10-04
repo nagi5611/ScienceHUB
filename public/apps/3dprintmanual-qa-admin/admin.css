@@ -1,0 +1,26 @@
+/* 利用ガイド Q&A 管理 */
+.qa-admin-wrap{max-width:1200px;margin:0 auto}
+.qa-admin-hero{margin-bottom:20px}
+.qa-admin-filters{margin-top:12px}
+.qa-admin-grid{display:grid;grid-template-columns:minmax(260px,1fr) 1.4fr;gap:16px;align-items:start}
+.qa-admin-list{padding:0;max-height:calc(100vh - 220px);overflow-y:auto}
+.qa-admin-list button{width:100%;text-align:left;padding:14px 16px;border:0;border-bottom:1px solid var(--color-border);background:none;cursor:pointer;font:inherit}
+.qa-admin-list button:hover{background:var(--color-surface-muted)}
+.qa-admin-list button.on{background:var(--color-primary-soft)}
+.qa-admin-list .meta{font-size:12px;color:var(--color-text-muted);margin-top:4px}
+.qa-admin-detail{padding:20px;min-height:320px}
+.qa-admin-placeholder{color:var(--color-text-muted)}
+.qa-admin-detail h2{font-size:18px;margin:0 0 12px}
+.qa-admin-body{font-size:15px;line-height:1.7;margin-bottom:16px;white-space:pre-wrap}
+.qa-admin-attach{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+.qa-admin-attach img,.qa-admin-attach video{max-width:200px;border-radius:8px;border:1px solid var(--color-border)}
+.qa-admin-posts{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.qa-admin-post{padding:12px;border-radius:8px;background:var(--color-surface-muted);font-size:14px}
+.qa-admin-post.staff{background:var(--color-warn-bg)}
+.qa-admin-actions{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+.qa-admin-reply{display:flex;flex-direction:column;gap:8px}
+.qa-admin-reply textarea{min-height:100px;font:inherit;padding:10px;border:1px solid var(--color-border);border-radius:8px}
+@media (max-width:900px){
+  .qa-admin-grid{grid-template-columns:1fr}
+  .qa-admin-list{max-height:240px}
+}

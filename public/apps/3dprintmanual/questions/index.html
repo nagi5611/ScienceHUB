@@ -26,7 +26,7 @@
       <div>
         <span class="badge badge-plain">3Dプリンター使い方ガイド</span>
         <h1 class="page-heading">質問・Q&amp;A</h1>
-        <p class="page-subheading">ガイドを読んでもわからなかったことを質問できます。回答するのは自然科学部 3Dモデル班の担当生徒（金田・田村・藤原）だけです。質問する前に、同じ質問がないか検索してみてください。</p>
+        <p class="page-subheading">ガイドを読んでもわからなかったことを質問できます。回答は担当者から行います。質問する前に、同じ質問がないか検索してみてください。</p>
       </div>
       <div class="qa-search card">
         <label class="qa-search-box">
@@ -88,7 +88,7 @@
     </aside>
   </div>
 
-  <!-- 質問フォーム（デザインのみ） -->
+  <!-- 質問フォーム -->
   <div class="qa-modal" id="qa-modal" hidden>
     <div class="qa-modal-bd" data-ask-close></div>
     <form class="qa-modal-pn card" id="qa-form" role="dialog" aria-modal="true" aria-labelledby="qa-form-h">
@@ -120,9 +120,12 @@
           <textarea rows="5" placeholder="どの手順で、何をしたら、どうなったかを書くと回答しやすくなります。"></textarea>
         </label>
         <div class="qa-field">
-          <span>画像（任意）</span>
-          <div class="qa-drop">エラー画面や失敗した作品の写真をここにドロップ</div>
+          <span>画像・動画（任意・最大5件）</span>
+          <div class="qa-drop">エラー画面や失敗した作品の写真をここにドロップ、またはクリックして選択</div>
+          <input type="file" id="qa-form-files" accept="image/*,video/mp4,video/webm,video/quicktime" multiple hidden>
+          <div class="qa-drop-previews" id="qa-form-previews"></div>
         </div>
+        <p class="qa-form-err" id="qa-form-err" hidden></p>
         <div class="note tip"><i>ヒント</i><div>印刷中のトラブルや危ないと感じたときは、ここに書かずにすぐ部員か先生を呼んでください。</div></div>
       </div>
       <div class="qa-modal-ft">

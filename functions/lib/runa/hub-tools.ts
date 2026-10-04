@@ -13,6 +13,9 @@ import {
   PROJECT_APP_SLUG,
 } from "../project-management";
 import { getUserUpcomingReservations as getPrintReservations } from "../3dprint/reservations";
+import { MANUAL_APP_SLUG } from "../3dprintmanual-content";
+import { listPublicQuestions } from "../3dprintmanual-qa/repo";
+import { searchManualQa } from "../3dprintmanual-qa/search";
 import { getTodayJst } from "../3dprint/slots";
 import { getUserUpcomingReservations as getSimReservations } from "../simulation/reservations";
 import { listFdsRequestsForUser } from "../simulation/fds-requests";
@@ -423,6 +426,21 @@ export const HUB_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "manual_qa_search",
+      description:
+        "3Dプリンター利用ガイドの質問・Q&A を意味検索する（ログインと利用ガイドアプリ権限が必要）",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "検索キーワードや質問文" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "sim_list_jobs",
       description: "自分のシミュレーション予約・FDS/OpenFOAM 依頼一覧",
       parameters: { type: "object", properties: {} },
@@ -737,6 +755,8 @@ export async function executeHubTool(
         return await runPmCompleteTask(db, user, args);
       case "print_list_reservations":
         return await runPrintList(db, user);
+      case "manual_qa_search":
+        return await runManualQaSearch(env, db, user, args);
       case "sim_list_jobs":
         return await runSimList(db, user);
       case "tp_list_projects":
@@ -1265,6 +1285,37 @@ async function runPmCompleteTask(
   if (!taskId) return { text: "task_id が必要です", files: [] };
   await completeTask(db, user.id, taskId);
   return { text: `タスクを完了にしました: ${taskId}`, files: [] };
+}
+
+async function runManualQaSearch(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  args: Record<string, unknown>
+): Promise<ToolRunResult> {
+  await requireApp(db, user.id, MANUAL_APP_SLUG);
+  const query = strArg(args, "query");
+  if (!query.trim()) {
+    return { text: "query を指定してください。", files: [] };
+  }
+
+  const { ids } = await searchManualQa(env, query.trim());
+  if (!ids.length) {
+    return { text: "該当する Q&A は見つかりませんでした。", files: [] };
+  }
+
+  const items = await listPublicQuestions(db, { ids, limit: Math.min(ids.length, 15) });
+  const order = new Map(ids.map((id, index) => [id, index]));
+  items.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+  const lines = items.map(
+    (item) =>
+      `- [${item.status === "answered" ? "回答済" : "未回答"}${item.resolved ? "・解決済" : ""}] ${item.title}（/apps/3dprintmanual/questions/#q-${item.id}）`
+  );
+  return {
+    text: `利用ガイド Q&A 検索「${query.trim().slice(0, 80)}」（${items.length} 件）:\n${lines.join("\n")}`,
+    files: [],
+  };
 }
 
 async function runPrintList(

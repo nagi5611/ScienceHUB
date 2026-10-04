@@ -9,10 +9,13 @@ import { canUserAccessApp } from "./apps";
 import { getDb } from "./db";
 import { getFiles } from "./r2";
 
+export const MANUAL_APP_SLUG = "3dprintmanual";
 export const MANUAL_EDITOR_APP_SLUG = "3dprintmanual-editor";
+export const MANUAL_QA_ADMIN_APP_SLUG = "3dprintmanual-qa-admin";
 
 export const MANUAL_CONTENT_KEY = "3dprintmanual/content.json";
 export const MANUAL_MEDIA_PREFIX = "3dprintmanual/media/";
+export const MANUAL_QA_MEDIA_PREFIX = "3dprintmanual/qa/";
 /** これ以下は1リクエストで保存する */
 export const MANUAL_SIMPLE_MAX = 20 * 1024 * 1024;
 /** R2 の非最終パートは 5MiB 以上。8MB にしておく */
@@ -21,6 +24,9 @@ export const MANUAL_MAX_BYTES = 512 * 1024 * 1024;
 
 const MEDIA_KEY_RE =
   /^3dprintmanual\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,80}$/;
+
+const QA_MEDIA_KEY_RE =
+  /^3dprintmanual\/qa\/(?:draft\/[A-Za-z0-9_]+|mq_[0-9a-f]{24})\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,80}$/;
 
 const EXT_TYPE: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -65,6 +71,40 @@ export async function manualUserDenied(
   return user instanceof Response ? user : null;
 }
 
+/** 利用ガイド（公開）アプリに入れるユーザーでなければエラーレスポンスを返す */
+export async function manualAppDenied(
+  request: Request,
+  env: Env
+): Promise<Response | null> {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+
+  const allowed = await canUserAccessApp(getDb(env), user.id, MANUAL_APP_SLUG);
+  if (!allowed) {
+    return jsonError("このアプリへのアクセス権限がありません", 403);
+  }
+  return null;
+}
+
+/** Q&A 管理アプリに入れるユーザーでなければエラーレスポンスを返す */
+export async function manualQaAdminDenied(
+  request: Request,
+  env: Env
+): Promise<Response | null> {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+
+  const allowed = await canUserAccessApp(
+    getDb(env),
+    user.id,
+    MANUAL_QA_ADMIN_APP_SLUG
+  );
+  if (!allowed) {
+    return jsonError("このアプリへのアクセス権限がありません", 403);
+  }
+  return null;
+}
+
 /** ガイド本文の公開URLを返す */
 export function manualMediaUrl(key: string): string {
   return `/api/3dprintmanual/file?key=${encodeURIComponent(key)}`;
@@ -75,9 +115,41 @@ export function createManualMediaKey(filename: string): string {
   return `${MANUAL_MEDIA_PREFIX}${crypto.randomUUID()}/${sanitizeMediaName(filename)}`;
 }
 
+/** Q&A 添付用の R2 キーを作る（未投稿は draft/{userId}） */
+export function createManualQaMediaKey(
+  userId: string,
+  filename: string,
+  questionId?: string
+): string {
+  const segment = questionId ?? `draft/${userId}`;
+  return `${MANUAL_QA_MEDIA_PREFIX}${segment}/${crypto.randomUUID()}/${sanitizeMediaName(filename)}`;
+}
+
 /** このガイドのメディアキーか判定する */
 export function isManualMediaKey(key: string): boolean {
   return MEDIA_KEY_RE.test(key);
+}
+
+/** Q&A 添付の R2 キーか判定する */
+export function isManualQaMediaKey(key: string): boolean {
+  return QA_MEDIA_KEY_RE.test(key);
+}
+
+/** ガイドまたは Q&A の配信対象キーか */
+export function isManualDeliverableKey(key: string): boolean {
+  return isManualMediaKey(key) || isManualQaMediaKey(key);
+}
+
+/** ユーザーがアップロードした Q&A ドラフトキーか */
+export function isManualQaDraftKeyForUser(key: string, userId: string): boolean {
+  if (!isManualQaMediaKey(key)) return false;
+  return key.startsWith(`${MANUAL_QA_MEDIA_PREFIX}draft/${userId}/`);
+}
+
+/** 質問に紐づく Q&A キーか */
+export function isManualQaKeyForQuestion(key: string, questionId: string): boolean {
+  if (!isManualQaMediaKey(key)) return false;
+  return key.startsWith(`${MANUAL_QA_MEDIA_PREFIX}${questionId}/`);
 }
 
 /** 拡張子から保存する Content-Type を返す。非対応なら null */
@@ -150,7 +222,7 @@ export async function streamManualMedia(
   env: Env,
   key: string
 ): Promise<Response> {
-  if (!isManualMediaKey(key)) return jsonError("ファイルが見つかりません", 404);
+  if (!isManualDeliverableKey(key)) return jsonError("ファイルが見つかりません", 404);
   const bucket = getFiles(env);
   const head = await bucket.head(key);
   if (!head) return jsonError("ファイルが見つかりません", 404);
