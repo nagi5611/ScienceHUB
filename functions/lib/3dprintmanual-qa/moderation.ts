@@ -1,24 +1,14 @@
 /**
- * Q&A 投稿の Gemini 精査
+ * Q&A 投稿の Runa（GPT 5.6 Luna 等）精査
  */
 
 import type { Env } from "../types";
-import { geminiGenerateJson } from "../gemini/generate";
-import { resolveTpLiteModel } from "../third-party/tp-flash";
+import { isRunaLlmAvailable, runaQaJsonCompletion } from "./runa-llm";
 
 export interface QaModerationResult {
   approved: boolean;
   userMessage: string;
 }
-
-const MODERATION_SCHEMA = {
-  type: "object",
-  properties: {
-    approved: { type: "boolean" },
-    userMessage: { type: "string" },
-  },
-  required: ["approved", "userMessage"],
-};
 
 const SYSTEM = `あなたは高校の3Dプリンター利用ガイド Q&A の投稿審査担当です。
 質問や追記が次のいずれかに該当する場合は approved を false にし、丁寧な日本語で userMessage に理由を書いてください。
@@ -27,14 +17,15 @@ const SYSTEM = `あなたは高校の3Dプリンター利用ガイド Q&A の投
 - 学校・部活と無関係なスパム・広告
 - 危険行為の助長（無理な改造の推奨など）
 
-該当しなければ approved を true、userMessage は空文字にしてください。`;
+該当しなければ approved を true、userMessage は空文字にしてください。
+出力は {"approved": boolean, "userMessage": string} の JSON だけです。`;
 
 /** 質問・追記本文を精査する */
 export async function moderateQaContent(
   env: Env,
   input: { title?: string; body: string }
 ): Promise<QaModerationResult> {
-  if (!env.GEMINI_API_KEY?.trim()) {
+  if (!isRunaLlmAvailable(env)) {
     return { approved: true, userMessage: "" };
   }
 
@@ -45,19 +36,10 @@ export async function moderateQaContent(
     .filter(Boolean)
     .join("\n");
 
-  const raw = await geminiGenerateJson<{ approved?: boolean; userMessage?: string }>(
-    env,
-    {
-      model: resolveTpLiteModel(env),
-      systemInstruction: SYSTEM,
-      prompt,
-      responseMimeType: "application/json",
-      responseSchema: MODERATION_SCHEMA,
-      temperature: 0.1,
-      maxOutputTokens: 512,
-      usageLabel: "manual_qa_moderation",
-    }
-  );
+  const raw = await runaQaJsonCompletion(env, SYSTEM, prompt);
+  if (!raw) {
+    return { approved: true, userMessage: "" };
+  }
 
   if (raw.approved === false) {
     const msg =

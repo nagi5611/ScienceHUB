@@ -1,11 +1,10 @@
 /**
- * Q&A 意味検索（FTS/LIKE 候補 + Gemini ランキング）
+ * Q&A 意味検索（LIKE 候補 + Runa / GPT 5.6 Luna ランキング）
  */
 
 import type { Env } from "../types";
 import { getDb } from "../db";
-import { geminiGenerateJson } from "../gemini/generate";
-import { resolveTpLiteModel } from "../third-party/tp-flash";
+import { isRunaLlmAvailable, runaQaJsonCompletion } from "./runa-llm";
 import { QA_SEARCH_CANDIDATES } from "./constants";
 
 export interface QaSearchHit {
@@ -14,16 +13,9 @@ export interface QaSearchHit {
   snippet: string;
 }
 
-const RANK_SCHEMA = {
-  type: "object",
-  properties: {
-    ids: {
-      type: "array",
-      items: { type: "string" },
-    },
-  },
-  required: ["ids"],
-};
+const RANK_SYSTEM = `ユーザーの検索クエリに最も関連する Q&A の id を、関連度の高い順に ids 配列で返してください。
+候補に無い id は含めないでください。該当が無ければ空配列。
+出力は {"ids": string[]} の JSON だけです。`;
 
 /** 公開済み質問をキーワードで候補取得する */
 export async function fetchQaSearchCandidates(
@@ -72,7 +64,7 @@ export async function searchManualQa(
     return { ids: [], candidates: [] };
   }
 
-  if (!env.GEMINI_API_KEY?.trim()) {
+  if (!isRunaLlmAvailable(env)) {
     return { ids: candidates.map((c) => c.id), candidates };
   }
 
@@ -86,25 +78,17 @@ export async function searchManualQa(
   };
 
   try {
-    const raw = await geminiGenerateJson<{ ids?: string[] }>(env, {
-      model: resolveTpLiteModel(env),
-      systemInstruction:
-        "ユーザーの検索クエリに最も関連する Q&A の id を、関連度の高い順に ids 配列で返してください。候補に無い id は含めないでください。該当が無ければ空配列。",
-      prompt: JSON.stringify(payload),
-      responseMimeType: "application/json",
-      responseSchema: RANK_SCHEMA,
-      temperature: 0.1,
-      maxOutputTokens: 1024,
-      usageLabel: "manual_qa_search",
-    });
-
+    const raw = await runaQaJsonCompletion(env, RANK_SYSTEM, JSON.stringify(payload));
+    const idsRaw = raw?.ids;
     const allowed = new Set(candidates.map((c) => c.id));
-    const ids = (raw.ids ?? []).filter((id) => typeof id === "string" && allowed.has(id));
+    const ids = Array.isArray(idsRaw)
+      ? idsRaw.filter((id): id is string => typeof id === "string" && allowed.has(id))
+      : [];
     if (ids.length) {
       return { ids, candidates };
     }
   } catch (error) {
-    console.warn("manual_qa_search gemini failed", error);
+    console.warn("manual_qa_search runa failed", error);
   }
 
   return { ids: candidates.map((c) => c.id), candidates };
