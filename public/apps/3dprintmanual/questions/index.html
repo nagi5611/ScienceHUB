@@ -17,6 +17,7 @@
     <div class="header-inner">
       <a href="/" class="site-title"><img src="../assets/icon-192.png" alt=""><b class="site-name">ScienceHUB</b> <span>3Dプリンター 質問・Q&amp;A</span></a>
       <a class="btn btn-secondary hdr-back" href="../index.html">← 使い方ガイド</a>
+      <a class="btn btn-secondary hdr-back" id="qa-admin-link" href="/apps/3dprintmanual-qa-admin/" hidden>Q&amp;A 管理</a>
       <button class="btn btn-primary" type="button" data-ask>質問する</button>
     </div>
   </header>
@@ -92,6 +93,15 @@
   <div class="qa-modal" id="qa-modal" hidden>
     <div class="qa-modal-bd" data-ask-close></div>
     <form class="qa-modal-pn card" id="qa-form" role="dialog" aria-modal="true" aria-labelledby="qa-form-h">
+      <div class="qa-form-busy" id="qa-form-busy" hidden aria-live="polite" aria-busy="false">
+        <div class="qa-form-busy-in">
+          <div class="qa-form-spinner" aria-hidden="true"></div>
+          <p class="qa-form-busy-msg" id="qa-form-busy-msg">送信中…</p>
+          <div class="qa-progress" id="qa-form-progress" hidden>
+            <div class="qa-progress-fill" id="qa-form-busy-fill" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
       <div class="qa-modal-hd">
         <b id="qa-form-h">質問する</b>
         <button type="button" class="qa-x" data-ask-close aria-label="閉じる">✕</button>

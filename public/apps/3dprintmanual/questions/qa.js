@@ -7,6 +7,10 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = d => d.replace(/^\d{4}-0?(\d+)-0?(\d+)$/, '$1/$2');
   const STAFF_ROLES = ['担当者'];
+  const EXT_KIND = {
+    '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.webp': 'image', '.gif': 'image',
+    '.mp4': 'video', '.webm': 'video', '.mov': 'video',
+  };
 
   const state = {
     cat: 'all',
@@ -22,7 +26,47 @@
     formMachine: 'both',
     pendingFiles: [],
     pendingKeys: [],
+    formSubmitting: false,
   };
+
+  function extOf(name) {
+    const base = String(name || '').split(/[/\\]/).pop() || '';
+    const dot = base.lastIndexOf('.');
+    return dot < 0 ? '' : base.slice(dot).toLowerCase();
+  }
+
+  /** contentType と拡張子から image / video / file を判定 */
+  function inferMediaKind(contentType, filename) {
+    const ct = (contentType || '').toLowerCase();
+    if (ct.startsWith('image/')) return 'image';
+    if (ct.startsWith('video/')) return 'video';
+    const ext = extOf(filename);
+    if (EXT_KIND[ext] === 'image') return 'image';
+    if (EXT_KIND[ext] === 'video') return 'video';
+    return 'file';
+  }
+
+  /** 添付1件の HTML（詳細・フォーム共通） */
+  function renderAttachmentItem(opts) {
+    const { url, filename, contentType, removeIndex } = opts;
+    const kind = inferMediaKind(contentType, filename);
+    const name = filename || 'file';
+    const rm = removeIndex != null
+      ? `<button type="button" data-rm-file="${removeIndex}" aria-label="削除">×</button>`
+      : '';
+    const cap = `<span class="qa-attach-cap">${esc(name)}</span>`;
+    if (kind === 'image' && url) {
+      return `<div class="qa-attach-preview">${rm}<img src="${esc(url)}" alt="${esc(name)}" loading="lazy">${cap}</div>`;
+    }
+    if (kind === 'video' && url) {
+      const src = esc(url) + (url.includes('#') ? '' : '#t=0.1');
+      return `<div class="qa-attach-preview qa-attach-preview--video">${rm}<video src="${src}" controls playsinline preload="metadata"></video>${cap}</div>`;
+    }
+    if (url) {
+      return `<div class="qa-attach-preview qa-attach-preview--file">${rm}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(name)}</a></div>`;
+    }
+    return `<div class="qa-attach-preview qa-attach-preview--file">${rm}<span class="qa-attach-cap">${esc(name)}</span></div>`;
+  }
 
   async function api(path, options = {}) {
     const res = await fetch(`${API}${path}`, { credentials: 'same-origin', ...options });
@@ -41,6 +85,15 @@
         const data = await res.json();
         state.userId = data.user?.id || data.id || null;
       }
+    } catch { /* ignore */ }
+  }
+
+  async function loadQaAdminLink() {
+    const link = $('#qa-admin-link');
+    if (!link) return;
+    try {
+      const res = await fetch('/api/apps/3dprintmanual-qa-admin/access', { credentials: 'same-origin' });
+      if (res.ok) link.hidden = false;
     } catch { /* ignore */ }
   }
 
@@ -88,16 +141,11 @@
 
   function attachHtml(attachments) {
     if (!attachments?.length) return '';
-    return `<div class="qa-attach">${attachments.map(a => {
-      const ct = a.contentType || '';
-      if (ct.startsWith('image/')) {
-        return `<div class="qa-attach-preview"><img src="${esc(a.url)}" alt="${esc(a.filename)}" loading="lazy"></div>`;
-      }
-      if (ct.startsWith('video/')) {
-        return `<div class="qa-attach-preview"><video src="${esc(a.url)}" controls preload="metadata"></video></div>`;
-      }
-      return `<div class="qa-attach-preview"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.filename)}</a></div>`;
-    }).join('')}</div>`;
+    return `<div class="qa-attach">${attachments.map(a => renderAttachmentItem({
+      url: a.url,
+      filename: a.filename,
+      contentType: a.contentType,
+    })).join('')}</div>`;
   }
 
   function catLinks() {
@@ -187,7 +235,12 @@
   window.matchMedia('(min-width:1001px)').addEventListener('change', e => { if (e.matches) setSheet(false); });
 
   const modal = $('#qa-modal');
+  const formPanel = $('#qa-form');
   const formErr = $('#qa-form-err');
+  const formBusy = $('#qa-form-busy');
+  const formBusyMsg = $('#qa-form-busy-msg');
+  const formProgress = $('#qa-form-progress');
+  const formProgressFill = $('#qa-form-busy-fill');
   const fileInput = $('#qa-form-files');
   const drop = $('.qa-drop');
 
@@ -196,13 +249,12 @@
   function renderFormPreviews() {
     const box = $('#qa-form-previews');
     if (!box) return;
-    box.innerHTML = state.pendingFiles.map((f, i) => {
-      const url = f.previewUrl || '';
-      if (f.type?.startsWith('image/') && url) {
-        return `<div class="qa-attach-preview"><img src="${url}" alt=""><button type="button" data-rm-file="${i}" aria-label="削除">×</button></div>`;
-      }
-      return `<div class="qa-attach-preview"><span>${esc(f.name)}</span><button type="button" data-rm-file="${i}">×</button></div>`;
-    }).join('');
+    box.innerHTML = state.pendingFiles.map((f, i) => renderAttachmentItem({
+      url: f.previewUrl || '',
+      filename: f.name,
+      contentType: f.type,
+      removeIndex: i,
+    })).join('');
     drop?.classList.toggle('has-files', state.pendingFiles.length > 0);
   }
 
@@ -210,7 +262,8 @@
     for (const file of fileList) {
       if (state.pendingFiles.length >= 5) break;
       const entry = { file, name: file.name, type: file.type };
-      if (file.type.startsWith('image/')) {
+      const kind = inferMediaKind(file.type, file.name);
+      if ((kind === 'image' || kind === 'video') && file.size > 0) {
         entry.previewUrl = URL.createObjectURL(file);
       }
       state.pendingFiles.push(entry);
@@ -229,15 +282,79 @@
     fileInput.value = '';
   });
 
-  async function uploadPending() {
-    const keys = [];
-    for (const entry of state.pendingFiles) {
+  function setFormBusy(on, opts = {}) {
+    const { message = '', progress = null, indeterminate = false } = opts;
+    state.formSubmitting = on;
+    formPanel?.classList.toggle('is-submitting', on);
+    if (formBusy) {
+      formBusy.hidden = !on;
+      formBusy.setAttribute('aria-busy', on ? 'true' : 'false');
+    }
+    if (formBusyMsg && message) formBusyMsg.textContent = message;
+    if (formProgress) {
+      const showBar = on && (progress != null || indeterminate);
+      formProgress.hidden = !showBar;
+      formProgress.classList.toggle('qa-progress--indeterminate', Boolean(indeterminate));
+    }
+    if (formProgressFill) {
+      if (progress != null) {
+        formProgressFill.style.width = `${Math.min(100, Math.max(0, progress))}%`;
+      } else if (!on) {
+        formProgressFill.style.width = '0%';
+      }
+    }
+  }
+
+  function uploadFileWithProgress(file, onFileProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API}/upload`);
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable && onFileProgress) {
+          onFileProgress(ev.loaded / ev.total);
+        }
+      };
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+        if (xhr.status >= 200 && xhr.status < 300 && data.key) {
+          resolve(data.key);
+          return;
+        }
+        reject(new Error(data.error || '添付のアップロードに失敗しました'));
+      };
+      xhr.onerror = () => reject(new Error('添付のアップロードに失敗しました'));
       const fd = new FormData();
-      fd.append('file', entry.file);
-      const res = await fetch(`${API}/upload`, { method: 'POST', credentials: 'same-origin', body: fd });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '添付のアップロードに失敗しました');
-      keys.push(data.key);
+      fd.append('file', file);
+      xhr.send(fd);
+    });
+  }
+
+  async function uploadPending(onTotalProgress) {
+    const files = state.pendingFiles;
+    if (!files.length) return [];
+    const keys = [];
+    const sizes = files.map(f => f.file.size || 1);
+    const totalBytes = sizes.reduce((a, b) => a + b, 0);
+    let doneBytes = 0;
+    for (let i = 0; i < files.length; i++) {
+      const entry = files[i];
+      setFormBusy(true, {
+        message: `添付をアップロード中 (${i + 1}/${files.length})`,
+        progress: totalBytes ? (doneBytes / totalBytes) * 90 : 0,
+      });
+      const key = await uploadFileWithProgress(entry.file, (frac) => {
+        const loaded = doneBytes + sizes[i] * frac;
+        const pct = totalBytes ? (loaded / totalBytes) * 90 : 0;
+        if (onTotalProgress) onTotalProgress(pct);
+        setFormBusy(true, {
+          message: `添付をアップロード中 (${i + 1}/${files.length})`,
+          progress: pct,
+        });
+      });
+      keys.push(key);
+      doneBytes += sizes[i];
     }
     return keys;
   }
@@ -251,9 +368,13 @@
   }
 
   const setModal = on => {
+    if (!on && state.formSubmitting) return;
     modal.hidden = !on;
     document.body.style.overflow = on ? 'hidden' : '';
-    if (!on) resetForm();
+    if (!on) {
+      setFormBusy(false);
+      resetForm();
+    }
     if (on) setTimeout(() => $('#qa-form input[type="text"]')?.focus(), 50);
   };
 
@@ -265,9 +386,23 @@
     const cat = $('#qa-form-cat').value;
     const body = form.querySelector('textarea')?.value?.trim() || '';
     const submitBtn = form.querySelector('[type="submit"]');
+    const cancelBtns = $$('[data-ask-close]', formPanel);
     submitBtn.disabled = true;
+    cancelBtns.forEach(b => { b.disabled = true; });
+    setFormBusy(true, {
+      message: state.pendingFiles.length
+        ? '添付をアップロードしています…'
+        : '内容を確認・送信しています…',
+      progress: state.pendingFiles.length ? 0 : null,
+      indeterminate: !state.pendingFiles.length,
+    });
     try {
       const attachmentKeys = await uploadPending();
+      setFormBusy(true, {
+        message: '内容を確認・送信しています…',
+        progress: 92,
+        indeterminate: true,
+      });
       const data = await api('/questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -299,7 +434,9 @@
         showToast(esc(err.message), false);
       }
     } finally {
+      setFormBusy(false);
       submitBtn.disabled = false;
+      cancelBtns.forEach(b => { b.disabled = false; });
     }
   });
 
@@ -324,7 +461,7 @@
     if (c) { e.preventDefault(); state.cat = c.dataset.cat; refreshList(); setSheet(false); window.scrollTo({ top: $('.layout').offsetTop - 80, behavior: 'smooth' }); return; }
     if (e.target.closest('[data-toc-close]')) { setSheet(false); return; }
     if (e.target.closest('[data-ask]')) { setModal(true); return; }
-    if (e.target.closest('[data-ask-close]')) { setModal(false); return; }
+    if (e.target.closest('[data-ask-close]')) { if (!state.formSubmitting) setModal(false); return; }
     const sb = e.target.closest('#qa-status button');
     if (sb) { state.status = sb.dataset.status; $$('#qa-status button').forEach(b => b.classList.toggle('on', b === sb)); refreshList(); return; }
     const mb = e.target.closest('#qa-machine button');
@@ -379,10 +516,13 @@
     }
   });
 
-  window.addEventListener('keydown', e => { if (e.key === 'Escape') { setModal(false); setSheet(false); } });
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !state.formSubmitting) { setModal(false); setSheet(false); }
+  });
 
   (async () => {
     await loadMe();
+    await loadQaAdminLink();
     await refreshList();
     const hash = location.hash.replace(/^#q-/, '');
     if (hash) {

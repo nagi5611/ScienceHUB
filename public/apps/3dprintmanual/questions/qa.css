@@ -33,10 +33,28 @@
 .qa-st.answered{background:var(--color-primary-soft);color:var(--color-primary-dark)}
 .qa-st.open{background:var(--color-surface-muted);color:var(--color-text-muted);border:1px solid var(--color-border)}
 .qa-st.resolved{background:#e8f5e9;color:#2e7d32}
-.qa-attach{margin:12px 0 16px;display:flex;flex-wrap:wrap;gap:10px}
-.qa-attach-preview{width:120px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--color-border);background:var(--color-surface-muted)}
-.qa-attach-preview img,.qa-attach-preview video{display:block;width:100%;height:auto;max-height:100px;object-fit:cover}
-.qa-attach-preview a{display:block;padding:10px;font-size:12px;word-break:break-all}
+.qa-attach{margin:12px 0 16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.qa-attach-preview{position:relative;width:120px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--color-border);background:var(--color-surface-muted)}
+.qa-attach-preview img{display:block;width:100%;height:auto;max-height:140px;object-fit:cover}
+.qa-attach-preview--video{width:min(100%,480px);max-width:480px}
+.qa-attach-preview--video video{display:block;width:100%;aspect-ratio:16/9;max-height:320px;object-fit:contain;background:#0d1117}
+.qa-attach-preview--file{width:auto;min-width:120px;max-width:240px}
+.qa-attach-preview--file a{display:block;padding:10px;font-size:12px;word-break:break-all}
+.qa-attach-cap{display:block;padding:6px 8px;font-size:11px;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid var(--color-border)}
+.qa-attach-preview button[data-rm-file]{position:absolute;top:4px;right:4px;width:28px;height:28px;border:0;border-radius:999px;background:rgba(16,22,36,.72);color:#fff;font-size:16px;line-height:1;cursor:pointer}
+.qa-attach-preview button[data-rm-file]:hover{background:rgba(16,22,36,.9)}
+.qa-drop-previews .qa-attach-preview--video{width:min(100%,280px)}
+.qa-form-busy{position:absolute;inset:0;z-index:5;display:grid;place-items:center;background:rgba(255,255,255,.88);border-radius:inherit}
+.qa-form-busy[hidden]{display:none}
+.qa-form-busy-in{text-align:center;padding:24px;max-width:90%}
+.qa-form-busy-msg{margin:12px 0 0;font-size:14px;font-weight:600;color:var(--color-heading)}
+.qa-form-spinner{width:36px;height:36px;margin:0 auto;border:3px solid var(--color-border);border-top-color:var(--color-primary);border-radius:50%;animation:qaSpin .75s linear infinite}
+@keyframes qaSpin{to{transform:rotate(360deg)}}
+.qa-progress{margin-top:14px;height:6px;border-radius:999px;background:var(--color-border);overflow:hidden}
+.qa-progress-fill{height:100%;background:var(--color-primary);transition:width .15s ease}
+.qa-progress--indeterminate .qa-progress-fill{width:40%!important;animation:qaProgInd 1.2s ease-in-out infinite}
+@keyframes qaProgInd{0%{transform:translateX(-120%)}100%{transform:translateX(280%)}}
+.qa-modal-pn.is-submitting .qa-x,.qa-modal-pn.is-submitting [data-ask-close]{pointer-events:none;opacity:.45}
 .qa-form-err{font-size:13px;color:#c62828;padding:10px 12px;border-radius:var(--radius-md);background:#ffebee;border:1px solid #ffcdd2}
 .qa-drop.has-files{border-style:solid;background:var(--color-surface)}
 .qa-drop-previews{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;width:100%}
@@ -74,7 +92,7 @@
 .qa-modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:24px}
 .qa-modal[hidden]{display:none}
 .qa-modal-bd{position:absolute;inset:0;background:rgba(16,22,36,.42)}
-.qa-modal-pn{position:relative;width:min(100%,600px);max-height:calc(100vh - 48px);display:flex;flex-direction:column;box-shadow:var(--shadow-md);animation:qaIn .25s cubic-bezier(.2,.8,.2,1)}
+.qa-modal-pn{position:relative;width:min(100%,600px);max-height:calc(100vh - 48px);display:flex;flex-direction:column;box-shadow:var(--shadow-md);animation:qaIn .25s cubic-bezier(.2,.8,.2,1);overflow:hidden}
 @keyframes qaIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 .qa-modal-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 12px 22px;border-bottom:1px solid var(--color-border)}
 .qa-modal-hd b{font-size:17px;color:var(--color-heading)}
@@ -112,4 +130,4 @@
   .qa-modal-ft{border-radius:0}
   .qa-row{grid-template-columns:1fr}
 }
-@media (prefers-reduced-motion:reduce){.qa-modal-pn{animation:none}}
+@media (prefers-reduced-motion:reduce){.qa-modal-pn{animation:none}.qa-form-spinner{animation:none;border-top-color:var(--color-border)}.qa-progress--indeterminate .qa-progress-fill{animation:none}}

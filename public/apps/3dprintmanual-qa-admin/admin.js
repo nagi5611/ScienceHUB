@@ -57,13 +57,35 @@
     renderDetail();
   }
 
+  function extOf(name) {
+    const base = String(name || '').split(/[/\\]/).pop() || '';
+    const dot = base.lastIndexOf('.');
+    return dot < 0 ? '' : base.slice(dot).toLowerCase();
+  }
+
+  function inferMediaKind(contentType, filename) {
+    const ct = (contentType || '').toLowerCase();
+    if (ct.startsWith('image/')) return 'image';
+    if (ct.startsWith('video/')) return 'video';
+    const ext = extOf(filename);
+    if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) return 'image';
+    if (['.mp4', '.webm', '.mov'].includes(ext)) return 'video';
+    return 'file';
+  }
+
   function attachHtml(attachments) {
     if (!attachments?.length) return '';
     return `<div class="qa-admin-attach">${attachments.map(a => {
-      const ct = a.contentType || '';
-      if (ct.startsWith('image/')) return `<img src="${esc(a.url)}" alt="">`;
-      if (ct.startsWith('video/')) return `<video src="${esc(a.url)}" controls></video>`;
-      return `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.filename)}</a>`;
+      const kind = inferMediaKind(a.contentType, a.filename);
+      const name = esc(a.filename || 'file');
+      if (kind === 'image') {
+        return `<figure class="qa-admin-attach-item"><img src="${esc(a.url)}" alt="${name}"><figcaption>${name}</figcaption></figure>`;
+      }
+      if (kind === 'video') {
+        const src = esc(a.url) + (String(a.url).includes('#') ? '' : '#t=0.1');
+        return `<figure class="qa-admin-attach-item qa-admin-attach-item--video"><video src="${src}" controls playsinline preload="metadata"></video><figcaption>${name}</figcaption></figure>`;
+      }
+      return `<a class="qa-admin-attach-file" href="${esc(a.url)}" target="_blank" rel="noopener">${name}</a>`;
     }).join('')}</div>`;
   }
 
