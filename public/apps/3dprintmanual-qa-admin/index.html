@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/apps/3dprintmanual/css/style.css">
   <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="/css/runa-panel.css">
 </head>
 <body>
   <header class="site-header">
@@ -41,6 +42,85 @@
   </div>
 
   <div class="page-toast" id="page-toast" role="status"></div>
+
+  <button type="button" class="runa-fab" id="runa-fab" aria-expanded="false" aria-controls="runa-panel">
+    <span class="runa-fab-label">Runa</span>
+  </button>
+  <div class="runa-panel" id="runa-panel" aria-hidden="true" role="dialog" aria-labelledby="runa-panel-title">
+    <div class="runa-backdrop" id="runa-backdrop" aria-hidden="true"></div>
+    <div class="runa-dialog">
+      <header class="runa-header">
+        <div>
+          <p class="runa-kicker">ScienceHUB Agent</p>
+          <h2 class="runa-title" id="runa-panel-title">Runa</h2>
+        </div>
+        <div class="runa-header-actions">
+          <button type="button" class="runa-new-chat" id="runa-new-chat">新規チャット</button>
+          <button type="button" class="runa-close" id="runa-close" aria-label="閉じる">×</button>
+        </div>
+      </header>
+      <p class="runa-status" id="runa-status" hidden></p>
+      <p class="runa-context-hint" id="runa-context-hint" hidden></p>
+      <div class="runa-body">
+        <div class="runa-messages" id="runa-messages"></div>
+        <div class="runa-composer" id="runa-composer">
+          <div class="runa-attach-list" id="runa-attach-list" hidden></div>
+          <div class="runa-composer-rise" id="runa-deep-research-rise" aria-hidden="true">
+            <p class="runa-composer-rise-lead">並列 Web 検索を繰り返し、調査レポートを作成します</p>
+            <p class="runa-deep-research-hint" id="runa-deep-research-hint" hidden></p>
+          </div>
+          <div class="runa-composer-modes">
+            <button type="button" class="runa-deep-research-toggle" id="runa-deep-research-toggle" aria-pressed="false">
+              <svg class="runa-deep-research-toggle-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" aria-hidden="true">
+                <path d="M2.5 13h11M5 10.5V6.5M8 10.5V3M11 10.5V7.5"/>
+              </svg>
+              <span class="runa-deep-research-toggle-label">ディープリサーチ</span>
+            </button>
+          </div>
+          <form class="runa-form" id="runa-form">
+          <button type="button" class="runa-attach-btn" id="runa-attach-btn" aria-label="ファイルを添付" title="ファイルを添付（端末・クラウドストレージ）"></button>
+          <input type="file" id="runa-file-input" class="runa-file-input" hidden multiple>
+          <textarea class="runa-input" id="runa-input" rows="2" placeholder="3Dプリンター利用ガイドや Q&amp;A について質問…" aria-label="メッセージ"></textarea>
+          <div class="runa-form-trailing">
+            <div class="runa-context-usage" id="runa-context-usage" hidden aria-live="polite">
+              <div class="runa-context-usage-actions" id="runa-context-usage-actions" hidden>
+                <span class="runa-context-usage-warn" id="runa-context-usage-warn">精度低下中</span>
+                <button type="button" class="runa-context-summarize-btn" id="runa-context-summarize-btn">要約</button>
+              </div>
+              <div
+                class="runa-context-usage-cycle"
+                id="runa-context-usage-track"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+                aria-label="Context"
+              >
+                <svg class="runa-context-usage-svg" viewBox="0 0 36 36" aria-hidden="true">
+                  <circle class="runa-context-usage-ring-bg" cx="18" cy="18" r="14" pathLength="100" />
+                  <circle
+                    class="runa-context-usage-ring-fill"
+                    id="runa-context-usage-fill"
+                    cx="18"
+                    cy="18"
+                    r="14"
+                    pathLength="100"
+                  />
+                </svg>
+                <span class="runa-context-usage-pct" id="runa-context-usage-pct">0</span>
+              </div>
+            </div>
+            <button type="button" class="runa-stop" id="runa-stop" hidden aria-label="推論を停止">■</button>
+            <button type="submit" class="runa-send" id="runa-send">送信</button>
+          </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="admin.js"></script>
+  <script src="/js/runa-panel.js" type="module"></script>
+  <script src="/apps/3dprintmanual/questions/qa-runa.js" type="module"></script>
 </body>
 </html>

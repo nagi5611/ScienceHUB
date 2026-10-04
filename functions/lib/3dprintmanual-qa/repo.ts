@@ -533,3 +533,32 @@ export async function patchQuestionAdmin(
     .bind(...binds)
     .run();
 }
+
+/** 質問を削除（添付 R2 → D1。posts/attachments は CASCADE） */
+export async function deleteQuestionAdmin(env: Env, questionId: string): Promise<void> {
+  const db = getDb(env);
+  const row = await db
+    .prepare("SELECT id FROM manual_qa_questions WHERE id = ?")
+    .bind(questionId)
+    .first();
+  if (!row) throw new Error("質問が見つかりません");
+
+  const attachments = await db
+    .prepare("SELECT r2_key FROM manual_qa_attachments WHERE question_id = ?")
+    .bind(questionId)
+    .all<{ r2_key: string }>();
+
+  const files = getFiles(env);
+  for (const att of attachments.results ?? []) {
+    try {
+      await files.delete(att.r2_key);
+    } catch (error) {
+      console.error("manual_qa delete r2", att.r2_key, error);
+    }
+  }
+
+  await db
+    .prepare("DELETE FROM manual_qa_questions WHERE id = ?")
+    .bind(questionId)
+    .run();
+}

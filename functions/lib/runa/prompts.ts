@@ -29,6 +29,7 @@ export const RUNA_SYSTEM_PROMPT = `あなたは ScienceHUB のアシスタント
 ## 予約・依頼
 - print_list_reservations — 3D印刷
 - sim_list_jobs — シミュレーション予約と FDS/OpenFOAM 依頼
+- manual_qa_search — 3Dプリンター利用ガイド Q&A の意味検索（結果に質問 URL）
 
 ## 制作系
 - tp_list_projects — サードパーティ

@@ -109,6 +109,7 @@
       <div class="qa-admin-actions">
         <button type="button" class="btn btn-secondary" data-toggle-resolved>${d.resolved ? '未解決に戻す' : '解決済みにする'}</button>
         <button type="button" class="btn btn-secondary" data-toggle-pinned>${d.pinned ? 'ピン留めを外す' : 'よくある質問にピン'}</button>
+        <button type="button" class="btn btn-danger" data-delete-question>質問を削除</button>
       </div>
       <div class="qa-admin-reply">
         <label><b>担当者として返信</b></label>
@@ -157,6 +158,21 @@
         renderDetail();
         await loadList();
         toast(next ? 'ピン留めしました' : 'ピン留めを外しました');
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    if (e.target.closest('[data-delete-question]') && state.detail) {
+      const title = state.detail.title || 'この質問';
+      if (!confirm(`「${title}」を完全に削除します。添付ファイルも消えます。よろしいですか？`)) {
+        return;
+      }
+      const id = state.detail.id;
+      try {
+        await api(`/questions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        state.detail = null;
+        renderDetail();
+        await loadList();
+        toast('質問を削除しました');
       } catch (err) { toast(err.message); }
       return;
     }

@@ -20,6 +20,7 @@ import {
   listAdminQuestions,
   listPublicQuestions,
   patchQuestionAdmin,
+  deleteQuestionAdmin,
 } from "../../../lib/3dprintmanual-qa/repo";
 import { searchManualQa } from "../../../lib/3dprintmanual-qa/search";
 
@@ -181,6 +182,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         resolved: body.resolved,
         pinned: body.pinned,
       });
+      return Response.json({ ok: true });
+    }
+
+    if (parts.length === 2 && parts[0] === "questions" && method === "DELETE") {
+      const denied = await manualQaAdminDenied(context.request, context.env);
+      if (denied) return denied;
+
+      const questionId = parts[1];
+      try {
+        await deleteQuestionAdmin(context.env, questionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "削除に失敗しました";
+        if (message.includes("見つかりません")) {
+          return jsonError(message, 404);
+        }
+        throw error;
+      }
       return Response.json({ ok: true });
     }
 

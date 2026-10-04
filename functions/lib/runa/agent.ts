@@ -161,6 +161,10 @@ export interface RunaChatContext {
   editIntent?: boolean;
   /** ディープリサーチモード（専用パイプライン） */
   deepResearchMode?: boolean;
+  /** 3Dプリンター利用ガイド Q&A 画面 */
+  manualQaPage?: boolean;
+  /** Q&A 画面上の検索キーワード */
+  qaSearchQuery?: string | null;
 }
 
 export interface RunaChatAttachment {
@@ -267,6 +271,18 @@ function buildContextSystemHint(context?: RunaChatContext): string {
   if (!context) return "";
 
   const parts: string[] = [];
+
+  if (context.manualQaPage) {
+    parts.push(
+      `\n\n## 現在の画面\nユーザーは 3Dプリンター利用ガイドの**質問・Q&A**（/apps/3dprintmanual/questions/）を利用しています。` +
+        `過去の質問・回答を探すときは **manual_qa_search** を使う（ユーザーが利用ガイドアプリ権限を持つ場合）。` +
+        `機種や手順の一般説明は利用ガイド /apps/3dprintmanual/ を案内する。`
+    );
+    const qaQ = context.qaSearchQuery?.trim();
+    if (qaQ) {
+      parts.push(`\n画面上の検索キーワード: 「${qaQ}」`);
+    }
+  }
 
   const webEdit = context.webSiteEditFile;
   if (webEdit?.siteId?.trim() && webEdit.path?.trim()) {
