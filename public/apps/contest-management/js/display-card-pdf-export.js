@@ -5,6 +5,8 @@ import { zipSync } from 'fflate';
 import {
   buildDisplayCardPreviewState,
   renderDisplayCardPreview,
+  fitDisplayCardPreviewToHost,
+  bindDisplayCardPreviewHostResize,
   DISPLAY_CARD_WIDTH_PX,
   DISPLAY_CARD_HEIGHT_PX,
   DISPLAY_CARD_LAYOUT,
@@ -228,9 +230,9 @@ export function setupDisplayCardPdfPreviewModal() {
   const closeModal = () => {
     modal.classList.remove('open');
     revokeDisplayCardPdfPreviewObjectUrls();
-    const img = modal.querySelector('[data-display-card-pdf-preview-img]');
-    if (img instanceof HTMLImageElement) {
-      img.removeAttribute('src');
+    const host = modal.querySelector('[data-display-card-pdf-preview-host]');
+    if (host instanceof HTMLElement) {
+      host.replaceChildren();
     }
     delete modal.dataset.downloadUrl;
     delete modal.dataset.downloadFilename;
@@ -256,10 +258,17 @@ export function setupDisplayCardPdfPreviewModal() {
 }
 
 /**
- * Shows the raster used for PDF export (same canvas → PNG preview + PDF download).
- * @param {{ canvas: HTMLCanvasElement; pdfBlob: Blob; filename: string; title?: string }} opts
+ * On-screen preview uses the same DOM + scale-wrap fit as contest entry; PDF uses the canvas bitmap.
+ * @param {{
+ *   canvas: HTMLCanvasElement;
+ *   pdfBlob: Blob;
+ *   filename: string;
+ *   title?: string;
+ *   previewState: ReturnType<typeof buildDisplayCardPreviewState>;
+ *   layout: typeof DISPLAY_CARD_LAYOUT;
+ * }} opts
  */
-export function openDisplayCardPdfPreviewModal(opts) {
+export async function openDisplayCardPdfPreviewModal(opts) {
   setupDisplayCardPdfPreviewModal();
   const modal = document.getElementById(DISPLAY_CARD_PDF_MODAL_ID);
   if (!(modal instanceof HTMLElement)) {
@@ -273,12 +282,13 @@ export function openDisplayCardPdfPreviewModal(opts) {
     titleEl.textContent = opts.title?.trim() || '展示カード PDF';
   }
 
-  const img = modal.querySelector('[data-display-card-pdf-preview-img]');
-  if (img instanceof HTMLImageElement) {
-    img.src = opts.canvas.toDataURL('image/png');
-    img.width = DISPLAY_CARD_WIDTH_PX;
-    img.height = DISPLAY_CARD_HEIGHT_PX;
-    img.alt = '展示カードプレビュー';
+  const host = modal.querySelector('[data-display-card-pdf-preview-host]');
+  if (host instanceof HTMLElement) {
+    renderDisplayCardPreview(host, opts.previewState, { layout: opts.layout });
+    fitDisplayCardPreviewToHost(host);
+    bindDisplayCardPreviewHostResize(host, () => fitDisplayCardPreviewToHost(host));
+    await waitForDisplayCardPreviewAssets(host, opts.layout);
+    fitDisplayCardPreviewToHost(host);
   }
 
   const pdfUrl = URL.createObjectURL(opts.pdfBlob);
@@ -287,17 +297,26 @@ export function openDisplayCardPdfPreviewModal(opts) {
   modal.dataset.downloadFilename = opts.filename;
 
   modal.classList.add('open');
+  if (host instanceof HTMLElement) {
+    requestAnimationFrame(() => fitDisplayCardPreviewToHost(host));
+  }
 }
 
-/** Renders preview + opens modal (PNG preview matches PDF bitmap). */
+/** Renders PDF bitmap + opens modal (on-screen preview matches entry DOM fit). */
 export async function previewDisplayCardPdfForApplication(app, layout) {
+  const input = applicationToDisplayCardInput(app);
+  const previewState = buildDisplayCardPreviewState(input, layout, {
+    cardWidthPx: DISPLAY_CARD_WIDTH_PX,
+  });
   const canvas = await renderDisplayCardPreviewCanvas(app, layout);
   const pdfBlob = displayCardCanvasToPdfBlob(canvas);
-  openDisplayCardPdfPreviewModal({
+  await openDisplayCardPdfPreviewModal({
     canvas,
     pdfBlob,
     filename: buildDisplayCardPdfFilename(app),
     title: (app.title ?? '').trim() || '展示カード',
+    previewState,
+    layout,
   });
 }
 

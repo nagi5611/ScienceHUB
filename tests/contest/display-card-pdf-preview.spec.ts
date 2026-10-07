@@ -64,33 +64,94 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     });
 
     await expect(modal).toHaveClass(/open/, { timeout: 90_000 });
-    const img = modal.locator("[data-display-card-pdf-preview-img]");
-    await expect(img).toBeVisible();
-    await expect
-      .poll(async () => img.getAttribute("src"), { timeout: 30_000 })
-      .toMatch(/^data:image\/png/);
+    const previewHost = modal.locator("[data-display-card-pdf-preview-host]");
+    await expect(previewHost).toBeVisible();
+    const previewCard = modal.getByTestId("display-card-root");
+    await expect(previewCard).toBeVisible({ timeout: 30_000 });
+    await expect(modal.getByTestId("display-card-title")).toContainText(title);
 
-    const previewHasInk = await page.evaluate(async (expectedTitle) => {
+    const previewChecks = await page.evaluate(async (expectedTitle) => {
       const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
       const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
       const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
-      const img = document.querySelector("[data-display-card-pdf-preview-img]");
-      if (!(img instanceof HTMLImageElement) || !img.src.startsWith("data:image/png")) return false;
-      await img.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return false;
-      ctx.drawImage(img, 0, 0);
+
+      const measureFieldFraction = (host: HTMLElement, testId: string) => {
+        const card = host.querySelector('[data-testid="display-card-root"]');
+        const field = host.querySelector(`[data-testid="${testId}"]`);
+        if (!(card instanceof HTMLElement) || !(field instanceof HTMLElement)) return null;
+        const cardRect = card.getBoundingClientRect();
+        const fieldRect = field.getBoundingClientRect();
+        if (cardRect.width < 1 || cardRect.height < 1) return null;
+        return {
+          left: (fieldRect.left - cardRect.left) / cardRect.width,
+          top: (fieldRect.top - cardRect.top) / cardRect.height,
+        };
+      };
+
+      const modalHost = document.querySelector("[data-display-card-pdf-preview-host]");
+      if (!(modalHost instanceof HTMLElement)) return { ok: false as const };
+
+      const hasScaleWrap = Boolean(modalHost.querySelector(".contest-display-card-scale-wrap"));
+      const modalTitle = measureFieldFraction(modalHost, "display-card-title");
+      const expectedLeft = layout.title.left / 100;
+      const expectedTop = layout.title.top / 100;
+
+      const app = {
+        schedule_type: "full_time",
+        homeroom: "101",
+        student_number: 7,
+        student_name: "山田太郎",
+        title: expectedTitle,
+        impressions: "テストコメント。PDFプレビュー用の短文です。",
+        members: [{ homeroom: "101", member_name: "山田太郎" }],
+      };
+      const canvas = await pdfMod.renderDisplayCardPreviewCanvas(app, layout);
       try {
         pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
       } catch {
-        return false;
+        return { ok: false as const };
       }
-      return (img.alt?.length ?? 0) >= 0 && expectedTitle.length > 0;
+
+      const input = pdfMod.applicationToDisplayCardInput(app);
+      const state = previewMod.buildDisplayCardPreviewState(input, layout, {
+        cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
+      });
+      const mount = previewMod.mountDisplayCardPreviewCaptureHost();
+      previewMod.renderDisplayCardPreview(mount.host, state, { layout });
+      mount.host.style.width = `${modalHost.clientWidth}px`;
+      previewMod.fitDisplayCardPreviewToHost(mount.host);
+      const entryTitle = measureFieldFraction(mount.host, "display-card-title");
+      mount.dispose();
+
+      const titleDelta =
+        modalTitle && entryTitle
+          ? Math.max(
+              Math.abs(modalTitle.left - entryTitle.left),
+              Math.abs(modalTitle.top - entryTitle.top)
+            )
+          : 1;
+
+      return {
+        ok: true as const,
+        hasScaleWrap,
+        modalTitle,
+        entryTitle,
+        titleDelta,
+        expectedLeft,
+        expectedTop,
+        canvasWidth: canvas.width,
+      };
     }, title);
-    expect(previewHasInk).toBe(true);
+
+    expect(previewChecks.ok).toBe(true);
+    if (previewChecks.ok) {
+      expect(previewChecks.hasScaleWrap).toBe(true);
+      expect(previewChecks.canvasWidth).toBe(1600);
+      expect(previewChecks.titleDelta).toBeLessThan(0.02);
+      expect(Math.abs((previewChecks.modalTitle?.left ?? 0) - previewChecks.expectedLeft)).toBeLessThan(
+        0.08
+      );
+    }
 
     await modal.locator("[data-display-card-pdf-dismiss]").click();
     await expect(modal).not.toHaveClass(/open/);

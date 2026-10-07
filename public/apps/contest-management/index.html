@@ -721,15 +721,14 @@
         <button class="modal-close" type="button" aria-label="閉じる">&times;</button>
       </div>
       <div class="modal-body contest-display-card-pdf-modal-body">
-        <p class="hint contest-display-card-pdf-modal-hint">プレビューとダウンロードするPDFは同じ画像です。</p>
+        <p class="hint contest-display-card-pdf-modal-hint">画面プレビューは申込フォームと同じ表示です。ダウンロードするPDFは高解像度の画像です。</p>
         <div class="contest-display-card-pdf-preview-wrap">
-          <img
-            class="contest-display-card-pdf-preview-img"
-            data-display-card-pdf-preview-img
-            width="800"
-            height="450"
-            alt=""
-          />
+          <div
+            id="contest-display-card-pdf-preview-host"
+            class="contest-display-card-host contest-display-card-pdf-preview-host"
+            data-display-card-pdf-preview-host
+            data-testid="display-card-pdf-preview-host"
+          ></div>
         </div>
       </div>
       <div class="modal-footer">
