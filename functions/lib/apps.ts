@@ -451,62 +451,140 @@ async function getDashboardForAdmin(db: D1Database): Promise<DashboardGroup[]> {
   ];
 }
 
-/** アプリのアクセス用メタデータを読み込む */
-export async function loadAppAccessMeta(
-  db: D1Database,
-  appId: string
-): Promise<{
+export interface AppAccessMeta {
   enabledGroupIds: Set<string>;
   roleRestrictions: Map<string, Set<string>>;
-}> {
-  const settings = await db
-    .prepare("SELECT group_id FROM app_group_settings WHERE app_id = ? AND enabled = 1")
-    .bind(appId)
-    .all<{ group_id: string }>();
+}
 
-  const roles = await db
-    .prepare("SELECT group_id, group_role_id FROM app_group_role_access WHERE app_id = ?")
-    .bind(appId)
-    .all<{ group_id: string; group_role_id: string }>();
-
-  const enabledGroupIds = new Set(
-    (settings.results ?? []).map((row) => row.group_id)
-  );
-
-  const explicitByGroup = new Map<string, string[]>();
-  for (const row of roles.results ?? []) {
-    const list = explicitByGroup.get(row.group_id) ?? [];
-    list.push(row.group_role_id);
-    explicitByGroup.set(row.group_id, list);
-  }
-
-  const groupIds = [...new Set([...enabledGroupIds, ...explicitByGroup.keys()])];
-  const groupRolesByGroup = new Map<string, Array<{ id: string; weight: number }>>();
-
-  if (groupIds.length > 0) {
-    const placeholders = groupIds.map(() => "?").join(", ");
-    const weightRows = await db
-      .prepare(
-        `SELECT id, group_id, weight FROM group_roles WHERE group_id IN (${placeholders})`
-      )
-      .bind(...groupIds)
-      .all<{ id: string; group_id: string; weight: number }>();
-
-    for (const row of weightRows.results ?? []) {
-      const list = groupRolesByGroup.get(row.group_id) ?? [];
-      list.push({ id: row.id, weight: row.weight ?? 1 });
-      groupRolesByGroup.set(row.group_id, list);
-    }
-  }
-
+function buildRoleRestrictionsForApp(
+  explicitByGroup: Map<string, string[]>,
+  groupRolesByGroup: Map<string, Array<{ id: string; weight: number }>>
+): Map<string, Set<string>> {
   const roleRestrictions = new Map<string, Set<string>>();
   for (const [groupId, explicitIds] of explicitByGroup) {
     if (explicitIds.length === 0) continue;
     const groupRoles = groupRolesByGroup.get(groupId) ?? [];
     roleRestrictions.set(groupId, expandRoleIdsByWeight(explicitIds, groupRoles));
   }
+  return roleRestrictions;
+}
 
-  return { enabledGroupIds, roleRestrictions };
+async function loadGroupRolesByGroupId(
+  db: D1Database,
+  groupIds: string[]
+): Promise<Map<string, Array<{ id: string; weight: number }>>> {
+  const groupRolesByGroup = new Map<string, Array<{ id: string; weight: number }>>();
+  if (groupIds.length === 0) return groupRolesByGroup;
+
+  const placeholders = groupIds.map(() => "?").join(", ");
+  const weightRows = await db
+    .prepare(
+      `SELECT id, group_id, weight FROM group_roles WHERE group_id IN (${placeholders})`
+    )
+    .bind(...groupIds)
+    .all<{ id: string; group_id: string; weight: number }>();
+
+  for (const row of weightRows.results ?? []) {
+    const list = groupRolesByGroup.get(row.group_id) ?? [];
+    list.push({ id: row.id, weight: row.weight ?? 1 });
+    groupRolesByGroup.set(row.group_id, list);
+  }
+  return groupRolesByGroup;
+}
+
+/**
+ * 複数アプリのアクセスメタを一括取得（ダッシュボード N+1 回避）
+ * @param appIds 省略時は全アプリの設定を読み込む
+ */
+export async function loadAppAccessMetaBatch(
+  db: D1Database,
+  appIds?: string[]
+): Promise<Map<string, AppAccessMeta>> {
+  const result = new Map<string, AppAccessMeta>();
+
+  const settingsSql =
+    appIds && appIds.length > 0
+      ? `SELECT app_id, group_id FROM app_group_settings WHERE enabled = 1 AND app_id IN (${appIds.map(() => "?").join(", ")})`
+      : "SELECT app_id, group_id FROM app_group_settings WHERE enabled = 1";
+
+  const settingsStmt = db.prepare(settingsSql);
+  const settings = appIds && appIds.length > 0
+    ? await settingsStmt.bind(...appIds).all<{ app_id: string; group_id: string }>()
+    : await settingsStmt.all<{ app_id: string; group_id: string }>();
+
+  const rolesSql =
+    appIds && appIds.length > 0
+      ? `SELECT app_id, group_id, group_role_id FROM app_group_role_access WHERE app_id IN (${appIds.map(() => "?").join(", ")})`
+      : "SELECT app_id, group_id, group_role_id FROM app_group_role_access";
+
+  const rolesStmt = db.prepare(rolesSql);
+  const roles = appIds && appIds.length > 0
+    ? await rolesStmt.bind(...appIds).all<{
+        app_id: string;
+        group_id: string;
+        group_role_id: string;
+      }>()
+    : await rolesStmt.all<{
+        app_id: string;
+        group_id: string;
+        group_role_id: string;
+      }>();
+
+  const explicitByApp = new Map<string, Map<string, string[]>>();
+  const allGroupIds = new Set<string>();
+
+  for (const row of settings.results ?? []) {
+    let meta = result.get(row.app_id);
+    if (!meta) {
+      meta = { enabledGroupIds: new Set(), roleRestrictions: new Map() };
+      result.set(row.app_id, meta);
+    }
+    meta.enabledGroupIds.add(row.group_id);
+    allGroupIds.add(row.group_id);
+  }
+
+  for (const row of roles.results ?? []) {
+    let byGroup = explicitByApp.get(row.app_id);
+    if (!byGroup) {
+      byGroup = new Map();
+      explicitByApp.set(row.app_id, byGroup);
+    }
+    const list = byGroup.get(row.group_id) ?? [];
+    list.push(row.group_role_id);
+    byGroup.set(row.group_id, list);
+    allGroupIds.add(row.group_id);
+
+    if (!result.has(row.app_id)) {
+      result.set(row.app_id, {
+        enabledGroupIds: new Set(),
+        roleRestrictions: new Map(),
+      });
+    }
+  }
+
+  const groupRolesByGroup = await loadGroupRolesByGroupId(db, [...allGroupIds]);
+
+  for (const [appId, byGroup] of explicitByApp) {
+    const meta = result.get(appId);
+    if (!meta) continue;
+    meta.roleRestrictions = buildRoleRestrictionsForApp(byGroup, groupRolesByGroup);
+  }
+
+  return result;
+}
+
+/** アプリのアクセス用メタデータを読み込む */
+export async function loadAppAccessMeta(
+  db: D1Database,
+  appId: string
+): Promise<AppAccessMeta> {
+  const batch = await loadAppAccessMetaBatch(db, [appId]);
+  return (
+    batch.get(appId) ?? {
+      enabledGroupIds: new Set(),
+      roleRestrictions: new Map(),
+    }
+  );
 }
 
 /** アプリにアクセス可能なメンバー ID を取得（閲覧者と共通グループかつロール許可） */
@@ -649,9 +727,12 @@ export async function getDashboardManifestForUser(
     }
   }
 
+  const accessByAppId = await loadAppAccessMetaBatch(db, apps.map((a) => a.id));
+
   for (const app of apps) {
-    const { enabledGroupIds, roleRestrictions } = await loadAppAccessMeta(db, app.id);
-    if (enabledGroupIds.size === 0) continue;
+    const accessMeta = accessByAppId.get(app.id);
+    if (!accessMeta || accessMeta.enabledGroupIds.size === 0) continue;
+    const { enabledGroupIds, roleRestrictions } = accessMeta;
 
     for (const membership of memberships) {
       if (!membershipCanAccessApp(membership, enabledGroupIds, roleRestrictions)) {
@@ -740,9 +821,12 @@ export async function getDashboardForUser(
     }
   }
 
+  const accessByAppId = await loadAppAccessMetaBatch(db, apps.map((a) => a.id));
+
   for (const app of apps) {
-    const { enabledGroupIds, roleRestrictions } = await loadAppAccessMeta(db, app.id);
-    if (enabledGroupIds.size === 0) continue;
+    const accessMeta = accessByAppId.get(app.id);
+    if (!accessMeta || accessMeta.enabledGroupIds.size === 0) continue;
+    const { enabledGroupIds, roleRestrictions } = accessMeta;
 
     for (const membership of memberships) {
       if (!membershipCanAccessApp(membership, enabledGroupIds, roleRestrictions)) {

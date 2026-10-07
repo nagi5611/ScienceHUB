@@ -421,11 +421,13 @@ function loadStorageOverviewProgressive(storageManifest) {
     cards.innerHTML = storageManifest.roots.map(storageCardSkeletonHtml).join("");
   }
 
-  for (const rootMeta of storageManifest.roots) {
-    fetchStorageRootQuota(rootMeta)
-      .then((row) => replaceStorageRootRow(rootMeta, row))
-      .catch(() => replaceStorageRootRow(rootMeta, null));
-  }
+  const storageTasks = storageManifest.roots.map(
+    (rootMeta) => () =>
+      fetchStorageRootQuota(rootMeta)
+        .then((row) => replaceStorageRootRow(rootMeta, row))
+        .catch(() => replaceStorageRootRow(rootMeta, null))
+  );
+  void runWithConcurrency(storageTasks, DASHBOARD_FETCH_CONCURRENCY);
 }
 
 /** ダッシュボードマニフェスト API を取得 */
@@ -453,6 +455,34 @@ async function fetchDashboardApp(slug) {
   if (!response.ok) return null;
   const data = await response.json();
   return data.app ?? null;
+}
+
+/** ダッシュボード段階読み込みの並列上限 */
+const DASHBOARD_FETCH_CONCURRENCY = 8;
+
+/**
+ * タスク配列を指定並列数で実行（各要素は () => Promise）
+ * @template T
+ * @param {Array<() => Promise<T>>} tasks
+ * @param {number} concurrency
+ * @returns {Promise<T[]>}
+ */
+async function runWithConcurrency(tasks, concurrency) {
+  if (tasks.length === 0) return [];
+  const limit = Math.max(1, Math.min(concurrency, tasks.length));
+  const results = new Array(tasks.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < tasks.length) {
+      const i = nextIndex;
+      nextIndex += 1;
+      results[i] = await tasks[i]();
+    }
+  }
+
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+  return results;
 }
 
 /** @type {Map<string, Promise<object|null>>} */
@@ -508,19 +538,21 @@ function loadDefaultAppsProgressive(defaultSlugs) {
   const loadedBySlug = new Map();
   let settled = 0;
 
-  for (const slug of slugs) {
-    loadDashboardAppCached(slug)
-      .then((app) => {
-        if (app) loadedBySlug.set(slug, app);
-      })
-      .finally(() => {
-        settled += 1;
-        if (settled === slugs.length) {
-          const ordered = slugs.map((s) => loadedBySlug.get(s)).filter(Boolean);
-          updateDefaultAppMenu(ordered);
-        }
-      });
-  }
+  const defaultTasks = slugs.map(
+    (slug) => () =>
+      loadDashboardAppCached(slug)
+        .then((app) => {
+          if (app) loadedBySlug.set(slug, app);
+        })
+        .finally(() => {
+          settled += 1;
+          if (settled === slugs.length) {
+            const ordered = slugs.map((s) => loadedBySlug.get(s)).filter(Boolean);
+            updateDefaultAppMenu(ordered);
+          }
+        })
+  );
+  void runWithConcurrency(defaultTasks, DASHBOARD_FETCH_CONCURRENCY);
 }
 
 /** グループとアプリを段階的に描画 */
@@ -586,19 +618,27 @@ async function renderGroupsProgressive() {
 
     section.innerHTML = defaultSection + groupSections;
 
+    const appSlotTasks = [];
+
     for (const slug of defaultSlugs) {
       const slotKey = `default:${slug}`;
-      loadDashboardAppCached(slug)
-        .then((app) => fillAppSlot(slotKey, app))
-        .catch(() => fillAppSlot(slotKey, null));
+      appSlotTasks.push(() =>
+        loadDashboardAppCached(slug)
+          .then((app) => fillAppSlot(slotKey, app))
+          .catch(() => fillAppSlot(slotKey, null))
+      );
     }
 
     for (const slot of groupSlots) {
       const slotKey = `group:${slot.group_id}:${slot.app_slug}`;
-      loadDashboardAppCached(slot.app_slug)
-        .then((app) => fillAppSlot(slotKey, app))
-        .catch(() => fillAppSlot(slotKey, null));
+      appSlotTasks.push(() =>
+        loadDashboardAppCached(slot.app_slug)
+          .then((app) => fillAppSlot(slotKey, app))
+          .catch(() => fillAppSlot(slotKey, null))
+      );
     }
+
+    void runWithConcurrency(appSlotTasks, DASHBOARD_FETCH_CONCURRENCY);
   } catch {
     section.innerHTML = `<p class="hub-groups-empty">アプリの読み込みに失敗しました。</p>`;
   }
@@ -1769,14 +1809,11 @@ async function init() {
   bindEvents();
 
   initDefaultAppMenu([]);
-
-  await Promise.all([
-    renderAnnouncements(),
-    renderGroupsProgressive(),
-    loadSchedule(),
-  ]);
-
   initAccountMenu();
+
+  void renderGroupsProgressive();
+
+  await Promise.all([renderAnnouncements(), loadSchedule()]);
 }
 
 init();

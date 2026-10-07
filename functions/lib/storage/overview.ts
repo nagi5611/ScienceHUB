@@ -189,31 +189,33 @@ export async function getStorageOverviewRowForDashboard(
   const entry = visibleRoots.find((r) => r.type === rootType && r.key === rootKey);
   if (!entry) return null;
 
-  if (rootType === "user") {
-    await ensureUserStorageRoot(
-      env,
-      db,
-      user.id,
-      user.username,
-      user.role_slug
-    );
-  } else {
-    const group = await db
-      .prepare("SELECT id, slug FROM hub_groups WHERE slug = ?")
-      .bind(rootKey)
-      .first<{ id: string; slug: string }>();
-    if (group) {
-      await ensureGroupStorageRoot(
+  let root = await resolveRootForPath(db, entry.type, entry.key);
+  if (!root) {
+    if (rootType === "user") {
+      await ensureUserStorageRoot(
         env,
         db,
-        group.id,
-        group.slug,
-        user.username
+        user.id,
+        user.username,
+        user.role_slug
       );
+    } else {
+      const group = await db
+        .prepare("SELECT id, slug FROM hub_groups WHERE slug = ?")
+        .bind(rootKey)
+        .first<{ id: string; slug: string }>();
+      if (group) {
+        await ensureGroupStorageRoot(
+          env,
+          db,
+          group.id,
+          group.slug,
+          user.username
+        );
+      }
     }
+    root = await resolveRootForPath(db, entry.type, entry.key);
   }
-
-  const root = await resolveRootForPath(db, entry.type, entry.key);
   if (!root) return null;
 
   const trashMap = await getTrashBytesByRootId(db, [root.id]);
