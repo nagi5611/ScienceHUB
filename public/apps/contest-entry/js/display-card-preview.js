@@ -74,8 +74,21 @@ export function measureDisplayCardHostWidthPx(host) {
   return resolveDisplayCardPreviewWidthPx(host);
 }
 
+/** @param {HTMLElement} host */
+function getDisplayCardFitShell(host) {
+  const shell = host.querySelector('.contest-display-card-fit-shell');
+  return shell instanceof HTMLElement ? shell : null;
+}
+
 /** Clears inline fit styles applied by fitDisplayCardPreviewToHost. */
 function resetDisplayCardPreviewFit(host) {
+  const shell = getDisplayCardFitShell(host);
+  if (shell) {
+    shell.style.width = '';
+    shell.style.height = '';
+    shell.style.maxWidth = '';
+    shell.style.overflow = '';
+  }
   const card = host.querySelector('.contest-display-card');
   if (!(card instanceof HTMLElement)) return;
   card.classList.remove('contest-display-card--fitted');
@@ -95,6 +108,7 @@ function resetDisplayCardPreviewFit(host) {
  */
 export function fitDisplayCardPreviewToHost(host) {
   if (!(host instanceof HTMLElement)) return;
+  const shell = getDisplayCardFitShell(host);
   const card = host.querySelector('.contest-display-card');
   if (!(card instanceof HTMLElement)) return;
   if (card.classList.contains('contest-display-card--editor')) {
@@ -111,6 +125,7 @@ export function fitDisplayCardPreviewToHost(host) {
   }
 
   const scale = available / DISPLAY_CARD_WIDTH_PX;
+  const fittedHeight = DISPLAY_CARD_HEIGHT_PX * scale;
   card.classList.add('contest-display-card--fitted');
   card.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
   card.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
@@ -118,8 +133,17 @@ export function fitDisplayCardPreviewToHost(host) {
   card.style.maxWidth = 'none';
   card.style.transform = `scale(${scale})`;
   card.style.transformOrigin = 'top left';
-  host.style.height = `${DISPLAY_CARD_HEIGHT_PX * scale}px`;
-  host.style.overflow = 'hidden';
+  if (shell) {
+    shell.style.width = '100%';
+    shell.style.maxWidth = '100%';
+    shell.style.height = `${fittedHeight}px`;
+    shell.style.overflow = 'hidden';
+    host.style.height = '';
+    host.style.overflow = '';
+  } else {
+    host.style.height = `${fittedHeight}px`;
+    host.style.overflow = 'hidden';
+  }
 }
 
 /** Font stack used on the display card overlay (keep PDF capture in sync). */
@@ -914,6 +938,8 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
   host.innerHTML = `
 
+    <div class="contest-display-card-fit-shell">
+
     <div class="contest-display-card" data-testid="display-card-root">
 
       <img
@@ -923,6 +949,10 @@ export function renderDisplayCardPreview(host, state, options = {}) {
         src="${DISPLAY_CARD_TEMPLATE_URL}"
 
         alt=""
+
+        width="${DISPLAY_CARD_WIDTH_PX}"
+
+        height="${DISPLAY_CARD_HEIGHT_PX}"
 
         decoding="async"
 
@@ -959,6 +989,8 @@ export function renderDisplayCardPreview(host, state, options = {}) {
         ${commentBlockHtml}
 
       </div>
+
+    </div>
 
     </div>
 

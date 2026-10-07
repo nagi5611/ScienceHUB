@@ -1105,12 +1105,30 @@ async function handleStlSubmit(e) {
 
 let staffMessagesPollTimer = null;
 let staffMessagesSignature = '';
+let staffMessages = [];
+let staffMessagesUnreadCount = 0;
+let staffMessagesExpanded = false;
+let staffMessagesCarouselBound = false;
+
+const STAFF_MESSAGES_EMPTY_TEXT = 'まだメッセージはありません。';
+const STAFF_MESSAGES_PER_SLIDE = 3;
+
+/** Groups messages into carousel slides (up to 3 per slide). */
+function chunkStaffMessages(items, size = STAFF_MESSAGES_PER_SLIDE) {
+  const chunkSize = Math.min(Math.max(size, 1), STAFF_MESSAGES_PER_SLIDE);
+  const chunks = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
 
 function formatStaffMessageDate(iso) {
   if (!iso) return '';
   try {
     return new Intl.DateTimeFormat('ja-JP', {
       timeZone: 'Asia/Tokyo',
+      year: 'numeric',
       month: 'numeric',
       day: 'numeric',
       hour: '2-digit',
@@ -1121,15 +1139,17 @@ function formatStaffMessageDate(iso) {
   }
 }
 
-const STAFF_MESSAGES_EMPTY_TEXT = 'まだメッセージはありません。';
+function staffMessagesUnreadIds() {
+  return staffMessages.filter((msg) => !msg.read).map((msg) => msg.id);
+}
 
 function showStaffMessagesLoadError() {
   const section = document.getElementById('contest-staff-messages-section');
-  const list = document.getElementById('contest-staff-messages-list');
+  const host = document.getElementById('contest-staff-messages-carousel-host');
   const empty = document.getElementById('contest-staff-messages-empty');
-  if (!section || !list) return;
+  if (!section) return;
   section.classList.remove('hidden');
-  list.innerHTML = '';
+  host?.innerHTML = '';
   if (empty) {
     empty.classList.remove('hidden');
     empty.textContent =
@@ -1137,60 +1157,286 @@ function showStaffMessagesLoadError() {
   }
 }
 
+function updateStaffMessagesChrome() {
+  const badge = document.getElementById('contest-staff-messages-badge');
+  const toggle = document.getElementById('contest-staff-messages-toggle');
+  const section = document.getElementById('contest-staff-messages-section');
+  if (!badge || !toggle || !section) return;
+
+  if (staffMessagesUnreadCount > 0) {
+    badge.classList.remove('hidden');
+    badge.textContent =
+      staffMessagesUnreadCount > 99 ? '99+' : String(staffMessagesUnreadCount);
+    badge.setAttribute(
+      'aria-label',
+      `未読メッセージ ${staffMessagesUnreadCount} 件`
+    );
+    section.classList.add('contest-staff-messages-card--has-unread');
+  } else {
+    badge.classList.add('hidden');
+    badge.textContent = '';
+    badge.removeAttribute('aria-label');
+    section.classList.remove('contest-staff-messages-card--has-unread');
+  }
+
+  toggle.classList.toggle('contest-staff-messages-toggle--pulse', staffMessagesUnreadCount > 0);
+}
+
+function renderStaffMessageCard(msg) {
+  const unreadClass = msg.read ? '' : ' contest-staff-message--unread';
+  const titleLine = msg.application_title
+    ? `<p class="contest-staff-message-work hint">${escapeHtml(msg.application_title)}</p>`
+    : '';
+  return `<li class="contest-staff-message${unreadClass}" data-message-id="${escapeHtml(msg.id)}">
+    <div class="contest-staff-message-head">
+      <span class="contest-staff-message-kind">${escapeHtml(msg.kind_label ?? msg.kind)}</span>
+      <time class="contest-staff-message-time" datetime="${escapeHtml(msg.created_at)}">${escapeHtml(formatStaffMessageDate(msg.created_at))}</time>
+    </div>
+    <p class="contest-staff-message-staff"><span class="contest-staff-message-staff-label">担当</span> <strong>${escapeHtml(msg.staff_display_name)}</strong></p>
+    ${titleLine}
+    <div class="contest-staff-message-body">${escapeHtml(msg.body).replace(/\n/g, '<br>')}</div>
+  </li>`;
+}
+
+function staffCarSet(car, index) {
+  if (!car) return;
+  const slides = car.querySelectorAll('.car-slide');
+  const total = slides.length;
+  const i = Math.max(0, Math.min(total - 1, index));
+  car.dataset.i = String(i);
+  const track = car.querySelector('.car-track');
+  if (track) track.style.transform = `translateX(${-i * 100}%)`;
+  slides.forEach((slide, k) => slide.toggleAttribute('aria-hidden', k !== i));
+  car.querySelectorAll('[data-staff-car-to]').forEach((dot, k) => {
+    dot.classList.toggle('on', k === i);
+  });
+  const pageNum = car.querySelector('.car-n b');
+  if (pageNum) pageNum.textContent = String(i + 1);
+  const prev = car.querySelector('.car-prev');
+  const next = car.querySelector('.car-next');
+  if (prev) prev.disabled = i === 0;
+  if (next) next.disabled = i === total - 1;
+}
+
+function renderStaffMessagesCarousel() {
+  const host = document.getElementById('contest-staff-messages-carousel-host');
+  if (!host) return;
+  if (!staffMessages.length) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const slides = chunkStaffMessages(staffMessages);
+  const slideHtml = slides
+    .map((group) => {
+      const cards = group.map((msg) => renderStaffMessageCard(msg)).join('');
+      return `<div class="contest-staff-car-slide car-slide"><ul class="contest-staff-messages-list">${cards}</ul></div>`;
+    })
+    .join('');
+
+  if (slides.length <= 1) {
+    host.innerHTML = `<div class="contest-staff-car contest-staff-car-single" data-staff-car data-i="0">${slideHtml}</div>`;
+    staffCarSet(host.querySelector('[data-staff-car]'), 0);
+    return;
+  }
+
+  host.innerHTML = `<div class="contest-staff-car" data-staff-car data-i="0" role="region" aria-roledescription="carousel" aria-label="担当者メッセージ">
+    <div class="contest-staff-car-view car-view">
+      <div class="contest-staff-car-track car-track">${slideHtml}</div>
+    </div>
+    <button type="button" class="contest-staff-car-btn car-btn car-prev" data-staff-car-go="-1" aria-label="前のページ">‹</button>
+    <button type="button" class="contest-staff-car-btn car-btn car-next" data-staff-car-go="1" aria-label="次のページ">›</button>
+    <div class="contest-staff-car-meta car-meta">
+      <span class="contest-staff-car-n car-n"><b>1</b> / ${slides.length}</span>
+      <div class="contest-staff-car-dots car-dots">${slides
+        .map(
+          (_, k) =>
+            `<button type="button" data-staff-car-to="${k}" aria-label="${k + 1}ページ目"${k ? '' : ' class="on"'}></button>`
+        )
+        .join('')}</div>
+    </div>
+  </div>`;
+  staffCarSet(host.querySelector('[data-staff-car]'), 0);
+}
+
+function setStaffMessagesExpanded(expanded) {
+  staffMessagesExpanded = expanded;
+  const panel = document.getElementById('contest-staff-messages-panel');
+  const toggle = document.getElementById('contest-staff-messages-toggle');
+  const section = document.getElementById('contest-staff-messages-section');
+  if (!panel || !toggle) return;
+  panel.classList.toggle('hidden', !expanded);
+  panel.hidden = !expanded;
+  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  toggle.textContent = expanded ? '閉じる' : '開く';
+  section?.classList.toggle('contest-staff-messages-card--expanded', expanded);
+}
+
+async function markStaffMessagesRead(messageIds) {
+  if (!messageIds.length) return;
+  await apiRequest('staff-messages/read', {
+    method: 'POST',
+    body: JSON.stringify({ message_ids: messageIds }),
+  });
+  const idSet = new Set(messageIds);
+  staffMessages = staffMessages.map((msg) =>
+    idSet.has(msg.id) ? { ...msg, read: true } : msg
+  );
+  staffMessagesUnreadCount = staffMessages.filter((msg) => !msg.read).length;
+  updateStaffMessagesChrome();
+}
+
+async function handleStaffMessagesToggle() {
+  const nextExpanded = !staffMessagesExpanded;
+  setStaffMessagesExpanded(nextExpanded);
+  if (!nextExpanded) return;
+
+  renderStaffMessagesCarousel();
+  const unreadIds = staffMessagesUnreadIds();
+  if (!unreadIds.length) return;
+  try {
+    await markStaffMessagesRead(unreadIds);
+    renderStaffMessagesCarousel();
+  } catch {
+    showToast('既読の保存に失敗しました', 'error');
+  }
+}
+
+function bindStaffMessagesCarouselOnce() {
+  if (staffMessagesCarouselBound) return;
+  staffMessagesCarouselBound = true;
+
+  document.addEventListener('click', (e) => {
+    const goBtn = e.target.closest('[data-staff-car-go]');
+    if (goBtn) {
+      const car = goBtn.closest('[data-staff-car]');
+      staffCarSet(car, Number(car.dataset.i) + Number(goBtn.dataset.staffCarGo));
+      return;
+    }
+    const dotBtn = e.target.closest('[data-staff-car-to]');
+    if (dotBtn) {
+      staffCarSet(dotBtn.closest('[data-staff-car]'), Number(dotBtn.dataset.staffCarTo));
+    }
+  });
+
+  let swipeState = null;
+  document.addEventListener('pointerdown', (e) => {
+    const car = e.target.closest('[data-staff-car]');
+    if (!car || e.target.closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) {
+      return;
+    }
+    const view = car.querySelector('.car-view');
+    if (!view) return;
+    swipeState = {
+      car,
+      x: e.clientX,
+      y: e.clientY,
+      dx: 0,
+      lock: null,
+      id: e.pointerId,
+      width: view.clientWidth,
+    };
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!swipeState || e.pointerId !== swipeState.id) return;
+    const dx = e.clientX - swipeState.x;
+    const dy = e.clientY - swipeState.y;
+    if (!swipeState.lock && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      swipeState.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (swipeState.lock === 'x') {
+        swipeState.car.classList.add('dragging');
+        try {
+          swipeState.car.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (swipeState.lock !== 'x') return;
+    const i = Number(swipeState.car.dataset.i);
+    const n = swipeState.car.querySelectorAll('.car-slide').length;
+    const edge = (i === 0 && dx > 0) || (i === n - 1 && dx < 0);
+    swipeState.dx = edge ? dx * 0.3 : dx;
+    const track = swipeState.car.querySelector('.car-track');
+    if (track) {
+      track.style.transform = `translateX(calc(${-i * 100}% + ${swipeState.dx}px))`;
+    }
+  });
+  const endSwipe = (e) => {
+    if (!swipeState || e.pointerId !== swipeState.id) return;
+    const { car, dx, lock, width } = swipeState;
+    swipeState = null;
+    car.classList.remove('dragging');
+    if (lock !== 'x') return;
+    const i = Number(car.dataset.i);
+    const threshold = Math.min(60, width * 0.18);
+    staffCarSet(car, Math.abs(dx) > threshold ? i + (dx < 0 ? 1 : -1) : i);
+  };
+  document.addEventListener('pointerup', endSwipe);
+  document.addEventListener('pointercancel', endSwipe);
+}
+
 function renderStaffMessages() {
   const section = document.getElementById('contest-staff-messages-section');
-  const list = document.getElementById('contest-staff-messages-list');
   const empty = document.getElementById('contest-staff-messages-empty');
-  if (!section || !list) return;
+  const toggle = document.getElementById('contest-staff-messages-toggle');
+  const host = document.getElementById('contest-staff-messages-carousel-host');
+  if (!section || !toggle) return;
 
   if (!staffMessages.length) {
-    list.innerHTML = '';
+    section.classList.add('hidden');
+    host?.innerHTML = '';
     if (empty) {
       empty.textContent = STAFF_MESSAGES_EMPTY_TEXT;
-      empty.classList.remove('hidden');
+      empty.classList.add('hidden');
     }
     return;
   }
 
   section.classList.remove('hidden');
+  toggle.classList.remove('hidden');
   empty?.classList.add('hidden');
-  list.innerHTML = staffMessages
-    .map((msg) => {
-      const titleLine = msg.application_title
-        ? `<p class="contest-staff-message-work hint">${escapeHtml(msg.application_title)}</p>`
-        : '';
-      return `<li class="contest-staff-message" data-message-id="${escapeHtml(msg.id)}">
-        <div class="contest-staff-message-head">
-          <span class="contest-staff-message-kind">${escapeHtml(msg.kind_label ?? msg.kind)}</span>
-          <time class="contest-staff-message-time" datetime="${escapeHtml(msg.created_at)}">${escapeHtml(formatStaffMessageDate(msg.created_at))}</time>
-        </div>
-        <p class="contest-staff-message-staff">担当者: <strong>${escapeHtml(msg.staff_display_name)}</strong></p>
-        ${titleLine}
-        <div class="contest-staff-message-body">${escapeHtml(msg.body).replace(/\n/g, '<br>')}</div>
-      </li>`;
-    })
-    .join('');
+  updateStaffMessagesChrome();
+
+  if (staffMessagesExpanded) {
+    renderStaffMessagesCarousel();
+  } else {
+    host?.innerHTML = '';
+  }
 }
 
 async function loadStaffMessages() {
   const data = await apiRequest('staff-messages');
   const messages = data.messages ?? [];
-  const nextSig = messages.map((m) => `${m.id}:${m.created_at}:${m.body.length}`).join('|');
-  if (nextSig === staffMessagesSignature) return;
+  const unreadCount =
+    typeof data.unread_count === 'number'
+      ? data.unread_count
+      : messages.filter((msg) => !msg.read).length;
+  const nextSig = messages
+    .map((msg) => `${msg.id}:${msg.created_at}:${msg.read ? 1 : 0}`)
+    .join('|');
+  if (nextSig === staffMessagesSignature && unreadCount === staffMessagesUnreadCount) {
+    return;
+  }
   staffMessagesSignature = nextSig;
   staffMessages = messages;
+  staffMessagesUnreadCount = unreadCount;
   renderStaffMessages();
 }
 
 function startStaffMessagesPolling() {
+  bindStaffMessagesCarouselOnce();
+  document
+    .getElementById('contest-staff-messages-toggle')
+    ?.addEventListener('click', () => {
+      handleStaffMessagesToggle().catch(showStaffMessagesLoadError);
+    });
   loadStaffMessages().catch(showStaffMessagesLoadError);
   if (staffMessagesPollTimer) clearInterval(staffMessagesPollTimer);
   staffMessagesPollTimer = setInterval(() => {
     loadStaffMessages().catch(showStaffMessagesLoadError);
   }, 5000);
 }
-
-let staffMessages = [];
 
 async function loadDisplayCardLayoutFromServer() {
   try {

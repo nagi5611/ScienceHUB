@@ -34,6 +34,18 @@ export interface StorageOverviewResult {
   roots: StorageOverviewRow[];
 }
 
+export interface StorageRootManifestRow {
+  type: "user" | "group";
+  key: string;
+  path: string;
+  group_label: string;
+}
+
+export interface StorageManifestResult {
+  enabled: boolean;
+  roots: StorageRootManifestRow[];
+}
+
 function calcRatio(used: number, limit: number): number {
   if (limit <= 0) return 0;
   return Math.min(100, Math.round((used / limit) * 100));
@@ -78,24 +90,65 @@ function sortOverviewEntries(
   return a.entry.label.localeCompare(b.entry.label, "ja");
 }
 
-/** ログインユーザー向けストレージ使用量一覧 */
-export async function getStorageOverviewForDashboard(
-  env: Env,
+function manifestLabel(entry: StorageRootEntry): string {
+  return entry.type === "user" ? "個人" : entry.label;
+}
+
+async function sortVisibleRootEntries(
+  db: D1Database,
+  visibleRoots: StorageRootEntry[]
+): Promise<StorageRootEntry[]> {
+  const rootGroup = await getRootGroup(db);
+  let rootGroupSlug: string | null = null;
+  if (rootGroup) {
+    const slugRow = await db
+      .prepare("SELECT slug FROM hub_groups WHERE id = ?")
+      .bind(rootGroup.id)
+      .first<{ slug: string }>();
+    rootGroupSlug = slugRow?.slug ?? null;
+  }
+  const sorted = [...visibleRoots];
+  sorted.sort((a, b) =>
+    sortOverviewEntries({ entry: a }, { entry: b }, rootGroupSlug)
+  );
+  return sorted;
+}
+
+function buildOverviewRow(
+  entry: StorageRootEntry,
+  root: StorageRootRow,
+  trashUsed: number,
+  websiteUsed: number
+): StorageOverviewRow {
+  const usedBytes =
+    entry.type === "user" ? root.used_bytes + websiteUsed : root.used_bytes;
+  const available = Math.max(0, root.quota_bytes - usedBytes);
+  const trashAvailable = Math.max(0, TRASH_QUOTA_BYTES - trashUsed);
+
+  return {
+    group_label: manifestLabel(entry),
+    path: entry.path,
+    type: entry.type,
+    quota_bytes: root.quota_bytes,
+    used_bytes: usedBytes,
+    available_bytes: available,
+    usage_ratio: calcRatio(usedBytes, root.quota_bytes),
+    trash_quota_bytes: TRASH_QUOTA_BYTES,
+    trash_used_bytes: trashUsed,
+    trash_available_bytes: trashAvailable,
+    trash_usage_ratio: calcRatio(trashUsed, TRASH_QUOTA_BYTES),
+  };
+}
+
+/** ダッシュボード用: ルート一覧のみ（使用量は別 API） */
+export async function getStorageManifestForDashboard(
   db: D1Database,
   user: SessionUser
-): Promise<StorageOverviewResult> {
+): Promise<StorageManifestResult> {
   const enabled = await canUserAccessApp(db, user.id, "cloud-storage");
   if (!enabled) {
     return { enabled: false, roots: [] };
   }
-
-  await ensureUserStorageRoot(
-    env,
-    db,
-    user.id,
-    user.username,
-    user.role_slug
-  );
 
   const visibleRoots = await buildVisibleRoots(
     db,
@@ -103,12 +156,51 @@ export async function getStorageOverviewForDashboard(
     user.username,
     user.is_admin
   );
+  const sorted = await sortVisibleRootEntries(db, visibleRoots);
 
-  for (const root of visibleRoots) {
-    if (root.type !== "group") continue;
+  return {
+    enabled: true,
+    roots: sorted.map((entry) => ({
+      type: entry.type,
+      key: entry.key,
+      path: entry.path,
+      group_label: manifestLabel(entry),
+    })),
+  };
+}
+
+/** ダッシュボード用: 1 ルートの使用量 */
+export async function getStorageOverviewRowForDashboard(
+  env: Env,
+  db: D1Database,
+  user: SessionUser,
+  rootType: "user" | "group",
+  rootKey: string
+): Promise<StorageOverviewRow | null> {
+  const enabled = await canUserAccessApp(db, user.id, "cloud-storage");
+  if (!enabled) return null;
+
+  const visibleRoots = await buildVisibleRoots(
+    db,
+    user.id,
+    user.username,
+    user.is_admin
+  );
+  const entry = visibleRoots.find((r) => r.type === rootType && r.key === rootKey);
+  if (!entry) return null;
+
+  if (rootType === "user") {
+    await ensureUserStorageRoot(
+      env,
+      db,
+      user.id,
+      user.username,
+      user.role_slug
+    );
+  } else {
     const group = await db
       .prepare("SELECT id, slug FROM hub_groups WHERE slug = ?")
-      .bind(root.key)
+      .bind(rootKey)
       .first<{ id: string; slug: string }>();
     if (group) {
       await ensureGroupStorageRoot(
@@ -121,64 +213,42 @@ export async function getStorageOverviewForDashboard(
     }
   }
 
-  const resolved: Array<{ entry: StorageRootEntry; root: StorageRootRow }> =
-    [];
-  for (const entry of visibleRoots) {
-    const root = await resolveRootForPath(db, entry.type, entry.key);
-    if (root) resolved.push({ entry, root });
+  const root = await resolveRootForPath(db, entry.type, entry.key);
+  if (!root) return null;
+
+  const trashMap = await getTrashBytesByRootId(db, [root.id]);
+  const trashUsed = trashMap.get(root.id) ?? 0;
+
+  let websiteUsed = 0;
+  if (entry.type === "user" && root.user_id) {
+    websiteUsed = await getUserWebSitesUsedBytes(db, root.user_id);
   }
 
-  const trashMap = await getTrashBytesByRootId(
-    db,
-    resolved.map((row) => row.root.id)
-  );
+  return buildOverviewRow(entry, root, trashUsed, websiteUsed);
+}
 
-  const rootGroup = await getRootGroup(db);
-  let rootGroupSlug: string | null = null;
-  if (rootGroup) {
-    const slugRow = await db
-      .prepare("SELECT slug FROM hub_groups WHERE id = ?")
-      .bind(rootGroup.id)
-      .first<{ slug: string }>();
-    rootGroupSlug = slugRow?.slug ?? null;
+/** ログインユーザー向けストレージ使用量一覧 */
+export async function getStorageOverviewForDashboard(
+  env: Env,
+  db: D1Database,
+  user: SessionUser
+): Promise<StorageOverviewResult> {
+  const manifest = await getStorageManifestForDashboard(db, user);
+  if (!manifest.enabled) {
+    return { enabled: false, roots: [] };
   }
-  resolved.sort((a, b) => sortOverviewEntries(a, b, rootGroupSlug));
 
-  const websiteUsedByUserId = new Map<string, number>();
-  for (const { entry, root } of resolved) {
-    if (entry.type !== "user" || !root.user_id) continue;
-    if (websiteUsedByUserId.has(root.user_id)) continue;
-    websiteUsedByUserId.set(
-      root.user_id,
-      await getUserWebSitesUsedBytes(db, root.user_id)
+  const roots: StorageOverviewRow[] = [];
+  for (const row of manifest.roots) {
+    const overview = await getStorageOverviewRowForDashboard(
+      env,
+      db,
+      user,
+      row.type,
+      row.key
     );
+    if (overview) roots.push(overview);
   }
-
-  const roots: StorageOverviewRow[] = resolved.map(({ entry, root }) => {
-    const trashUsed = trashMap.get(root.id) ?? 0;
-    const websiteUsed =
-      entry.type === "user" && root.user_id
-        ? websiteUsedByUserId.get(root.user_id) ?? 0
-        : 0;
-    const usedBytes =
-      entry.type === "user" ? root.used_bytes + websiteUsed : root.used_bytes;
-    const available = Math.max(0, root.quota_bytes - usedBytes);
-    const trashAvailable = Math.max(0, TRASH_QUOTA_BYTES - trashUsed);
-
-    return {
-      group_label: entry.type === "user" ? "個人" : entry.label,
-      path: entry.path,
-      type: entry.type,
-      quota_bytes: root.quota_bytes,
-      used_bytes: usedBytes,
-      available_bytes: available,
-      usage_ratio: calcRatio(usedBytes, root.quota_bytes),
-      trash_quota_bytes: TRASH_QUOTA_BYTES,
-      trash_used_bytes: trashUsed,
-      trash_available_bytes: trashAvailable,
-      trash_usage_ratio: calcRatio(trashUsed, TRASH_QUOTA_BYTES),
-    };
-  });
 
   return { enabled: true, roots };
 }

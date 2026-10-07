@@ -45,9 +45,19 @@
     <p class="contact-notice">お問い合わせ：<br /><a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a></p>
 
     <section class="card contest-staff-messages-card hidden" id="contest-staff-messages-section" aria-labelledby="contest-staff-messages-heading">
-      <h2 class="contest-section-title" id="contest-staff-messages-heading">担当者からのメッセージ</h2>
-      <p class="hint hidden" id="contest-staff-messages-empty">まだメッセージはありません。</p>
-      <ul class="contest-staff-messages-list" id="contest-staff-messages-list" aria-live="polite"></ul>
+      <div class="contest-staff-messages-toolbar">
+        <div class="contest-staff-messages-toolbar-title">
+          <h2 class="contest-section-title contest-staff-messages-heading" id="contest-staff-messages-heading">担当者からのメッセージ</h2>
+          <span class="contest-staff-messages-badge hidden" id="contest-staff-messages-badge" aria-live="polite"></span>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm contest-staff-messages-toggle hidden" id="contest-staff-messages-toggle" aria-expanded="false" aria-controls="contest-staff-messages-panel">
+          開く
+        </button>
+      </div>
+      <div class="contest-staff-messages-panel hidden" id="contest-staff-messages-panel" hidden>
+        <p class="hint hidden" id="contest-staff-messages-empty">まだメッセージはありません。</p>
+        <div id="contest-staff-messages-carousel-host" class="contest-staff-messages-carousel-host" aria-live="polite"></div>
+      </div>
     </section>
 
     <div class="contest-entry-layout">

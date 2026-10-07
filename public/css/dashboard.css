@@ -874,6 +874,40 @@ body.hub-modal-open {
   opacity: 1;
 }
 
+.hub-schedule-stale-banner {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--cf-muted);
+  background: #f8f9fa;
+  border-bottom: 1px solid var(--cf-border);
+}
+
+.hub-calendar-card.is-schedule-stale .calendar-grid-wrap {
+  opacity: 0.58;
+  filter: grayscale(0.25);
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.hub-calendar-card.is-schedule-stale .calendar-day--addable {
+  cursor: default;
+}
+
+.hub-schedule.is-schedule-stale .hub-schedule-scope-btn:disabled,
+.hub-calendar-card.is-schedule-stale .calendar-nav-btn:disabled,
+.hub-calendar-card.is-schedule-stale .calendar-today-btn:disabled,
+.hub-calendar-card.is-schedule-stale .calendar-period-select:disabled,
+.hub-calendar-card.is-schedule-stale .calendar-month-chip:disabled,
+.hub-schedule.is-schedule-stale .hub-schedule-subscribe-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#groups-section:has(.hub-loading) {
+  min-height: 11rem;
+}
+
 .hub-announcement-loading,
 .hub-tasks-loading-item {
   list-style: none;
@@ -2293,6 +2327,101 @@ body.hub-modal-open {
   border-color: var(--cf-border);
   color: var(--cf-muted);
   box-shadow: none;
+}
+
+.hub-app-tile--skeleton {
+  background: var(--cf-surface);
+  cursor: default;
+  pointer-events: none;
+}
+
+.hub-app-tile--skeleton:hover {
+  border-color: var(--cf-border);
+  box-shadow: none;
+  transform: none;
+}
+
+.hub-app-tile-skeleton-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--cf-border) 55%, transparent) 0%,
+    color-mix(in srgb, var(--cf-border) 25%, transparent) 50%,
+    color-mix(in srgb, var(--cf-border) 55%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: hub-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.hub-app-tile-skeleton-label {
+  display: block;
+  width: 70%;
+  max-width: 8rem;
+  height: 0.85rem;
+  margin: 0 auto;
+  border-radius: 0.25rem;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--cf-border) 55%, transparent) 0%,
+    color-mix(in srgb, var(--cf-border) 25%, transparent) 50%,
+    color-mix(in srgb, var(--cf-border) 55%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: hub-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.hub-storage-row--skeleton th,
+.hub-storage-row--skeleton td {
+  vertical-align: middle;
+}
+
+.hub-storage-skeleton-bar,
+.hub-storage-skeleton-line {
+  display: block;
+  width: 100%;
+  height: 0.75rem;
+  border-radius: 0.25rem;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--cf-border) 55%, transparent) 0%,
+    color-mix(in srgb, var(--cf-border) 25%, transparent) 50%,
+    color-mix(in srgb, var(--cf-border) 55%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: hub-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.hub-storage-card--skeleton .hub-storage-skeleton-line {
+  max-width: 14rem;
+}
+
+.hub-storage-skeleton-bar-wrap .hub-storage-skeleton-bar {
+  width: 45%;
+  height: 100%;
+  min-height: 0.5rem;
+}
+
+@keyframes hub-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Responsive */

@@ -20,6 +20,14 @@ import {
   type GoogleCalendarFetchTarget,
   type GoogleCalendarFetchedOccurrence,
 } from "./google-calendar";
+import {
+  invalidateScheduleListCacheForUser,
+  scheduleCacheAfterEventDelete,
+  scheduleCacheAfterGoogleDelete,
+  scheduleCacheAfterHubCreate,
+  scheduleCacheAfterHubUpdate,
+  setScheduleListCache,
+} from "./schedule-cache";
 
 export interface ScheduleEventRow {
   id: string;
@@ -586,6 +594,8 @@ export async function updateGoogleScheduleEvent(
     group_display_name: groupCtx.group_display_name,
   });
 
+  await invalidateScheduleListCacheForUser(db, userId);
+
   return { ok: true };
 }
 
@@ -605,6 +615,8 @@ export async function deleteGoogleScheduleEvent(
 
   await assertCanManageGoogleCalendarEvent(db, env, userId, calId);
   await deleteGoogleCalendarOnlyEvent(env, calId, eventId);
+
+  await scheduleCacheAfterGoogleDelete(db, userId, eventId);
 
   return { ok: true };
 }
@@ -780,6 +792,20 @@ async function mergeGoogleCalendarEvents(
   });
 
   return merged;
+}
+
+/** Google 含む一覧を再取得して D1 キャッシュを更新 */
+export async function refreshScheduleListCache(
+  db: D1Database,
+  env: Env,
+  userId: string,
+  from: string,
+  to: string,
+  scope: "mine" | "all"
+): Promise<ScheduleListResult> {
+  const data = await listScheduleEvents(db, env, userId, from, to, scope);
+  await setScheduleListCache(db, userId, from, to, scope, data);
+  return data;
 }
 
 /** 予定一覧を取得 */
@@ -1046,6 +1072,8 @@ export async function createScheduleEvent(
     );
   }
 
+  await scheduleCacheAfterHubCreate(db, userId, publicEvent);
+
   return { event: publicEvent, sync_warnings: syncWarnings };
 }
 
@@ -1225,6 +1253,8 @@ export async function updateScheduleEvent(
     );
   }
 
+  await scheduleCacheAfterHubUpdate(db, userId, publicEvent);
+
   return { event: publicEvent, sync_warnings: syncWarnings };
 }
 
@@ -1256,6 +1286,8 @@ export async function deleteScheduleEvent(
     .prepare("DELETE FROM hub_schedule_events WHERE id = ?")
     .bind(eventId)
     .run();
+
+  await scheduleCacheAfterEventDelete(db, userId, eventId);
 
   return { sync_warnings: syncWarnings };
 }

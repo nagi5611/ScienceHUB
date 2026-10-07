@@ -601,8 +601,10 @@
     box-shadow: 0 10px 40px rgb(0 0 0 / 0.14);
     /* メイン max-width 内の右端からビューポート右端まで伸ばす */
     width: calc(100% + max(0px, (100vw - 100%) / 2 - 1rem));
+    max-width: 100vw;
     margin-right: calc(-1 * max(0px, (100vw - 100%) / 2 - 1rem));
     box-sizing: border-box;
+    overflow-x: clip;
   }
 
   .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-calendar-aside {
@@ -647,6 +649,13 @@
 }
 
 .contest-display-card-host {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.contest-display-card-fit-shell {
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -729,6 +738,70 @@
 
 .contest-staff-messages-card {
   margin-bottom: 0.25rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.contest-staff-messages-card--has-unread {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.contest-staff-messages-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+}
+
+.contest-staff-messages-toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.contest-staff-messages-heading {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.contest-staff-messages-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.contest-staff-messages-toggle--pulse {
+  animation: contest-staff-msg-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes contest-staff-msg-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+  }
+}
+
+.contest-staff-messages-panel {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+
+.contest-staff-messages-carousel-host {
+  min-height: 0;
 }
 
 .contest-staff-messages-list {
@@ -737,13 +810,19 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.45rem;
 }
 
 .contest-staff-message {
   border: 1px solid var(--color-border, #e5e7eb);
-  padding: 0.85rem 1rem;
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
   background: #fffbeb;
+}
+
+.contest-staff-message--unread {
+  border-color: #fbbf24;
+  background: #fff7ed;
 }
 
 .contest-staff-message-head {
@@ -751,35 +830,124 @@
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.35rem 0.75rem;
-  margin-bottom: 0.35rem;
+  gap: 0.25rem 0.5rem;
+  margin-bottom: 0.2rem;
 }
 
 .contest-staff-message-kind {
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   color: #b45309;
   letter-spacing: 0.02em;
 }
 
 .contest-staff-message-time {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   color: var(--color-muted, #6b7280);
+  white-space: nowrap;
 }
 
 .contest-staff-message-staff {
-  margin: 0 0 0.35rem;
-  font-size: 0.875rem;
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+}
+
+.contest-staff-message-staff-label {
+  color: var(--color-muted, #6b7280);
 }
 
 .contest-staff-message-work {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.2rem;
+  font-size: 0.6875rem;
 }
 
 .contest-staff-message-body {
-  font-size: 0.9375rem;
-  line-height: 1.6;
+  font-size: 0.8125rem;
+  line-height: 1.45;
   color: #422006;
+}
+
+.contest-staff-car {
+  position: relative;
+}
+
+.contest-staff-car-view {
+  overflow: hidden;
+  border-radius: 6px;
+  touch-action: pan-y;
+}
+
+.contest-staff-car-track {
+  display: flex;
+  transition: transform 0.22s ease;
+}
+
+.contest-staff-car.dragging .contest-staff-car-track {
+  transition: none;
+}
+
+.contest-staff-car-slide {
+  flex: 0 0 100%;
+  min-width: 100%;
+}
+
+.contest-staff-car-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #374151;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.contest-staff-car-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.contest-staff-car-btn.car-prev {
+  left: 0.15rem;
+}
+
+.contest-staff-car-btn.car-next {
+  right: 0.15rem;
+}
+
+.contest-staff-car-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-size: 0.6875rem;
+  color: var(--color-muted, #6b7280);
+}
+
+.contest-staff-car-dots {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.contest-staff-car-dots button {
+  width: 0.45rem;
+  height: 0.45rem;
+  border: none;
+  border-radius: 999px;
+  background: #d1d5db;
+  padding: 0;
+  cursor: pointer;
+}
+
+.contest-staff-car-dots button.on {
+  background: #b45309;
 }
 
 /* STL 提出・印刷予約の進行オーバーレイ（シミュレーション依頼の審査オーバーレイと同系） */

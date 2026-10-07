@@ -44,6 +44,21 @@ export interface ContestStaffMessageRow {
 export interface ContestStaffMessageForApi extends ContestStaffMessageRow {
   kind_label: string;
   application_title: string | null;
+  read: boolean;
+  read_at: string | null;
+}
+
+/** Splits messages into carousel slides (max `size` items per slide). */
+export function chunkContestStaffMessagesForCarousel<T>(
+  items: T[],
+  size = 3
+): T[][] {
+  const chunkSize = Math.min(Math.max(size, 1), 3);
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
 }
 
 const MAX_BODY_LEN = 4000;
@@ -125,6 +140,11 @@ async function fetchApplicationTitles(
   return map;
 }
 
+type ContestStaffMessageListRow = ContestStaffMessageRow & {
+  read_flag: number;
+  read_at: string | null;
+};
+
 /** Lists staff messages for the logged-in contest participant. */
 export async function listContestStaffMessagesForUser(
   db: D1Database,
@@ -133,9 +153,14 @@ export async function listContestStaffMessagesForUser(
 ): Promise<ContestStaffMessageForApi[]> {
   const limit = Math.min(Math.max(options?.limit ?? 100, 1), 200);
   const since = options?.since?.trim();
-  let query = `SELECT m.* FROM contest_staff_messages m
+  let query = `SELECT m.*,
+      CASE WHEN r.message_id IS NOT NULL THEN 1 ELSE 0 END AS read_flag,
+      r.read_at
+    FROM contest_staff_messages m
+    LEFT JOIN contest_staff_message_reads r
+      ON r.message_id = m.id AND r.user_id = ?
     WHERE m.user_id = ?`;
-  const binds: unknown[] = [userId];
+  const binds: unknown[] = [userId, userId];
   if (since) {
     query += ` AND m.created_at > ?`;
     binds.push(since);
@@ -143,7 +168,7 @@ export async function listContestStaffMessagesForUser(
   query += ` ORDER BY m.created_at ASC LIMIT ?`;
   binds.push(limit);
 
-  const result = await db.prepare(query).bind(...binds).all<ContestStaffMessageRow>();
+  const result = await db.prepare(query).bind(...binds).all<ContestStaffMessageListRow>();
   const rows = result.results ?? [];
   const titleMap = await fetchApplicationTitles(
     db,
@@ -151,10 +176,51 @@ export async function listContestStaffMessagesForUser(
   );
 
   return rows.map((row) => ({
-    ...row,
+    id: row.id,
+    user_id: row.user_id,
+    contest_application_id: row.contest_application_id,
+    print_reservation_id: row.print_reservation_id,
+    kind: row.kind,
+    body: row.body,
+    staff_display_name: row.staff_display_name,
+    created_by_user_id: row.created_by_user_id,
+    created_at: row.created_at,
     kind_label: CONTEST_STAFF_MESSAGE_KIND_LABELS[row.kind] ?? row.kind,
     application_title: titleMap.get(row.contest_application_id) ?? null,
+    read: row.read_flag === 1,
+    read_at: row.read_at,
   }));
+}
+
+/** Marks staff messages as read for the participant (only own messages). */
+export async function markContestStaffMessagesAsRead(
+  db: D1Database,
+  userId: string,
+  messageIds: string[]
+): Promise<number> {
+  const ids = [...new Set(messageIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return 0;
+
+  const placeholders = ids.map(() => '?').join(', ');
+  const owned = await db
+    .prepare(
+      `SELECT id FROM contest_staff_messages WHERE user_id = ? AND id IN (${placeholders})`
+    )
+    .bind(userId, ...ids)
+    .all<{ id: string }>();
+  const ownedIds = (owned.results ?? []).map((row) => row.id);
+  if (ownedIds.length === 0) return 0;
+
+  const readAt = new Date().toISOString();
+  const stmt = db.prepare(
+    `INSERT INTO contest_staff_message_reads (user_id, message_id, read_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(user_id, message_id) DO UPDATE SET read_at = excluded.read_at`
+  );
+  for (const messageId of ownedIds) {
+    await stmt.bind(userId, messageId, readAt).run();
+  }
+  return ownedIds.length;
 }
 
 async function resolveStaffDisplayName(

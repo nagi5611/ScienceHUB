@@ -90,6 +90,7 @@ import {
 } from "../../lib/contest/applications";
 import {
   listContestStaffMessagesForUser,
+  markContestStaffMessagesAsRead,
   rejectContestPrintReservationAsAdmin,
   recordContestAcceptedStaffMessage,
   recordContestDecidedStaffMessage,
@@ -759,7 +760,27 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[0] === "staff-messages" && segments.length === 1) {
       const since = url.searchParams.get("since");
       const messages = await listContestStaffMessagesForUser(db, userId, { since });
-      return json({ messages });
+      const unread_count = messages.filter((m) => !m.read).length;
+      return json({ messages, unread_count });
+    }
+
+    // POST /api/contest/staff-messages/read
+    if (
+      method === "POST" &&
+      segments[0] === "staff-messages" &&
+      segments[1] === "read" &&
+      segments.length === 2
+    ) {
+      const body = await request.json<{ message_ids?: unknown }>().catch(() => null);
+      const raw = body?.message_ids;
+      const messageIds = Array.isArray(raw)
+        ? raw.filter((id): id is string => typeof id === "string")
+        : [];
+      if (messageIds.length === 0) {
+        return json({ error: "message_ids を指定してください" }, 400);
+      }
+      const marked = await markContestStaffMessagesAsRead(db, userId, messageIds);
+      return json({ ok: true, marked });
     }
 
     // POST /api/contest/applications

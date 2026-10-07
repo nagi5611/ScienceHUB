@@ -5,18 +5,26 @@
 import type { Env } from "../lib/types";
 import { getDb } from "../lib/db";
 import { requireUser } from "../lib/auth";
-import { getDashboardForUser, getDefaultAppsForUser } from "../lib/apps";
-import { getStorageOverviewForDashboard } from "../lib/storage/overview";
+import {
+  getDashboardManifestForUser,
+  getDefaultAppSlugsForUser,
+} from "../lib/apps";
+import { getStorageManifestForDashboard } from "../lib/storage/overview";
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireUser(context.request, context.env);
   if (auth instanceof Response) return auth;
 
   const db = getDb(context.env);
-  const [groups, storage, default_apps] = await Promise.all([
-    getDashboardForUser(db, auth.id),
-    getStorageOverviewForDashboard(context.env, db, auth),
-    getDefaultAppsForUser(db, auth.id),
+  const [manifest, storage, default_app_slugs] = await Promise.all([
+    getDashboardManifestForUser(db, auth.id),
+    getStorageManifestForDashboard(db, auth),
+    getDefaultAppSlugsForUser(db),
   ]);
-  return Response.json({ groups, storage, default_apps });
+  return Response.json({
+    groups: manifest.groups,
+    slots: manifest.slots,
+    default_app_slugs,
+    storage,
+  });
 };

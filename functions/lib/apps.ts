@@ -65,6 +65,23 @@ export interface DashboardGroup {
   apps: DashboardApp[];
 }
 
+export interface DashboardGroupMeta {
+  id: string;
+  slug: string;
+  display_name: string;
+  color: string;
+}
+
+export interface DashboardAppSlot {
+  group_id: string;
+  app_slug: string;
+}
+
+export interface DashboardManifest {
+  groups: DashboardGroupMeta[];
+  slots: DashboardAppSlot[];
+}
+
 function toPublicApp(row: HubAppRow): PublicApp {
   return {
     id: row.id,
@@ -408,7 +425,7 @@ export function membershipCanAccessApp(
 }
 
 /** ダッシュボード用アプリ情報 */
-function toDashboardApp(app: PublicApp): DashboardApp {
+export function toDashboardApp(app: PublicApp): DashboardApp {
   return {
     slug: app.slug,
     display_name: app.display_name,
@@ -584,6 +601,116 @@ export async function canUserAccessApp(
     });
   }
   return allowed;
+}
+
+/** ダッシュボード用: グループ一覧とアプリ配置（アプリ本体は別 API） */
+export async function getDashboardManifestForUser(
+  db: D1Database,
+  userId: string
+): Promise<DashboardManifest> {
+  if (await userHasAdminRole(db, userId)) {
+    const apps = await listApps(db);
+    if (apps.length === 0) {
+      return { groups: [], slots: [] };
+    }
+    const groupId = ADMIN_APPS_GROUP_ID;
+    return {
+      groups: [
+        {
+          id: groupId,
+          slug: "all-apps",
+          display_name: "アプリ",
+          color: "#F38020",
+        },
+      ],
+      slots: apps.map((app) => ({ group_id: groupId, app_slug: app.slug })),
+    };
+  }
+
+  const memberships = await getUserGroupMemberships(db, userId);
+  if (memberships.length === 0) {
+    return { groups: [], slots: [] };
+  }
+
+  const apps = await listApps(db);
+  const groupMap = new Map<string, DashboardGroupMeta>();
+  const slots: DashboardAppSlot[] = [];
+  const slugsByGroup = new Map<string, Set<string>>();
+
+  for (const membership of memberships) {
+    if (!groupMap.has(membership.group_id)) {
+      groupMap.set(membership.group_id, {
+        id: membership.group_id,
+        slug: membership.group_slug,
+        display_name: membership.group_display_name,
+        color: membership.group_color,
+      });
+      slugsByGroup.set(membership.group_id, new Set());
+    }
+  }
+
+  for (const app of apps) {
+    const { enabledGroupIds, roleRestrictions } = await loadAppAccessMeta(db, app.id);
+    if (enabledGroupIds.size === 0) continue;
+
+    for (const membership of memberships) {
+      if (!membershipCanAccessApp(membership, enabledGroupIds, roleRestrictions)) {
+        continue;
+      }
+
+      const slugSet = slugsByGroup.get(membership.group_id);
+      if (!slugSet || slugSet.has(app.slug)) continue;
+
+      slugSet.add(app.slug);
+      slots.push({ group_id: membership.group_id, app_slug: app.slug });
+    }
+  }
+
+  const rootGroup = await getRootGroup(db);
+  const rootGroupId = rootGroup?.id ?? null;
+
+  const groups = [...groupMap.values()]
+    .filter((g) => (slugsByGroup.get(g.id)?.size ?? 0) > 0)
+    .sort((a, b) => {
+      const aIsRoot = a.id === rootGroupId ? 0 : 1;
+      const bIsRoot = b.id === rootGroupId ? 0 : 1;
+      if (aIsRoot !== bIsRoot) return aIsRoot - bIsRoot;
+      return a.display_name.localeCompare(b.display_name, "ja");
+    });
+
+  return { groups, slots };
+}
+
+/** ダッシュボード用: 1 アプリの表示情報（アクセス可のときのみ） */
+export async function getDashboardAppForUser(
+  db: D1Database,
+  userId: string,
+  slug: string
+): Promise<DashboardApp | null> {
+  const app = await getAppBySlug(db, slug);
+  if (!app) return null;
+
+  if (app.is_default) {
+    return toDashboardApp(app);
+  }
+
+  const allowed = await canUserAccessApp(db, userId, slug);
+  if (!allowed) return null;
+
+  return toDashboardApp(app);
+}
+
+/** Default App の slug 一覧 */
+export async function getDefaultAppSlugsForUser(db: D1Database): Promise<string[]> {
+  const result = await db
+    .prepare(
+      `SELECT slug FROM hub_apps
+       WHERE is_default = 1
+       ORDER BY position ASC, display_name ASC, slug ASC`
+    )
+    .all<{ slug: string }>();
+
+  return (result.results ?? []).map((row) => row.slug);
 }
 
 /** ダッシュボード用: ユーザーが見られるグループとアプリ */

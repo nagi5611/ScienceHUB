@@ -41,6 +41,36 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     await expect(page.getByTestId("display-card-mark-full_time")).not.toHaveClass(/is-active/);
   });
 
+  test("展示カードプレビューが aside とビューポート内に収まる", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await fillPrimaryParticipant(page);
+    await page.locator("#title").fill("テストタイトル");
+
+    const preview = page.getByTestId("display-card-root");
+    await expect(preview).toBeVisible();
+
+    const bounds = await page.evaluate(() => {
+      const aside = document.querySelector(".contest-display-card-preview-aside");
+      const card = document.querySelector('[data-testid="display-card-root"]');
+      const asideRect = aside?.getBoundingClientRect();
+      const cardRect = card?.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      return {
+        docScrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: vw,
+        cardLeft: cardRect?.left ?? 0,
+        cardRight: cardRect?.right ?? 0,
+        asideLeft: asideRect?.left ?? 0,
+        asideRight: asideRect?.right ?? 0,
+      };
+    });
+
+    expect(bounds.docScrollWidth).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+    expect(bounds.cardLeft).toBeGreaterThanOrEqual(bounds.asideLeft - 1);
+    expect(bounds.cardRight).toBeLessThanOrEqual(bounds.asideRight + 1);
+    expect(bounds.cardRight).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+  });
+
   test("サンプルテンプレート画像が読み込まれる", async ({ page }) => {
     const img = page.locator(".contest-display-card-bg");
     await expect(img).toHaveAttribute("src", /display-card-template\.png/);

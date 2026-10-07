@@ -5,11 +5,21 @@
 import type { Env } from "../lib/types";
 import { getDb } from "../lib/db";
 import { requireUser } from "../lib/auth";
-import { jsonError } from "../lib/types";
+import { jsonError, now } from "../lib/types";
 import {
   createScheduleEvent,
-  listScheduleEvents,
+  refreshScheduleListCache,
 } from "../lib/schedule";
+import {
+  getScheduleListCache,
+  type ScheduleListApiPayload,
+} from "../lib/schedule-cache";
+
+function parseFreshParam(value: string | null): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
 
 interface CreateScheduleBody {
   title?: string;
@@ -35,16 +45,96 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return jsonError("from と to を指定してください", 400);
   }
 
+  const db = getDb(context.env);
+  const fresh = parseFreshParam(url.searchParams.get("fresh"));
+  const sinceRaw = url.searchParams.get("since");
+  const since =
+    sinceRaw && /^\d+$/.test(sinceRaw.trim())
+      ? Number(sinceRaw.trim())
+      : 0;
+
   try {
-    const data = await listScheduleEvents(
-      getDb(context.env),
+    if (fresh) {
+      const cached = await getScheduleListCache(db, auth.id, from, to, scope);
+      if (cached && since > 0) {
+        if (cached.updated_at > since) {
+          const body: ScheduleListApiPayload = {
+            ...cached.payload,
+            stale: false,
+            read_only: false,
+            cache_updated_at: cached.updated_at,
+          };
+          return Response.json(body);
+        }
+
+        // バックグラウンド refresh（waitUntil）完了待ち — Google を再取得しない
+        const body: ScheduleListApiPayload = {
+          ...cached.payload,
+          stale: true,
+          read_only: true,
+          cache_updated_at: cached.updated_at,
+        };
+        return Response.json(body);
+      }
+
+      const data = await refreshScheduleListCache(
+        db,
+        context.env,
+        auth.id,
+        from,
+        to,
+        scope
+      );
+      const body: ScheduleListApiPayload = {
+        ...data,
+        stale: false,
+        read_only: false,
+        cache_updated_at: now(),
+      };
+      return Response.json(body);
+    }
+
+    {
+      const cached = await getScheduleListCache(db, auth.id, from, to, scope);
+      if (cached) {
+        context.waitUntil(
+          refreshScheduleListCache(
+            db,
+            context.env,
+            auth.id,
+            from,
+            to,
+            scope
+          ).catch((error) => {
+            console.error("schedule cache background refresh failed:", error);
+          })
+        );
+
+        const body: ScheduleListApiPayload = {
+          ...cached.payload,
+          stale: true,
+          read_only: true,
+          cache_updated_at: cached.updated_at,
+        };
+        return Response.json(body);
+      }
+    }
+
+    const data = await refreshScheduleListCache(
+      db,
       context.env,
       auth.id,
       from,
       to,
       scope
     );
-    return Response.json(data);
+    const body: ScheduleListApiPayload = {
+      ...data,
+      stale: false,
+      read_only: false,
+      cache_updated_at: now(),
+    };
+    return Response.json(body);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "スケジュールの取得に失敗しました";

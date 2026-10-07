@@ -13,6 +13,42 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/** Default App リストを描画 */
+function renderDefaultAppList(listEl, emptyEl, apps) {
+  if (!listEl || !emptyEl) return;
+
+  if (!apps.length) {
+    listEl.innerHTML = "";
+    emptyEl.hidden = false;
+    return;
+  }
+
+  emptyEl.hidden = true;
+  listEl.innerHTML = apps
+    .map(
+      (app) => `
+      <li role="none">
+        <a
+          href="${escapeHtml(app.href)}"
+          class="hub-default-app-item"
+          role="menuitem"
+          style="--app-color:${escapeHtml(app.color)}"
+        >
+          <span class="hub-default-app-item-icon" aria-hidden="true">${appIconHtml(app, "hub-icon hub-icon--sm")}</span>
+          <span class="hub-default-app-item-label">${escapeHtml(app.display_name)}</span>
+        </a>
+      </li>`
+    )
+    .join("");
+}
+
+/** ヘッダー Default App メニューのリストを更新 */
+export function updateDefaultAppMenu(defaultApps = []) {
+  const listEl = document.getElementById("default-app-list");
+  const emptyEl = document.getElementById("default-app-empty");
+  renderDefaultAppList(listEl, emptyEl, defaultApps);
+}
+
 /** Default App ドロップダウンを初期化 */
 export function initDefaultAppMenu(defaultApps = []) {
   const menuRoot = document.getElementById("default-app-menu");
@@ -34,36 +70,7 @@ export function initDefaultAppMenu(defaultApps = []) {
     if (dropdown) dropdown.hidden = false;
   }
 
-  /** リストを描画 */
-  function renderList(apps) {
-    if (!listEl || !emptyEl) return;
-
-    if (!apps.length) {
-      listEl.innerHTML = "";
-      emptyEl.hidden = false;
-      return;
-    }
-
-    emptyEl.hidden = true;
-    listEl.innerHTML = apps
-      .map(
-        (app) => `
-      <li role="none">
-        <a
-          href="${escapeHtml(app.href)}"
-          class="hub-default-app-item"
-          role="menuitem"
-          style="--app-color:${escapeHtml(app.color)}"
-        >
-          <span class="hub-default-app-item-icon" aria-hidden="true">${appIconHtml(app, "hub-icon hub-icon--sm")}</span>
-          <span class="hub-default-app-item-label">${escapeHtml(app.display_name)}</span>
-        </a>
-      </li>`
-      )
-      .join("");
-  }
-
-  renderList(defaultApps);
+  renderDefaultAppList(listEl, emptyEl, defaultApps);
 
   function clearHoverCloseTimer() {
     if (hoverCloseTimer) {

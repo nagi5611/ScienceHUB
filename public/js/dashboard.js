@@ -3,7 +3,7 @@
  */
 
 import { initAccountMenu } from "./account-menu.js";
-import { initDefaultAppMenu } from "./default-app-menu.js";
+import { initDefaultAppMenu, updateDefaultAppMenu } from "./default-app-menu.js";
 import { appIconHtml } from "./hub-icons.js";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -21,9 +21,19 @@ let calendarSync = { enabled: false, all_groups_calendar_name: "自然科学部"
 /** @type {{ id: string, display_name: string, color: string }[]} */
 let scheduleLegendGroups = [];
 let scheduleLoading = false;
+let scheduleStale = false;
+let scheduleRefreshInFlight = false;
+let scheduleLoadSeq = 0;
 let calendarNavLock = false;
 let lastWheelMonthNavAt = 0;
 const WHEEL_MONTH_COOLDOWN_MS = 400;
+const SCHEDULE_FRESH_POLL_MS = 450;
+const SCHEDULE_FRESH_POLL_MAX_ATTEMPTS = 80;
+
+/** 短い待機 */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 let scheduleFetchedYear = null;
 let scheduleFetchedScope = null;
 /** @type {Map<string, object>} */
@@ -289,25 +299,24 @@ function storageBarClass(ratio) {
   return "";
 }
 
-/** クラウドストレージ使用量表を描画 */
-function renderStorageOverview(storage) {
-  const section = document.getElementById("hub-storage-section");
-  const tbody = document.getElementById("hub-storage-tbody");
-  const cards = document.getElementById("hub-storage-cards");
-  if (!section || !tbody) return;
+/** ストレージルートの DOM 用 ID */
+function storageRootDomId(rootMeta) {
+  return `${rootMeta.type}:${rootMeta.key}`;
+}
 
-  if (!storage?.enabled || !storage.roots?.length) {
-    section.hidden = true;
-    tbody.innerHTML = "";
-    if (cards) cards.innerHTML = "";
-    return;
-  }
+/** ストレージルート API パス */
+function storageRootApiPath(rootMeta) {
+  const encodedKey = rootMeta.key
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `/api/dashboard/storage/${rootMeta.type}/${encodedKey}`;
+}
 
-  section.hidden = false;
-  tbody.innerHTML = storage.roots
-    .map((row) => {
-      const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(row.path)}`;
-      return `<tr>
+/** ストレージ表の 1 行 HTML */
+function storageTableRowHtml(row) {
+  const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(row.path)}`;
+  return `<tr>
         <th scope="row">${escapeHtml(row.group_label)}</th>
         <td><a href="${escapeHtml(storageHref)}" class="hub-storage-path">${escapeHtml(row.path)}</a></td>
         <td class="hub-storage-num">${formatBytes(row.quota_bytes)}</td>
@@ -319,16 +328,14 @@ function renderStorageOverview(storage) {
         <td class="hub-storage-num">${formatBytes(row.trash_available_bytes)}</td>
         <td class="${storageRatioClass(row.trash_usage_ratio)}">${row.trash_usage_ratio}%</td>
       </tr>`;
-    })
-    .join("");
+}
 
-  if (cards) {
-    cards.innerHTML = storage.roots
-      .map((row) => {
-        const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(row.path)}`;
-        const usageWidth = Math.min(100, Math.max(0, row.usage_ratio));
-        const trashWidth = Math.min(100, Math.max(0, row.trash_usage_ratio));
-        return `<li class="app-card hub-storage-card">
+/** ストレージカード 1 件 HTML */
+function storageCardHtml(row) {
+  const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(row.path)}`;
+  const usageWidth = Math.min(100, Math.max(0, row.usage_ratio));
+  const trashWidth = Math.min(100, Math.max(0, row.trash_usage_ratio));
+  return `<li class="app-card hub-storage-card">
           <p class="app-card-title"><a href="${escapeHtml(storageHref)}" class="hub-storage-path">${escapeHtml(row.group_label)}</a></p>
           <p class="app-card-meta">${escapeHtml(row.path)}</p>
           <p class="app-card-meta">使用: ${formatBytes(row.used_bytes)} / ${formatBytes(row.quota_bytes)}（${row.usage_ratio}%）</p>
@@ -336,13 +343,93 @@ function renderStorageOverview(storage) {
           <p class="app-card-meta hub-storage-card-trash">ごみ箱: ${formatBytes(row.trash_used_bytes)} / ${formatBytes(row.trash_quota_bytes)}（${row.trash_usage_ratio}%）</p>
           <div class="app-card-bar" role="presentation"><div class="app-card-bar-fill ${storageBarClass(row.trash_usage_ratio)}" style="width:${trashWidth}%"></div></div>
         </li>`;
-      })
-      .join("");
+}
+
+/** ストレージ表のスケルトン行 */
+function storageTableSkeletonRowHtml(rootMeta) {
+  const domId = storageRootDomId(rootMeta);
+  const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(rootMeta.path)}`;
+  return `<tr class="hub-storage-row--skeleton" data-storage-root-id="${escapeHtml(domId)}">
+        <th scope="row">${escapeHtml(rootMeta.group_label)}</th>
+        <td><a href="${escapeHtml(storageHref)}" class="hub-storage-path">${escapeHtml(rootMeta.path)}</a></td>
+        <td class="hub-storage-num" colspan="8"><span class="hub-storage-skeleton-bar" aria-hidden="true"></span><span class="visually-hidden">使用量を読み込み中</span></td>
+      </tr>`;
+}
+
+/** ストレージカードのスケルトン */
+function storageCardSkeletonHtml(rootMeta) {
+  const domId = storageRootDomId(rootMeta);
+  const storageHref = `/apps/cloud-storage/?path=${encodeURIComponent(rootMeta.path)}`;
+  return `<li class="app-card hub-storage-card hub-storage-card--skeleton" data-storage-root-id="${escapeHtml(domId)}">
+          <p class="app-card-title"><a href="${escapeHtml(storageHref)}" class="hub-storage-path">${escapeHtml(rootMeta.group_label)}</a></p>
+          <p class="app-card-meta">${escapeHtml(rootMeta.path)}</p>
+          <p class="app-card-meta hub-storage-skeleton-line" aria-hidden="true"></p>
+          <div class="app-card-bar hub-storage-skeleton-bar-wrap" role="presentation" aria-hidden="true"><div class="app-card-bar-fill hub-storage-skeleton-bar"></div></div>
+          <p class="app-card-meta hub-storage-skeleton-line hub-storage-card-trash" aria-hidden="true"></p>
+          <div class="app-card-bar hub-storage-skeleton-bar-wrap" role="presentation" aria-hidden="true"><div class="app-card-bar-fill hub-storage-skeleton-bar"></div></div>
+        </li>`;
+}
+
+/** ストレージルートの使用量を 1 件取得 */
+async function fetchStorageRootQuota(rootMeta) {
+  const response = await fetch(storageRootApiPath(rootMeta), { credentials: "same-origin" });
+  if (response.status === 401) {
+    window.location.href = hubLoginRedirectUrl();
+    return null;
+  }
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data.root ?? null;
+}
+
+/** ストレージルートの使用量を差し替え */
+function replaceStorageRootRow(rootMeta, row) {
+  const domId = storageRootDomId(rootMeta);
+  const tbody = document.getElementById("hub-storage-tbody");
+  const cards = document.getElementById("hub-storage-cards");
+  const tr = tbody?.querySelector(`tr[data-storage-root-id="${domId}"]`);
+  if (tr && row) {
+    tr.outerHTML = storageTableRowHtml(row);
+  } else if (tr) {
+    tr.remove();
+  }
+  const card = cards?.querySelector(`[data-storage-root-id="${domId}"]`);
+  if (card && row) {
+    card.outerHTML = storageCardHtml(row);
+  } else if (card) {
+    card.remove();
   }
 }
 
-/** ダッシュボード API を取得 */
-async function fetchDashboard() {
+/** クラウドストレージ使用量を段階的に読み込み */
+function loadStorageOverviewProgressive(storageManifest) {
+  const section = document.getElementById("hub-storage-section");
+  const tbody = document.getElementById("hub-storage-tbody");
+  const cards = document.getElementById("hub-storage-cards");
+  if (!section || !tbody) return;
+
+  if (!storageManifest?.enabled || !storageManifest.roots?.length) {
+    section.hidden = true;
+    tbody.innerHTML = "";
+    if (cards) cards.innerHTML = "";
+    return;
+  }
+
+  section.hidden = false;
+  tbody.innerHTML = storageManifest.roots.map(storageTableSkeletonRowHtml).join("");
+  if (cards) {
+    cards.innerHTML = storageManifest.roots.map(storageCardSkeletonHtml).join("");
+  }
+
+  for (const rootMeta of storageManifest.roots) {
+    fetchStorageRootQuota(rootMeta)
+      .then((row) => replaceStorageRootRow(rootMeta, row))
+      .catch(() => replaceStorageRootRow(rootMeta, null));
+  }
+}
+
+/** ダッシュボードマニフェスト API を取得 */
+async function fetchDashboardManifest() {
   const response = await fetch("/api/dashboard", { credentials: "same-origin" });
   if (response.status === 401) {
     window.location.href = hubLoginRedirectUrl();
@@ -354,6 +441,34 @@ async function fetchDashboard() {
   return response.json();
 }
 
+/** ダッシュボード用 1 アプリを取得 */
+async function fetchDashboardApp(slug) {
+  const response = await fetch(`/api/dashboard/apps/${encodeURIComponent(slug)}`, {
+    credentials: "same-origin",
+  });
+  if (response.status === 401) {
+    window.location.href = hubLoginRedirectUrl();
+    return null;
+  }
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data.app ?? null;
+}
+
+/** @type {Map<string, Promise<object|null>>} */
+const dashboardAppFetchCache = new Map();
+
+/** slug 単位でアプリ取得を共有 */
+function loadDashboardAppCached(slug) {
+  if (!dashboardAppFetchCache.has(slug)) {
+    dashboardAppFetchCache.set(
+      slug,
+      fetchDashboardApp(slug).catch(() => null)
+    );
+  }
+  return dashboardAppFetchCache.get(slug);
+}
+
 /** ダッシュボード用アプリタイル HTML */
 function renderAppTileHtml(app) {
   return `<a href="${escapeHtml(app.href)}" class="hub-app-tile" style="--app-color:${escapeHtml(app.color)}">
@@ -362,43 +477,103 @@ function renderAppTileHtml(app) {
   </a>`;
 }
 
-/** グループセクションを描画（API から取得） */
-async function renderGroups(dashboardData) {
+/** アプリタイルのスケルトン */
+function renderAppTileSkeletonHtml(slotKey) {
+  return `<div class="hub-app-tile hub-app-tile--skeleton" data-app-slot="${escapeHtml(slotKey)}" aria-busy="true">
+    <span class="hub-app-tile-icon hub-app-tile-skeleton-icon" aria-hidden="true"></span>
+    <span class="hub-app-tile-label hub-app-tile-skeleton-label" aria-hidden="true"></span>
+    <span class="visually-hidden">アプリを読み込み中</span>
+  </div>`;
+}
+
+/** スロット要素をアプリタイルに差し替え */
+function fillAppSlot(slotKey, app) {
+  const el = document.querySelector(`[data-app-slot="${slotKey}"]`);
+  if (!el || !app) {
+    el?.remove();
+    return;
+  }
+  el.outerHTML = renderAppTileHtml(app);
+}
+
+/** 既定アプリを段階的に読み込み */
+function loadDefaultAppsProgressive(defaultSlugs) {
+  const slugs = defaultSlugs ?? [];
+  if (slugs.length === 0) {
+    updateDefaultAppMenu([]);
+    return;
+  }
+
+  /** @type {Map<string, object>} */
+  const loadedBySlug = new Map();
+  let settled = 0;
+
+  for (const slug of slugs) {
+    loadDashboardAppCached(slug)
+      .then((app) => {
+        if (app) loadedBySlug.set(slug, app);
+      })
+      .finally(() => {
+        settled += 1;
+        if (settled === slugs.length) {
+          const ordered = slugs.map((s) => loadedBySlug.get(s)).filter(Boolean);
+          updateDefaultAppMenu(ordered);
+        }
+      });
+  }
+}
+
+/** グループとアプリを段階的に描画 */
+async function renderGroupsProgressive() {
   const section = document.getElementById("groups-section");
   if (!section) return;
 
-  section.innerHTML = hubLoadingHtml("アプリを読み込み中…");
-
   try {
-    const data = dashboardData ?? (await fetchDashboard());
+    const data = await fetchDashboardManifest();
     if (!data) return;
 
     const groups = data.groups ?? [];
-    const defaultApps = data.default_apps ?? [];
-    const defaultSlugs = new Set(defaultApps.map((app) => app.slug));
-    renderStorageOverview(data.storage);
+    const slots = data.slots ?? [];
+    const defaultSlugs = data.default_app_slugs ?? [];
+    const defaultSlugSet = new Set(defaultSlugs);
 
-    if (groups.length === 0 && defaultApps.length === 0) {
+    loadStorageOverviewProgressive(data.storage);
+    loadDefaultAppsProgressive(defaultSlugs);
+
+    const groupSlots = slots.filter((slot) => !defaultSlugSet.has(slot.app_slug));
+
+    if (
+      groups.length === 0 &&
+      defaultSlugs.length === 0 &&
+      groupSlots.length === 0
+    ) {
       section.innerHTML = `<p class="hub-groups-empty">利用可能なアプリがありません。管理者にグループ所属とアプリのアクセス設定を確認してください。</p>`;
       return;
     }
 
     const defaultSection =
-      defaultApps.length > 0
+      defaultSlugs.length > 0
         ? `<div class="hub-group hub-group--default" style="--group-color:var(--cf-orange)">
           <h2 class="hub-group-title">既定のアプリ</h2>
-          <div class="hub-app-grid">${defaultApps.map(renderAppTileHtml).join("")}</div>
+          <div class="hub-app-grid">${defaultSlugs.map((slug) => renderAppTileSkeletonHtml(`default:${slug}`)).join("")}</div>
         </div>`
         : "";
 
     const groupSections = groups
       .map((group) => {
-        const apps = group.apps.filter((app) => !defaultSlugs.has(app.slug));
-        if (apps.length === 0) return "";
+        const groupSlotRows = groupSlots.filter((s) => s.group_id === group.id);
+        if (groupSlotRows.length === 0) return "";
+
+        const tiles = groupSlotRows
+          .map((slot) => {
+            const slotKey = `group:${group.id}:${slot.app_slug}`;
+            return renderAppTileSkeletonHtml(slotKey);
+          })
+          .join("");
 
         return `<div class="hub-group" style="--group-color:${escapeHtml(group.color)}">
           <h2 class="hub-group-title">${escapeHtml(group.display_name)}</h2>
-          <div class="hub-app-grid">${apps.map(renderAppTileHtml).join("")}</div>
+          <div class="hub-app-grid">${tiles}</div>
         </div>`;
       })
       .filter(Boolean)
@@ -410,6 +585,20 @@ async function renderGroups(dashboardData) {
     }
 
     section.innerHTML = defaultSection + groupSections;
+
+    for (const slug of defaultSlugs) {
+      const slotKey = `default:${slug}`;
+      loadDashboardAppCached(slug)
+        .then((app) => fillAppSlot(slotKey, app))
+        .catch(() => fillAppSlot(slotKey, null));
+    }
+
+    for (const slot of groupSlots) {
+      const slotKey = `group:${slot.group_id}:${slot.app_slug}`;
+      loadDashboardAppCached(slot.app_slug)
+        .then((app) => fillAppSlot(slotKey, app))
+        .catch(() => fillAppSlot(slotKey, null));
+    }
   } catch {
     section.innerHTML = `<p class="hub-groups-empty">アプリの読み込みに失敗しました。</p>`;
   }
@@ -463,6 +652,103 @@ function getCalendarRange() {
   return { from, to };
 }
 
+/** API レスポンスがキャッシュ（編集不可）か */
+function isSchedulePayloadStale(data) {
+  return data?.stale === true || data?.read_only === true;
+}
+
+/** 予定の新規作成が可能か（同期完了後のみ） */
+function canCreateOnSchedule() {
+  return scheduleCanCreate && !scheduleStale;
+}
+
+/** スケジュールの読み取り専用 UI を反映 */
+function updateScheduleStaleUi() {
+  const section = document.getElementById("calendar-section");
+  const schedulePanel = document.querySelector(".hub-schedule");
+  const banner = document.getElementById("schedule-stale-banner");
+  const locked = scheduleStale;
+
+  section?.classList.toggle("is-schedule-stale", locked);
+  schedulePanel?.classList.toggle("is-schedule-stale", locked);
+
+  if (banner) {
+    banner.hidden = !locked;
+    banner.textContent = scheduleRefreshInFlight
+      ? "Google カレンダーと同期しています…（編集は一時停止しています）"
+      : "キャッシュの予定を表示しています…";
+  }
+
+  document.querySelectorAll("[data-schedule-scope]").forEach((btn) => {
+    btn.disabled = locked;
+  });
+
+  const subscribeBtn = document.getElementById("schedule-subscribe-btn");
+  if (subscribeBtn) subscribeBtn.disabled = locked;
+
+  for (const id of [
+    "prev-month-mobile",
+    "next-month-mobile",
+    "go-today-btn",
+    "calendar-year-select",
+  ]) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = locked;
+  }
+
+  document.querySelectorAll(".calendar-month-chip").forEach((chip) => {
+    chip.disabled = locked;
+  });
+}
+
+/** スケジュール API レスポンスを状態へ反映 */
+function applySchedulePayload(data) {
+  scheduleCanCreate = Boolean(data.can_create);
+  creatableGroups = data.creatable_groups ?? [];
+  calendarSync = data.calendar_sync ?? calendarSync;
+  scheduleLegendGroups = data.legend_groups ?? [];
+  scheduleStale = isSchedulePayloadStale(data);
+
+  scheduleByDate = new Map();
+  scheduleEventsById = new Map();
+  for (const event of data.events ?? []) {
+    scheduleEventsById.set(event.id, event);
+    const list = scheduleByDate.get(event.event_date) ?? [];
+    list.push(event);
+    scheduleByDate.set(event.event_date, list);
+  }
+
+  scheduleFetchedYear = currentYear;
+  scheduleFetchedScope = scheduleScope;
+  updateScheduleStaleUi();
+}
+
+/** スケジュール一覧を API から取得 */
+async function fetchSchedulePayload({ fresh = false, since = 0 } = {}) {
+  const { from, to } = getScheduleFetchRange();
+  const params = new URLSearchParams({
+    from,
+    to,
+    scope: scheduleScope,
+  });
+  if (fresh) {
+    params.set("fresh", "1");
+    if (since > 0) params.set("since", String(since));
+  }
+
+  const response = await fetch(`/api/schedule?${params.toString()}`, {
+    credentials: "same-origin",
+  });
+  if (response.status === 401) {
+    window.location.href = hubLoginRedirectUrl();
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error("schedule fetch failed");
+  }
+  return response.json();
+}
+
 /** スケジュールを API から取得 */
 async function loadSchedule(force = false) {
   if (scheduleLoading) return;
@@ -470,6 +756,7 @@ async function loadSchedule(force = false) {
   const { from, to } = getScheduleFetchRange();
   if (
     !force &&
+    !scheduleStale &&
     scheduleFetchedYear === currentYear &&
     scheduleFetchedScope === scheduleScope &&
     scheduleByDate.size > 0
@@ -479,46 +766,59 @@ async function loadSchedule(force = false) {
     return;
   }
 
-  scheduleLoading = true;
-  showCalendarLoading();
-  showTasksLoading();
+  const seq = ++scheduleLoadSeq;
+  const hadDisplayedData = scheduleByDate.size > 0;
+
+  scheduleLoading = !hadDisplayedData;
+  if (!hadDisplayedData) {
+    showCalendarLoading();
+    showTasksLoading();
+  }
 
   try {
-    const response = await fetch(
-      `/api/schedule?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&scope=${scheduleScope}`,
-      { credentials: "same-origin" }
-    );
-    if (response.status === 401) {
-      window.location.href = hubLoginRedirectUrl();
-      return;
-    }
-    if (!response.ok) {
-      showScheduleLoadError();
-      return;
-    }
+    const initial = await fetchSchedulePayload({ fresh: force });
+    if (!initial || seq !== scheduleLoadSeq) return;
 
-    const data = await response.json();
-    scheduleCanCreate = Boolean(data.can_create);
-    creatableGroups = data.creatable_groups ?? [];
-    calendarSync = data.calendar_sync ?? calendarSync;
-    scheduleLegendGroups = data.legend_groups ?? [];
-
-    scheduleByDate = new Map();
-    scheduleEventsById = new Map();
-    for (const event of data.events ?? []) {
-      scheduleEventsById.set(event.id, event);
-      const list = scheduleByDate.get(event.event_date) ?? [];
-      list.push(event);
-      scheduleByDate.set(event.event_date, list);
-    }
-
-    scheduleFetchedYear = currentYear;
-    scheduleFetchedScope = scheduleScope;
+    applySchedulePayload(initial);
     renderCalendar();
     renderScheduleLegend();
     renderTodayTasks();
+
+    if (!force && isSchedulePayloadStale(initial)) {
+      scheduleRefreshInFlight = true;
+      updateScheduleStaleUi();
+      try {
+        const since = Number(initial.cache_updated_at) || 0;
+        let freshData = null;
+
+        for (let attempt = 0; attempt < SCHEDULE_FRESH_POLL_MAX_ATTEMPTS; attempt++) {
+          if (seq !== scheduleLoadSeq) return;
+          if (attempt > 0) {
+            await delay(SCHEDULE_FRESH_POLL_MS);
+          }
+          freshData = await fetchSchedulePayload({ fresh: true, since });
+          if (!freshData || seq !== scheduleLoadSeq) return;
+          if (!isSchedulePayloadStale(freshData)) break;
+        }
+
+        if (freshData && isSchedulePayloadStale(freshData)) {
+          freshData = await fetchSchedulePayload({ fresh: true, since: 0 });
+        }
+        if (!freshData || seq !== scheduleLoadSeq) return;
+
+        applySchedulePayload(freshData);
+        renderCalendar();
+        renderScheduleLegend();
+        renderTodayTasks();
+      } finally {
+        scheduleRefreshInFlight = false;
+        updateScheduleStaleUi();
+      }
+    }
   } catch {
-    showScheduleLoadError();
+    if (!hadDisplayedData) {
+      showScheduleLoadError();
+    }
   } finally {
     scheduleLoading = false;
   }
@@ -864,7 +1164,7 @@ function setScheduleFormMode(mode) {
 
 /** 予定追加モーダルを開く */
 function openScheduleModal(dateStr) {
-  if (!scheduleCanCreate || creatableGroups.length === 0) return;
+  if (!canCreateOnSchedule() || creatableGroups.length === 0) return;
 
   const modal = document.getElementById("schedule-modal");
   const dateInput = document.getElementById("schedule-event-date");
@@ -908,7 +1208,7 @@ function openScheduleModal(dateStr) {
 
 /** 予定編集モーダルを開く */
 function openScheduleEditModal(ev) {
-  if (!ev?.can_manage) return;
+  if (scheduleStale || !ev?.can_manage) return;
 
   closeScheduleDetailModal();
 
@@ -1034,7 +1334,7 @@ function openScheduleDetailModal(ev) {
       </div>`;
   }
 
-  const canManage = Boolean(ev.can_manage);
+  const canManage = Boolean(ev.can_manage) && !scheduleStale;
   if (editBtn) editBtn.hidden = !canManage;
   if (deleteBtn) deleteBtn.hidden = !canManage;
 
@@ -1054,7 +1354,7 @@ function closeScheduleDetailModal() {
 /** 予定を削除 */
 async function deleteViewingScheduleEvent() {
   const ev = viewingScheduleEvent;
-  if (!ev?.can_manage) return;
+  if (scheduleStale || !ev?.can_manage) return;
 
   const wholeNote =
     ev.source === "google" && ev.google_whole_event
@@ -1101,6 +1401,7 @@ async function deleteViewingScheduleEvent() {
 /** 予定を保存（追加・編集） */
 async function submitScheduleEvent(event) {
   event.preventDefault();
+  if (scheduleStale) return;
 
   const titleInput = document.getElementById("schedule-event-title");
   const descInput = document.getElementById("schedule-event-description");
@@ -1201,7 +1502,7 @@ function createDayCell(dayNum, otherMonth, todayStr, dateStr) {
   cell.className = "calendar-day";
   if (otherMonth) cell.classList.add("other-month");
   if (dateStr === todayStr) cell.classList.add("today");
-  if (dateStr && !otherMonth && scheduleCanCreate) {
+  if (dateStr && !otherMonth && canCreateOnSchedule()) {
     cell.classList.add("calendar-day--addable");
     cell.setAttribute("aria-label", `${dateStr} に予定を追加`);
   } else if (dateStr) {
@@ -1256,7 +1557,7 @@ function createDayCell(dayNum, otherMonth, todayStr, dateStr) {
     cell.appendChild(slotsWrap);
   }
 
-  if (dateStr && !otherMonth && scheduleCanCreate) {
+  if (dateStr && !otherMonth && canCreateOnSchedule()) {
     cell.addEventListener("click", () => openScheduleModal(dateStr));
   }
 
@@ -1296,6 +1597,8 @@ function renderCalendar() {
   for (let day = 1; day <= remaining; day++) {
     grid.appendChild(createDayCell(day, true, todayStr));
   }
+
+  updateScheduleStaleUi();
 }
 
 /** Google カレンダー購読モーダルを開く */
@@ -1465,18 +1768,11 @@ async function init() {
 
   bindEvents();
 
-  let dashboardData = null;
-  try {
-    dashboardData = await fetchDashboard();
-  } catch {
-    dashboardData = null;
-  }
-
-  initDefaultAppMenu(dashboardData?.default_apps ?? []);
+  initDefaultAppMenu([]);
 
   await Promise.all([
     renderAnnouncements(),
-    renderGroups(dashboardData),
+    renderGroupsProgressive(),
     loadSchedule(),
   ]);
 
