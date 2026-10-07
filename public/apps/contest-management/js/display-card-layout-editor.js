@@ -3,10 +3,12 @@ import { apiRequest } from './api.js';
 import {
   DISPLAY_CARD_LAYOUT,
   buildDisplayCardPreviewState,
+  commentLineLeftPercent,
   defaultCommentLineTopPercent,
   renderDisplayCardPreview,
   setDisplayCardLayout,
 } from '../../contest-entry/js/display-card-preview.js';
+import { snapLayoutX, snapLayoutY } from '../../contest-entry/js/display-card-layout-snap.js';
 
 const SAMPLE = {
   scheduleType: 'full_time',
@@ -201,10 +203,11 @@ function injectEditorHandles(host) {
   const lineTops = c.lineTops ?? [];
   for (let i = 0; i < lineCount; i += 1) {
     const top = lineTops[i] ?? defaultCommentLineTopPercent(c, i);
+    const left = commentLineLeftPercent(c, i);
     handles.push({
       key: `comment.line.${i}`,
       label: `コメント${i + 1}行`,
-      left: c.left,
+      left,
       top,
       kind: 'commentLine',
       lineIndex: i,
@@ -268,12 +271,29 @@ function syncLayoutVisualFromEditor(previewHost) {
     const idx = parseInt(el.dataset.layoutKey?.slice('comment.line.'.length) ?? '', 10);
     if (!Number.isFinite(idx)) continue;
     const top = lineTops[idx] ?? defaultCommentLineTopPercent(c, idx);
-    el.style.left = pct(c.left);
+    const left = commentLineLeftPercent(c, idx);
+    el.style.left = pct(left);
     el.style.top = pct(top);
     el.style.width = pct(c.width);
   }
 
   updateHandlePositions(previewHost);
+}
+
+function ensureCommentLineSlots(lineIndex) {
+  if (!editorLayout) return;
+  const c = editorLayout.comment;
+  if (!c.lineTops) c.lineTops = [];
+  if (!c.lineLefts) c.lineLefts = [];
+  const slotCount = Math.max(lineIndex + 1, c.lineTops.length, c.lineLefts.length, 3);
+  for (let i = 0; i < slotCount; i += 1) {
+    if (c.lineTops[i] === undefined) {
+      c.lineTops[i] = defaultCommentLineTopPercent(c, i);
+    }
+    if (c.lineLefts[i] === undefined) {
+      c.lineLefts[i] = c.left;
+    }
+  }
 }
 
 function layoutPointForKey(key) {
@@ -288,7 +308,7 @@ function layoutPointForKey(key) {
     if (!Number.isFinite(index)) return null;
     const tops = editorLayout.comment.lineTops ?? [];
     return {
-      left: editorLayout.comment.left,
+      left: commentLineLeftPercent(editorLayout.comment, index),
       top: tops[index] ?? defaultCommentLineTopPercent(editorLayout.comment, index),
     };
   }
@@ -402,8 +422,8 @@ function applyLayoutPosition(key, left, top) {
   if (key.startsWith('marks.')) {
     const markKey = key.slice('marks.'.length);
     if (editorLayout.marks[markKey]) {
-      editorLayout.marks[markKey].left = clamp(left);
-      editorLayout.marks[markKey].top = clamp(top);
+      editorLayout.marks[markKey].left = snapLayoutX(editorLayout, clamp(left));
+      editorLayout.marks[markKey].top = snapLayoutY(editorLayout, clamp(top));
     }
     return;
   }
@@ -411,23 +431,24 @@ function applyLayoutPosition(key, left, top) {
   if (key.startsWith('comment.line.')) {
     const index = parseInt(key.slice('comment.line.'.length), 10);
     if (!Number.isFinite(index)) return;
-    if (!editorLayout.comment.lineTops) {
-      editorLayout.comment.lineTops = [];
-    }
-    editorLayout.comment.lineTops[index] = clamp(top);
-    editorLayout.comment.left = clamp(left);
+    ensureCommentLineSlots(index);
+    editorLayout.comment.lineTops[index] = snapLayoutY(editorLayout, clamp(top));
+    editorLayout.comment.lineLefts[index] = snapLayoutX(editorLayout, clamp(left));
     return;
   }
 
   if (key === 'comment') {
-    editorLayout.comment.left = clamp(left);
-    editorLayout.comment.top = clamp(top);
+    editorLayout.comment.left = snapLayoutX(editorLayout, clamp(left));
+    editorLayout.comment.top = snapLayoutY(editorLayout, clamp(top));
     return;
   }
 
   if (editorLayout[key]) {
+    const ySnappedFields = ['year', 'classGroup', 'name', 'title'];
     editorLayout[key].left = clamp(left);
-    editorLayout[key].top = clamp(top);
+    editorLayout[key].top = ySnappedFields.includes(key)
+      ? snapLayoutY(editorLayout, clamp(top))
+      : clamp(top);
   }
 }
 
@@ -449,15 +470,16 @@ function renderPropsPanel(mount) {
     const tops = editorLayout.comment.lineTops ?? [];
     const top =
       tops[index] ?? defaultCommentLineTopPercent(editorLayout.comment, index);
+    const lineLeft = commentLineLeftPercent(editorLayout.comment, index);
     html += numberFields(
       [
-        ['left', '左 (%)', editorLayout.comment.left],
+        ['left', '左 (%)', lineLeft],
         ['lineTop', '行の上 (%)', top],
       ],
       key,
       { lineIndex: index }
     );
-    html += `<p class="hint">行位置を動かすと行ごとの上位置（lineTops）が保存されます。</p>`;
+    html += `<p class="hint">行ごとに left（lineLefts）・上（lineTops）を保存します。近い座標は自動で揃います。</p>`;
   } else if (key === 'comment') {
     const c = editorLayout.comment;
     html += numberFields(
@@ -523,10 +545,12 @@ function applyPropFromInput(key, prop, rawValue, lineIndexAttr) {
 
   if (key.startsWith('comment.line.')) {
     const index = parseInt(lineIndexAttr ?? key.slice('comment.line.'.length), 10);
-    if (prop === 'left') editorLayout.comment.left = value;
+    ensureCommentLineSlots(index);
+    if (prop === 'left') {
+      editorLayout.comment.lineLefts[index] = snapLayoutX(editorLayout, value);
+    }
     if (prop === 'lineTop') {
-      if (!editorLayout.comment.lineTops) editorLayout.comment.lineTops = [];
-      editorLayout.comment.lineTops[index] = value;
+      editorLayout.comment.lineTops[index] = snapLayoutY(editorLayout, value);
     }
     return;
   }

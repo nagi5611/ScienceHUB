@@ -14,6 +14,13 @@ describe("display-card-preview", () => {
     });
   });
 
+  it("parseHomeroomForDisplayCard: 定時制 203 → 2年3組", () => {
+    assert.deepEqual(parseHomeroomForDisplayCard("part_time", "203"), {
+      year: "2",
+      classGroup: "3",
+    });
+  });
+
   it("wrapDisplayCardComment respects max lines", () => {
     const long =
       "テストコメント。造形にこだわって作りました。細部まで丁寧に仕上げています。ぜひご覧ください。";

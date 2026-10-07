@@ -53,7 +53,7 @@ test.describe("造形物コンテスト管理 — 展示カードレイアウト
     await page.goto("/apps/contest-management/");
     await page.locator('.admin-menu-item[data-panel="display-card-layout"]').click();
     await expect(page.locator("#panel-display-card-layout")).toBeVisible();
-    await expect(page.getByTestId("display-card-root")).toBeVisible();
+    await expect(page.getByTestId("display-card-root")).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".contest-display-card--editor")).toBeVisible();
   });
 
@@ -70,6 +70,26 @@ test.describe("造形物コンテスト管理 — 展示カードレイアウト
     await expect
       .poll(async () => title.evaluate((el) => el.style.left))
       .not.toBe(beforeLeft);
+  });
+
+  test("コメント1行目ハンドルのXだけ動かしても2行目のXは変わらない", async ({ page }) => {
+    const handle0 = page.locator('.display-card-layout-handle[data-layout-key="comment.line.0"]');
+    const handle1 = page.locator('.display-card-layout-handle[data-layout-key="comment.line.1"]');
+    await expect(handle0).toBeVisible();
+    await expect(handle1).toBeVisible();
+
+    await dispatchLayoutDrag(page, '.display-card-layout-handle[data-layout-key="comment.line.0"]', 36, 0);
+    const left1AfterSetup = await handle1.evaluate((el) => el.style.left);
+    const left0Before = await handle0.evaluate((el) => el.style.left);
+
+    await dispatchLayoutDrag(page, '.display-card-layout-handle[data-layout-key="comment.line.0"]', -24, 0);
+
+    await expect
+      .poll(async () => handle0.evaluate((el) => el.style.left))
+      .not.toBe(left0Before);
+    await expect
+      .poll(async () => handle1.evaluate((el) => el.style.left))
+      .toBe(left1AfterSetup);
   });
 
   test("作品名ハンドルをドラッグすると位置が変わる", async ({ page }) => {

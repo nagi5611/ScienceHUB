@@ -26,6 +26,8 @@ export type DisplayCardCommentLayout = DisplayCardTextFieldLayout & {
   maxLines: number;
   /** Optional absolute top (% of card) per comment line index */
   lineTops?: number[];
+  /** Optional absolute left (% of card) per comment line index */
+  lineLefts?: number[];
 };
 
 export type DisplayCardLayout = {
@@ -64,13 +66,19 @@ function clampPercent(value: number, min = 0, max = 100): number {
 function readTextField(
   raw: unknown,
   fallback: DisplayCardTextFieldLayout,
-  extra?: { maxLines?: number; lineHeight?: number; lineTops?: number[] }
-): DisplayCardTextFieldLayout & { maxLines?: number; lineHeight?: number; lineTops?: number[] } {
+  extra?: { maxLines?: number; lineHeight?: number; lineTops?: number[]; lineLefts?: number[] }
+): DisplayCardTextFieldLayout & {
+  maxLines?: number;
+  lineHeight?: number;
+  lineTops?: number[];
+  lineLefts?: number[];
+} {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const out: DisplayCardTextFieldLayout & {
     maxLines?: number;
     lineHeight?: number;
     lineTops?: number[];
+    lineLefts?: number[];
   } = {
     left: isFiniteNumber(obj.left) ? clampPercent(obj.left) : fallback.left,
     top: isFiniteNumber(obj.top) ? clampPercent(obj.top) : fallback.top,
@@ -98,6 +106,17 @@ function readTextField(
     if (tops.length > 0) out.lineTops = tops;
   } else if (extra?.lineTops) {
     out.lineTops = extra.lineTops;
+  }
+  if (Array.isArray(obj.lineLefts)) {
+    const lefts: number[] = [];
+    for (const entry of obj.lineLefts) {
+      if (!isFiniteNumber(entry)) continue;
+      lefts.push(clampPercent(entry));
+      if (lefts.length >= (out.maxLines ?? extra?.maxLines ?? 6)) break;
+    }
+    if (lefts.length > 0) out.lineLefts = lefts;
+  } else if (extra?.lineLefts) {
+    out.lineLefts = extra.lineLefts;
   }
   return out;
 }
@@ -171,6 +190,7 @@ export function parseDisplayCardLayout(
       lineHeight: commentParsed.lineHeight ?? DEFAULT_DISPLAY_CARD_LAYOUT.comment.lineHeight,
       maxLines: commentParsed.maxLines ?? DEFAULT_DISPLAY_CARD_LAYOUT.comment.maxLines,
       lineTops: commentParsed.lineTops,
+      lineLefts: commentParsed.lineLefts,
     },
   };
 

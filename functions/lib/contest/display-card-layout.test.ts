@@ -41,4 +41,16 @@ describe('display-card-layout', () => {
       assert.deepEqual(result.layout.comment.lineTops, [40, 100, 0]);
     }
   });
+
+  it('clamps comment line lefts', () => {
+    const result = parseDisplayCardLayout({
+      comment: {
+        lineLefts: [22, 105],
+      },
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.layout.comment.lineLefts, [22, 100]);
+    }
+  });
 });
