@@ -6,7 +6,11 @@ import {
   buildDisplayCardPreviewState,
   renderDisplayCardPreview,
   DISPLAY_CARD_WIDTH_PX,
+  DISPLAY_CARD_HEIGHT_PX,
   DISPLAY_CARD_LAYOUT,
+  mountDisplayCardPreviewCaptureHost,
+  prepareDisplayCardElementForRasterCapture,
+  waitForDisplayCardPreviewAssets,
 } from '../../contest-entry/js/display-card-preview.js';
 
 const SCHEDULE_FILENAME_LABELS = {
@@ -14,7 +18,8 @@ const SCHEDULE_FILENAME_LABELS = {
   part_time: '定時制',
 };
 
-const CARD_HEIGHT_PX = 450;
+/** Raster capture scale (2× → PDF page is still 800×450 px). */
+const DISPLAY_CARD_CAPTURE_SCALE = 2;
 
 /** Removes characters illegal in Windows file names. */
 export function sanitizeDisplayCardPdfFilenamePart(text) {
@@ -67,74 +72,95 @@ export function applicationToDisplayCardInput(app) {
   };
 }
 
-async function waitForDisplayCardReady(host) {
-  const img = host.querySelector('.contest-display-card-bg');
-  if (img instanceof HTMLImageElement) {
-    if (!img.complete) {
-      await new Promise((resolve, reject) => {
-        img.addEventListener('load', resolve, { once: true });
-        img.addEventListener('error', reject, { once: true });
-      }).catch(() => {});
-    } else {
-      await img.decode?.().catch(() => {});
-    }
+function assertCanvasHasPixels(canvas) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('展示カード画像の生成に失敗しました');
+  const sample = ctx.getImageData(0, 0, Math.min(8, canvas.width), Math.min(8, canvas.height));
+  let opaque = 0;
+  for (let i = 3; i < sample.data.length; i += 4) {
+    if (sample.data[i] > 0) opaque += 1;
   }
-  await document.fonts.ready;
+  if (opaque === 0) {
+    throw new Error('展示カードのキャプチャが空です。ページを再読み込みして再度お試しください。');
+  }
 }
 
 /**
- * Renders one application display card to a PDF blob (800×450 px page).
+ * Renders the same DOM as the entry preview, then captures it as a canvas bitmap.
+ * @param {object} app
+ * @param {typeof DISPLAY_CARD_LAYOUT} layout
+ */
+export async function renderDisplayCardPreviewCanvas(app, layout) {
+  const input = applicationToDisplayCardInput(app);
+  const state = buildDisplayCardPreviewState(input, layout, {
+    cardWidthPx: DISPLAY_CARD_WIDTH_PX,
+  });
+  const mount = mountDisplayCardPreviewCaptureHost(DISPLAY_CARD_WIDTH_PX);
+  try {
+    renderDisplayCardPreview(mount.host, state, { layout });
+    await waitForDisplayCardPreviewAssets(mount.host, layout);
+
+    const card = mount.host.querySelector('.contest-display-card');
+    if (!(card instanceof HTMLElement)) {
+      throw new Error('展示カードの描画に失敗しました');
+    }
+    prepareDisplayCardElementForRasterCapture(card);
+
+    const canvas = await html2canvas(card, {
+      scale: DISPLAY_CARD_CAPTURE_SCALE,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: DISPLAY_CARD_WIDTH_PX,
+      height: DISPLAY_CARD_HEIGHT_PX,
+      windowWidth: DISPLAY_CARD_WIDTH_PX,
+      windowHeight: DISPLAY_CARD_HEIGHT_PX,
+    });
+    assertCanvasHasPixels(canvas);
+    return canvas;
+  } finally {
+    mount.dispose();
+  }
+}
+
+/**
+ * Wraps a preview bitmap in a single-page PDF (image only, no text layer).
+ * @param {HTMLCanvasElement} canvas
+ */
+export function displayCardCanvasToPdfBlob(canvas) {
+  const pdf = new jsPDF({
+    orientation: 'landscape',
+    unit: 'px',
+    format: [DISPLAY_CARD_WIDTH_PX, DISPLAY_CARD_HEIGHT_PX],
+    compress: true,
+  });
+  const dataUrl = canvas.toDataURL('image/png');
+  pdf.addImage(
+    dataUrl,
+    'PNG',
+    0,
+    0,
+    DISPLAY_CARD_WIDTH_PX,
+    DISPLAY_CARD_HEIGHT_PX,
+    undefined,
+    'FAST'
+  );
+  const out = pdf.output('blob');
+  if (out instanceof Blob) {
+    return out.type ? out : new Blob([out], { type: 'application/pdf' });
+  }
+  return new Blob([out], { type: 'application/pdf' });
+}
+
+/**
+ * Preview DOM → PNG bitmap → single-page PDF.
  * @param {object} app
  * @param {typeof DISPLAY_CARD_LAYOUT} layout
  */
 export async function renderDisplayCardPdfBlob(app, layout) {
-  const container = document.createElement('div');
-  container.setAttribute('aria-hidden', 'true');
-  container.style.cssText =
-    'position:fixed;left:-10000px;top:0;width:800px;pointer-events:none;opacity:0;';
-
-  const host = document.createElement('div');
-  host.className = 'contest-display-card-host';
-  host.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
-  container.appendChild(host);
-  document.body.appendChild(container);
-
-  try {
-    const input = applicationToDisplayCardInput(app);
-    const state = buildDisplayCardPreviewState(input, layout, {
-      cardWidthPx: DISPLAY_CARD_WIDTH_PX,
-    });
-    renderDisplayCardPreview(host, state, { layout });
-    await waitForDisplayCardReady(host);
-
-    const card = host.querySelector('.contest-display-card');
-    if (!(card instanceof HTMLElement)) {
-      throw new Error('展示カードの描画に失敗しました');
-    }
-
-    const canvas = await html2canvas(card, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      width: DISPLAY_CARD_WIDTH_PX,
-      height: CARD_HEIGHT_PX,
-      windowWidth: DISPLAY_CARD_WIDTH_PX,
-      windowHeight: CARD_HEIGHT_PX,
-    });
-
-    const pdf = new jsPDF({
-      orientation: 'landscape',
-      unit: 'px',
-      format: [DISPLAY_CARD_WIDTH_PX, CARD_HEIGHT_PX],
-      compress: true,
-    });
-    const dataUrl = canvas.toDataURL('image/png');
-    pdf.addImage(dataUrl, 'PNG', 0, 0, DISPLAY_CARD_WIDTH_PX, CARD_HEIGHT_PX);
-
-    return pdf.output('blob');
-  } finally {
-    container.remove();
-  }
+  const canvas = await renderDisplayCardPreviewCanvas(app, layout);
+  return displayCardCanvasToPdfBlob(canvas);
 }
 
 function downloadBlob(blob, filename) {

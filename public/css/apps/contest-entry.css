@@ -572,6 +572,10 @@
   align-items: start;
 }
 
+.contest-apply-layout > * {
+  min-width: 0;
+}
+
 @media (min-width: 900px) {
   .contest-apply-layout {
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
@@ -645,6 +649,7 @@
 .contest-display-card-host {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 
 .contest-display-card {
@@ -660,6 +665,7 @@
 .contest-display-card-bg {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: 100%;
   object-fit: contain;
   pointer-events: none;

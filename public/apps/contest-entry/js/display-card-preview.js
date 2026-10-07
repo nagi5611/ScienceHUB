@@ -45,22 +45,157 @@ export const DISPLAY_CARD_COMMENT_LINES_CAP = 12;
 
 export const DISPLAY_CARD_WIDTH_PX = 800;
 
+export const DISPLAY_CARD_HEIGHT_PX = 450;
+
 /** Slight shrink so glyphs stay inside the line box (font metrics vs. 1em estimate). */
 const COMMENT_LINE_FIT_MARGIN = 0.97;
+
+/**
+ * Preview width (px) for comment wrap — matches the scaled width shown in the aside.
+ * @param {HTMLElement | null | undefined} host
+ */
+export function resolveDisplayCardPreviewWidthPx(host) {
+  if (!(host instanceof HTMLElement)) return DISPLAY_CARD_WIDTH_PX;
+  const w = host.clientWidth;
+  if (Number.isFinite(w) && w >= 80) {
+    return Math.min(w, DISPLAY_CARD_WIDTH_PX);
+  }
+  const card = host.querySelector('.contest-display-card');
+  const el = card instanceof HTMLElement ? card : host;
+  const measured = el.getBoundingClientRect().width;
+  return Number.isFinite(measured) && measured >= 80 ? measured : DISPLAY_CARD_WIDTH_PX;
+}
 
 /**
  * Width (px) of the card on screen — use for line-break math (not the 800px template constant).
  * @param {HTMLElement | null | undefined} host
  */
 export function measureDisplayCardHostWidthPx(host) {
-  if (!(host instanceof HTMLElement)) return DISPLAY_CARD_WIDTH_PX;
-  const card = host.querySelector('.contest-display-card');
-  const el = card instanceof HTMLElement ? card : host;
-  const w = el.getBoundingClientRect().width;
-  return Number.isFinite(w) && w >= 80 ? w : DISPLAY_CARD_WIDTH_PX;
+  return resolveDisplayCardPreviewWidthPx(host);
 }
 
+/** Clears inline fit styles applied by fitDisplayCardPreviewToHost. */
+function resetDisplayCardPreviewFit(host) {
+  const card = host.querySelector('.contest-display-card');
+  if (!(card instanceof HTMLElement)) return;
+  card.classList.remove('contest-display-card--fitted');
+  card.style.width = '';
+  card.style.height = '';
+  card.style.aspectRatio = '';
+  card.style.maxWidth = '';
+  card.style.transform = '';
+  card.style.transformOrigin = '';
+  host.style.height = '';
+  host.style.overflow = '';
+}
 
+/**
+ * Scales the 800×450 design canvas so the full card stays inside the preview host.
+ * @param {HTMLElement | null | undefined} host
+ */
+export function fitDisplayCardPreviewToHost(host) {
+  if (!(host instanceof HTMLElement)) return;
+  const card = host.querySelector('.contest-display-card');
+  if (!(card instanceof HTMLElement)) return;
+  if (card.classList.contains('contest-display-card--editor')) {
+    resetDisplayCardPreviewFit(host);
+    return;
+  }
+
+  const available = host.clientWidth;
+  if (!Number.isFinite(available) || available < 40) return;
+
+  if (available >= DISPLAY_CARD_WIDTH_PX - 1) {
+    resetDisplayCardPreviewFit(host);
+    return;
+  }
+
+  const scale = available / DISPLAY_CARD_WIDTH_PX;
+  card.classList.add('contest-display-card--fitted');
+  card.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
+  card.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
+  card.style.aspectRatio = 'auto';
+  card.style.maxWidth = 'none';
+  card.style.transform = `scale(${scale})`;
+  card.style.transformOrigin = 'top left';
+  host.style.height = `${DISPLAY_CARD_HEIGHT_PX * scale}px`;
+  host.style.overflow = 'hidden';
+}
+
+/** Font stack used on the display card overlay (keep PDF capture in sync). */
+export const DISPLAY_CARD_PREVIEW_FONT_FAMILY =
+  "'BIZ UDPGothic', 'Yu Gothic UI', 'Yu Gothic', 'Hiragino Sans', Meiryo, sans-serif";
+
+/**
+ * Off-screen mount for raster capture (must stay visible to html2canvas; no opacity:0).
+ * @param {number} [layoutWidth]
+ */
+export function mountDisplayCardPreviewCaptureHost(layoutWidth = DISPLAY_CARD_WIDTH_PX) {
+  const container = document.createElement('div');
+  container.setAttribute('aria-hidden', 'true');
+  container.dataset.displayCardCapture = 'true';
+  container.style.cssText = `position:fixed;left:-12000px;top:0;width:${layoutWidth}px;pointer-events:none;`;
+  const host = document.createElement('div');
+  host.className = 'contest-display-card-host';
+  host.style.width = `${layoutWidth}px`;
+  container.appendChild(host);
+  document.body.appendChild(container);
+  return {
+    host,
+    dispose() {
+      container.remove();
+    },
+  };
+}
+
+/** Pins card to design size (800×450) before html2canvas — same geometry as full-size preview. */
+export function prepareDisplayCardElementForRasterCapture(card) {
+  if (!(card instanceof HTMLElement)) return;
+  card.classList.remove('contest-display-card--fitted');
+  card.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
+  card.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
+  card.style.aspectRatio = 'auto';
+  card.style.maxWidth = 'none';
+  card.style.transform = 'none';
+  card.style.transformOrigin = 'top left';
+  card.style.boxShadow = 'none';
+}
+
+/**
+ * Waits for template image + overlay fonts before capturing preview as bitmap.
+ * @param {HTMLElement} host
+ * @param {typeof DISPLAY_CARD_LAYOUT} [layout]
+ */
+export async function waitForDisplayCardPreviewAssets(host, layout = activeDisplayCardLayout) {
+  const img = host.querySelector('.contest-display-card-bg');
+  if (img instanceof HTMLImageElement) {
+    if (!img.complete) {
+      await new Promise((resolve, reject) => {
+        img.addEventListener('load', resolve, { once: true });
+        img.addEventListener('error', reject, { once: true });
+      }).catch(() => {});
+    } else {
+      await img.decode?.().catch(() => {});
+    }
+  }
+
+  const fontSizes = new Set(
+    [
+      layout.year?.fontSize,
+      layout.classGroup?.fontSize,
+      layout.name?.fontSize,
+      layout.title?.fontSize,
+      layout.comment?.fontSize,
+    ].filter((n) => Number.isFinite(n))
+  );
+  for (const size of fontSizes) {
+    await document.fonts.load(`${size}px "BIZ UDPGothic"`).catch(() => {});
+  }
+  await document.fonts.ready;
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
 
 /** Comment line plot count from layout (＋ / ┃ handle count in admin editor). */
 
@@ -787,10 +922,6 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
         src="${DISPLAY_CARD_TEMPLATE_URL}"
 
-        width="800"
-
-        height="450"
-
         alt=""
 
         decoding="async"
@@ -902,7 +1033,21 @@ export function syncDisplayCardPreviewFromForm(host, form, scheduleType, partici
   );
 
   renderDisplayCardPreview(host, state);
+  fitDisplayCardPreviewToHost(host);
 
+}
+
+let displayCardPreviewResizeHost = null;
+
+/** Re-fits preview when the aside column is resized. */
+export function bindDisplayCardPreviewHostResize(host, onResize) {
+  if (!(host instanceof HTMLElement)) return;
+  if (displayCardPreviewResizeHost === host) return;
+  displayCardPreviewResizeHost = host;
+  const observer = new ResizeObserver(() => {
+    onResize?.();
+  });
+  observer.observe(host);
 }
 
 

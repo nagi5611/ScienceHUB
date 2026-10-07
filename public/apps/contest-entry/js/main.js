@@ -14,7 +14,11 @@ import {
 } from './entry-draft.js';
 import { setPrintFlowOverlay } from './print-flow-overlay.js';
 import { initContestPublicGallery } from './gallery.js';
-import { setDisplayCardLayout, syncDisplayCardPreviewFromForm } from './display-card-preview.js';
+import {
+  bindDisplayCardPreviewHostResize,
+  setDisplayCardLayout,
+  syncDisplayCardPreviewFromForm,
+} from './display-card-preview.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
@@ -1279,6 +1283,10 @@ async function init() {
     }
   }
   updateScheduleTypeUi();
+  bindDisplayCardPreviewHostResize(
+    document.getElementById('contest-display-card-host'),
+    refreshDisplayCardPreview
+  );
   refreshDisplayCardPreview();
 
   try {
