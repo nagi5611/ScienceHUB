@@ -1,5 +1,4 @@
 // public/apps/contest-management/js/display-card-pdf-export.js
-import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { zipSync } from 'fflate';
 import {
@@ -10,8 +9,9 @@ import {
   DISPLAY_CARD_WIDTH_PX,
   DISPLAY_CARD_HEIGHT_PX,
   DISPLAY_CARD_LAYOUT,
+  DISPLAY_CARD_CAPTURE_SCALE,
   mountDisplayCardPreviewCaptureHost,
-  prepareDisplayCardHostForRasterCapture,
+  captureDisplayCardForExport,
   waitForDisplayCardPreviewAssets,
 } from '../../contest-entry/js/display-card-preview.js';
 
@@ -19,9 +19,6 @@ const SCHEDULE_FILENAME_LABELS = {
   full_time: '全日制',
   part_time: '定時制',
 };
-
-/** Raster capture scale (2× → PDF page is still 800×450 px). */
-const DISPLAY_CARD_CAPTURE_SCALE = 2;
 
 /** Removes characters illegal in Windows file names. */
 export function sanitizeDisplayCardPdfFilenamePart(text) {
@@ -125,32 +122,10 @@ export function assertDisplayCardCanvasHasOverlayInk(canvas, layout = DISPLAY_CA
  * @param {typeof DISPLAY_CARD_LAYOUT} layout
  */
 export async function renderDisplayCardPreviewCanvasFromHost(host, layout) {
-  if (!(host instanceof HTMLElement)) {
-    throw new Error('展示カードのプレビュー領域が見つかりません');
-  }
-  const card = host.querySelector('.contest-display-card');
-  if (!(card instanceof HTMLElement)) {
-    throw new Error('展示カードの描画に失敗しました');
-  }
-  prepareDisplayCardHostForRasterCapture(host);
-  try {
-    const canvas = await html2canvas(card, {
-      scale: DISPLAY_CARD_CAPTURE_SCALE,
-      useCORS: true,
-      allowTaint: false,
-      backgroundColor: '#ffffff',
-      logging: false,
-      width: DISPLAY_CARD_WIDTH_PX,
-      height: DISPLAY_CARD_HEIGHT_PX,
-      windowWidth: DISPLAY_CARD_WIDTH_PX,
-      windowHeight: DISPLAY_CARD_HEIGHT_PX,
-    });
-    assertCanvasHasPixels(canvas);
-    assertDisplayCardCanvasHasOverlayInk(canvas, layout);
-    return canvas;
-  } finally {
-    fitDisplayCardPreviewToHost(host);
-  }
+  const canvas = await captureDisplayCardForExport(host, layout);
+  assertCanvasHasPixels(canvas);
+  assertDisplayCardCanvasHasOverlayInk(canvas, layout);
+  return canvas;
 }
 
 /**
@@ -178,23 +153,17 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
  * @param {HTMLCanvasElement} canvas
  */
 export function displayCardCanvasToPdfBlob(canvas) {
+  const pageW = DISPLAY_CARD_WIDTH_PX;
+  const pageH = DISPLAY_CARD_HEIGHT_PX;
   const pdf = new jsPDF({
-    orientation: 'landscape',
     unit: 'px',
-    format: [DISPLAY_CARD_WIDTH_PX, DISPLAY_CARD_HEIGHT_PX],
+    format: [pageW, pageH],
+    // [800,450] must stay width×height; default portrait treats 800 as height → 450×800 page.
+    orientation: pageW >= pageH ? 'landscape' : 'portrait',
     compress: true,
   });
   const dataUrl = canvas.toDataURL('image/png');
-  pdf.addImage(
-    dataUrl,
-    'PNG',
-    0,
-    0,
-    DISPLAY_CARD_WIDTH_PX,
-    DISPLAY_CARD_HEIGHT_PX,
-    undefined,
-    'FAST'
-  );
+  pdf.addImage(dataUrl, 'PNG', 0, 0, DISPLAY_CARD_WIDTH_PX, DISPLAY_CARD_HEIGHT_PX);
   const out = pdf.output('blob');
   if (out instanceof Blob) {
     return out.type ? out : new Blob([out], { type: 'application/pdf' });

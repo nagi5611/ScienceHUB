@@ -636,6 +636,11 @@
   user-select: none;
 }
 
+/* html2canvas: overlay % must match template pixels 1:1 (contain letterboxes). */
+.contest-display-card--raster .contest-display-card-bg {
+  object-fit: fill;
+}
+
 .contest-display-card-overlay {
   position: absolute;
   inset: 0;

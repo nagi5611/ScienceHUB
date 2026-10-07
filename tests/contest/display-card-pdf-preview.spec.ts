@@ -67,6 +67,9 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     });
 
     await expect(modal).toHaveClass(/open/, { timeout: 90_000 });
+    await expect
+      .poll(() => modal.evaluate((el) => (el instanceof HTMLElement ? Boolean(el.dataset.downloadUrl) : false)))
+      .toBe(true);
     const previewHost = modal.locator("[data-display-card-pdf-preview-host]");
     await expect(previewHost).toBeVisible();
     const previewCard = modal.getByTestId("display-card-root");
@@ -94,6 +97,10 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
       const modalHost = document.querySelector("[data-display-card-pdf-preview-host]");
       if (!(modalHost instanceof HTMLElement)) return { ok: false as const };
 
+      const modalEl = document.getElementById("contest-display-card-pdf-modal");
+      const pdfFromModalUrl =
+        modalEl instanceof HTMLElement ? modalEl.dataset.downloadUrl : undefined;
+
       const hasScaleWrap = Boolean(modalHost.querySelector(".contest-display-card-scale-wrap"));
       const modalTitle = measureFieldFraction(modalHost, "display-card-title");
       const expectedLeft = layout.title.left / 100;
@@ -118,6 +125,10 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
       } catch {
         return { ok: false as const };
       }
+
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
 
       const cardAfter = modalHost.querySelector('[data-testid="display-card-root"]');
       const cardRectAfter =
@@ -154,10 +165,6 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
           : 0;
 
       const pdfBlob = pdfMod.displayCardCanvasToPdfBlob(canvas);
-      const pdfFromModalUrl = document
-        .getElementById("contest-display-card-pdf-modal")
-        ?.getAttribute("data-download-url");
-
       const input = pdfMod.applicationToDisplayCardInput(app);
       const state = previewMod.buildDisplayCardPreviewState(input, layout, {
         cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,

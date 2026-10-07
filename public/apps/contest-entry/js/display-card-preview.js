@@ -47,6 +47,9 @@ export const DISPLAY_CARD_WIDTH_PX = 800;
 
 export const DISPLAY_CARD_HEIGHT_PX = 450;
 
+/** html2canvas scale — PDF page stays 800×450 design px (bitmap is 2×). */
+export const DISPLAY_CARD_CAPTURE_SCALE = 2;
+
 /** Slight shrink so glyphs stay inside the line box (font metrics vs. 1em estimate). */
 const COMMENT_LINE_FIT_MARGIN = 0.97;
 
@@ -84,6 +87,36 @@ function getDisplayCardFitShell(host) {
 function getDisplayCardScaleWrap(host) {
   const wrap = host.querySelector('.contest-display-card-scale-wrap');
   return wrap instanceof HTMLElement ? wrap : null;
+}
+
+/** @param {HTMLElement} host */
+function forEachDisplayCardCaptureAncestor(host, fn) {
+  let el = host.parentElement;
+  while (el instanceof HTMLElement) {
+    fn(el);
+    if (el.classList.contains('modal') || el.id === 'admin-section') break;
+    el = el.parentElement;
+  }
+}
+
+/** Prevents modal preview wrap from clipping the 800×450 card during html2canvas. */
+function prepareDisplayCardCaptureAncestors(host) {
+  forEachDisplayCardCaptureAncestor(host, (el) => {
+    if (el.dataset.displayCardCaptureAncestorOverflow === undefined) {
+      el.dataset.displayCardCaptureAncestorOverflow = el.style.overflow;
+    }
+    el.style.overflow = 'visible';
+  });
+}
+
+/** @param {HTMLElement} host */
+function restoreDisplayCardCaptureAncestors(host) {
+  forEachDisplayCardCaptureAncestor(host, (el) => {
+    if (el.dataset.displayCardCaptureAncestorOverflow !== undefined) {
+      el.style.overflow = el.dataset.displayCardCaptureAncestorOverflow;
+      delete el.dataset.displayCardCaptureAncestorOverflow;
+    }
+  });
 }
 
 /** Clears inline fit styles applied by fitDisplayCardPreviewToHost. */
@@ -212,6 +245,11 @@ export function prepareDisplayCardHostForRasterCapture(host) {
   const card = host.querySelector('.contest-display-card');
   if (!(card instanceof HTMLElement)) return;
 
+  if (!host.dataset.displayCardCapturePrevOverflow) {
+    host.dataset.displayCardCapturePrevOverflow = host.style.overflow;
+    host.dataset.displayCardCapturePrevHeight = host.style.height;
+  }
+
   const shell = getDisplayCardFitShell(host);
   if (shell) {
     shell.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
@@ -230,6 +268,64 @@ export function prepareDisplayCardHostForRasterCapture(host) {
   host.style.overflow = 'visible';
 
   prepareDisplayCardElementForRasterCapture(card);
+  card.classList.add('contest-display-card--raster');
+  prepareDisplayCardCaptureAncestors(host);
+}
+
+/** Restores host/card after raster capture (re-applies fitted preview). */
+export function restoreDisplayCardHostAfterRasterCapture(host) {
+  if (!(host instanceof HTMLElement)) return;
+  const card = host.querySelector('.contest-display-card');
+  if (card instanceof HTMLElement) {
+    card.classList.remove('contest-display-card--raster');
+  }
+  if (host.dataset.displayCardCapturePrevOverflow !== undefined) {
+    host.style.overflow = host.dataset.displayCardCapturePrevOverflow ?? '';
+    host.style.height = host.dataset.displayCardCapturePrevHeight ?? '';
+    delete host.dataset.displayCardCapturePrevOverflow;
+    delete host.dataset.displayCardCapturePrevHeight;
+  }
+  restoreDisplayCardCaptureAncestors(host);
+  resetDisplayCardPreviewFit(host);
+  fitDisplayCardPreviewToHost(host);
+}
+
+/**
+ * Canonical DOM → bitmap for PDF and parity tests (800×450 design, 2× supersampling).
+ * @param {HTMLElement} host
+ * @param {typeof DISPLAY_CARD_LAYOUT} [layout]
+ */
+export async function captureDisplayCardForExport(host, layout = activeDisplayCardLayout) {
+  if (!(host instanceof HTMLElement)) {
+    throw new Error('展示カードのプレビュー領域が見つかりません');
+  }
+  const card = host.querySelector('.contest-display-card');
+  if (!(card instanceof HTMLElement)) {
+    throw new Error('展示カードの描画に失敗しました');
+  }
+
+  await waitForDisplayCardPreviewAssets(host, layout);
+  prepareDisplayCardHostForRasterCapture(host);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  const { default: html2canvas } = await import('html2canvas');
+  try {
+    const canvas = await html2canvas(card, {
+      scale: DISPLAY_CARD_CAPTURE_SCALE,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: DISPLAY_CARD_WIDTH_PX,
+      height: DISPLAY_CARD_HEIGHT_PX,
+    });
+    return canvas;
+  } finally {
+    restoreDisplayCardHostAfterRasterCapture(host);
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+  }
 }
 
 /**
