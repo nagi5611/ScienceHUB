@@ -1149,7 +1149,7 @@ function showStaffMessagesLoadError() {
   const empty = document.getElementById('contest-staff-messages-empty');
   if (!section) return;
   section.classList.remove('hidden');
-  host?.innerHTML = '';
+  if (host) host.innerHTML = '';
   if (empty) {
     empty.classList.remove('hidden');
     empty.textContent =
@@ -1385,7 +1385,7 @@ function renderStaffMessages() {
 
   if (!staffMessages.length) {
     section.classList.add('hidden');
-    host?.innerHTML = '';
+    if (host) host.innerHTML = '';
     if (empty) {
       empty.textContent = STAFF_MESSAGES_EMPTY_TEXT;
       empty.classList.add('hidden');
@@ -1401,7 +1401,7 @@ function renderStaffMessages() {
   if (staffMessagesExpanded) {
     renderStaffMessagesCarousel();
   } else {
-    host?.innerHTML = '';
+    if (host) host.innerHTML = '';
   }
 }
 
