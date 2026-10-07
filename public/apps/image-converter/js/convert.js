@@ -59,6 +59,7 @@ function serverRasterFormat(format) {
  *   quality: number,
  *   maxEdge: number,
  *   pdfPages: 'all' | 'first',
+ *   pdfQuality?: 'normal' | 'ultra',
  *   icoSizes?: number[],
  * }} options
  * @param {{ onProgress?: (items: Array<{ blob: Blob, pageNum?: number }>, meta?: { done: number, total: number }) => void | Promise<void> }} [callbacks]
@@ -93,6 +94,7 @@ export async function convertFile(file, options, callbacks = {}) {
         quality,
         maxEdge: options.maxEdge,
         pdfPages: options.pdfPages,
+        pdfQuality: options.pdfQuality,
         icoSizes: options.icoSizes,
       },
       {

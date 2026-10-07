@@ -6,7 +6,19 @@ import * as pdfjs from "pdfjs-dist";
 
 const PDFJS_VERSION = "4.10.38";
 const PDF_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
-const DEFAULT_RENDER_SCALE = 2;
+
+/** PDF→画像の通常レンダリング倍率（72pt × 2 ≈ 144 DPI 相当） */
+export const PDF_RENDER_SCALE_NORMAL = 2;
+/** PDF→画像の最高画質レンダリング倍率 */
+export const PDF_RENDER_SCALE_ULTRA = 8;
+
+/**
+ * 画質レベルから PDF.js の scale を解決
+ * @param {'normal' | 'ultra'} [quality]
+ */
+export function resolvePdfRenderScale(quality = "normal") {
+  return quality === "ultra" ? PDF_RENDER_SCALE_ULTRA : PDF_RENDER_SCALE_NORMAL;
+}
 
 let workerReady = false;
 
@@ -56,13 +68,21 @@ export async function loadPdfDocument(source) {
  * @param {number} pageNum 1-based
  * @param {number} maxEdge
  * @param {'jpeg' | 'none'} [background]
+ * @param {number} [renderScale]
  */
-export async function renderPdfPageToCanvas(pdf, pageNum, maxEdge, background = "jpeg") {
+export async function renderPdfPageToCanvas(
+  pdf,
+  pageNum,
+  maxEdge,
+  background = "jpeg",
+  renderScale = PDF_RENDER_SCALE_NORMAL,
+) {
   const page = await pdf.getPage(pageNum);
-  const baseViewport = page.getViewport({ scale: DEFAULT_RENDER_SCALE });
+  const baseScale = Math.max(0.25, renderScale);
+  const baseViewport = page.getViewport({ scale: baseScale });
   const { width, height } = fitDimensions(baseViewport.width, baseViewport.height, maxEdge);
   const scale = width / baseViewport.width;
-  const viewport = page.getViewport({ scale: DEFAULT_RENDER_SCALE * scale });
+  const viewport = page.getViewport({ scale: baseScale * scale });
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);

@@ -66,6 +66,8 @@ const qualityField = document.getElementById("quality-field");
 const maxEdgeInput = document.getElementById("max-edge");
 const pdfPagesField = document.getElementById("pdf-pages-field");
 const pdfPagesSelect = document.getElementById("pdf-pages");
+const pdfQualityField = document.getElementById("pdf-quality-field");
+const pdfQualitySelect = document.getElementById("pdf-quality");
 const icoSizesField = document.getElementById("ico-sizes-field");
 const icoSizesGrid = document.getElementById("ico-sizes-grid");
 const svgNoteField = document.getElementById("svg-note-field");
@@ -291,17 +293,20 @@ function refreshOptionVisibility() {
   const isPdfOutput = format === "pdf";
   const showQuality = spec?.lossy === true;
   const showPdfPages = queueHasPdf() && !isPdfOutput;
+  const showPdfQuality = showPdfPages;
   const showIcoSizes = format === "ico";
   const showSvgNote = format === "svg";
   const hideMaxEdge = queueHasVideo();
 
   setFieldHidden(qualityField, !showQuality);
   setFieldHidden(pdfPagesField, !showPdfPages);
+  setFieldHidden(pdfQualityField, !showPdfQuality);
   setFieldHidden(icoSizesField, !showIcoSizes);
   setFieldHidden(svgNoteField, !showSvgNote);
   setFieldHidden(maxEdgeInput?.closest(".icv-field") ?? null, hideMaxEdge);
 
-  const hasContextOptions = showQuality || showPdfPages || showIcoSizes || showSvgNote;
+  const hasContextOptions =
+    showQuality || showPdfPages || showPdfQuality || showIcoSizes || showSvgNote;
   setFieldHidden(formatContext, !hasContextOptions);
 }
 
@@ -675,6 +680,7 @@ function getConvertOptions() {
     quality: Number(qualityInput.value),
     maxEdge: Number(maxEdgeInput.value) || 0,
     pdfPages: /** @type {'all' | 'first'} */ (pdfPagesSelect.value),
+    pdfQuality: /** @type {'normal' | 'ultra'} */ (pdfQualitySelect?.value ?? "normal"),
     icoSizes: getSelectedIcoSizes(),
   };
 }

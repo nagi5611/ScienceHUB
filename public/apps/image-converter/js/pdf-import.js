@@ -6,6 +6,7 @@ import {
   loadPdfDocument,
   renderPdfPageToCanvas,
   createPdfPreviewBlob,
+  resolvePdfRenderScale,
 } from "../../../js/shared/pdf-import.js";
 import { OUTPUT_FORMATS } from "./convert-core.js";
 import { encodeCanvasToFormat } from "./encode-output.js";
@@ -42,6 +43,7 @@ function chunkPageNumbers(pageNumbers, batchSize) {
  *   quality: number,
  *   maxEdge: number,
  *   pdfPages: 'all' | 'first',
+ *   pdfQuality?: 'normal' | 'ultra',
  *   icoSizes?: number[],
  * }} options
  * @param {{ onPage?: (page: { blob: Blob, pageNum: number }, progress: { done: number, total: number }) => void | Promise<void> }} [callbacks]
@@ -52,6 +54,7 @@ export async function convertPdfToImages(file, options, callbacks = {}) {
   const total = pageNumbers.length;
   let doneCount = 0;
   const quality = Math.min(1, Math.max(0.05, options.quality));
+  const renderScale = resolvePdfRenderScale(options.pdfQuality);
 
   const batches =
     options.pdfPages === "all" && pageNumbers.length > PDF_PAGE_BATCH_SIZE
@@ -68,6 +71,7 @@ export async function convertPdfToImages(file, options, callbacks = {}) {
         pageNum,
         options.maxEdge,
         options.outputFormat === "jpeg" ? "jpeg" : "none",
+        renderScale,
       );
       const formatSpec = OUTPUT_FORMATS[options.outputFormat];
       const blob = await encodeCanvasToFormat(canvas, options.outputFormat, {
