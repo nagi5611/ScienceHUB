@@ -259,7 +259,41 @@ export function commentLineWidthPercent(commentLayout, lineIndex) {
 
  */
 
-export function commentLineCharsCapacity(commentLayout, lineIndex, cardWidthPx = DISPLAY_CARD_WIDTH_PX) {
+/** Width units for one glyph (full-width = 1, half-width ≈ 0.5). */
+
+export function displayCardCharWidthUnits(ch) {
+
+  if (!ch) return 0;
+
+  const code = ch.codePointAt(0) ?? 0;
+
+  if (code <= 0x007f) return 0.5;
+
+  if (code >= 0xff61 && code <= 0xff9f) return 0.5;
+
+  return 1;
+
+}
+
+
+
+/** Sum of display width units for a string. */
+
+export function displayCardTextWidthUnits(text) {
+
+  let units = 0;
+
+  for (const ch of String(text ?? '')) units += displayCardCharWidthUnits(ch);
+
+  return units;
+
+}
+
+
+
+/** Max width units that fit in a comment line plot (matches CSS nowrap at font-size). */
+
+export function commentLineCapacityUnits(commentLayout, lineIndex, cardWidthPx = DISPLAY_CARD_WIDTH_PX) {
 
   const widthPct = commentLineWidthPercent(commentLayout, lineIndex);
 
@@ -267,9 +301,17 @@ export function commentLineCharsCapacity(commentLayout, lineIndex, cardWidthPx =
 
   const fontPx = commentLayout.fontSize ?? 13;
 
-  // ~1em per full-width glyph; small margin so overflow moves to the next plot before clipping.
+  return Math.max(0.5, widthPx / fontPx);
 
-  return Math.max(1, Math.floor(widthPx / (fontPx * 1.04)));
+}
+
+
+
+/** @deprecated Use commentLineCapacityUnits; kept for tests comparing full-width char counts. */
+
+export function commentLineCharsCapacity(commentLayout, lineIndex, cardWidthPx = DISPLAY_CARD_WIDTH_PX) {
+
+  return Math.max(1, Math.floor(commentLineCapacityUnits(commentLayout, lineIndex, cardWidthPx)));
 
 }
 
@@ -277,17 +319,73 @@ export function commentLineCharsCapacity(commentLayout, lineIndex, cardWidthPx =
 
 /**
 
- * Splits one chunk at capacity; remainder is kept for the next line plot (no in-line wrap).
+ * Splits one chunk at width-unit capacity; remainder goes to the next line plot.
 
  * @param {string} rest
 
- * @param {number} cap
+ * @param {number} capUnits
 
  * @param {boolean} softBreak
 
  */
 
-function splitCommentChunkAtCapacity(rest, cap, softBreak) {
+function splitCommentChunkAtCapacity(rest, capUnits, softBreak) {
+
+  if (displayCardTextWidthUnits(rest) <= capUnits) {
+
+    return { line: rest, rest: '' };
+
+  }
+
+  let units = 0;
+
+  let breakAt = 0;
+
+  for (let i = 0; i < rest.length; i += 1) {
+
+    const cu = displayCardCharWidthUnits(rest[i]);
+
+    if (units + cu > capUnits && i > 0) {
+
+      breakAt = i;
+
+      break;
+
+    }
+
+    units += cu;
+
+    breakAt = i + 1;
+
+  }
+
+  if (breakAt <= 0) breakAt = 1;
+
+  if (softBreak && breakAt > 1) {
+
+    const slice = rest.slice(0, breakAt);
+
+    const lastSpace = slice.lastIndexOf(' ');
+
+    const lastPunct = Math.max(slice.lastIndexOf('、'), slice.lastIndexOf('。'));
+
+    const minBreak = Math.max(1, Math.floor(breakAt * 0.35));
+
+    if (lastPunct >= minBreak) breakAt = lastPunct + 1;
+
+    else if (lastSpace >= minBreak) breakAt = lastSpace + 1;
+
+  }
+
+  return { line: rest.slice(0, breakAt), rest: rest.slice(breakAt) };
+
+}
+
+
+
+/** Legacy fixed character count (no layout / width units). */
+
+function splitCommentChunkAtCharCount(rest, cap, softBreak) {
 
   if (rest.length <= cap) {
 
@@ -353,7 +451,7 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = CO
 
   const capacityForIndex = (lineIndex) => {
 
-    if (useLayout) return commentLineCharsCapacity(charsPerLineOrLayout, lineIndex);
+    if (useLayout) return commentLineCapacityUnits(charsPerLineOrLayout, lineIndex);
 
     const n =
 
@@ -379,7 +477,11 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = CO
 
       const cap = capacityForIndex(lines.length);
 
-      const { line, rest: nextRest } = splitCommentChunkAtCapacity(rest, cap, softBreak);
+      const { line, rest: nextRest } = useLayout
+
+        ? splitCommentChunkAtCapacity(rest, cap, softBreak)
+
+        : splitCommentChunkAtCharCount(rest, cap, softBreak);
 
       if (line.length > 0) lines.push(line);
 
@@ -397,13 +499,17 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = CO
 
   const used = lines.join('').length;
 
-  if (joinedLen > used && lines.length > 0) {
+  if (joinedLen > used && lines.length >= maxLines && lines.length > 0) {
 
     const last = lines[lines.length - 1];
 
-    const cap = capacityForIndex(lines.length - 1);
+    const capUnits = capacityForIndex(lines.length - 1);
 
-    lines[lines.length - 1] = last.length >= cap - 1 ? `${last.slice(0, -1)}…` : `${last}…`;
+    const lastUnits = displayCardTextWidthUnits(last);
+
+    lines[lines.length - 1] =
+
+      lastUnits >= capUnits - 0.5 ? `${last.slice(0, -1)}…` : `${last}…`;
 
   }
 
@@ -461,7 +567,7 @@ export function buildDisplayCardPreviewState(input, layoutOverride) {
 
       input.impressions,
 
-      layout.comment.maxLines,
+      getCommentLinePlotCount(layout.comment),
 
       layout.comment
 

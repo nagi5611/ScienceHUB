@@ -582,7 +582,7 @@
 
 .display-card-layout-handle {
   position: absolute;
-  z-index: 4;
+  z-index: 10;
   transform: translate(-50%, -50%);
   width: 1.35rem;
   height: 1.35rem;
@@ -608,7 +608,7 @@
 }
 
 .display-card-layout-handle--right {
-  z-index: 6;
+  z-index: 11;
   border-color: #0d9488;
   color: #0d9488;
   font-size: 0.75rem;

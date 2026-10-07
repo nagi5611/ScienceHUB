@@ -43,6 +43,19 @@ let editorLayout = null;
 let defaultLayout = null;
 let selectedKey = 'name';
 let editorBound = false;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let samplePreviewDebounceTimer = null;
+
+function scheduleSamplePreview(previewHost) {
+  if (!previewHost) return;
+  if (samplePreviewDebounceTimer !== null) {
+    window.clearTimeout(samplePreviewDebounceTimer);
+  }
+  samplePreviewDebounceTimer = window.setTimeout(() => {
+    samplePreviewDebounceTimer = null;
+    renderEditorPreview(previewHost);
+  }, 120);
+}
 
 /** @returns {{ index: number; part: 'position' | 'right' } | null} */
 function parseCommentLineKey(key) {
@@ -105,7 +118,7 @@ export function initDisplayCardLayoutEditor(root) {
 
   for (const input of root.querySelectorAll('[data-sample-field]')) {
     input.addEventListener('input', () => {
-      renderEditorPreview(previewHost);
+      scheduleSamplePreview(previewHost);
     });
   }
 
@@ -204,8 +217,8 @@ function injectEditorHandles(host) {
   handles.push({
     key: 'comment',
     label: FIELD_LABELS.comment,
-    left: c.left,
-    top: c.top,
+    left: Math.max(2, c.left - 4),
+    top: Math.max(2, c.top - 3),
     kind: 'comment',
   });
 
