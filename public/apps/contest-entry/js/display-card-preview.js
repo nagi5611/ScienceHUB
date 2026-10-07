@@ -267,7 +267,9 @@ export function commentLineCharsCapacity(commentLayout, lineIndex, cardWidthPx =
 
   const fontPx = commentLayout.fontSize ?? 13;
 
-  return Math.max(1, Math.floor(widthPx / (fontPx * 0.52)));
+  // ~1em per full-width glyph; small margin so overflow moves to the next plot before clipping.
+
+  return Math.max(1, Math.floor(widthPx / (fontPx * 1.04)));
 
 }
 
@@ -427,9 +429,11 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = CO
 
  * }} input
 
+ * @param {typeof DISPLAY_CARD_LAYOUT | null | undefined} [layoutOverride]
+
  */
 
-export function buildDisplayCardPreviewState(input) {
+export function buildDisplayCardPreviewState(input, layoutOverride) {
 
   const { year, classGroup } = parseHomeroomForDisplayCard(
 
@@ -439,7 +443,7 @@ export function buildDisplayCardPreviewState(input) {
 
   );
 
-  const layout = activeDisplayCardLayout;
+  const layout = layoutOverride ?? activeDisplayCardLayout;
 
   return {
 

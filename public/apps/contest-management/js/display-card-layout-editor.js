@@ -152,15 +152,19 @@ function readSampleFromDom(root) {
 
 function renderEditorPreview(previewHost) {
   if (!previewHost || !editorLayout) return;
+  setDisplayCardLayout(editorLayout);
   const root = previewHost.closest('#panel-display-card-layout');
   const sample = root ? readSampleFromDom(root) : SAMPLE;
-  const state = buildDisplayCardPreviewState({
-    scheduleType: sample.scheduleType,
-    homeroom: sample.homeroom,
-    studentName: sample.studentName,
-    title: sample.title,
-    impressions: sample.impressions,
-  });
+  const state = buildDisplayCardPreviewState(
+    {
+      scheduleType: sample.scheduleType,
+      homeroom: sample.homeroom,
+      studentName: sample.studentName,
+      title: sample.title,
+      impressions: sample.impressions,
+    },
+    editorLayout
+  );
   renderDisplayCardPreview(previewHost, state, { layout: editorLayout, editorLinePlots: true });
   const card = previewHost.querySelector('.contest-display-card');
   if (card) card.classList.add('contest-display-card--editor');
