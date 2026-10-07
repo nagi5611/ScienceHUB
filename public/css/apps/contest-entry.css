@@ -576,43 +576,6 @@
   min-width: 0;
 }
 
-/* 参加申請: カレンダー列の上に全幅オーバーレイ（一覧・提出は従来レイアウト） */
-@media (min-width: 960px) {
-  .contest-entry-main:has(#view-apply:not(.hidden)) {
-    overflow-x: clip;
-  }
-
-  .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-entry-primary {
-    display: contents;
-  }
-
-  .contest-entry-layout:has(#view-apply:not(.hidden)) #view-apply {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    position: relative;
-    z-index: 5;
-    background: var(--cf-bg, #fff);
-    box-shadow: 0 10px 40px rgb(0 0 0 / 0.14);
-    /* メイン max-width 内の右端からビューポート右端まで伸ばす */
-    width: calc(100% + max(0px, (100vw - 100%) / 2 - 1rem));
-    max-width: 100vw;
-    margin-right: calc(-1 * max(0px, (100vw - 100%) / 2 - 1rem));
-    box-sizing: border-box;
-    overflow-x: clip;
-  }
-
-  .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-calendar-aside {
-    grid-column: 2;
-    grid-row: 1;
-    z-index: 1;
-    pointer-events: none;
-  }
-
-  .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-calendar-aside .hub-calendar-card {
-    opacity: 0.42;
-  }
-}
-
 .contest-display-card-preview-aside {
   position: relative;
   z-index: 2;
