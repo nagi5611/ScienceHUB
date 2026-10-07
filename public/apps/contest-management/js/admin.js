@@ -47,6 +47,14 @@ import {
   initDisplayCardLayoutEditor,
   loadDisplayCardLayoutEditor,
 } from './display-card-layout-editor.js';
+import {
+  getDisplayCardLayout,
+  setDisplayCardLayout,
+} from '../../contest-entry/js/display-card-preview.js';
+import {
+  downloadDisplayCardPdfForApplication,
+  downloadDisplayCardPdfsZip,
+} from './display-card-pdf-export.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 let contestStorageGroupSlug = '';
@@ -122,6 +130,7 @@ let contestApplicationDetailId = null;
 let contestApplicationsSearchQuery = '';
 let contestApplicationsSort = { key: 'created_at', dir: 'desc' };
 let contestApplicationsToolbarBound = false;
+let contestDisplayCardLayoutForExportLoaded = false;
 
 const CONTEST_APPLICATION_SORT_KEYS = [
   'homeroom',
@@ -1280,6 +1289,7 @@ function contestAdminApplicationDeleteCell(app) {
 
 function contestAdminApplicationActionsCell(app) {
   return `<div class="contest-admin-app-actions">
+    <button type="button" class="btn btn-secondary btn-sm contest-admin-app-display-card-pdf" data-app-id="${escapeHtml(app.id)}">PDF</button>
     <button type="button" class="btn btn-secondary btn-sm contest-admin-app-detail" data-app-id="${escapeHtml(app.id)}">詳細</button>
     ${contestAdminApplicationDeleteCell(app)}
   </div>`;
@@ -1559,12 +1569,33 @@ function updateContestApplicationsCount(visibleCount) {
   el.textContent = `${visibleCount}件 / 全${total}件`;
 }
 
+/** Loads saved display-card layout for PDF export (once per session). */
+async function ensureContestDisplayCardLayoutForExport() {
+  if (contestDisplayCardLayoutForExportLoaded) {
+    return getDisplayCardLayout();
+  }
+  try {
+    const data = await apiRequest('admin/settings/display-card-layout');
+    setDisplayCardLayout(data?.layout);
+  } catch {
+    setDisplayCardLayout(null);
+  }
+  contestDisplayCardLayoutForExportLoaded = true;
+  return getDisplayCardLayout();
+}
+
+function setContestApplicationsPdfStatus(message) {
+  const el = document.getElementById('contest-applications-pdf-status');
+  if (el) el.textContent = message ?? '';
+}
+
 /** Wires search and mobile sort controls for participation applications. */
 function setupContestApplicationsToolbar() {
   if (contestApplicationsToolbarBound) return;
   const searchInput = document.getElementById('contest-applications-search');
   const sortMobile = document.getElementById('contest-applications-sort-mobile');
-  if (!searchInput && !sortMobile) return;
+  const zipBtn = document.getElementById('contest-applications-display-cards-zip');
+  if (!searchInput && !sortMobile && !zipBtn) return;
   contestApplicationsToolbarBound = true;
 
   searchInput?.addEventListener('input', (e) => {
@@ -1577,6 +1608,30 @@ function setupContestApplicationsToolbar() {
     if (!key || (dir !== 'asc' && dir !== 'desc')) return;
     contestApplicationsSort = { key, dir };
     renderContestApplicationsResults();
+  });
+
+  zipBtn?.addEventListener('click', async () => {
+    const apps = getVisibleContestApplications();
+    if (!apps.length) {
+      setContestApplicationsPdfStatus('出力対象がありません');
+      return;
+    }
+    zipBtn.disabled = true;
+    setContestApplicationsPdfStatus('レイアウト読み込み中…');
+    try {
+      const layout = await ensureContestDisplayCardLayoutForExport();
+      setContestApplicationsPdfStatus(`PDF生成中… 0 / ${apps.length}`);
+      await downloadDisplayCardPdfsZip(apps, layout, (done, total) => {
+        setContestApplicationsPdfStatus(`PDF生成中… ${done} / ${total}`);
+      });
+      setContestApplicationsPdfStatus(`${apps.length}件をZIPでダウンロードしました`);
+    } catch (err) {
+      setContestApplicationsPdfStatus(
+        err instanceof Error ? err.message : 'ZIPの作成に失敗しました'
+      );
+    } finally {
+      zipBtn.disabled = false;
+    }
   });
 }
 
@@ -1729,7 +1784,32 @@ function renderContestApplicationsResults() {
   mount.innerHTML = renderContestApplicationsListHtml(visible);
   bindContestApplicationDeleteButtons(mount);
   bindContestApplicationDetailButtons(mount);
+  bindContestApplicationDisplayCardPdfButtons(mount);
   bindContestApplicationSortButtons(mount);
+}
+
+/** Binds per-row display card PDF download buttons. */
+function bindContestApplicationDisplayCardPdfButtons(container) {
+  container.querySelectorAll('.contest-admin-app-display-card-pdf').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const appId = btn.getAttribute('data-app-id');
+      const app = appId ? contestApplicationById.get(appId) : null;
+      if (!app) return;
+      btn.disabled = true;
+      setContestApplicationsPdfStatus('PDF生成中…');
+      try {
+        const layout = await ensureContestDisplayCardLayoutForExport();
+        await downloadDisplayCardPdfForApplication(app, layout);
+        setContestApplicationsPdfStatus('PDFをダウンロードしました');
+      } catch (err) {
+        setContestApplicationsPdfStatus(
+          err instanceof Error ? err.message : 'PDFの作成に失敗しました'
+        );
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 /** Renders contest participation applications in a single list. */

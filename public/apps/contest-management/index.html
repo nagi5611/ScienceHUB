@@ -14,10 +14,19 @@
   <title>造形物コンテスト管理 — ScienceHUB</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/apps/3dprint-management.css" />
   <link rel="stylesheet" href="/css/apps/contest-management.css" />
   <link rel="stylesheet" href="/css/apps/contest-entry.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "fflate": "https://esm.sh/fflate@0.8.2?target=es2022",
+        "jspdf": "https://esm.sh/jspdf@4.2.1?target=es2022",
+        "html2canvas": "https://esm.sh/html2canvas@1.4.1?target=es2022"
+      }
+    }
+  </script>
 </head>
 <body>
   <section id="admin-section">
@@ -221,6 +230,12 @@
                   autocomplete="off"
                 />
                 <span class="hint" id="contest-applications-count"></span>
+              </div>
+              <div class="contest-applications-toolbar-row contest-applications-pdf-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="contest-applications-display-cards-zip">
+                  展示カードPDF（ZIP）
+                </button>
+                <span class="hint" id="contest-applications-pdf-status" role="status" aria-live="polite"></span>
               </div>
               <div class="contest-applications-toolbar-row contest-applications-sort-mobile">
                 <label for="contest-applications-sort-mobile">並び替え</label>

@@ -16,7 +16,7 @@
     "test:contest:display-card-layout": "playwright test tests/contest/display-card-layout-editor.spec.ts",
     "test:contest-entry": "playwright test tests/contest-entry",
     "test:contest-entry:display-card": "playwright test tests/contest-entry/display-card-preview.spec.ts",
-    "test:contest-entry:unit": "npx tsx --test tests/contest-entry/display-card-preview.unit.test.ts tests/contest-entry/display-card-layout-snap.unit.test.ts",
+    "test:contest-entry:unit": "npx tsx --test tests/contest-entry/display-card-preview.unit.test.ts tests/contest-entry/display-card-layout-snap.unit.test.ts tests/contest-entry/display-card-pdf-filename.unit.test.ts",
     "predeploy": "npm run build && node scripts/stash-3dprintmanual-videos.mjs && npm run assets:upload-ffmpeg && npm run db:migrate:remote && npm run storage:index:backfill:kick:remote",
     "assets:restore-3dprintmanual-videos": "node scripts/restore-3dprintmanual-videos.mjs",
     "assets:upload-ffmpeg": "node scripts/upload-ffmpeg-core.mjs",
@@ -63,7 +63,9 @@
     "fflate": "^0.8.2",
     "firebase": "^12.16.0",
     "gifenc": "^1.0.3",
+    "html2canvas": "^1.4.1",
     "jose": "^6.2.4",
+    "jspdf": "^4.2.1",
     "mp4-muxer": "^5.2.2",
     "mp4box": "^0.5.3"
   }

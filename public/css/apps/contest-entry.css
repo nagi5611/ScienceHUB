@@ -627,6 +627,8 @@
   border: 1px solid var(--border, #e5e7eb);
   padding: 0.75rem 0.85rem 1rem;
   background: var(--surface-muted, #fafafa);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .contest-display-card-preview-title {
@@ -642,14 +644,17 @@
 
 .contest-display-card-host {
   width: 100%;
+  max-width: 100%;
 }
 
 .contest-display-card {
   position: relative;
   width: 100%;
+  max-width: 100%;
   aspect-ratio: 800 / 450;
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
 }
 
 .contest-display-card-bg {
@@ -664,8 +669,9 @@
 .contest-display-card-overlay {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
-  font-family: 'Yu Gothic UI', 'Yu Gothic', 'Hiragino Sans', Meiryo, sans-serif;
+  font-family: 'BIZ UDPGothic', 'Yu Gothic UI', 'Yu Gothic', 'Hiragino Sans', Meiryo, sans-serif;
   color: #111;
 }
 
