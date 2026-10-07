@@ -36,6 +36,7 @@ function delay(ms) {
 }
 let scheduleFetchedYear = null;
 let scheduleFetchedScope = null;
+let lastMonthChipsScrollKey = null;
 /** @type {Map<string, object>} */
 let scheduleEventsById = new Map();
 /** @type {object | null} */
@@ -956,11 +957,18 @@ function renderMonthChips() {
     container.appendChild(chip);
   }
 
+  const chipScrollKey = `${currentYear}-${currentMonth}`;
+  if (lastMonthChipsScrollKey === chipScrollKey) return;
+  lastMonthChipsScrollKey = chipScrollKey;
+
   requestAnimationFrame(() => {
-    container.querySelector(".calendar-month-chip.active")?.scrollIntoView({
+    const active = container.querySelector(".calendar-month-chip.active");
+    if (!active) return;
+    const left =
+      active.offsetLeft - (container.clientWidth - active.offsetWidth) / 2;
+    container.scrollTo({
+      left: Math.max(0, left),
       behavior: "smooth",
-      inline: "center",
-      block: "nearest",
     });
   });
 }
