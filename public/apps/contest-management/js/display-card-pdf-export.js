@@ -119,26 +119,21 @@ export function assertDisplayCardCanvasHasOverlayInk(canvas, layout = DISPLAY_CA
 }
 
 /**
- * Renders the same DOM as the entry preview, then captures it as a canvas bitmap.
- * @param {object} app
+ * html2canvas on the `.contest-display-card` inside a preview host (modal or off-screen).
+ * Restores fitted preview styling after capture.
+ * @param {HTMLElement} host
  * @param {typeof DISPLAY_CARD_LAYOUT} layout
  */
-export async function renderDisplayCardPreviewCanvas(app, layout) {
-  const input = applicationToDisplayCardInput(app);
-  const state = buildDisplayCardPreviewState(input, layout, {
-    cardWidthPx: DISPLAY_CARD_WIDTH_PX,
-  });
-  const mount = mountDisplayCardPreviewCaptureHost(DISPLAY_CARD_WIDTH_PX);
+export async function renderDisplayCardPreviewCanvasFromHost(host, layout) {
+  if (!(host instanceof HTMLElement)) {
+    throw new Error('展示カードのプレビュー領域が見つかりません');
+  }
+  const card = host.querySelector('.contest-display-card');
+  if (!(card instanceof HTMLElement)) {
+    throw new Error('展示カードの描画に失敗しました');
+  }
+  prepareDisplayCardElementForRasterCapture(card);
   try {
-    renderDisplayCardPreview(mount.host, state, { layout });
-    await waitForDisplayCardPreviewAssets(mount.host, layout);
-
-    const card = mount.host.querySelector('.contest-display-card');
-    if (!(card instanceof HTMLElement)) {
-      throw new Error('展示カードの描画に失敗しました');
-    }
-    prepareDisplayCardElementForRasterCapture(card);
-
     const canvas = await html2canvas(card, {
       scale: DISPLAY_CARD_CAPTURE_SCALE,
       useCORS: true,
@@ -153,6 +148,26 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
     assertCanvasHasPixels(canvas);
     assertDisplayCardCanvasHasOverlayInk(canvas, layout);
     return canvas;
+  } finally {
+    fitDisplayCardPreviewToHost(host);
+  }
+}
+
+/**
+ * Off-screen batch capture (ZIP bulk export). Same raster path as modal after DOM render.
+ * @param {object} app
+ * @param {typeof DISPLAY_CARD_LAYOUT} layout
+ */
+export async function renderDisplayCardPreviewCanvas(app, layout) {
+  const input = applicationToDisplayCardInput(app);
+  const state = buildDisplayCardPreviewState(input, layout, {
+    cardWidthPx: DISPLAY_CARD_WIDTH_PX,
+  });
+  const mount = mountDisplayCardPreviewCaptureHost(DISPLAY_CARD_WIDTH_PX);
+  try {
+    renderDisplayCardPreview(mount.host, state, { layout });
+    await waitForDisplayCardPreviewAssets(mount.host, layout);
+    return await renderDisplayCardPreviewCanvasFromHost(mount.host, layout);
   } finally {
     mount.dispose();
   }
@@ -214,6 +229,9 @@ const DISPLAY_CARD_PDF_MODAL_ID = 'contest-display-card-pdf-modal';
 /** @type {string[]} */
 let displayCardPdfPreviewObjectUrls = [];
 
+/** @type {{ layout: typeof DISPLAY_CARD_LAYOUT; filename: string } | null} */
+let displayCardPdfModalContext = null;
+
 function revokeDisplayCardPdfPreviewObjectUrls() {
   for (const url of displayCardPdfPreviewObjectUrls) {
     URL.revokeObjectURL(url);
@@ -230,6 +248,7 @@ export function setupDisplayCardPdfPreviewModal() {
   const closeModal = () => {
     modal.classList.remove('open');
     revokeDisplayCardPdfPreviewObjectUrls();
+    displayCardPdfModalContext = null;
     const host = modal.querySelector('[data-display-card-pdf-preview-host]');
     if (host instanceof HTMLElement) {
       host.replaceChildren();
@@ -243,25 +262,20 @@ export function setupDisplayCardPdfPreviewModal() {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
   });
-  modal.querySelector('[data-display-card-pdf-download]')?.addEventListener('click', () => {
-    const url = modal.dataset.downloadUrl;
+  modal.querySelector('[data-display-card-pdf-download]')?.addEventListener('click', async () => {
     const filename = modal.dataset.downloadFilename;
-    if (!url || !filename) return;
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.rel = 'noopener';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+    const ctx = displayCardPdfModalContext;
+    const host = modal.querySelector('[data-display-card-pdf-preview-host]');
+    if (!filename || !ctx?.layout || !(host instanceof HTMLElement)) return;
+    const canvas = await renderDisplayCardPreviewCanvasFromHost(host, ctx.layout);
+    const blob = displayCardCanvasToPdfBlob(canvas);
+    downloadBlob(blob, filename);
   });
 }
 
 /**
- * On-screen preview uses the same DOM + scale-wrap fit as contest entry; PDF uses the canvas bitmap.
+ * On-screen preview and PDF both rasterize the same fitted DOM in the modal host.
  * @param {{
- *   canvas: HTMLCanvasElement;
- *   pdfBlob: Blob;
  *   filename: string;
  *   title?: string;
  *   previewState: ReturnType<typeof buildDisplayCardPreviewState>;
@@ -276,6 +290,7 @@ export async function openDisplayCardPdfPreviewModal(opts) {
   }
 
   revokeDisplayCardPdfPreviewObjectUrls();
+  displayCardPdfModalContext = { layout: opts.layout, filename: opts.filename };
 
   const titleEl = modal.querySelector('[data-display-card-pdf-title]');
   if (titleEl) {
@@ -283,36 +298,35 @@ export async function openDisplayCardPdfPreviewModal(opts) {
   }
 
   const host = modal.querySelector('[data-display-card-pdf-preview-host]');
-  if (host instanceof HTMLElement) {
-    renderDisplayCardPreview(host, opts.previewState, { layout: opts.layout });
-    fitDisplayCardPreviewToHost(host);
-    bindDisplayCardPreviewHostResize(host, () => fitDisplayCardPreviewToHost(host));
-    await waitForDisplayCardPreviewAssets(host, opts.layout);
-    fitDisplayCardPreviewToHost(host);
+  if (!(host instanceof HTMLElement)) {
+    throw new Error('展示カードのプレビュー領域が見つかりません');
   }
 
-  const pdfUrl = URL.createObjectURL(opts.pdfBlob);
+  renderDisplayCardPreview(host, opts.previewState, { layout: opts.layout });
+  fitDisplayCardPreviewToHost(host);
+  bindDisplayCardPreviewHostResize(host, () => fitDisplayCardPreviewToHost(host));
+  await waitForDisplayCardPreviewAssets(host, opts.layout);
+  fitDisplayCardPreviewToHost(host);
+
+  modal.classList.add('open');
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  fitDisplayCardPreviewToHost(host);
+
+  const canvas = await renderDisplayCardPreviewCanvasFromHost(host, opts.layout);
+  const pdfBlob = displayCardCanvasToPdfBlob(canvas);
+  const pdfUrl = URL.createObjectURL(pdfBlob);
   displayCardPdfPreviewObjectUrls.push(pdfUrl);
   modal.dataset.downloadUrl = pdfUrl;
   modal.dataset.downloadFilename = opts.filename;
-
-  modal.classList.add('open');
-  if (host instanceof HTMLElement) {
-    requestAnimationFrame(() => fitDisplayCardPreviewToHost(host));
-  }
 }
 
-/** Renders PDF bitmap + opens modal (on-screen preview matches entry DOM fit). */
+/** Renders PDF from modal preview DOM + opens modal (matches entry fit). */
 export async function previewDisplayCardPdfForApplication(app, layout) {
   const input = applicationToDisplayCardInput(app);
   const previewState = buildDisplayCardPreviewState(input, layout, {
     cardWidthPx: DISPLAY_CARD_WIDTH_PX,
   });
-  const canvas = await renderDisplayCardPreviewCanvas(app, layout);
-  const pdfBlob = displayCardCanvasToPdfBlob(canvas);
   await openDisplayCardPdfPreviewModal({
-    canvas,
-    pdfBlob,
     filename: buildDisplayCardPdfFilename(app),
     title: (app.title ?? '').trim() || '展示カード',
     previewState,

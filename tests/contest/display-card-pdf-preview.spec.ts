@@ -105,12 +105,17 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         impressions: "テストコメント。PDFプレビュー用の短文です。",
         members: [{ homeroom: "101", member_name: "山田太郎" }],
       };
-      const canvas = await pdfMod.renderDisplayCardPreviewCanvas(app, layout);
+      const canvas = await pdfMod.renderDisplayCardPreviewCanvasFromHost(modalHost, layout);
       try {
         pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
       } catch {
         return { ok: false as const };
       }
+
+      const pdfBlob = pdfMod.displayCardCanvasToPdfBlob(canvas);
+      const pdfFromModalUrl = document
+        .getElementById("contest-display-card-pdf-modal")
+        ?.getAttribute("data-download-url");
 
       const input = pdfMod.applicationToDisplayCardInput(app);
       const state = previewMod.buildDisplayCardPreviewState(input, layout, {
@@ -140,6 +145,8 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         expectedLeft,
         expectedTop,
         canvasWidth: canvas.width,
+        pdfBlobSize: pdfBlob.size,
+        hasModalPdfUrl: Boolean(pdfFromModalUrl),
       };
     }, title);
 
@@ -147,6 +154,8 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     if (previewChecks.ok) {
       expect(previewChecks.hasScaleWrap).toBe(true);
       expect(previewChecks.canvasWidth).toBe(1600);
+      expect(previewChecks.pdfBlobSize).toBeGreaterThan(1000);
+      expect(previewChecks.hasModalPdfUrl).toBe(true);
       expect(previewChecks.titleDelta).toBeLessThan(0.02);
       expect(Math.abs((previewChecks.modalTitle?.left ?? 0) - previewChecks.expectedLeft)).toBeLessThan(
         0.08
