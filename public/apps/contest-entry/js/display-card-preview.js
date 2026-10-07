@@ -45,6 +45,21 @@ export const DISPLAY_CARD_COMMENT_LINES_CAP = 12;
 
 export const DISPLAY_CARD_WIDTH_PX = 800;
 
+/** Slight shrink so glyphs stay inside the line box (font metrics vs. 1em estimate). */
+const COMMENT_LINE_FIT_MARGIN = 0.97;
+
+/**
+ * Width (px) of the card on screen — use for line-break math (not the 800px template constant).
+ * @param {HTMLElement | null | undefined} host
+ */
+export function measureDisplayCardHostWidthPx(host) {
+  if (!(host instanceof HTMLElement)) return DISPLAY_CARD_WIDTH_PX;
+  const card = host.querySelector('.contest-display-card');
+  const el = card instanceof HTMLElement ? card : host;
+  const w = el.getBoundingClientRect().width;
+  return Number.isFinite(w) && w >= 80 ? w : DISPLAY_CARD_WIDTH_PX;
+}
+
 
 
 /** Comment line plot count from layout (＋ / ┃ handle count in admin editor). */
@@ -301,7 +316,7 @@ export function commentLineCapacityUnits(commentLayout, lineIndex, cardWidthPx =
 
   const fontPx = commentLayout.fontSize ?? 13;
 
-  return Math.max(0.5, widthPx / fontPx);
+  return Math.max(0.5, (widthPx / fontPx) * COMMENT_LINE_FIT_MARGIN);
 
 }
 
@@ -425,9 +440,16 @@ function splitCommentChunkAtCharCount(rest, cap, softBreak) {
 
  * @param {number | typeof DISPLAY_CARD_LAYOUT.comment} [charsPerLineOrLayout]
 
+ * @param {number} [cardWidthPx]
+
  */
 
-export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = COMMENT_CHARS_PER_LINE) {
+export function wrapDisplayCardComment(
+  text,
+  maxLines,
+  charsPerLineOrLayout = COMMENT_CHARS_PER_LINE,
+  cardWidthPx = DISPLAY_CARD_WIDTH_PX
+) {
 
   const normalized = String(text ?? '')
 
@@ -451,7 +473,7 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = CO
 
   const capacityForIndex = (lineIndex) => {
 
-    if (useLayout) return commentLineCapacityUnits(charsPerLineOrLayout, lineIndex);
+    if (useLayout) return commentLineCapacityUnits(charsPerLineOrLayout, lineIndex, cardWidthPx);
 
     const n =
 
@@ -537,9 +559,11 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = CO
 
  * @param {typeof DISPLAY_CARD_LAYOUT | null | undefined} [layoutOverride]
 
+ * @param {{ cardWidthPx?: number }} [options]
+
  */
 
-export function buildDisplayCardPreviewState(input, layoutOverride) {
+export function buildDisplayCardPreviewState(input, layoutOverride, options = {}) {
 
   const { year, classGroup } = parseHomeroomForDisplayCard(
 
@@ -550,6 +574,8 @@ export function buildDisplayCardPreviewState(input, layoutOverride) {
   );
 
   const layout = layoutOverride ?? activeDisplayCardLayout;
+
+  const cardWidthPx = options.cardWidthPx ?? DISPLAY_CARD_WIDTH_PX;
 
   return {
 
@@ -569,7 +595,9 @@ export function buildDisplayCardPreviewState(input, layoutOverride) {
 
       getCommentLinePlotCount(layout.comment),
 
-      layout.comment
+      layout.comment,
+
+      cardWidthPx
 
     ),
 
@@ -847,21 +875,31 @@ export function syncDisplayCardPreviewFromForm(host, form, scheduleType, partici
 
   const impressionsInput = form.querySelector('#impressions');
 
-  const state = buildDisplayCardPreviewState({
+  const cardWidthPx = measureDisplayCardHostWidthPx(host);
 
-    scheduleType,
+  const state = buildDisplayCardPreviewState(
 
-    homeroom: primary.homeroom ?? '',
+    {
 
-    studentName: primary.student_name ?? '',
+      scheduleType,
 
-    title: titleInput instanceof HTMLInputElement ? titleInput.value : '',
+      homeroom: primary.homeroom ?? '',
 
-    impressions:
+      studentName: primary.student_name ?? '',
 
-      impressionsInput instanceof HTMLTextAreaElement ? impressionsInput.value : '',
+      title: titleInput instanceof HTMLInputElement ? titleInput.value : '',
 
-  });
+      impressions:
+
+        impressionsInput instanceof HTMLTextAreaElement ? impressionsInput.value : '',
+
+    },
+
+    undefined,
+
+    { cardWidthPx }
+
+  );
 
   renderDisplayCardPreview(host, state);
 

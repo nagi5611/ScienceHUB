@@ -3,12 +3,14 @@ import { apiRequest } from './api.js';
 import {
   DISPLAY_CARD_LAYOUT,
   DISPLAY_CARD_COMMENT_LINES_CAP,
+  DISPLAY_CARD_WIDTH_PX,
   buildDisplayCardPreviewState,
   commentLineLeftPercent,
   commentLineRightPercent,
   commentLineWidthPercent,
   defaultCommentLineTopPercent,
   getCommentLinePlotCount,
+  measureDisplayCardHostWidthPx,
   renderDisplayCardPreview,
   setDisplayCardLayout,
 } from '../../contest-entry/js/display-card-preview.js';
@@ -163,12 +165,9 @@ function readSampleFromDom(root) {
   };
 }
 
-function renderEditorPreview(previewHost) {
-  if (!previewHost || !editorLayout) return;
-  setDisplayCardLayout(editorLayout);
-  const root = previewHost.closest('#panel-display-card-layout');
-  const sample = root ? readSampleFromDom(root) : SAMPLE;
-  const state = buildDisplayCardPreviewState(
+function buildEditorPreviewState(previewHost, sample) {
+  const cardWidthPx = measureDisplayCardHostWidthPx(previewHost);
+  return buildDisplayCardPreviewState(
     {
       scheduleType: sample.scheduleType,
       homeroom: sample.homeroom,
@@ -176,12 +175,30 @@ function renderEditorPreview(previewHost) {
       title: sample.title,
       impressions: sample.impressions,
     },
-    editorLayout
+    editorLayout,
+    { cardWidthPx }
   );
-  renderDisplayCardPreview(previewHost, state, { layout: editorLayout, editorLinePlots: true });
-  const card = previewHost.querySelector('.contest-display-card');
-  if (card) card.classList.add('contest-display-card--editor');
-  injectEditorHandles(previewHost);
+}
+
+function renderEditorPreview(previewHost) {
+  if (!previewHost || !editorLayout) return;
+  setDisplayCardLayout(editorLayout);
+  const root = previewHost.closest('#panel-display-card-layout');
+  const sample = root ? readSampleFromDom(root) : SAMPLE;
+  const paintPreview = () => {
+    const state = buildEditorPreviewState(previewHost, sample);
+    renderDisplayCardPreview(previewHost, state, { layout: editorLayout, editorLinePlots: true });
+    const card = previewHost.querySelector('.contest-display-card');
+    if (card) card.classList.add('contest-display-card--editor');
+    injectEditorHandles(previewHost);
+  };
+  const widthBeforePaint = measureDisplayCardHostWidthPx(previewHost);
+  paintPreview();
+  if (Math.abs(widthBeforePaint - DISPLAY_CARD_WIDTH_PX) < 1) {
+    requestAnimationFrame(() => {
+      paintPreview();
+    });
+  }
 }
 
 function injectEditorHandles(host) {

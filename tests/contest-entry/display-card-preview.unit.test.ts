@@ -47,10 +47,28 @@ describe("display-card-preview", () => {
     const capUnits = commentLineCapacityUnits(sampleLayout, 0);
     const firstLineChars = Math.floor(capUnits);
     const text = "あ".repeat(firstLineChars + 5);
-    const lines = wrapDisplayCardComment(text, 3, sampleLayout);
+    const lines = wrapDisplayCardComment(text, 3, sampleLayout, 800);
     assert.equal(lines.length, 2);
     assert.equal(lines[0].length, firstLineChars);
     assert.equal(lines[1].length, 5);
+  });
+
+  it("each CJK line stays within capacity at 720px card width", () => {
+    const text =
+      "テストコメント。造形にこだわって作りました。細部まで丁寧に仕上げています。ぜひご覧ください。";
+    const layout = {
+      ...sampleLayout,
+      maxLines: 5,
+      lineLefts: [22, 22, 22, 22, 22],
+      lineRights: [96, 96, 96, 96, 96],
+    };
+    const cardW = 720;
+    const lines = wrapDisplayCardComment(text, 5, layout, cardW);
+    for (let i = 0; i < lines.length; i++) {
+      const units = displayCardTextWidthUnits(lines[i]);
+      const cap = commentLineCapacityUnits(layout, i, cardW);
+      assert.ok(units <= cap + 0.001, `line ${i}: ${units} > ${cap}`);
+    }
   });
 
   it("ASCII uses half width units so line fills before early wrap", () => {
@@ -58,7 +76,7 @@ describe("display-card-preview", () => {
     const fitAscii = "a".repeat(Math.floor(capUnits / 0.5));
     assert.ok(displayCardTextWidthUnits(fitAscii) <= capUnits + 0.01);
     const overflow = "bbb";
-    const lines = wrapDisplayCardComment(fitAscii + overflow, 2, sampleLayout);
+    const lines = wrapDisplayCardComment(fitAscii + overflow, 2, sampleLayout, 800);
     assert.equal(lines[0], fitAscii);
     assert.equal(lines[1], overflow);
   });
