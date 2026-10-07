@@ -41,7 +41,7 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     await expect(page.getByTestId("display-card-mark-full_time")).not.toHaveClass(/is-active/);
   });
 
-  test("展示カードプレビューが aside とビューポート内に収まる", async ({ page }) => {
+  test("展示カードプレビューがフォーム下の領域とビューポート内に収まる", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await fillPrimaryParticipant(page);
     await page.locator("#title").fill("テストタイトル");
@@ -50,14 +50,18 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     await expect(preview).toBeVisible();
 
     const bounds = await page.evaluate(() => {
+      const form = document.getElementById("application-form");
       const aside = document.querySelector(".contest-display-card-preview-aside");
       const card = document.querySelector('[data-testid="display-card-root"]');
+      const formRect = form?.getBoundingClientRect();
       const asideRect = aside?.getBoundingClientRect();
       const cardRect = card?.getBoundingClientRect();
       const vw = document.documentElement.clientWidth;
       return {
         docScrollWidth: document.documentElement.scrollWidth,
         viewportWidth: vw,
+        formBottom: formRect?.bottom ?? 0,
+        asideTop: asideRect?.top ?? 0,
         cardLeft: cardRect?.left ?? 0,
         cardRight: cardRect?.right ?? 0,
         asideLeft: asideRect?.left ?? 0,
@@ -65,6 +69,7 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
       };
     });
 
+    expect(bounds.asideTop).toBeGreaterThanOrEqual(bounds.formBottom - 2);
     expect(bounds.docScrollWidth).toBeLessThanOrEqual(bounds.viewportWidth + 1);
     expect(bounds.cardLeft).toBeGreaterThanOrEqual(bounds.asideLeft - 1);
     expect(bounds.cardRight).toBeLessThanOrEqual(bounds.asideRight + 1);

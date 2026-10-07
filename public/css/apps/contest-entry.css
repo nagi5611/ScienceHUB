@@ -576,12 +576,6 @@
   min-width: 0;
 }
 
-@media (min-width: 900px) {
-  .contest-apply-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  }
-}
-
 /* 参加申請: カレンダー列の上に全幅オーバーレイ（一覧・提出は従来レイアウト） */
 @media (min-width: 960px) {
   .contest-entry-main:has(#view-apply:not(.hidden)) {
@@ -616,16 +610,6 @@
 
   .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-calendar-aside .hub-calendar-card {
     opacity: 0.42;
-  }
-
-  .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-apply-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(380px, 520px);
-  }
-}
-
-@media (min-width: 1200px) {
-  .contest-entry-layout:has(#view-apply:not(.hidden)) .contest-apply-layout {
-    grid-template-columns: minmax(300px, 1fr) minmax(440px, 580px);
   }
 }
 
