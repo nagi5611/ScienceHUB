@@ -77,6 +77,55 @@ export async function loadPdfDocument(source) {
 }
 
 /**
+ * PDF 1ページの描画用 viewport
+ * @param {import('pdfjs-dist').PDFPageProxy} page
+ * @param {number} maxEdge
+ * @param {number} [renderScale]
+ */
+export function getPdfPageRenderViewport(page, maxEdge, renderScale = PDF_RENDER_SCALE_NORMAL) {
+  const baseScale = Math.max(0.25, renderScale);
+  const baseViewport = page.getViewport({ scale: baseScale });
+  const { width, height } = fitDimensions(baseViewport.width, baseViewport.height, maxEdge);
+  const scale = width / baseViewport.width;
+  return page.getViewport({ scale: baseScale * scale });
+}
+
+/**
+ * PDF 1ページの描画キャンバス寸法（px）
+ * @param {import('pdfjs-dist').PDFPageProxy} page
+ * @param {number} maxEdge
+ * @param {number} [renderScale]
+ */
+export function getPdfPageCanvasDimensionsFromPage(page, maxEdge, renderScale = PDF_RENDER_SCALE_NORMAL) {
+  const viewport = getPdfPageRenderViewport(page, maxEdge, renderScale);
+  return {
+    width: Math.ceil(viewport.width),
+    height: Math.ceil(viewport.height),
+  };
+}
+
+/**
+ * PDF 1ページの描画キャンバス寸法（px）
+ * @param {import('pdfjs-dist').PDFDocumentProxy} pdf
+ * @param {number} pageNum 1-based
+ * @param {number} maxEdge
+ * @param {number} [renderScale]
+ */
+export async function getPdfPageCanvasDimensions(
+  pdf,
+  pageNum,
+  maxEdge,
+  renderScale = PDF_RENDER_SCALE_NORMAL,
+) {
+  const page = await pdf.getPage(pageNum);
+  try {
+    return getPdfPageCanvasDimensionsFromPage(page, maxEdge, renderScale);
+  } finally {
+    page.cleanup();
+  }
+}
+
+/**
  * PDF 1ページを canvas に描画
  * @param {import('pdfjs-dist').PDFDocumentProxy} pdf
  * @param {number} pageNum 1-based
@@ -92,11 +141,7 @@ export async function renderPdfPageToCanvas(
   renderScale = PDF_RENDER_SCALE_NORMAL,
 ) {
   const page = await pdf.getPage(pageNum);
-  const baseScale = Math.max(0.25, renderScale);
-  const baseViewport = page.getViewport({ scale: baseScale });
-  const { width, height } = fitDimensions(baseViewport.width, baseViewport.height, maxEdge);
-  const scale = width / baseViewport.width;
-  const viewport = page.getViewport({ scale: baseScale * scale });
+  const viewport = getPdfPageRenderViewport(page, maxEdge, renderScale);
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);

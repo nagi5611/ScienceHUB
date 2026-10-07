@@ -12,6 +12,7 @@ import { OUTPUT_FORMATS } from "./convert-core.js";
 import { encodeCanvasToFormat } from "./encode-output.js";
 import { mapPool, yieldToMain } from "./async-pool.js";
 import { WORKER_POOL_SIZE } from "./worker-pool.js";
+import { computePdfRenderConcurrency } from "./pdf-parallelism.js";
 
 export { loadPdfDocument, renderPdfPageToCanvas, createPdfPreviewBlob };
 
@@ -65,7 +66,16 @@ export async function convertPdfToImages(file, options, callbacks = {}) {
   const pageResults = [];
 
   for (const batch of batches) {
-    const batchResults = await mapPool(batch, WORKER_POOL_SIZE, async (pageNum) => {
+    const parallelism = await computePdfRenderConcurrency({
+      pdfFileSize: file.size,
+      pdf,
+      pageNumbers: batch,
+      maxEdge: options.maxEdge,
+      pdfQuality: options.pdfQuality,
+      maxConcurrency: WORKER_POOL_SIZE,
+    });
+
+    const batchResults = await mapPool(batch, parallelism, async (pageNum) => {
       const canvas = await renderPdfPageToCanvas(
         pdf,
         pageNum,
