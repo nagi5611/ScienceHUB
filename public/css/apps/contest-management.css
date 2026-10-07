@@ -552,6 +552,28 @@
   pointer-events: auto;
 }
 
+.contest-display-card--editor .contest-display-card-field,
+.contest-display-card--editor .contest-display-card-comment,
+.contest-display-card--editor .contest-display-card-comment-line--placed,
+.contest-display-card--editor .contest-display-card-mark {
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  z-index: 5;
+}
+
+.contest-display-card--editor .contest-display-card-field:active,
+.contest-display-card--editor .contest-display-card-comment:active,
+.contest-display-card--editor .contest-display-card-comment-line--placed:active,
+.contest-display-card--editor .contest-display-card-mark:active {
+  cursor: grabbing;
+}
+
+.contest-display-card--editor .is-layout-selected {
+  outline: 2px dashed #2563eb;
+  outline-offset: 2px;
+}
+
 .display-card-layout-handle {
   position: absolute;
   z-index: 4;

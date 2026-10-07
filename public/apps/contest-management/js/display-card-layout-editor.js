@@ -85,15 +85,18 @@ export function initDisplayCardLayoutEditor(root) {
 
   sampleSchedule?.addEventListener('change', () => {
     renderEditorPreview(previewHost);
-    bindDragHandles(previewHost, propsMount, statusEl);
   });
 
   for (const input of root.querySelectorAll('[data-sample-field]')) {
     input.addEventListener('input', () => {
       renderEditorPreview(previewHost);
-      bindDragHandles(previewHost, propsMount, statusEl);
     });
   }
+
+  ensureLayoutDragBinding(previewHost, () => ({
+    propsMount: root.querySelector('#display-card-layout-props'),
+    statusEl: root.querySelector('#display-card-layout-status'),
+  }));
 
   loadDisplayCardLayoutEditor(root);
 }
@@ -112,7 +115,6 @@ export async function loadDisplayCardLayoutEditor(root) {
     statusEl.textContent = '';
     renderEditorPreview(previewHost);
     renderPropsPanel(propsMount);
-    bindDragHandles(previewHost, propsMount, statusEl);
   } catch (err) {
     statusEl.textContent = err instanceof Error ? err.message : '読み込みに失敗しました';
   }
@@ -223,46 +225,173 @@ function injectEditorHandles(host) {
   }
 }
 
-function bindDragHandles(previewHost, propsMount, statusEl) {
+/** Updates overlay/handle positions during drag without rebuilding preview HTML. */
+function syncLayoutVisualFromEditor(previewHost) {
+  if (!previewHost || !editorLayout) return;
+  const overlay = previewHost.querySelector('.contest-display-card-overlay');
+  if (!overlay) return;
+  const layout = editorLayout;
+  const pct = (v) => `${v}%`;
+
+  for (const markKey of ['full_time', 'part_time', 'tobe_branch']) {
+    const m = layout.marks[markKey];
+    const el = overlay.querySelector(`[data-layout-key="marks.${markKey}"]`);
+    if (el instanceof HTMLElement) {
+      el.style.left = pct(m.left);
+      el.style.top = pct(m.top);
+      el.style.width = pct(m.size);
+      el.style.height = pct(m.size);
+    }
+  }
+
+  for (const fieldKey of ['year', 'classGroup', 'name', 'title']) {
+    const f = layout[fieldKey];
+    const el = overlay.querySelector(`[data-layout-key="${fieldKey}"]`);
+    if (el instanceof HTMLElement) {
+      el.style.left = pct(f.left);
+      el.style.top = pct(f.top);
+      el.style.width = pct(f.width);
+    }
+  }
+
+  const c = layout.comment;
+  const commentEl = overlay.querySelector('[data-layout-key="comment"]');
+  if (commentEl instanceof HTMLElement) {
+    commentEl.style.left = pct(c.left);
+    commentEl.style.top = pct(c.top);
+    commentEl.style.width = pct(c.width);
+  }
+
+  const lineTops = c.lineTops ?? [];
+  for (const el of overlay.querySelectorAll('[data-layout-key^="comment.line."]')) {
+    if (!(el instanceof HTMLElement)) continue;
+    const idx = parseInt(el.dataset.layoutKey?.slice('comment.line.'.length) ?? '', 10);
+    if (!Number.isFinite(idx)) continue;
+    const top = lineTops[idx] ?? defaultCommentLineTopPercent(c, idx);
+    el.style.left = pct(c.left);
+    el.style.top = pct(top);
+    el.style.width = pct(c.width);
+  }
+
+  updateHandlePositions(previewHost);
+}
+
+function layoutPointForKey(key) {
+  if (!editorLayout) return null;
+  if (key.startsWith('marks.')) {
+    const markKey = key.slice('marks.'.length);
+    const m = editorLayout.marks[markKey];
+    return m ? { left: m.left, top: m.top } : null;
+  }
+  if (key.startsWith('comment.line.')) {
+    const index = parseInt(key.slice('comment.line.'.length), 10);
+    if (!Number.isFinite(index)) return null;
+    const tops = editorLayout.comment.lineTops ?? [];
+    return {
+      left: editorLayout.comment.left,
+      top: tops[index] ?? defaultCommentLineTopPercent(editorLayout.comment, index),
+    };
+  }
+  if (key === 'comment') {
+    return { left: editorLayout.comment.left, top: editorLayout.comment.top };
+  }
+  const field = editorLayout[key];
+  return field ? { left: field.left, top: field.top } : null;
+}
+
+function updateHandlePositions(previewHost) {
   if (!previewHost) return;
-  const card = previewHost.querySelector('.contest-display-card');
-  if (!card) return;
+  previewHost.querySelectorAll('.display-card-layout-handle').forEach((btn) => {
+    const key = btn.dataset.layoutKey;
+    if (!key) return;
+    const pos = layoutPointForKey(key);
+    if (!pos) return;
+    btn.style.left = `${pos.left}%`;
+    btn.style.top = `${pos.top}%`;
+  });
+}
 
-  previewHost.querySelectorAll('.display-card-layout-handle').forEach((handle) => {
-    handle.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      const key = handle.dataset.layoutKey;
-      if (!key || !editorLayout) return;
-      selectedKey = key;
-      statusEl.textContent = '';
+/** @param {HTMLElement | null} previewHost */
+function ensureLayoutDragBinding(previewHost, getContext) {
+  if (!previewHost || previewHost.dataset.layoutDragBound === '1') return;
+  previewHost.dataset.layoutDragBound = '1';
+
+  previewHost.addEventListener('pointerdown', (ev) => {
+    if (!editorLayout) return;
+    const card = previewHost.querySelector('.contest-display-card--editor');
+    if (!card) return;
+
+    const target = ev.target.closest('.display-card-layout-handle, [data-layout-key]');
+    if (!target || !card.contains(target)) return;
+
+    ev.preventDefault();
+    const key = target.dataset.layoutKey;
+    if (!key) return;
+
+    if (target instanceof Element && 'setPointerCapture' in target) {
+      try {
+        target.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const { propsMount, statusEl } = getContext();
+    selectedKey = key;
+    if (statusEl) statusEl.textContent = '';
+    renderPropsPanel(propsMount);
+    injectEditorHandles(previewHost);
+
+    const rect = card.getBoundingClientRect();
+    const targetEl = target instanceof HTMLElement ? target : null;
+    const isCenteredHandle =
+      target instanceof Element && target.classList.contains('display-card-layout-handle');
+    const anchor = targetEl?.getBoundingClientRect();
+    const offsetX = isCenteredHandle || !anchor ? 0 : ev.clientX - anchor.left;
+    const offsetY = isCenteredHandle || !anchor ? 0 : ev.clientY - anchor.top;
+
+    const onMove = (moveEv) => {
+      const left = ((moveEv.clientX - rect.left - offsetX) / rect.width) * 100;
+      const top = ((moveEv.clientY - rect.top - offsetY) / rect.height) * 100;
+      applyLayoutPosition(key, left, top);
+      syncLayoutVisualFromEditor(previewHost);
       renderPropsPanel(propsMount);
-      injectEditorHandles(previewHost);
-
-      const rect = card.getBoundingClientRect();
-      const onMove = (moveEv) => {
-        const left = ((moveEv.clientX - rect.left) / rect.width) * 100;
-        const top = ((moveEv.clientY - rect.top) / rect.height) * 100;
-        applyLayoutPosition(key, left, top);
-        renderEditorPreview(previewHost);
-        renderPropsPanel(propsMount);
-        const overlay = previewHost.querySelector('.contest-display-card-overlay');
-        const active = overlay?.querySelector(`[data-layout-key="${key}"]`);
-        if (active instanceof HTMLElement) active.classList.add('is-selected');
-      };
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-      };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      onMove(ev);
-    });
-
-    handle.addEventListener('click', () => {
-      selectedKey = handle.dataset.layoutKey ?? 'name';
+      const overlay = previewHost.querySelector('.contest-display-card-overlay');
+      const active = overlay?.querySelector(`[data-layout-key="${CSS.escape(key)}"]`);
+      if (active instanceof HTMLElement) active.classList.add('is-layout-selected');
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (target instanceof Element && 'releasePointerCapture' in target) {
+        try {
+          target.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      renderEditorPreview(previewHost);
       renderPropsPanel(propsMount);
-      injectEditorHandles(previewHost);
-    });
+      previewHost.querySelectorAll('.is-layout-selected').forEach((el) => {
+        el.classList.remove('is-layout-selected');
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    onMove(ev);
+  });
+
+  previewHost.addEventListener('click', (ev) => {
+    const target = ev.target.closest('[data-layout-key], .display-card-layout-handle');
+    if (!target || !previewHost.querySelector('.contest-display-card--editor')?.contains(target)) {
+      return;
+    }
+    const key = target.dataset.layoutKey;
+    if (!key) return;
+    const { propsMount } = getContext();
+    selectedKey = key;
+    renderPropsPanel(propsMount);
+    injectEditorHandles(previewHost);
   });
 }
 
@@ -361,7 +490,6 @@ function renderPropsPanel(mount) {
       const root = mount.closest('#panel-display-card-layout');
       const previewHost = root?.querySelector('#display-card-layout-preview');
       renderEditorPreview(previewHost);
-      bindDragHandles(previewHost, mount, root?.querySelector('#display-card-layout-status'));
       renderPropsPanel(mount);
     });
   });

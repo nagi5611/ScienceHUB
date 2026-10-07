@@ -13,6 +13,7 @@
     "test:workspace-edits": "npx tsx --test functions/lib/third-party/workspace-edits.test.ts",
     "test:contest-logic": "npx tsx --test functions/lib/contest/applications.submission-status.test.ts functions/lib/contest/display-card-layout.test.ts",
     "test:contest": "playwright test tests/contest",
+    "test:contest:display-card-layout": "playwright test tests/contest/display-card-layout-editor.spec.ts",
     "test:contest-entry": "playwright test tests/contest-entry",
     "test:contest-entry:display-card": "playwright test tests/contest-entry/display-card-preview.spec.ts",
     "test:contest-entry:unit": "npx tsx --test tests/contest-entry/display-card-preview.unit.test.ts",

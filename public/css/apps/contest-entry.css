@@ -669,6 +669,22 @@
   color: #111;
 }
 
+.contest-display-card--editor .contest-display-card-overlay,
+.contest-display-card--editor .contest-display-card-field,
+.contest-display-card--editor .contest-display-card-comment,
+.contest-display-card--editor .contest-display-card-comment-line--placed,
+.contest-display-card--editor .contest-display-card-mark {
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.contest-display-card--editor .contest-display-card-field,
+.contest-display-card--editor .contest-display-card-comment,
+.contest-display-card--editor .contest-display-card-comment-line--placed {
+  z-index: 5;
+}
+
 .contest-display-card-mark {
   position: absolute;
   border: 2px solid transparent;

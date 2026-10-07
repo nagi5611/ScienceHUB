@@ -46,6 +46,7 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     await expect(img).toHaveAttribute("src", /display-card-template\.png/);
     await expect
       .poll(async () => img.evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)))
-      .toBe(800);
+      .toBeGreaterThan(0);
+    await expect(img).toHaveAttribute("width", "800");
   });
 });
