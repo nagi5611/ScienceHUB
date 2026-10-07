@@ -47,7 +47,7 @@ export const DISPLAY_CARD_WIDTH_PX = 800;
 
 export const DISPLAY_CARD_HEIGHT_PX = 450;
 
-/** html2canvas scale — PDF page stays 800×450 design px (bitmap is 2×). */
+/** html2canvas supersampling on the fitted on-screen preview box (bitmap ≈ visual size × this). */
 export const DISPLAY_CARD_CAPTURE_SCALE = 2;
 
 /** Slight shrink so glyphs stay inside the line box (font metrics vs. 1em estimate). */
@@ -236,8 +236,7 @@ export function prepareDisplayCardElementForRasterCapture(card) {
 }
 
 /**
- * Expands fit shell / scale-wrap so an 800×450 card is not clipped after transform is cleared.
- * Call before html2canvas when the modal uses fitDisplayCardPreviewToHost (CSS scale).
+ * Legacy: expands host to 800×450 and clears CSS scale (superseded by WYSIWYG scale-wrap capture).
  * @param {HTMLElement} host
  */
 export function prepareDisplayCardHostForRasterCapture(host) {
@@ -291,7 +290,30 @@ export function restoreDisplayCardHostAfterRasterCapture(host) {
 }
 
 /**
- * Canonical DOM → bitmap for PDF and parity tests (800×450 design, 2× supersampling).
+ * Pixel size of the fitted preview box (what the user sees), before html2canvas scale.
+ * @param {HTMLElement} host
+ */
+export function measureDisplayCardVisualCaptureSize(host) {
+  if (!(host instanceof HTMLElement)) {
+    return { width: DISPLAY_CARD_WIDTH_PX, height: DISPLAY_CARD_HEIGHT_PX };
+  }
+  fitDisplayCardPreviewToHost(host);
+  const scaleWrap = getDisplayCardScaleWrap(host);
+  const card = host.querySelector('.contest-display-card');
+  const target =
+    scaleWrap instanceof HTMLElement
+      ? scaleWrap
+      : card instanceof HTMLElement
+        ? card
+        : host;
+  const rect = target.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  return { width, height };
+}
+
+/**
+ * Canonical DOM → bitmap for PDF and parity tests (WYSIWYG: fitted scale-wrap, 2× supersampling).
  * @param {HTMLElement} host
  * @param {typeof DISPLAY_CARD_LAYOUT} [layout]
  */
@@ -305,23 +327,29 @@ export async function captureDisplayCardForExport(host, layout = activeDisplayCa
   }
 
   await waitForDisplayCardPreviewAssets(host, layout);
-  prepareDisplayCardHostForRasterCapture(host);
+  const scaleWrap = getDisplayCardScaleWrap(host);
+  const captureTarget =
+    scaleWrap instanceof HTMLElement ? scaleWrap : card;
+  const { width: captureWidth, height: captureHeight } =
+    measureDisplayCardVisualCaptureSize(host);
+
+  prepareDisplayCardCaptureAncestors(host);
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   const { default: html2canvas } = await import('html2canvas');
   try {
-    const canvas = await html2canvas(card, {
+    const canvas = await html2canvas(captureTarget, {
       scale: DISPLAY_CARD_CAPTURE_SCALE,
       useCORS: true,
       allowTaint: false,
       backgroundColor: '#ffffff',
       logging: false,
-      width: DISPLAY_CARD_WIDTH_PX,
-      height: DISPLAY_CARD_HEIGHT_PX,
+      width: captureWidth,
+      height: captureHeight,
     });
     return canvas;
   } finally {
-    restoreDisplayCardHostAfterRasterCapture(host);
+    restoreDisplayCardCaptureAncestors(host);
     await new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     });

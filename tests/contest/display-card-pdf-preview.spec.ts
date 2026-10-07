@@ -4,6 +4,7 @@ import { uniqueContestTitle } from "../contest-entry/helpers";
 import {
   DISPLAY_CARD_LAYOUT,
   DISPLAY_CARD_WIDTH_PX,
+  DISPLAY_CARD_CAPTURE_SCALE,
 } from "../../public/apps/contest-entry/js/display-card-preview.js";
 
 test.describe("contest-management — 展示カード PDF プレビュー", () => {
@@ -163,6 +164,12 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         cardRectBefore && cardRectBefore.width > 0
           ? cardRectBefore.width / previewMod.DISPLAY_CARD_WIDTH_PX
           : 0;
+      const visualSize = previewMod.measureDisplayCardVisualCaptureSize(modalHost);
+      const scaleWrapBefore = modalHost.querySelector(".contest-display-card-scale-wrap");
+      const scaleWrapRectBefore =
+        scaleWrapBefore instanceof HTMLElement
+          ? scaleWrapBefore.getBoundingClientRect()
+          : null;
 
       const pdfBlob = pdfMod.displayCardCanvasToPdfBlob(canvas);
       const input = pdfMod.applicationToDisplayCardInput(app);
@@ -198,6 +205,9 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         hasModalPdfUrl: Boolean(pdfFromModalUrl),
         titleInkPixels,
         visibleToDesignScale,
+        visualWidth: visualSize.width,
+        visualHeight: visualSize.height,
+        scaleWrapWidthBefore: scaleWrapRectBefore?.width ?? 0,
         cardWidthAfterCapture: cardRectAfter?.width ?? 0,
         scaleWrapWidthAfter,
         fitRestored:
@@ -210,8 +220,15 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     expect(previewChecks.ok).toBe(true);
     if (previewChecks.ok) {
       expect(previewChecks.hasScaleWrap).toBe(true);
-      expect(previewChecks.canvasWidth).toBe(1600);
-      expect(previewChecks.canvasHeight).toBe(900);
+      expect(previewChecks.canvasWidth).toBe(
+        Math.round(previewChecks.visualWidth * DISPLAY_CARD_CAPTURE_SCALE)
+      );
+      expect(previewChecks.canvasHeight).toBe(
+        Math.round(previewChecks.visualHeight * DISPLAY_CARD_CAPTURE_SCALE)
+      );
+      expect(Math.abs(previewChecks.scaleWrapWidthBefore - previewChecks.visualWidth)).toBeLessThan(
+        2
+      );
       expect(previewChecks.titleInkPixels).toBeGreaterThan(8);
       expect(previewChecks.fitRestored).toBe(true);
       if (previewChecks.visibleToDesignScale > 0 && previewChecks.visibleToDesignScale < 1) {

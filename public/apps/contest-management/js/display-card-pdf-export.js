@@ -116,8 +116,7 @@ export function assertDisplayCardCanvasHasOverlayInk(canvas, layout = DISPLAY_CA
 }
 
 /**
- * html2canvas on the `.contest-display-card` inside a preview host (modal or off-screen).
- * Restores fitted preview styling after capture.
+ * html2canvas on the fitted `.contest-display-card-scale-wrap` (same pixels as on-screen preview).
  * @param {HTMLElement} host
  * @param {typeof DISPLAY_CARD_LAYOUT} layout
  */
@@ -153,17 +152,16 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
  * @param {HTMLCanvasElement} canvas
  */
 export function displayCardCanvasToPdfBlob(canvas) {
-  const pageW = DISPLAY_CARD_WIDTH_PX;
-  const pageH = DISPLAY_CARD_HEIGHT_PX;
+  const pageW = canvas.width / DISPLAY_CARD_CAPTURE_SCALE;
+  const pageH = canvas.height / DISPLAY_CARD_CAPTURE_SCALE;
   const pdf = new jsPDF({
     unit: 'px',
     format: [pageW, pageH],
-    // [800,450] must stay width×height; default portrait treats 800 as height → 450×800 page.
     orientation: pageW >= pageH ? 'landscape' : 'portrait',
     compress: true,
   });
   const dataUrl = canvas.toDataURL('image/png');
-  pdf.addImage(dataUrl, 'PNG', 0, 0, DISPLAY_CARD_WIDTH_PX, DISPLAY_CARD_HEIGHT_PX);
+  pdf.addImage(dataUrl, 'PNG', 0, 0, pageW, pageH);
   const out = pdf.output('blob');
   if (out instanceof Blob) {
     return out.type ? out : new Blob([out], { type: 'application/pdf' });

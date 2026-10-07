@@ -49,6 +49,9 @@ test.describe("contest — 展示カード PDF ピクセル一致", () => {
         });
         const mount = previewMod.mountDisplayCardPreviewCaptureHost(designW);
         previewMod.renderDisplayCardPreview(mount.host, state, { layout });
+        await previewMod.waitForDisplayCardPreviewAssets(mount.host, layout);
+        mount.host.style.width = "380px";
+        const visualSize = previewMod.measureDisplayCardVisualCaptureSize(mount.host);
 
         const measureInkCenter = (
           canvas: HTMLCanvasElement,
@@ -171,6 +174,8 @@ test.describe("contest — 展示カード PDF ピクセル一致", () => {
           ok: true as const,
           canvasWidth: canvas.width,
           canvasHeight: canvas.height,
+          visualWidth: visualSize.width,
+          visualHeight: visualSize.height,
           maxChannelDiff,
           mismatched,
           mismatchRatio: mismatched / (canvas.width * canvas.height),
@@ -189,8 +194,9 @@ test.describe("contest — 展示カード PDF ピクセル一致", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.canvasWidth).toBe(DISPLAY_CARD_WIDTH_PX * DISPLAY_CARD_CAPTURE_SCALE);
-    expect(result.canvasHeight).toBe(DISPLAY_CARD_HEIGHT_PX * DISPLAY_CARD_CAPTURE_SCALE);
+    expect(result.visualWidth).toBeLessThanOrEqual(DISPLAY_CARD_WIDTH_PX);
+    expect(result.canvasWidth).toBe(result.visualWidth * DISPLAY_CARD_CAPTURE_SCALE);
+    expect(result.canvasHeight).toBe(result.visualHeight * DISPLAY_CARD_CAPTURE_SCALE);
     expect(result.markCenterMass).toBeGreaterThan(20);
     expect(result.titleDeltaPx).toBeLessThan(3);
     expect(result.mismatchRatio).toBeLessThan(0.002);
