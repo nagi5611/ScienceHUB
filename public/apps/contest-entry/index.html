@@ -64,7 +64,8 @@
         <section class="card contest-entry-form-card hidden" id="view-apply" aria-labelledby="apply-heading">
           <button type="button" class="btn btn-secondary btn-sm contest-back-btn" id="btn-back-from-apply">← 一覧に戻る</button>
           <h2 class="contest-section-title" id="apply-heading">参加申請</h2>
-          <form id="application-form" class="contest-entry-form">
+          <div class="contest-apply-layout">
+          <form id="application-form" class="contest-entry-form contest-apply-form-col">
             <fieldset class="form-group">
               <legend>在籍区分</legend>
               <label class="radio-label">
@@ -117,6 +118,12 @@
 
             <button type="submit" class="btn btn-primary btn-block" id="application-submit-btn">参加申請する</button>
           </form>
+          <aside class="contest-display-card-preview-aside" aria-labelledby="display-card-preview-heading">
+            <h3 class="contest-display-card-preview-title" id="display-card-preview-heading">展示カード プレビュー</h3>
+            <p class="hint contest-display-card-preview-hint">入力内容を展示用カード（サンプルテンプレート）に重ねて表示します。</p>
+            <div id="contest-display-card-host" class="contest-display-card-host" data-testid="display-card-host"></div>
+          </aside>
+          </div>
         </section>
 
         <section class="card contest-entry-form-card hidden" id="view-submit" aria-labelledby="submit-heading">

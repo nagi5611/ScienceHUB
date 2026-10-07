@@ -14,6 +14,7 @@ import {
 } from './entry-draft.js';
 import { setPrintFlowOverlay } from './print-flow-overlay.js';
 import { initContestPublicGallery } from './gallery.js';
+import { syncDisplayCardPreviewFromForm } from './display-card-preview.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
@@ -113,6 +114,13 @@ function showView(view) {
   document.getElementById('view-submit')?.classList.toggle('hidden', view !== 'submit');
 }
 
+function refreshDisplayCardPreview() {
+  const host = document.getElementById('contest-display-card-host');
+  const form = document.getElementById('application-form');
+  syncParticipantsFromDom();
+  syncDisplayCardPreviewFromForm(host, form, scheduleType, participants);
+}
+
 function populateHomeroomDatalist() {
   const datalist = document.getElementById('homeroom-datalist');
   if (!datalist) return;
@@ -183,6 +191,7 @@ function renderParticipantList() {
       syncParticipantsFromDom();
       persistApplicationDraft();
       updateApplicationSubmitState();
+      refreshDisplayCardPreview();
     });
   });
   list.querySelectorAll('.participant-remove').forEach((btn) => {
@@ -193,8 +202,10 @@ function renderParticipantList() {
       renderParticipantList();
       persistApplicationDraft();
       updateApplicationSubmitState();
+      refreshDisplayCardPreview();
     });
   });
+  refreshDisplayCardPreview();
 }
 
 function updateScheduleTypeUi() {
@@ -581,6 +592,7 @@ function openApplyView() {
   showView('apply');
   renderParticipantList();
   updateApplicationSubmitState();
+  refreshDisplayCardPreview();
 }
 
 function openEditView(applicationId) {
@@ -605,6 +617,7 @@ function openEditView(applicationId) {
   showView('apply');
   renderParticipantList();
   updateApplicationSubmitState();
+  refreshDisplayCardPreview();
 }
 
 function openSubmitView(applicationId) {
@@ -1216,6 +1229,7 @@ async function init() {
       scheduleType = parseScheduleType(input.value);
       updateScheduleTypeUi();
       persistApplicationDraft();
+      refreshDisplayCardPreview();
     });
   });
 
@@ -1223,6 +1237,7 @@ async function init() {
   applicationForm?.addEventListener('input', () => {
     persistApplicationDraft();
     updateApplicationSubmitState();
+    refreshDisplayCardPreview();
   });
   applicationForm?.addEventListener('submit', handleApplicationSubmit);
   document.getElementById('submit-form')?.addEventListener('submit', handleStlSubmit);
@@ -1253,6 +1268,7 @@ async function init() {
     }
   }
   updateScheduleTypeUi();
+  refreshDisplayCardPreview();
 
   try {
     await loadApplications();
@@ -1262,6 +1278,7 @@ async function init() {
     showToast(err.message, 'error');
   }
   showView('list');
+  document.body.dataset.contestEntryReady = '1';
 }
 
 init();

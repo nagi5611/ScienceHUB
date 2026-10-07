@@ -6,10 +6,6 @@ import { bookableDateWithOffset, ensureTestPrinters } from "../3dprint-reservati
 
 export { loginAsAdmin };
 
-export { loginAsAdmin };
-
-export { loginAsAdmin };
-
 export function uniqueContestTitle(prefix = "e2e") {
   return `${prefix}-${Date.now().toString(36)}`;
 }
@@ -49,6 +45,10 @@ export async function ensureContestListView(page: Page) {
 
 export async function openNewApplicationForm(page: Page) {
   await ensureContestListView(page);
+  await page.waitForFunction(
+    () => document.body.dataset.contestEntryReady === "1",
+    { timeout: 60_000 }
+  );
   await page.locator("#btn-new-application").click();
   await page.waitForSelector("#view-apply:not(.hidden)", { timeout: 15_000 });
   await expect(page.locator("#apply-heading")).toHaveText("参加申請");
