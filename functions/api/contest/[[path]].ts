@@ -2,7 +2,7 @@
  * 造形物コンテスト API
  */
 
-import type { Env } from "../../lib/types";
+import { now, type Env } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { requireUser } from "../../lib/auth";
 import { canUserAccessApp } from "../../lib/apps";
@@ -124,6 +124,13 @@ import {
   listContestStlSubmissionLogsForReservation,
   logContestStlSubmission,
 } from "../../lib/contest/stl-submission-logs";
+import {
+  buildContestAdminReservationsCacheKey,
+  getContestAdminReservationsListCache,
+  setContestAdminReservationsListCache,
+  type ContestAdminReservationsListApiPayload,
+  type ContestAdminReservationsListResult,
+} from "../../lib/contest/admin-reservations-list-cache";
 import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
@@ -424,6 +431,43 @@ function enrichReservationForAdmin(
     printer_name: resolvePrinterLabel(r, printerMap),
     printer_capabilities: resolvePrinterCapabilities(r, printerMap),
   };
+}
+
+function parseFreshQueryParam(value: string | null): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/** 管理画面向け予約一覧を D1 から組み立てる */
+async function buildContestAdminReservationsList(
+  db: D1Database,
+  filterUserId: string | null
+): Promise<ContestAdminReservationsListResult> {
+  const reservations = await getAllReservations(
+    db,
+    "contest",
+    filterUserId ? { userId: filterUserId } : undefined
+  );
+  const memberMap = await buildMemberMap(db);
+  const printerMap = await buildPrinterMap(db);
+  return {
+    reservations: reservations.map((r) =>
+      enrichReservationForAdmin(r, memberMap, printerMap)
+    ),
+  };
+}
+
+/** 予約一覧キャッシュを再取得して保存 */
+async function refreshContestAdminReservationsListCache(
+  db: D1Database,
+  adminUserId: string,
+  cacheKey: string,
+  filterUserId: string | null
+): Promise<ContestAdminReservationsListResult> {
+  const data = await buildContestAdminReservationsList(db, filterUserId);
+  await setContestAdminReservationsListCache(db, adminUserId, cacheKey, data);
+  return data;
 }
 
 /** Maps availability result to API JSON (camelCase). */
@@ -1868,17 +1912,98 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // GET /api/3dprint/admin/reservations
     if (method === "GET" && segments[1] === "reservations" && segments.length === 2) {
-      const userId = url.searchParams.get("user_id")?.trim() || null;
-      const reservations = await getAllReservations(
+      const filterUserId = url.searchParams.get("user_id")?.trim() || null;
+      const cacheKey = buildContestAdminReservationsCacheKey(filterUserId);
+      const fresh = parseFreshQueryParam(url.searchParams.get("fresh"));
+      const sinceRaw = url.searchParams.get("since");
+      const since =
+        sinceRaw && /^\d+$/.test(sinceRaw.trim()) ? Number(sinceRaw.trim()) : 0;
+
+      if (fresh) {
+        const cached = await getContestAdminReservationsListCache(
+          db,
+          userId,
+          cacheKey
+        );
+        if (cached && since > 0) {
+          if (cached.updated_at > since) {
+            const body: ContestAdminReservationsListApiPayload = {
+              ...cached.payload,
+              stale: false,
+              read_only: false,
+              cache_updated_at: cached.updated_at,
+            };
+            return json(body);
+          }
+
+          const body: ContestAdminReservationsListApiPayload = {
+            ...cached.payload,
+            stale: true,
+            read_only: true,
+            cache_updated_at: cached.updated_at,
+          };
+          return json(body);
+        }
+
+        const data = await refreshContestAdminReservationsListCache(
+          db,
+          userId,
+          cacheKey,
+          filterUserId
+        );
+        const body: ContestAdminReservationsListApiPayload = {
+          ...data,
+          stale: false,
+          read_only: false,
+          cache_updated_at: now(),
+        };
+        return json(body);
+      }
+
+      {
+        const cached = await getContestAdminReservationsListCache(
+          db,
+          userId,
+          cacheKey
+        );
+        if (cached) {
+          context.waitUntil(
+            refreshContestAdminReservationsListCache(
+              db,
+              userId,
+              cacheKey,
+              filterUserId
+            ).catch((error) => {
+              console.error(
+                "contest admin reservations cache background refresh failed:",
+                error
+              );
+            })
+          );
+
+          const body: ContestAdminReservationsListApiPayload = {
+            ...cached.payload,
+            stale: true,
+            read_only: true,
+            cache_updated_at: cached.updated_at,
+          };
+          return json(body);
+        }
+      }
+
+      const data = await refreshContestAdminReservationsListCache(
         db,
-        "contest",
-        userId ? { userId } : undefined
+        userId,
+        cacheKey,
+        filterUserId
       );
-      const memberMap = await buildMemberMap(db);
-      const printerMap = await buildPrinterMap(db);
-      return json({
-        reservations: reservations.map((r) => enrichReservationForAdmin(r, memberMap, printerMap)),
-      });
+      const body: ContestAdminReservationsListApiPayload = {
+        ...data,
+        stale: false,
+        read_only: false,
+        cache_updated_at: now(),
+      };
+      return json(body);
     }
 
     // GET /api/3dprint/admin/reservations/:id

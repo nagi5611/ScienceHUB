@@ -52,8 +52,9 @@ import {
   setDisplayCardLayout,
 } from '../../contest-entry/js/display-card-preview.js';
 import {
-  downloadDisplayCardPdfForApplication,
   downloadDisplayCardPdfsZip,
+  previewDisplayCardPdfForApplication,
+  setupDisplayCardPdfPreviewModal,
 } from './display-card-pdf-export.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
@@ -124,12 +125,16 @@ const CONTEST_SCHEDULE_LABELS = {
   part_time: '定時制',
 };
 
+const ADMIN_RESERVATIONS_FRESH_POLL_MS = 450;
+const ADMIN_RESERVATIONS_FRESH_POLL_MAX_ATTEMPTS = 80;
+
 let contestApplications = [];
 let contestApplicationById = new Map();
 let contestApplicationDetailId = null;
 let contestApplicationsSearchQuery = '';
 let contestApplicationsSort = { key: 'created_at', dir: 'desc' };
 let contestApplicationsToolbarBound = false;
+let contestDisplayCardPdfDelegationBound = false;
 let contestDisplayCardLayoutForExportLoaded = false;
 
 const CONTEST_APPLICATION_SORT_KEYS = [
@@ -161,9 +166,152 @@ let activePanel = 'dashboard';
 let lastMobileAdminView = MOBILE_ADMIN_MQ.matches;
 let draggedReservationId = null;
 let calendarRescheduleBusy = false;
+let adminReservationsStale = false;
+let adminReservationsRefreshInFlight = false;
+let adminReservationsLoading = false;
+let adminReservationsLoadSeq = 0;
 let emailComposeSettings = {
   email_configured: false,
 };
+
+/** Waits for the given milliseconds. */
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/** Returns true when the admin reservations payload is cache-only. */
+function isAdminReservationsPayloadStale(data) {
+  return data?.stale === true || data?.read_only === true;
+}
+
+/** Shows a skeleton calendar grid while reservations load. */
+function showAdminCalendarLoading() {
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) return;
+  grid.classList.add('is-loading');
+  grid.innerHTML = `<div class="admin-calendar-loading" role="status" aria-live="polite">
+    <span class="admin-calendar-loading-spinner" aria-hidden="true"></span>
+    <span>予約を読み込み中…</span>
+  </div>`;
+}
+
+/** Reflects stale / read-only state on the admin calendar UI. */
+function updateAdminCalendarStaleUi() {
+  const section = document.getElementById('admin-calendar-section');
+  const banner = document.getElementById('admin-calendar-stale-banner');
+  const locked = adminReservationsStale;
+
+  section?.classList.toggle('is-schedule-stale', locked);
+  if (banner) {
+    banner.hidden = !locked;
+    banner.textContent = adminReservationsRefreshInFlight
+      ? '予約データを同期しています…（編集は一時停止しています）'
+      : 'キャッシュの予約を表示しています…';
+  }
+
+  for (const id of [
+    'prev-month',
+    'next-month',
+    'admin-prev-month-mobile',
+    'admin-next-month-mobile',
+    'admin-go-today-btn',
+    'admin-calendar-user-filter',
+    'admin-calendar-user-filter-clear',
+  ]) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = locked;
+  }
+
+  document.querySelectorAll('#admin-calendar-month-chips .calendar-month-chip').forEach((chip) => {
+    chip.disabled = locked;
+  });
+}
+
+/** Applies admin reservations API payload to in-memory state. */
+function applyAdminReservationsPayload(data) {
+  allReservations = (data.reservations ?? []).filter((r) => r.status !== 'cancelled');
+  adminReservationsStale = isAdminReservationsPayloadStale(data);
+  updateAdminCalendarUserFilterOptions(allReservations);
+  updateAdminCalendarStaleUi();
+}
+
+/** Fetches admin reservations (cache-first when fresh is false). */
+async function fetchAdminReservationsPayload({ fresh = false, since = 0 } = {}) {
+  const params = new URLSearchParams();
+  if (fresh) {
+    params.set('fresh', '1');
+    if (since > 0) params.set('since', String(since));
+  }
+  const query = params.toString();
+  const path = query ? `admin/reservations?${query}` : 'admin/reservations';
+  return apiRequest(path);
+}
+
+/** Loads reservations with hub-style cache → fresh polling. */
+async function loadAdminReservations(force = false) {
+  if (adminReservationsLoading) return;
+
+  const seq = ++adminReservationsLoadSeq;
+  const hadDisplayedData = allReservations.length > 0;
+
+  adminReservationsLoading = !hadDisplayedData;
+  if (!hadDisplayedData) {
+    showAdminCalendarLoading();
+  }
+
+  try {
+    const initial = await fetchAdminReservationsPayload({ fresh: force });
+    if (seq !== adminReservationsLoadSeq) return;
+
+    applyAdminReservationsPayload(initial);
+    await renderAdminCalendar();
+    renderTodayTasks();
+
+    if (!force && isAdminReservationsPayloadStale(initial)) {
+      adminReservationsRefreshInFlight = true;
+      updateAdminCalendarStaleUi();
+      try {
+        const since = Number(initial.cache_updated_at) || 0;
+        let freshData = null;
+
+        for (let attempt = 0; attempt < ADMIN_RESERVATIONS_FRESH_POLL_MAX_ATTEMPTS; attempt++) {
+          if (seq !== adminReservationsLoadSeq) return;
+          if (attempt > 0) {
+            await delay(ADMIN_RESERVATIONS_FRESH_POLL_MS);
+          }
+          freshData = await fetchAdminReservationsPayload({ fresh: true, since });
+          if (seq !== adminReservationsLoadSeq) return;
+          if (!isAdminReservationsPayloadStale(freshData)) break;
+        }
+
+        if (freshData && isAdminReservationsPayloadStale(freshData)) {
+          freshData = await fetchAdminReservationsPayload({ fresh: true, since: 0 });
+        }
+        if (seq !== adminReservationsLoadSeq) return;
+
+        applyAdminReservationsPayload(freshData);
+        await renderAdminCalendar();
+        renderTodayTasks();
+      } finally {
+        adminReservationsRefreshInFlight = false;
+        updateAdminCalendarStaleUi();
+      }
+    }
+  } catch (err) {
+    if (!hadDisplayedData) {
+      const grid = document.getElementById('calendar-grid');
+      if (grid) {
+        grid.classList.add('is-loading');
+        grid.innerHTML = `<p class="admin-calendar-load-error">${escapeHtml(err.message || '予約の読み込みに失敗しました')}</p>`;
+      }
+    }
+    throw err;
+  } finally {
+    adminReservationsLoading = false;
+  }
+}
 
 /** Shows or hides loading UI while a drag-reschedule API call is in flight. */
 function setCalendarRescheduleBusy(busy, reservationId = null) {
@@ -267,6 +415,8 @@ async function init() {
   acceptBtn?.addEventListener('click', acceptReservation);
   deleteBtn.addEventListener('click', deleteReservation);
   setupContestApplicationDetailModal();
+  setupDisplayCardPdfPreviewModal();
+  setupContestApplicationDisplayCardPdfDelegation();
   setupContestApplicationsToolbar();
   document.getElementById('edit-content-btn').addEventListener('click', () => {
     if (!currentReservationData) return;
@@ -291,7 +441,7 @@ async function init() {
   setupAdminCalendarDragMonthNavigation({
     wrapSelector: '#admin-calendar-section .calendar-grid-wrap',
     getDraggedReservationId: () => draggedReservationId,
-    isRescheduleBusy: () => calendarRescheduleBusy,
+    isRescheduleBusy: () => calendarRescheduleBusy || adminReservationsStale,
     getCurrentMonth: () => ({ year: currentYear, month: currentMonth }),
     changeMonth,
     onDropToMonth: handleAdminCalendarDropToMonth,
@@ -394,15 +544,14 @@ async function loadEmailComposeSettings() {
 }
 
 /** Refreshes dashboard data. */
-async function refreshAll() {
+async function refreshAll(forceReservations = false) {
   try {
-    const [resData, membersData, printersData, appsData] = await Promise.all([
-      apiRequest('admin/reservations'),
+    const [, membersData, printersData, appsData] = await Promise.all([
+      loadAdminReservations(forceReservations),
       apiRequest('admin/members'),
       apiRequest('admin/printers'),
       apiRequest('admin/applications?limit=500').catch(() => ({ applications: [] })),
     ]);
-    allReservations = resData.reservations.filter((r) => r.status !== 'cancelled');
     allMembers = membersData.members;
     allPrinters = printersData.printers;
     contestApplications = appsData.applications ?? [];
@@ -410,7 +559,6 @@ async function refreshAll() {
     for (const app of contestApplications) {
       contestApplicationById.set(app.id, app);
     }
-    updateAdminCalendarUserFilterOptions(allReservations);
     await renderAdminCalendar();
     renderTodayTasks();
     if (activePanel === 'history') renderHistory();
@@ -463,7 +611,7 @@ async function rescheduleAdminReservationToDate(reservationId, dateStr) {
       method: 'PATCH',
       body: JSON.stringify({ desired_date: dateStr }),
     });
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   } finally {
@@ -586,6 +734,7 @@ async function renderAdminCalendar() {
   renderAdminMonthChips();
 
   const grid = document.getElementById('calendar-grid');
+  grid.classList.remove('is-loading');
   grid.innerHTML = '';
   renderAdminWeekdayHeaders();
 
@@ -638,13 +787,20 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
     } else if (isFull) {
       cell.classList.add('full');
       cell.addEventListener('click', () => alert('この日はもう満杯です'));
-    } else {
+    } else if (!adminReservationsStale) {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => openAdminFormForDate(dateStr));
     }
 
     cell.addEventListener('dragover', (e) => {
-      if (calendarRescheduleBusy || !draggedReservationId || dateStr < todayStr) return;
+      if (
+        adminReservationsStale ||
+        calendarRescheduleBusy ||
+        !draggedReservationId ||
+        dateStr < todayStr
+      ) {
+        return;
+      }
       e.preventDefault();
       cell.classList.add('drop-target');
     });
@@ -654,7 +810,7 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
       cell.classList.remove('drop-target');
       const id = e.dataTransfer.getData('text/plain') || draggedReservationId;
       draggedReservationId = null;
-      if (!id || dateStr < todayStr || calendarRescheduleBusy) return;
+      if (!id || dateStr < todayStr || calendarRescheduleBusy || adminReservationsStale) return;
       await rescheduleAdminReservationToDate(id, dateStr);
     });
   }
@@ -683,11 +839,11 @@ function createAdminDayCell(dayNum, otherMonth, byDate, todayStr, dateStr) {
         colorMode: 'status',
         getStatusColorClass: resolveContestCalendarColorClass,
         onOpenDetail: openDetail,
-        draggable: true,
-        dragBusy: calendarRescheduleBusy,
+        draggable: !adminReservationsStale,
+        dragBusy: calendarRescheduleBusy || adminReservationsStale,
         bindDrag: (id, el) => {
           el.addEventListener('dragstart', (e) => {
-            if (calendarRescheduleBusy) {
+            if (calendarRescheduleBusy || adminReservationsStale) {
               e.preventDefault();
               return;
             }
@@ -947,7 +1103,7 @@ function setupAdminFormModal() {
       submitBtn.disabled = false;
       resetAdminForm();
       adminFormMode = 'create';
-      await refreshAll();
+      await refreshAll(true);
       setTimeout(closeModal, 1200);
     } catch (err) {
       showAdminFormAlert(err.message, 'error');
@@ -1289,7 +1445,7 @@ function contestAdminApplicationDeleteCell(app) {
 
 function contestAdminApplicationActionsCell(app) {
   return `<div class="contest-admin-app-actions">
-    <button type="button" class="btn btn-secondary btn-sm contest-admin-app-display-card-pdf" data-app-id="${escapeHtml(app.id)}">PDF</button>
+    <button type="button" class="btn btn-secondary btn-sm contest-admin-app-display-card-pdf" data-testid="contest-admin-display-card-pdf" data-app-id="${escapeHtml(app.id)}">PDF</button>
     <button type="button" class="btn btn-secondary btn-sm contest-admin-app-detail" data-app-id="${escapeHtml(app.id)}">詳細</button>
     ${contestAdminApplicationDeleteCell(app)}
   </div>`;
@@ -1459,7 +1615,7 @@ async function handleDeleteContestApplication(applicationId, title) {
 
   try {
     await apiRequest(`admin/applications/${applicationId}`, { method: 'DELETE' });
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   }
@@ -1784,31 +1940,50 @@ function renderContestApplicationsResults() {
   mount.innerHTML = renderContestApplicationsListHtml(visible);
   bindContestApplicationDeleteButtons(mount);
   bindContestApplicationDetailButtons(mount);
-  bindContestApplicationDisplayCardPdfButtons(mount);
   bindContestApplicationSortButtons(mount);
 }
 
-/** Binds per-row display card PDF download buttons. */
-function bindContestApplicationDisplayCardPdfButtons(container) {
-  container.querySelectorAll('.contest-admin-app-display-card-pdf').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const appId = btn.getAttribute('data-app-id');
-      const app = appId ? contestApplicationById.get(appId) : null;
-      if (!app) return;
-      btn.disabled = true;
-      setContestApplicationsPdfStatus('PDF生成中…');
-      try {
-        const layout = await ensureContestDisplayCardLayoutForExport();
-        await downloadDisplayCardPdfForApplication(app, layout);
-        setContestApplicationsPdfStatus('PDFをダウンロードしました');
-      } catch (err) {
-        setContestApplicationsPdfStatus(
-          err instanceof Error ? err.message : 'PDFの作成に失敗しました'
-        );
-      } finally {
-        btn.disabled = false;
-      }
-    });
+/** Resolves a participation application row for admin actions. */
+function resolveContestApplicationForAdmin(appId) {
+  if (!appId) return null;
+  return (
+    contestApplicationById.get(appId) ??
+    contestApplications.find((entry) => entry.id === appId) ??
+    null
+  );
+}
+
+/** One delegated listener for per-row display card PDF preview buttons. */
+function setupContestApplicationDisplayCardPdfDelegation() {
+  if (contestDisplayCardPdfDelegationBound) return;
+  contestDisplayCardPdfDelegationBound = true;
+  document.addEventListener('click', async (ev) => {
+    const btn =
+      ev.target instanceof Element
+        ? ev.target.closest('.contest-admin-app-display-card-pdf')
+        : null;
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const panel = document.getElementById('panel-applications');
+    if (!panel || panel.classList.contains('hidden') || !panel.contains(btn)) return;
+    const appId = btn.getAttribute('data-app-id');
+    const app = resolveContestApplicationForAdmin(appId);
+    if (!app) {
+      setContestApplicationsPdfStatus('申請データの取得に失敗しました。一覧を再読み込みしてください。');
+      return;
+    }
+    btn.disabled = true;
+    setContestApplicationsPdfStatus('PDFプレビュー生成中…');
+    try {
+      const layout = await ensureContestDisplayCardLayoutForExport();
+      await previewDisplayCardPdfForApplication(app, layout);
+      setContestApplicationsPdfStatus('');
+    } catch (err) {
+      setContestApplicationsPdfStatus(
+        err instanceof Error ? err.message : 'PDFの作成に失敗しました'
+      );
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 
@@ -2026,7 +2201,7 @@ async function resyncGoogleCalendar() {
     resultEl.innerHTML = html;
 
     if (data.created || data.updated || data.deleted) {
-      await refreshAll();
+      await refreshAll(true);
     }
   } catch (err) {
     resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
@@ -2057,7 +2232,7 @@ async function handleAddMember(e) {
       }),
     });
     document.getElementById('member-add-form').reset();
-    await refreshAll();
+    await refreshAll(true);
     alertEl.innerHTML = '<div class="alert alert-success">メンバーを追加しました</div>';
   } catch (err) {
     alertEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
@@ -2087,7 +2262,7 @@ async function handleDeleteMember(id) {
 
   try {
     await apiRequest(`admin/members/${id}`, { method: 'DELETE' });
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   }
@@ -2154,7 +2329,7 @@ async function submitPrintReject(reservationId) {
       }),
     });
     document.getElementById('detail-modal')?.classList.remove('open');
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     statusEl.textContent = err.message || '送信に失敗しました';
     statusEl.className = 'hint contest-email-send-err';
@@ -2369,7 +2544,7 @@ async function acceptReservation() {
     });
 
     document.getElementById('detail-modal').classList.remove('open');
-    await refreshAll();
+    await refreshAll(true);
 
     if (data.calendar && !data.calendar.ok) {
       alert(
@@ -2396,7 +2571,7 @@ async function saveReservation() {
     });
 
     document.getElementById('detail-modal').classList.remove('open');
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   }
@@ -2411,7 +2586,7 @@ async function deleteReservation() {
     await apiRequest(`admin/reservations/${currentReservationId}`, { method: 'DELETE' });
     document.getElementById('detail-modal').classList.remove('open');
     currentReservationId = null;
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   }
@@ -2665,7 +2840,7 @@ async function handleUploadPrintVideo(reservationId) {
       method: 'POST',
     });
     await openDetail(reservationId);
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   } finally {
@@ -2680,7 +2855,7 @@ async function handleDeletePrintVideo(reservationId) {
   try {
     await apiRequest(`admin/reservations/${reservationId}/print-video`, { method: 'DELETE' });
     await openDetail(reservationId);
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   }
@@ -2859,7 +3034,7 @@ async function handlePrinterEditSave(e) {
       await apiFormRequest(`admin/printers/${editingPrinterId}/image`, formData, { method: 'PUT' });
     }
 
-    await refreshAll();
+    await refreshAll(true);
     document.getElementById('printer-edit-modal').classList.remove('open');
     editingPrinterId = null;
   } catch (err) {
@@ -2886,7 +3061,7 @@ async function handleAddPrinter(e) {
   try {
     await apiFormRequest('admin/printers', formData);
     document.getElementById('printer-add-form').reset();
-    await refreshAll();
+    await refreshAll(true);
     alertEl.innerHTML = '<div class="alert alert-success">プリンターを追加しました</div>';
   } catch (err) {
     alertEl.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
@@ -2901,7 +3076,7 @@ async function handleDeletePrinter(id) {
 
   try {
     await apiRequest(`admin/printers/${id}`, { method: 'DELETE' });
-    await refreshAll();
+    await refreshAll(true);
   } catch (err) {
     alert(err.message);
   }

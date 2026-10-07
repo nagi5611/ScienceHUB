@@ -127,6 +127,7 @@
           <p class="page-subheading">コンテスト登録のみ表示します。予約チップをドラッグして日付を変更できます（依頼者にメールが送信されます）。チップをクリックすると詳細・ステータス変更ができます。</p>
 
           <section class="card" id="admin-calendar-section">
+            <p class="admin-calendar-stale-banner" id="admin-calendar-stale-banner" hidden role="status" aria-live="polite"></p>
             <div class="calendar-sticky-header">
               <div class="calendar-toolbar">
                 <div class="calendar-header calendar-header-desktop">
@@ -709,6 +710,31 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="shift-reschedule-cancel" type="button">キャンセル</button>
         <button class="btn btn-primary" id="shift-reschedule-save" type="button">日付を変更してシフトを外す</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="contest-display-card-pdf-modal" role="dialog" aria-modal="true" aria-labelledby="contest-display-card-pdf-title">
+    <div class="modal modal-lg contest-display-card-pdf-modal">
+      <div class="modal-header">
+        <h2 id="contest-display-card-pdf-title" data-display-card-pdf-title>展示カード PDF</h2>
+        <button class="modal-close" type="button" aria-label="閉じる">&times;</button>
+      </div>
+      <div class="modal-body contest-display-card-pdf-modal-body">
+        <p class="hint contest-display-card-pdf-modal-hint">プレビューとダウンロードするPDFは同じ画像です。</p>
+        <div class="contest-display-card-pdf-preview-wrap">
+          <img
+            class="contest-display-card-pdf-preview-img"
+            data-display-card-pdf-preview-img
+            width="800"
+            height="450"
+            alt=""
+          />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" data-display-card-pdf-dismiss>閉じる</button>
+        <button class="btn btn-primary" type="button" data-display-card-pdf-download>ダウンロード</button>
       </div>
     </div>
   </div>
