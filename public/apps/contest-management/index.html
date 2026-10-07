@@ -17,6 +17,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/apps/3dprint-management.css" />
   <link rel="stylesheet" href="/css/apps/contest-management.css" />
+  <link rel="stylesheet" href="/css/apps/contest-entry.css" />
 </head>
 <body>
   <section id="admin-section">
@@ -73,6 +74,15 @@
         </span>
         <span>プリンター</span>
       </button>
+      <button class="admin-mobile-nav-item" data-panel="display-card-layout" type="button">
+        <span class="admin-mobile-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="14" rx="2" />
+            <path d="M7 8h10M7 12h6" />
+          </svg>
+        </span>
+        <span>展示カード</span>
+      </button>
       <button class="admin-mobile-nav-item" data-panel="shifts" type="button">
         <span class="admin-mobile-nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -96,6 +106,7 @@
           <button class="admin-menu-item" data-panel="applications" type="button">参加申請</button>
           <button class="admin-menu-item" data-panel="members" type="button">メンバー一覧</button>
           <button class="admin-menu-item" data-panel="printers" type="button">プリンター管理</button>
+          <button class="admin-menu-item" data-panel="display-card-layout" type="button">展示カードレイアウト</button>
           <button class="admin-menu-item" data-panel="shifts" type="button">シフト管理表</button>
         </nav>
         <button class="btn btn-secondary btn-sm admin-logout" id="logout-btn" type="button">ダッシュボード</button>
@@ -455,6 +466,57 @@
               <button class="btn btn-primary" id="print-video-folder-confirm" type="button" disabled>このフォルダを選択</button>
             </div>
           </div>
+        </div>
+
+        <div class="admin-panel hidden" id="panel-display-card-layout">
+          <h1 class="page-heading">展示カードレイアウト</h1>
+          <p class="page-subheading">展示用カード（800×450）の文字・マーク位置をドラッグまたは数値で調整します。保存後、依頼画面のプレビューに反映されます。</p>
+
+          <section class="card display-card-layout-editor" id="display-card-layout-editor-root">
+            <div class="display-card-layout-toolbar">
+              <button class="btn btn-primary btn-sm" id="display-card-layout-save" type="button">保存</button>
+              <button class="btn btn-secondary btn-sm" id="display-card-layout-reset" type="button">初期値に戻す</button>
+              <button class="btn btn-secondary btn-sm" id="display-card-layout-reload" type="button">再読み込み</button>
+              <span class="hint" id="display-card-layout-status" role="status"></span>
+            </div>
+
+            <div class="display-card-layout-grid">
+              <div class="display-card-layout-preview-wrap">
+                <h2 class="form-section-title">プレビュー</h2>
+                <div id="display-card-layout-preview" class="contest-display-card-host" data-testid="display-card-layout-preview"></div>
+              </div>
+
+              <div class="display-card-layout-side">
+                <h2 class="form-section-title">サンプル文言</h2>
+                <div class="form-group">
+                  <label for="display-card-sample-schedule">日程区分</label>
+                  <select id="display-card-sample-schedule">
+                    <option value="full_time">全日制</option>
+                    <option value="part_time">定時制</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="display-card-sample-homeroom">ホームルーム</label>
+                  <input type="text" id="display-card-sample-homeroom" data-sample-field value="101" />
+                </div>
+                <div class="form-group">
+                  <label for="display-card-sample-name">氏名</label>
+                  <input type="text" id="display-card-sample-name" data-sample-field value="山田太郎" />
+                </div>
+                <div class="form-group">
+                  <label for="display-card-sample-title">作品名</label>
+                  <input type="text" id="display-card-sample-title" data-sample-field value="テストタイトル" />
+                </div>
+                <div class="form-group">
+                  <label for="display-card-sample-comment">コメント</label>
+                  <textarea id="display-card-sample-comment" data-sample-field rows="4">テストコメント。造形にこだわって作りました。細部まで丁寧に仕上げています。ぜひご覧ください。</textarea>
+                </div>
+
+                <h2 class="form-section-title">選択項目の座標</h2>
+                <div id="display-card-layout-props"></div>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div class="admin-panel hidden" id="panel-shifts">

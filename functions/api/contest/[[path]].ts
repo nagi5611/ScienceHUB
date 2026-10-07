@@ -108,6 +108,12 @@ import {
   validateContestStorageGroupForUser,
 } from "../../lib/contest/contest-app-settings";
 import {
+  DEFAULT_DISPLAY_CARD_LAYOUT,
+  getDisplayCardLayout,
+  parseDisplayCardLayout,
+  setDisplayCardLayout,
+} from "../../lib/contest/display-card-layout";
+import {
   buildContestSubmissionsLogicalDir,
   ensureContestStorageDirectories,
   syncContestSubmissionToStorage,
@@ -668,6 +674,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[0] === "reservations" ||
       segments[0] === "printers" ||
       segments[0] === "print-videos" ||
+      (segments[0] === "settings" && segments[1] === "display-card-layout") ||
       segments.length === 0
     ) {
       const resAccess = await requireAppAccess(request, env, RESERVATION_APP);
@@ -1440,6 +1447,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json(mapAvailabilityResponse(result));
     }
 
+    // GET /api/contest/settings/display-card-layout
+    if (
+      method === "GET" &&
+      segments[0] === "settings" &&
+      segments[1] === "display-card-layout" &&
+      segments.length === 2
+    ) {
+      const layout = await getDisplayCardLayout(db);
+      return json({ layout, defaults: DEFAULT_DISPLAY_CARD_LAYOUT });
+    }
+
     // --- Admin routes (management app access already verified) ---
     if (!isAdminRoute) {
       return error("Not Found", 404);
@@ -1761,6 +1779,31 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         group_slug: groupSlug,
         submissions_path: buildContestSubmissionsLogicalDir(groupSlug),
       });
+    }
+
+    // GET /api/contest/admin/settings/display-card-layout
+    if (
+      method === "GET" &&
+      segments[1] === "settings" &&
+      segments[2] === "display-card-layout" &&
+      segments.length === 3
+    ) {
+      const layout = await getDisplayCardLayout(db);
+      return json({ layout, defaults: DEFAULT_DISPLAY_CARD_LAYOUT });
+    }
+
+    // PATCH /api/contest/admin/settings/display-card-layout
+    if (
+      method === "PATCH" &&
+      segments[1] === "settings" &&
+      segments[2] === "display-card-layout" &&
+      segments.length === 3
+    ) {
+      const body = await request.json<{ layout?: unknown }>();
+      const parsed = parseDisplayCardLayout(body.layout);
+      if (!parsed.ok) return error(parsed.error);
+      await setDisplayCardLayout(db, parsed.layout);
+      return json({ layout: parsed.layout });
     }
 
     // GET /api/3dprint/admin/settings/storage-list

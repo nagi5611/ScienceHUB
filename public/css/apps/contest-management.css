@@ -521,3 +521,77 @@
 .contest-admin-status-cell .contest-cal-category {
   vertical-align: middle;
 }
+
+/* Display card layout editor */
+.display-card-layout-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.display-card-layout-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .display-card-layout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.display-card-layout-preview-wrap {
+  max-width: 720px;
+}
+
+.contest-display-card--editor .contest-display-card-overlay {
+  pointer-events: auto;
+}
+
+.display-card-layout-handle {
+  position: absolute;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 2px solid #2563eb;
+  border-radius: 50%;
+  background: #fff;
+  color: #2563eb;
+  font-size: 0.65rem;
+  line-height: 1;
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.display-card-layout-handle.is-selected {
+  border-color: #dc2626;
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.display-card-layout-handle:active {
+  cursor: grabbing;
+}
+
+.display-card-layout-prop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+
+.display-card-layout-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+}
+
+.display-card-layout-prop input {
+  width: 100%;
+}

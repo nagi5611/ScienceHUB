@@ -14,7 +14,7 @@ import {
 } from './entry-draft.js';
 import { setPrintFlowOverlay } from './print-flow-overlay.js';
 import { initContestPublicGallery } from './gallery.js';
-import { syncDisplayCardPreviewFromForm } from './display-card-preview.js';
+import { setDisplayCardLayout, syncDisplayCardPreviewFromForm } from './display-card-preview.js';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const CALENDAR_STATUSES = ['applied', 'accepted', 'printing', 'delivered'];
@@ -1188,9 +1188,20 @@ function startStaffMessagesPolling() {
 
 let staffMessages = [];
 
+async function loadDisplayCardLayoutFromServer() {
+  try {
+    const data = await apiRequest('settings/display-card-layout');
+    if (data.layout) setDisplayCardLayout(data.layout);
+  } catch {
+    // 未設定時は DISPLAY_CARD_LAYOUT の既定値
+  }
+}
+
 async function init() {
   const allowed = await checkAppAccess();
   if (!allowed) return;
+
+  await loadDisplayCardLayoutFromServer();
 
   populateHomeroomDatalist();
   const now = new Date();

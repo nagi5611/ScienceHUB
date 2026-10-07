@@ -43,6 +43,10 @@ import {
   calendarMonthAfterDelta,
   setupAdminCalendarDragMonthNavigation,
 } from '../../../js/admin-calendar-drag-month.js';
+import {
+  initDisplayCardLayoutEditor,
+  loadDisplayCardLayoutEditor,
+} from './display-card-layout-editor.js';
 let printVideoGroupRoots = [];
 let printVideoStoragePath = '';
 let contestStorageGroupSlug = '';
@@ -104,6 +108,7 @@ const ADMIN_PANEL_TITLES = {
   members: 'メンバー',
   printers: 'プリンター',
   shifts: 'シフト',
+  'display-card-layout': '展示カード',
 };
 
 const CONTEST_SCHEDULE_LABELS = {
@@ -362,6 +367,11 @@ function switchPanel(panel) {
     loadPrintVideoSettings();
   }
   if (panel === 'shifts') renderShiftPanel();
+  if (panel === 'display-card-layout') {
+    const root = document.getElementById('display-card-layout-editor-root');
+    initDisplayCardLayoutEditor(root);
+    loadDisplayCardLayoutEditor(document.getElementById('panel-display-card-layout'));
+  }
   updateAdminStickyOffsets();
 }
 
