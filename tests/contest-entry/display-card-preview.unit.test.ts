@@ -24,8 +24,8 @@ describe("display-card-preview", () => {
   it("wrapDisplayCardComment respects max lines", () => {
     const long =
       "テストコメント。造形にこだわって作りました。細部まで丁寧に仕上げています。ぜひご覧ください。";
-    const lines = wrapDisplayCardComment(long, 5);
-    assert.ok(lines.length >= 1 && lines.length <= 5);
+    const lines = wrapDisplayCardComment(long, 6);
+    assert.ok(lines.length >= 1 && lines.length <= 6);
     assert.ok(lines.join("").includes("テストコメント"));
   });
 

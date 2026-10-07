@@ -36,11 +36,11 @@ export const DISPLAY_CARD_LAYOUT = {
 
   title: { left: 22, top: 29.2, width: 74, fontSize: 15, maxLines: 1 },
 
-  comment: { left: 22, top: 37, width: 74, fontSize: 13, lineHeight: 1.52, maxLines: 5 },
+  comment: { left: 22, top: 37, width: 74, fontSize: 13, lineHeight: 1.52, maxLines: 6 },
 
 };
 
-export const DISPLAY_CARD_COMMENT_MAX_LINES = 5;
+export const DISPLAY_CARD_COMMENT_MAX_LINES = 6;
 
 
 

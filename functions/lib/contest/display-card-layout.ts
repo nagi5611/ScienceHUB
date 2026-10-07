@@ -32,7 +32,7 @@ export type DisplayCardCommentLayout = DisplayCardTextFieldLayout & {
   lineRights?: number[];
 };
 
-export const DISPLAY_CARD_COMMENT_MAX_LINES = 5;
+export const DISPLAY_CARD_COMMENT_MAX_LINES = 6;
 
 export type DisplayCardLayout = {
   marks: Record<DisplayCardMarkKey, DisplayCardMarkLayout>;

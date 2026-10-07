@@ -42,13 +42,13 @@ describe('display-card-layout', () => {
     }
   });
 
-  it('clamps comment max lines to 5', () => {
+  it('clamps comment max lines to 6', () => {
     const result = parseDisplayCardLayout({
       comment: { maxLines: 12 },
     });
     assert.equal(result.ok, true);
     if (result.ok) {
-      assert.equal(result.layout.comment.maxLines, 5);
+      assert.equal(result.layout.comment.maxLines, 6);
     }
   });
 
