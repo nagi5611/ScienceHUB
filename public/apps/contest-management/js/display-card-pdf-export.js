@@ -11,7 +11,7 @@ import {
   DISPLAY_CARD_HEIGHT_PX,
   DISPLAY_CARD_LAYOUT,
   mountDisplayCardPreviewCaptureHost,
-  prepareDisplayCardElementForRasterCapture,
+  prepareDisplayCardHostForRasterCapture,
   waitForDisplayCardPreviewAssets,
 } from '../../contest-entry/js/display-card-preview.js';
 
@@ -132,7 +132,7 @@ export async function renderDisplayCardPreviewCanvasFromHost(host, layout) {
   if (!(card instanceof HTMLElement)) {
     throw new Error('展示カードの描画に失敗しました');
   }
-  prepareDisplayCardElementForRasterCapture(card);
+  prepareDisplayCardHostForRasterCapture(host);
   try {
     const canvas = await html2canvas(card, {
       scale: DISPLAY_CARD_CAPTURE_SCALE,

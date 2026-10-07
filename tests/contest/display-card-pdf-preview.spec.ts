@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { loginAsAdmin } from "./helpers";
 import { uniqueContestTitle } from "../contest-entry/helpers";
-import { DISPLAY_CARD_LAYOUT } from "../../public/apps/contest-entry/js/display-card-preview.js";
+import {
+  DISPLAY_CARD_LAYOUT,
+  DISPLAY_CARD_WIDTH_PX,
+} from "../../public/apps/contest-entry/js/display-card-preview.js";
 
 test.describe("contest-management — 展示カード PDF プレビュー", () => {
   test.use({ serviceWorkers: "block" });
@@ -105,12 +108,50 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         impressions: "テストコメント。PDFプレビュー用の短文です。",
         members: [{ homeroom: "101", member_name: "山田太郎" }],
       };
+      const cardBefore = modalHost.querySelector('[data-testid="display-card-root"]');
+      const cardRectBefore =
+        cardBefore instanceof HTMLElement ? cardBefore.getBoundingClientRect() : null;
+
       const canvas = await pdfMod.renderDisplayCardPreviewCanvasFromHost(modalHost, layout);
       try {
         pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
       } catch {
         return { ok: false as const };
       }
+
+      const cardAfter = modalHost.querySelector('[data-testid="display-card-root"]');
+      const cardRectAfter =
+        cardAfter instanceof HTMLElement ? cardAfter.getBoundingClientRect() : null;
+      const scaleWrapAfter = modalHost.querySelector(".contest-display-card-scale-wrap");
+      const scaleWrapWidthAfter =
+        scaleWrapAfter instanceof HTMLElement ? scaleWrapAfter.getBoundingClientRect().width : 0;
+
+      const sampleCanvasTitleInk = () => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return 0;
+        const scale = canvas.width / previewMod.DISPLAY_CARD_WIDTH_PX;
+        const left = Math.floor((layout.title.left / 100) * previewMod.DISPLAY_CARD_WIDTH_PX * scale);
+        const top = Math.floor((layout.title.top / 100) * previewMod.DISPLAY_CARD_HEIGHT_PX * scale);
+        const width = Math.max(
+          8,
+          Math.floor((layout.title.width / 100) * previewMod.DISPLAY_CARD_WIDTH_PX * scale)
+        );
+        const height = Math.max(8, Math.ceil(layout.title.fontSize * scale * 1.4));
+        const region = ctx.getImageData(left, top, width, height);
+        let dark = 0;
+        for (let i = 0; i < region.data.length; i += 4) {
+          const alpha = region.data[i + 3];
+          const lum = region.data[i] + region.data[i + 1] + region.data[i + 2];
+          if (alpha > 16 && lum < 720) dark += 1;
+        }
+        return dark;
+      };
+
+      const titleInkPixels = sampleCanvasTitleInk();
+      const visibleToDesignScale =
+        cardRectBefore && cardRectBefore.width > 0
+          ? cardRectBefore.width / previewMod.DISPLAY_CARD_WIDTH_PX
+          : 0;
 
       const pdfBlob = pdfMod.displayCardCanvasToPdfBlob(canvas);
       const pdfFromModalUrl = document
@@ -145,8 +186,17 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         expectedLeft,
         expectedTop,
         canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
         pdfBlobSize: pdfBlob.size,
         hasModalPdfUrl: Boolean(pdfFromModalUrl),
+        titleInkPixels,
+        visibleToDesignScale,
+        cardWidthAfterCapture: cardRectAfter?.width ?? 0,
+        scaleWrapWidthAfter,
+        fitRestored:
+          cardRectAfter &&
+          cardRectBefore &&
+          Math.abs(cardRectAfter.width - cardRectBefore.width) < 2,
       };
     }, title);
 
@@ -154,6 +204,12 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     if (previewChecks.ok) {
       expect(previewChecks.hasScaleWrap).toBe(true);
       expect(previewChecks.canvasWidth).toBe(1600);
+      expect(previewChecks.canvasHeight).toBe(900);
+      expect(previewChecks.titleInkPixels).toBeGreaterThan(8);
+      expect(previewChecks.fitRestored).toBe(true);
+      if (previewChecks.visibleToDesignScale > 0 && previewChecks.visibleToDesignScale < 1) {
+        expect(previewChecks.scaleWrapWidthAfter).toBeLessThan(DISPLAY_CARD_WIDTH_PX);
+      }
       expect(previewChecks.pdfBlobSize).toBeGreaterThan(1000);
       expect(previewChecks.hasModalPdfUrl).toBe(true);
       expect(previewChecks.titleDelta).toBeLessThan(0.02);

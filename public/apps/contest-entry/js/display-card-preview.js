@@ -203,6 +203,36 @@ export function prepareDisplayCardElementForRasterCapture(card) {
 }
 
 /**
+ * Expands fit shell / scale-wrap so an 800×450 card is not clipped after transform is cleared.
+ * Call before html2canvas when the modal uses fitDisplayCardPreviewToHost (CSS scale).
+ * @param {HTMLElement} host
+ */
+export function prepareDisplayCardHostForRasterCapture(host) {
+  if (!(host instanceof HTMLElement)) return;
+  const card = host.querySelector('.contest-display-card');
+  if (!(card instanceof HTMLElement)) return;
+
+  const shell = getDisplayCardFitShell(host);
+  if (shell) {
+    shell.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
+    shell.style.maxWidth = 'none';
+    shell.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
+    shell.style.overflow = 'visible';
+  }
+  const scaleWrap = getDisplayCardScaleWrap(host);
+  if (scaleWrap) {
+    scaleWrap.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
+    scaleWrap.style.maxWidth = 'none';
+    scaleWrap.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
+    scaleWrap.style.overflow = 'visible';
+  }
+  host.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
+  host.style.overflow = 'visible';
+
+  prepareDisplayCardElementForRasterCapture(card);
+}
+
+/**
  * Waits for template image + overlay fonts before capturing preview as bitmap.
  * @param {HTMLElement} host
  * @param {typeof DISPLAY_CARD_LAYOUT} [layout]
