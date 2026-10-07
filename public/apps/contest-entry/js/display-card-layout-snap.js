@@ -45,6 +45,9 @@ export function collectLayoutXTargets(layout) {
   for (const left of layout.comment?.lineLefts ?? []) {
     push(left);
   }
+  for (const right of layout.comment?.lineRights ?? []) {
+    push(right);
+  }
   return xs;
 }
 

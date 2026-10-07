@@ -2,8 +2,11 @@
 import { apiRequest } from './api.js';
 import {
   DISPLAY_CARD_LAYOUT,
+  DISPLAY_CARD_COMMENT_MAX_LINES,
   buildDisplayCardPreviewState,
   commentLineLeftPercent,
+  commentLineRightPercent,
+  commentLineWidthPercent,
   defaultCommentLineTopPercent,
   renderDisplayCardPreview,
   setDisplayCardLayout,
@@ -39,6 +42,16 @@ let editorLayout = null;
 let defaultLayout = null;
 let selectedKey = 'name';
 let editorBound = false;
+
+/** @returns {{ index: number; part: 'position' | 'right' } | null} */
+function parseCommentLineKey(key) {
+  const match = key.match(/^comment\.line\.(\d+)(?:\.(right))?$/);
+  if (!match) return null;
+  return {
+    index: parseInt(match[1], 10),
+    part: match[2] === 'right' ? 'right' : 'position',
+  };
+}
 
 /**
  * Initializes the display card layout editor panel.
@@ -113,6 +126,10 @@ export async function loadDisplayCardLayoutEditor(root) {
     const data = await apiRequest('admin/settings/display-card-layout');
     defaultLayout = structuredClone(data.defaults ?? DISPLAY_CARD_LAYOUT);
     editorLayout = structuredClone(data.layout ?? defaultLayout);
+    editorLayout.comment.maxLines = Math.min(
+      DISPLAY_CARD_COMMENT_MAX_LINES,
+      editorLayout.comment.maxLines
+    );
     setDisplayCardLayout(editorLayout);
     statusEl.textContent = '';
     renderEditorPreview(previewHost);
@@ -199,11 +216,13 @@ function injectEditorHandles(host) {
     title: sample.title,
     impressions: sample.impressions,
   });
-  const lineCount = Math.min(c.maxLines, Math.max(state.commentLines.length, 3));
+  const maxLines = Math.min(DISPLAY_CARD_COMMENT_MAX_LINES, c.maxLines);
+  const lineCount = Math.min(maxLines, Math.max(state.commentLines.length, 3));
   const lineTops = c.lineTops ?? [];
   for (let i = 0; i < lineCount; i += 1) {
     const top = lineTops[i] ?? defaultCommentLineTopPercent(c, i);
     const left = commentLineLeftPercent(c, i);
+    const right = commentLineRightPercent(c, i);
     handles.push({
       key: `comment.line.${i}`,
       label: `コメント${i + 1}行`,
@@ -212,18 +231,29 @@ function injectEditorHandles(host) {
       kind: 'commentLine',
       lineIndex: i,
     });
+    handles.push({
+      key: `comment.line.${i}.right`,
+      label: `コメント${i + 1}行 右端（改行位置）`,
+      left: right,
+      top,
+      kind: 'commentLineRight',
+      lineIndex: i,
+    });
   }
 
   for (const h of handles) {
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = `display-card-layout-handle${selectedKey === h.key ? ' is-selected' : ''}`;
+    const isRight = h.kind === 'commentLineRight';
+    el.className = `display-card-layout-handle${isRight ? ' display-card-layout-handle--right' : ''}${
+      selectedKey === h.key ? ' is-selected' : ''
+    }`;
     el.dataset.layoutKey = h.key;
     el.style.left = `${h.left}%`;
     el.style.top = `${h.top}%`;
     el.title = h.label;
     el.setAttribute('aria-label', h.label);
-    el.textContent = h.kind === 'mark' ? '●' : '＋';
+    el.textContent = h.kind === 'mark' ? '●' : isRight ? '┃' : '＋';
     overlay.appendChild(el);
   }
 }
@@ -268,13 +298,14 @@ function syncLayoutVisualFromEditor(previewHost) {
   const lineTops = c.lineTops ?? [];
   for (const el of overlay.querySelectorAll('[data-layout-key^="comment.line."]')) {
     if (!(el instanceof HTMLElement)) continue;
-    const idx = parseInt(el.dataset.layoutKey?.slice('comment.line.'.length) ?? '', 10);
-    if (!Number.isFinite(idx)) continue;
+    const parsed = parseCommentLineKey(el.dataset.layoutKey ?? '');
+    if (!parsed || parsed.part !== 'position') continue;
+    const idx = parsed.index;
     const top = lineTops[idx] ?? defaultCommentLineTopPercent(c, idx);
     const left = commentLineLeftPercent(c, idx);
     el.style.left = pct(left);
     el.style.top = pct(top);
-    el.style.width = pct(c.width);
+    el.style.width = pct(commentLineWidthPercent(c, idx));
   }
 
   updateHandlePositions(previewHost);
@@ -285,13 +316,23 @@ function ensureCommentLineSlots(lineIndex) {
   const c = editorLayout.comment;
   if (!c.lineTops) c.lineTops = [];
   if (!c.lineLefts) c.lineLefts = [];
-  const slotCount = Math.max(lineIndex + 1, c.lineTops.length, c.lineLefts.length, 3);
+  if (!c.lineRights) c.lineRights = [];
+  const slotCount = Math.max(
+    lineIndex + 1,
+    c.lineTops.length,
+    c.lineLefts.length,
+    c.lineRights.length,
+    3
+  );
   for (let i = 0; i < slotCount; i += 1) {
     if (c.lineTops[i] === undefined) {
       c.lineTops[i] = defaultCommentLineTopPercent(c, i);
     }
     if (c.lineLefts[i] === undefined) {
       c.lineLefts[i] = c.left;
+    }
+    if (c.lineRights[i] === undefined) {
+      c.lineRights[i] = Math.min(100, c.left + c.width);
     }
   }
 }
@@ -303,13 +344,18 @@ function layoutPointForKey(key) {
     const m = editorLayout.marks[markKey];
     return m ? { left: m.left, top: m.top } : null;
   }
-  if (key.startsWith('comment.line.')) {
-    const index = parseInt(key.slice('comment.line.'.length), 10);
-    if (!Number.isFinite(index)) return null;
+  const commentLine = parseCommentLineKey(key);
+  if (commentLine) {
     const tops = editorLayout.comment.lineTops ?? [];
+    const top =
+      tops[commentLine.index] ??
+      defaultCommentLineTopPercent(editorLayout.comment, commentLine.index);
+    if (commentLine.part === 'right') {
+      return { left: commentLineRightPercent(editorLayout.comment, commentLine.index), top };
+    }
     return {
-      left: commentLineLeftPercent(editorLayout.comment, index),
-      top: tops[index] ?? defaultCommentLineTopPercent(editorLayout.comment, index),
+      left: commentLineLeftPercent(editorLayout.comment, commentLine.index),
+      top,
     };
   }
   if (key === 'comment') {
@@ -357,7 +403,11 @@ function ensureLayoutDragBinding(previewHost, getContext) {
     }
 
     const { propsMount, statusEl } = getContext();
-    selectedKey = key;
+    const parsedSelect = parseCommentLineKey(key);
+    selectedKey =
+      parsedSelect?.part === 'right'
+        ? `comment.line.${parsedSelect.index}`
+        : key;
     if (statusEl) statusEl.textContent = '';
     renderPropsPanel(propsMount);
     injectEditorHandles(previewHost);
@@ -373,7 +423,12 @@ function ensureLayoutDragBinding(previewHost, getContext) {
     const onMove = (moveEv) => {
       const left = ((moveEv.clientX - rect.left - offsetX) / rect.width) * 100;
       const top = ((moveEv.clientY - rect.top - offsetY) / rect.height) * 100;
-      applyLayoutPosition(key, left, top);
+      const parsedLine = parseCommentLineKey(key);
+      if (parsedLine?.part === 'right') {
+        applyCommentLineRight(parsedLine.index, left);
+      } else {
+        applyLayoutPosition(key, left, top);
+      }
       syncLayoutVisualFromEditor(previewHost);
       renderPropsPanel(propsMount);
       const overlay = previewHost.querySelector('.contest-display-card-overlay');
@@ -409,7 +464,11 @@ function ensureLayoutDragBinding(previewHost, getContext) {
     const key = target.dataset.layoutKey;
     if (!key) return;
     const { propsMount } = getContext();
-    selectedKey = key;
+    const parsedSelect = parseCommentLineKey(key);
+    selectedKey =
+      parsedSelect?.part === 'right'
+        ? `comment.line.${parsedSelect.index}`
+        : key;
     renderPropsPanel(propsMount);
     injectEditorHandles(previewHost);
   });
@@ -422,15 +481,15 @@ function applyLayoutPosition(key, left, top) {
   if (key.startsWith('marks.')) {
     const markKey = key.slice('marks.'.length);
     if (editorLayout.marks[markKey]) {
-      editorLayout.marks[markKey].left = snapLayoutX(editorLayout, clamp(left));
+      editorLayout.marks[markKey].left = clamp(left);
       editorLayout.marks[markKey].top = snapLayoutY(editorLayout, clamp(top));
     }
     return;
   }
 
-  if (key.startsWith('comment.line.')) {
-    const index = parseInt(key.slice('comment.line.'.length), 10);
-    if (!Number.isFinite(index)) return;
+  const commentLine = parseCommentLineKey(key);
+  if (commentLine?.part === 'position') {
+    const index = commentLine.index;
     ensureCommentLineSlots(index);
     editorLayout.comment.lineTops[index] = snapLayoutY(editorLayout, clamp(top));
     editorLayout.comment.lineLefts[index] = snapLayoutX(editorLayout, clamp(left));
@@ -444,12 +503,21 @@ function applyLayoutPosition(key, left, top) {
   }
 
   if (editorLayout[key]) {
-    const ySnappedFields = ['year', 'classGroup', 'name', 'title'];
+    const ySnappedFields = ['year', 'classGroup', 'name'];
     editorLayout[key].left = clamp(left);
     editorLayout[key].top = ySnappedFields.includes(key)
       ? snapLayoutY(editorLayout, clamp(top))
       : clamp(top);
   }
+}
+
+function applyCommentLineRight(lineIndex, rightPercent) {
+  if (!editorLayout) return;
+  const clamp = (v) => Math.min(100, Math.max(0, Math.round(v * 100) / 100));
+  ensureCommentLineSlots(lineIndex);
+  const minRight = commentLineLeftPercent(editorLayout.comment, lineIndex) + 2;
+  const snapped = snapLayoutX(editorLayout, clamp(rightPercent));
+  editorLayout.comment.lineRights[lineIndex] = Math.max(minRight, snapped);
 }
 
 function renderPropsPanel(mount) {
@@ -465,21 +533,28 @@ function renderPropsPanel(mount) {
       ['top', '上 (%)', m.top],
       ['size', 'サイズ (%)', m.size],
     ], key);
-  } else if (key.startsWith('comment.line.')) {
-    const index = parseInt(key.slice('comment.line.'.length), 10);
+  } else if (parseCommentLineKey(key)) {
+    const { index, part } = parseCommentLineKey(key);
     const tops = editorLayout.comment.lineTops ?? [];
     const top =
       tops[index] ?? defaultCommentLineTopPercent(editorLayout.comment, index);
     const lineLeft = commentLineLeftPercent(editorLayout.comment, index);
+    const lineRight = commentLineRightPercent(editorLayout.comment, index);
+    const baseKey = `comment.line.${index}`;
     html += numberFields(
       [
         ['left', '左 (%)', lineLeft],
         ['lineTop', '行の上 (%)', top],
+        ['lineRight', '右端・改行位置 (%)', lineRight],
       ],
-      key,
+      baseKey,
       { lineIndex: index }
     );
-    html += `<p class="hint">行ごとに left（lineLefts）・上（lineTops）を保存します。近い座標は自動で揃います。</p>`;
+    html += `<label class="display-card-layout-prop display-card-layout-range">
+      <span>改行位置（右端）スライダー</span>
+      <input type="range" min="${lineLeft + 2}" max="100" step="0.1" data-range-input="lineRight" data-layout-key="${escapeHtml(baseKey)}" data-line-index="${index}" value="${lineRight}" />
+    </label>`;
+    html += `<p class="hint">行ごとに left / 上 / 右端（lineRights）を保存します。右端はスライダーまたは┃ハンドルをドラッグ。近い座標は自動で揃います。</p>`;
   } else if (key === 'comment') {
     const c = editorLayout.comment;
     html += numberFields(
@@ -489,7 +564,7 @@ function renderPropsPanel(mount) {
         ['width', '幅 (%)', c.width],
         ['fontSize', '文字 (px)', c.fontSize],
         ['lineHeight', '行間', c.lineHeight],
-        ['maxLines', '最大行数', c.maxLines],
+        ['maxLines', '最大行数', DISPLAY_CARD_COMMENT_MAX_LINES],
       ],
       key
     );
@@ -506,13 +581,24 @@ function renderPropsPanel(mount) {
   }
 
   mount.innerHTML = html;
+  const syncFromPanel = () => {
+    const root = mount.closest('#panel-display-card-layout');
+    const previewHost = root?.querySelector('#display-card-layout-preview');
+    renderEditorPreview(previewHost);
+    renderPropsPanel(mount);
+  };
   mount.querySelectorAll('[data-prop-input]').forEach((input) => {
     input.addEventListener('change', () => {
-      applyPropFromInput(key, input.dataset.propInput, input.value, input.dataset.lineIndex);
-      const root = mount.closest('#panel-display-card-layout');
-      const previewHost = root?.querySelector('#display-card-layout-preview');
-      renderEditorPreview(previewHost);
-      renderPropsPanel(mount);
+      const propKey = input.dataset.layoutKey ?? key;
+      applyPropFromInput(propKey, input.dataset.propInput, input.value, input.dataset.lineIndex);
+      syncFromPanel();
+    });
+  });
+  mount.querySelectorAll('[data-range-input]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const propKey = input.dataset.layoutKey ?? key;
+      applyPropFromInput(propKey, input.dataset.rangeInput, input.value, input.dataset.lineIndex);
+      syncFromPanel();
     });
   });
 }
@@ -543,14 +629,18 @@ function applyPropFromInput(key, prop, rawValue, lineIndexAttr) {
     return;
   }
 
-  if (key.startsWith('comment.line.')) {
-    const index = parseInt(lineIndexAttr ?? key.slice('comment.line.'.length), 10);
+  const commentLine = parseCommentLineKey(key);
+  if (commentLine?.part === 'position') {
+    const index = commentLine.index;
     ensureCommentLineSlots(index);
     if (prop === 'left') {
       editorLayout.comment.lineLefts[index] = snapLayoutX(editorLayout, value);
     }
     if (prop === 'lineTop') {
       editorLayout.comment.lineTops[index] = snapLayoutY(editorLayout, value);
+    }
+    if (prop === 'lineRight') {
+      applyCommentLineRight(index, value);
     }
     return;
   }
@@ -562,9 +652,12 @@ function applyPropFromInput(key, prop, rawValue, lineIndexAttr) {
 
 function labelForKey(key) {
   if (key.startsWith('marks.')) return MARK_LABELS[key.slice('marks.'.length)] ?? key;
-  if (key.startsWith('comment.line.')) {
-    const i = parseInt(key.slice('comment.line.'.length), 10);
-    return `コメント${i + 1}行`;
+  const commentLine = parseCommentLineKey(key);
+  if (commentLine) {
+    if (commentLine.part === 'right') {
+      return `コメント${commentLine.index + 1}行 右端`;
+    }
+    return `コメント${commentLine.index + 1}行`;
   }
   return FIELD_LABELS[key] ?? key;
 }

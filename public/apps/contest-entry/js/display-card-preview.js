@@ -36,9 +36,11 @@ export const DISPLAY_CARD_LAYOUT = {
 
   title: { left: 22, top: 29.2, width: 74, fontSize: 15, maxLines: 1 },
 
-  comment: { left: 22, top: 37, width: 74, fontSize: 13, lineHeight: 1.52, maxLines: 6 },
+  comment: { left: 22, top: 37, width: 74, fontSize: 13, lineHeight: 1.52, maxLines: 5 },
 
 };
+
+export const DISPLAY_CARD_COMMENT_MAX_LINES = 5;
 
 
 
@@ -160,7 +162,9 @@ export function usesPerLineCommentPlacement(commentLayout) {
 
     (commentLayout.lineTops?.length ?? 0) > 0 ||
 
-    (commentLayout.lineLefts?.length ?? 0) > 0
+    (commentLayout.lineLefts?.length ?? 0) > 0 ||
+
+    (commentLayout.lineRights?.length ?? 0) > 0
 
   );
 
@@ -181,6 +185,38 @@ export function commentLineLeftPercent(commentLayout, lineIndex) {
   }
 
   return commentLayout.left;
+
+}
+
+
+
+/** Right edge (% of card) for a comment line — controls wrap width. */
+
+export function commentLineRightPercent(commentLayout, lineIndex) {
+
+  const rights = commentLayout.lineRights ?? [];
+
+  if (rights[lineIndex] !== undefined && rights[lineIndex] !== null) {
+
+    return rights[lineIndex];
+
+  }
+
+  return Math.min(100, commentLayout.left + commentLayout.width);
+
+}
+
+
+
+/** Width (% of card) for a placed comment line. */
+
+export function commentLineWidthPercent(commentLayout, lineIndex) {
+
+  const left = commentLineLeftPercent(commentLayout, lineIndex);
+
+  const right = commentLineRightPercent(commentLayout, lineIndex);
+
+  return Math.max(1, right - left);
 
 }
 
@@ -436,11 +472,13 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
         const absoluteLeft = commentLineLeftPercent(layout.comment, i);
 
+        const widthPct = commentLineWidthPercent(layout.comment, i);
+
         const lineStyle = `position:absolute;left:${pct(absoluteLeft)};top:${pct(
 
           absoluteTop
 
-        )};width:${pct(layout.comment.width)};font-size:${layout.comment.fontSize}px;line-height:${layout.comment.lineHeight}`;
+        )};width:${pct(widthPct)};font-size:${layout.comment.fontSize}px;line-height:${layout.comment.lineHeight};white-space:normal;word-break:break-word;overflow:hidden`;
 
         return `<div class="contest-display-card-comment-line contest-display-card-comment-line--placed" data-testid="display-card-comment-line-${i}" data-layout-key="comment.line.${i}" style="${lineStyle}">${escapeText(
 

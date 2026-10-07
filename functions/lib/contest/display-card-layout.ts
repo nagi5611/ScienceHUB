@@ -28,7 +28,11 @@ export type DisplayCardCommentLayout = DisplayCardTextFieldLayout & {
   lineTops?: number[];
   /** Optional absolute left (% of card) per comment line index */
   lineLefts?: number[];
+  /** Optional absolute right edge (% of card) per comment line — wrap width */
+  lineRights?: number[];
 };
+
+export const DISPLAY_CARD_COMMENT_MAX_LINES = 5;
 
 export type DisplayCardLayout = {
   marks: Record<DisplayCardMarkKey, DisplayCardMarkLayout>;
@@ -50,7 +54,14 @@ export const DEFAULT_DISPLAY_CARD_LAYOUT: DisplayCardLayout = {
   classGroup: { left: 66, top: 19.2, width: 6, fontSize: 16 },
   name: { left: 74, top: 19.2, width: 22, fontSize: 16 },
   title: { left: 22, top: 29.2, width: 74, fontSize: 15, maxLines: 1 },
-  comment: { left: 22, top: 37, width: 74, fontSize: 13, lineHeight: 1.52, maxLines: 6 },
+  comment: {
+    left: 22,
+    top: 37,
+    width: 74,
+    fontSize: 13,
+    lineHeight: 1.52,
+    maxLines: DISPLAY_CARD_COMMENT_MAX_LINES,
+  },
 };
 
 const MARK_KEYS: DisplayCardMarkKey[] = ['full_time', 'part_time', 'tobe_branch'];
@@ -66,12 +77,20 @@ function clampPercent(value: number, min = 0, max = 100): number {
 function readTextField(
   raw: unknown,
   fallback: DisplayCardTextFieldLayout,
-  extra?: { maxLines?: number; lineHeight?: number; lineTops?: number[]; lineLefts?: number[] }
+  extra?: {
+    maxLines?: number;
+    lineHeight?: number;
+    lineTops?: number[];
+    lineLefts?: number[];
+    lineRights?: number[];
+    maxLinesCap?: number;
+  }
 ): DisplayCardTextFieldLayout & {
   maxLines?: number;
   lineHeight?: number;
   lineTops?: number[];
   lineLefts?: number[];
+  lineRights?: number[];
 } {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const out: DisplayCardTextFieldLayout & {
@@ -79,6 +98,7 @@ function readTextField(
     lineHeight?: number;
     lineTops?: number[];
     lineLefts?: number[];
+    lineRights?: number[];
   } = {
     left: isFiniteNumber(obj.left) ? clampPercent(obj.left) : fallback.left,
     top: isFiniteNumber(obj.top) ? clampPercent(obj.top) : fallback.top,
@@ -89,7 +109,8 @@ function readTextField(
   };
   if (extra?.maxLines !== undefined) {
     const ml = isFiniteNumber(obj.maxLines) ? Math.round(obj.maxLines) : extra.maxLines;
-    out.maxLines = Math.min(12, Math.max(1, ml));
+    const cap = extra.maxLinesCap ?? 12;
+    out.maxLines = Math.min(cap, Math.max(1, ml));
   }
   if (extra?.lineHeight !== undefined) {
     out.lineHeight = isFiniteNumber(obj.lineHeight)
@@ -117,6 +138,17 @@ function readTextField(
     if (lefts.length > 0) out.lineLefts = lefts;
   } else if (extra?.lineLefts) {
     out.lineLefts = extra.lineLefts;
+  }
+  if (Array.isArray(obj.lineRights)) {
+    const rights: number[] = [];
+    for (const entry of obj.lineRights) {
+      if (!isFiniteNumber(entry)) continue;
+      rights.push(clampPercent(entry));
+      if (rights.length >= (out.maxLines ?? extra?.maxLines ?? DISPLAY_CARD_COMMENT_MAX_LINES)) break;
+    }
+    if (rights.length > 0) out.lineRights = rights;
+  } else if (extra?.lineRights) {
+    out.lineRights = extra.lineRights;
   }
   return out;
 }
@@ -164,6 +196,7 @@ export function parseDisplayCardLayout(
   });
   const commentParsed = readTextField(raw.comment, DEFAULT_DISPLAY_CARD_LAYOUT.comment, {
     maxLines: DEFAULT_DISPLAY_CARD_LAYOUT.comment.maxLines,
+    maxLinesCap: DISPLAY_CARD_COMMENT_MAX_LINES,
     lineHeight: DEFAULT_DISPLAY_CARD_LAYOUT.comment.lineHeight,
   });
 
@@ -191,6 +224,7 @@ export function parseDisplayCardLayout(
       maxLines: commentParsed.maxLines ?? DEFAULT_DISPLAY_CARD_LAYOUT.comment.maxLines,
       lineTops: commentParsed.lineTops,
       lineLefts: commentParsed.lineLefts,
+      lineRights: commentParsed.lineRights,
     },
   };
 

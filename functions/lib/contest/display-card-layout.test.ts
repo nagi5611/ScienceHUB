@@ -42,6 +42,16 @@ describe('display-card-layout', () => {
     }
   });
 
+  it('clamps comment max lines to 5', () => {
+    const result = parseDisplayCardLayout({
+      comment: { maxLines: 12 },
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.layout.comment.maxLines, 5);
+    }
+  });
+
   it('clamps comment line lefts', () => {
     const result = parseDisplayCardLayout({
       comment: {
@@ -51,6 +61,18 @@ describe('display-card-layout', () => {
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.deepEqual(result.layout.comment.lineLefts, [22, 100]);
+    }
+  });
+
+  it('clamps comment line rights', () => {
+    const result = parseDisplayCardLayout({
+      comment: {
+        lineRights: [88, 110],
+      },
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.layout.comment.lineRights, [88, 100]);
     }
   });
 });
