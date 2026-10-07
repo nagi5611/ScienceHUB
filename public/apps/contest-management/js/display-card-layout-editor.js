@@ -10,8 +10,7 @@ import {
   commentLineWidthPercent,
   defaultCommentLineTopPercent,
   getCommentLinePlotCount,
-  measureDisplayCardHostWidthPx,
-  renderDisplayCardPreview,
+  renderDisplayCardRasterPreview,
   setDisplayCardLayout,
 } from '../../contest-entry/js/display-card-preview.js';
 import { snapLayoutX, snapLayoutY } from '../../contest-entry/js/display-card-layout-snap.js';
@@ -179,29 +178,25 @@ function buildEditorPreviewState(previewHost, sample) {
   );
 }
 
-function renderEditorPreview(previewHost) {
+async function renderEditorPreview(previewHost) {
   if (!previewHost || !editorLayout) return;
   setDisplayCardLayout(editorLayout);
   const root = previewHost.closest('#panel-display-card-layout');
   const sample = root ? readSampleFromDom(root) : SAMPLE;
-  const paintPreview = () => {
-    const state = buildEditorPreviewState(previewHost, sample);
-    renderDisplayCardPreview(previewHost, state, { layout: editorLayout, editorLinePlots: true });
-    const card = previewHost.querySelector('.contest-display-card');
-    if (card) card.classList.add('contest-display-card--editor');
-    injectEditorHandles(previewHost);
-  };
-  const widthBeforePaint = measureDisplayCardHostWidthPx(previewHost);
-  paintPreview();
-  if (Math.abs(widthBeforePaint - DISPLAY_CARD_WIDTH_PX) < 1) {
-    requestAnimationFrame(() => {
-      paintPreview();
-    });
-  }
+  const state = buildEditorPreviewState(previewHost, sample);
+  await renderDisplayCardRasterPreview(previewHost, state, {
+    layout: editorLayout,
+    editorLinePlots: true,
+  });
+  const card = previewHost.querySelector('.contest-display-card');
+  if (card) card.classList.add('contest-display-card--editor');
+  injectEditorHandles(previewHost);
 }
 
 function injectEditorHandles(host) {
-  const overlay = host.querySelector('.contest-display-card-overlay');
+  const overlay =
+    host.querySelector('.contest-display-card-overlay--editor-tools') ??
+    host.querySelector('.contest-display-card-overlay');
   if (!overlay || !editorLayout) return;
   overlay.querySelectorAll('.display-card-layout-handle').forEach((el) => el.remove());
 
@@ -282,7 +277,9 @@ function injectEditorHandles(host) {
 /** Updates overlay/handle positions during drag without rebuilding preview HTML. */
 function syncLayoutVisualFromEditor(previewHost) {
   if (!previewHost || !editorLayout) return;
-  const overlay = previewHost.querySelector('.contest-display-card-overlay');
+  const overlay =
+    previewHost.querySelector('.contest-display-card-overlay--editor-tools') ??
+    previewHost.querySelector('.contest-display-card-overlay');
   if (!overlay) return;
   const layout = editorLayout;
   const pct = (v) => `${v}%`;
@@ -464,7 +461,9 @@ function ensureLayoutDragBinding(previewHost, getContext) {
       }
       syncLayoutVisualFromEditor(previewHost);
       renderPropsPanel(propsMount);
-      const overlay = previewHost.querySelector('.contest-display-card-overlay');
+      const overlay =
+        previewHost.querySelector('.contest-display-card-overlay--editor-tools') ??
+        previewHost.querySelector('.contest-display-card-overlay');
       const active = overlay?.querySelector(`[data-layout-key="${CSS.escape(key)}"]`);
       if (active instanceof HTMLElement) active.classList.add('is-layout-selected');
     };

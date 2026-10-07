@@ -47,8 +47,41 @@ export const DISPLAY_CARD_WIDTH_PX = 800;
 
 export const DISPLAY_CARD_HEIGHT_PX = 450;
 
-/** html2canvas supersampling on the fitted on-screen preview box (bitmap ≈ visual size × this). */
+/** html2canvas supersampling at design size 800×450 (bitmap = design × this). */
 export const DISPLAY_CARD_CAPTURE_SCALE = 2;
+
+/** @type {WeakMap<HTMLElement, HTMLCanvasElement>} */
+const displayCardHostRasterCanvas = new WeakMap();
+
+/** @type {WeakMap<HTMLElement, string>} */
+const displayCardHostRasterObjectUrls = new WeakMap();
+
+/** @type {number} */
+let displayCardPreviewSyncGeneration = 0;
+
+function cloneDisplayCardCanvas(canvas) {
+  const copy = document.createElement('canvas');
+  copy.width = canvas.width;
+  copy.height = canvas.height;
+  const ctx = copy.getContext('2d');
+  if (!ctx) throw new Error('展示カード画像の複製に失敗しました');
+  ctx.drawImage(canvas, 0, 0);
+  return copy;
+}
+
+function revokeDisplayCardHostRasterObjectUrl(host) {
+  const prev = displayCardHostRasterObjectUrls.get(host);
+  if (prev) {
+    URL.revokeObjectURL(prev);
+    displayCardHostRasterObjectUrls.delete(host);
+  }
+}
+
+/** Returns the latest html2canvas bitmap shown in the preview host (tests / PDF download). */
+export function getDisplayCardRasterCanvas(host) {
+  if (!(host instanceof HTMLElement)) return null;
+  return displayCardHostRasterCanvas.get(host) ?? null;
+}
 
 /** Slight shrink so glyphs stay inside the line box (font metrics vs. 1em estimate). */
 const COMMENT_LINE_FIT_MARGIN = 0.97;
@@ -313,7 +346,107 @@ export function measureDisplayCardVisualCaptureSize(host) {
 }
 
 /**
- * Canonical DOM → bitmap for PDF and parity tests (WYSIWYG: fitted scale-wrap, 2× supersampling).
+ * html2canvas on an in-DOM 800×450 card (--raster fill). Caller must prepare/restore host fit state.
+ * @param {HTMLElement} host
+ * @param {typeof DISPLAY_CARD_LAYOUT} [layout]
+ */
+async function rasterizeDisplayCardHostDom(host, layout = activeDisplayCardLayout) {
+  const card = host.querySelector('.contest-display-card');
+  if (!(card instanceof HTMLElement)) {
+    throw new Error('展示カードの描画に失敗しました');
+  }
+  await waitForDisplayCardPreviewAssets(host, layout);
+  prepareDisplayCardHostForRasterCapture(host);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  const { default: html2canvas } = await import('html2canvas');
+  try {
+    return await html2canvas(card, {
+      scale: DISPLAY_CARD_CAPTURE_SCALE,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: DISPLAY_CARD_WIDTH_PX,
+      height: DISPLAY_CARD_HEIGHT_PX,
+    });
+  } finally {
+    restoreDisplayCardHostAfterRasterCapture(host);
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+  }
+}
+
+/**
+ * Off-screen DOM → bitmap at design size (single source for preview, layout editor, PDF).
+ * @param {object} state
+ * @param {{ layout?: typeof DISPLAY_CARD_LAYOUT; editorLinePlots?: boolean }} [options]
+ */
+export async function rasterizeDisplayCardState(state, options = {}) {
+  const layout = options.layout ?? activeDisplayCardLayout;
+  const mount = mountDisplayCardPreviewCaptureHost(DISPLAY_CARD_WIDTH_PX);
+  try {
+    renderDisplayCardPreview(mount.host, state, { ...options, layout });
+    return await rasterizeDisplayCardHostDom(mount.host, layout);
+  } finally {
+    mount.dispose();
+  }
+}
+
+/**
+ * Replaces preview host contents with the html2canvas bitmap (scaled to fit like before).
+ * @param {HTMLElement} host
+ * @param {object} state
+ * @param {{ layout?: typeof DISPLAY_CARD_LAYOUT; editorLinePlots?: boolean }} [options]
+ */
+export async function renderDisplayCardRasterPreview(host, state, options = {}) {
+  if (!(host instanceof HTMLElement)) return;
+  const layout = options.layout ?? activeDisplayCardLayout;
+  const canvas = await rasterizeDisplayCardState(state, { ...options, layout });
+  displayCardHostRasterCanvas.set(host, canvas);
+
+  revokeDisplayCardHostRasterObjectUrl(host);
+  const objectUrl = await new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('展示カードのプレビュー画像化に失敗しました'));
+        return;
+      }
+      resolve(URL.createObjectURL(blob));
+    }, 'image/png');
+  });
+  displayCardHostRasterObjectUrls.set(host, objectUrl);
+
+  const editorClass = options.editorLinePlots ? ' contest-display-card--editor' : '';
+  const editorOverlay = options.editorLinePlots
+    ? '<div class="contest-display-card-overlay contest-display-card-overlay--editor-tools" aria-hidden="true"></div>'
+    : '';
+
+  host.innerHTML = `
+    <div class="contest-display-card-fit-shell">
+    <div class="contest-display-card-scale-wrap">
+    <div class="contest-display-card contest-display-card--raster-output${editorClass}" data-testid="display-card-root">
+      <img
+        class="contest-display-card-raster"
+        data-testid="display-card-raster"
+        src="${objectUrl}"
+        alt="展示カードプレビュー"
+        width="${DISPLAY_CARD_WIDTH_PX}"
+        height="${DISPLAY_CARD_HEIGHT_PX}"
+        decoding="async"
+      />
+      ${editorOverlay}
+    </div>
+    </div>
+    </div>
+  `;
+
+  fitDisplayCardPreviewToHost(host);
+}
+
+/**
+ * Same bitmap as on-screen raster preview (or re-rasterize legacy DOM host).
  * @param {HTMLElement} host
  * @param {typeof DISPLAY_CARD_LAYOUT} [layout]
  */
@@ -321,39 +454,14 @@ export async function captureDisplayCardForExport(host, layout = activeDisplayCa
   if (!(host instanceof HTMLElement)) {
     throw new Error('展示カードのプレビュー領域が見つかりません');
   }
-  const card = host.querySelector('.contest-display-card');
-  if (!(card instanceof HTMLElement)) {
-    throw new Error('展示カードの描画に失敗しました');
+  const cached = displayCardHostRasterCanvas.get(host);
+  if (cached) {
+    return cloneDisplayCardCanvas(cached);
   }
-
-  await waitForDisplayCardPreviewAssets(host, layout);
-  const scaleWrap = getDisplayCardScaleWrap(host);
-  const captureTarget =
-    scaleWrap instanceof HTMLElement ? scaleWrap : card;
-  const { width: captureWidth, height: captureHeight } =
-    measureDisplayCardVisualCaptureSize(host);
-
-  prepareDisplayCardCaptureAncestors(host);
-  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-  const { default: html2canvas } = await import('html2canvas');
-  try {
-    const canvas = await html2canvas(captureTarget, {
-      scale: DISPLAY_CARD_CAPTURE_SCALE,
-      useCORS: true,
-      allowTaint: false,
-      backgroundColor: '#ffffff',
-      logging: false,
-      width: captureWidth,
-      height: captureHeight,
-    });
-    return canvas;
-  } finally {
-    restoreDisplayCardCaptureAncestors(host);
-    await new Promise((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
-    });
+  if (host.querySelector('.contest-display-card-bg')) {
+    return rasterizeDisplayCardHostDom(host, layout);
   }
+  throw new Error('展示カードのプレビューが未生成です');
 }
 
 /**
@@ -1242,9 +1350,16 @@ export function syncDisplayCardPreviewFromForm(host, form, scheduleType, partici
 
   );
 
-  renderDisplayCardPreview(host, state);
-  fitDisplayCardPreviewToHost(host);
-
+  const generation = ++displayCardPreviewSyncGeneration;
+  void (async () => {
+    try {
+      await renderDisplayCardRasterPreview(host, state);
+      if (generation !== displayCardPreviewSyncGeneration) return;
+      fitDisplayCardPreviewToHost(host);
+    } catch (err) {
+      console.error('展示カードプレビューの更新に失敗しました', err);
+    }
+  })();
 }
 
 let displayCardPreviewResizeHost = null;

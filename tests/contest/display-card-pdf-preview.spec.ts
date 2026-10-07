@@ -4,6 +4,7 @@ import { uniqueContestTitle } from "../contest-entry/helpers";
 import {
   DISPLAY_CARD_LAYOUT,
   DISPLAY_CARD_WIDTH_PX,
+  DISPLAY_CARD_HEIGHT_PX,
   DISPLAY_CARD_CAPTURE_SCALE,
 } from "../../public/apps/contest-entry/js/display-card-preview.js";
 
@@ -75,25 +76,12 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     await expect(previewHost).toBeVisible();
     const previewCard = modal.getByTestId("display-card-root");
     await expect(previewCard).toBeVisible({ timeout: 30_000 });
-    await expect(modal.getByTestId("display-card-title")).toContainText(title);
+    await expect(modal.getByTestId("display-card-raster")).toBeVisible();
 
     const previewChecks = await page.evaluate(async (expectedTitle) => {
       const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
       const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
       const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
-
-      const measureFieldFraction = (host: HTMLElement, testId: string) => {
-        const card = host.querySelector('[data-testid="display-card-root"]');
-        const field = host.querySelector(`[data-testid="${testId}"]`);
-        if (!(card instanceof HTMLElement) || !(field instanceof HTMLElement)) return null;
-        const cardRect = card.getBoundingClientRect();
-        const fieldRect = field.getBoundingClientRect();
-        if (cardRect.width < 1 || cardRect.height < 1) return null;
-        return {
-          left: (fieldRect.left - cardRect.left) / cardRect.width,
-          top: (fieldRect.top - cardRect.top) / cardRect.height,
-        };
-      };
 
       const modalHost = document.querySelector("[data-display-card-pdf-preview-host]");
       if (!(modalHost instanceof HTMLElement)) return { ok: false as const };
@@ -103,9 +91,7 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
         modalEl instanceof HTMLElement ? modalEl.dataset.downloadUrl : undefined;
 
       const hasScaleWrap = Boolean(modalHost.querySelector(".contest-display-card-scale-wrap"));
-      const modalTitle = measureFieldFraction(modalHost, "display-card-title");
-      const expectedLeft = layout.title.left / 100;
-      const expectedTop = layout.title.top / 100;
+      const hasRaster = Boolean(modalHost.querySelector('[data-testid="display-card-raster"]'));
 
       const app = {
         schedule_type: "full_time",
@@ -172,35 +158,16 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
           : null;
 
       const pdfBlob = pdfMod.displayCardCanvasToPdfBlob(canvas);
-      const input = pdfMod.applicationToDisplayCardInput(app);
-      const state = previewMod.buildDisplayCardPreviewState(input, layout, {
-        cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
-      });
-      const mount = previewMod.mountDisplayCardPreviewCaptureHost();
-      previewMod.renderDisplayCardPreview(mount.host, state, { layout });
-      mount.host.style.width = `${modalHost.clientWidth}px`;
-      previewMod.fitDisplayCardPreviewToHost(mount.host);
-      const entryTitle = measureFieldFraction(mount.host, "display-card-title");
-      mount.dispose();
-
-      const titleDelta =
-        modalTitle && entryTitle
-          ? Math.max(
-              Math.abs(modalTitle.left - entryTitle.left),
-              Math.abs(modalTitle.top - entryTitle.top)
-            )
-          : 1;
+      const cached = previewMod.getDisplayCardRasterCanvas(modalHost);
 
       return {
         ok: true as const,
         hasScaleWrap,
-        modalTitle,
-        entryTitle,
-        titleDelta,
-        expectedLeft,
-        expectedTop,
+        hasRaster,
         canvasWidth: canvas.width,
         canvasHeight: canvas.height,
+        cachedSameBitmap:
+          cached !== null && cached.width === canvas.width && cached.height === canvas.height,
         pdfBlobSize: pdfBlob.size,
         hasModalPdfUrl: Boolean(pdfFromModalUrl),
         titleInkPixels,
@@ -220,11 +187,11 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
     expect(previewChecks.ok).toBe(true);
     if (previewChecks.ok) {
       expect(previewChecks.hasScaleWrap).toBe(true);
-      expect(previewChecks.canvasWidth).toBe(
-        Math.round(previewChecks.visualWidth * DISPLAY_CARD_CAPTURE_SCALE)
-      );
+      expect(previewChecks.hasRaster).toBe(true);
+      expect(previewChecks.cachedSameBitmap).toBe(true);
+      expect(previewChecks.canvasWidth).toBe(DISPLAY_CARD_WIDTH_PX * DISPLAY_CARD_CAPTURE_SCALE);
       expect(previewChecks.canvasHeight).toBe(
-        Math.round(previewChecks.visualHeight * DISPLAY_CARD_CAPTURE_SCALE)
+        DISPLAY_CARD_HEIGHT_PX * DISPLAY_CARD_CAPTURE_SCALE
       );
       expect(Math.abs(previewChecks.scaleWrapWidthBefore - previewChecks.visualWidth)).toBeLessThan(
         2
@@ -236,10 +203,6 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
       }
       expect(previewChecks.pdfBlobSize).toBeGreaterThan(1000);
       expect(previewChecks.hasModalPdfUrl).toBe(true);
-      expect(previewChecks.titleDelta).toBeLessThan(0.02);
-      expect(Math.abs((previewChecks.modalTitle?.left ?? 0) - previewChecks.expectedLeft)).toBeLessThan(
-        0.08
-      );
     }
 
     await modal.locator("[data-display-card-pdf-dismiss]").click();

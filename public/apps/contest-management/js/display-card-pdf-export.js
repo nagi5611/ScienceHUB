@@ -3,16 +3,15 @@ import { jsPDF } from 'jspdf';
 import { zipSync } from 'fflate';
 import {
   buildDisplayCardPreviewState,
-  renderDisplayCardPreview,
   fitDisplayCardPreviewToHost,
   bindDisplayCardPreviewHostResize,
   DISPLAY_CARD_WIDTH_PX,
   DISPLAY_CARD_HEIGHT_PX,
   DISPLAY_CARD_LAYOUT,
   DISPLAY_CARD_CAPTURE_SCALE,
-  mountDisplayCardPreviewCaptureHost,
   captureDisplayCardForExport,
-  waitForDisplayCardPreviewAssets,
+  renderDisplayCardRasterPreview,
+  rasterizeDisplayCardState,
 } from '../../contest-entry/js/display-card-preview.js';
 
 const SCHEDULE_FILENAME_LABELS = {
@@ -122,7 +121,7 @@ export function assertDisplayCardCanvasHasOverlayInk(canvas, layout = DISPLAY_CA
 }
 
 /**
- * html2canvas on the fitted `.contest-display-card-scale-wrap` (same pixels as on-screen preview).
+ * Returns the cached html2canvas bitmap from `renderDisplayCardRasterPreview` (800×450 design).
  * @param {HTMLElement} host
  * @param {typeof DISPLAY_CARD_LAYOUT} layout
  */
@@ -143,14 +142,10 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
   const state = buildDisplayCardPreviewState(input, layout, {
     cardWidthPx: DISPLAY_CARD_WIDTH_PX,
   });
-  const mount = mountDisplayCardPreviewCaptureHost(DISPLAY_CARD_WIDTH_PX);
-  try {
-    renderDisplayCardPreview(mount.host, state, { layout });
-    await waitForDisplayCardPreviewAssets(mount.host, layout);
-    return await renderDisplayCardPreviewCanvasFromHost(mount.host, layout);
-  } finally {
-    mount.dispose();
-  }
+  const canvas = await rasterizeDisplayCardState(state, { layout });
+  assertCanvasHasPixels(canvas);
+  assertDisplayCardCanvasHasOverlayInk(canvas, layout);
+  return canvas;
 }
 
 /**
@@ -262,7 +257,7 @@ export function setupDisplayCardPdfPreviewModal() {
 }
 
 /**
- * On-screen preview and PDF both rasterize the same fitted DOM in the modal host.
+ * On-screen preview and PDF share the same html2canvas bitmap (800×450 design).
  * @param {{
  *   filename: string;
  *   title?: string;
@@ -290,11 +285,8 @@ export async function openDisplayCardPdfPreviewModal(opts) {
     throw new Error('展示カードのプレビュー領域が見つかりません');
   }
 
-  renderDisplayCardPreview(host, opts.previewState, { layout: opts.layout });
-  fitDisplayCardPreviewToHost(host);
   bindDisplayCardPreviewHostResize(host, () => fitDisplayCardPreviewToHost(host));
-  await waitForDisplayCardPreviewAssets(host, opts.layout);
-  fitDisplayCardPreviewToHost(host);
+  await renderDisplayCardRasterPreview(host, opts.previewState, { layout: opts.layout });
 
   modal.classList.add('open');
   await new Promise((resolve) => requestAnimationFrame(() => resolve()));

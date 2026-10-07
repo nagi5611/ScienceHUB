@@ -641,6 +641,29 @@
   object-fit: fill;
 }
 
+.contest-display-card-raster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+.contest-display-card--raster-output {
+  background: #fff;
+}
+
+.contest-display-card-overlay--editor-tools {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.contest-display-card-overlay--editor-tools .display-card-layout-handle {
+  pointer-events: auto;
+}
+
 .contest-display-card-overlay {
   position: absolute;
   inset: 0;

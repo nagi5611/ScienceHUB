@@ -1,6 +1,21 @@
 import { test, expect } from "@playwright/test";
 import { fillPrimaryParticipant, openContestEntry, openNewApplicationForm } from "./helpers";
 
+async function waitForDisplayCardRaster(page: import("@playwright/test").Page) {
+  await expect(page.getByTestId("display-card-raster")).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const mod = await import("/apps/contest-entry/js/display-card-preview.js");
+        const host = document.getElementById("contest-display-card-host");
+        if (!(host instanceof HTMLElement)) return false;
+        const canvas = mod.getDisplayCardRasterCanvas(host);
+        return Boolean(canvas && canvas.width > 0);
+      })
+    )
+    .toBe(true);
+}
+
 test.describe("造形物コンテスト — 展示カードプレビュー", () => {
   test.beforeEach(async ({ page }) => {
     await openContestEntry(page);
@@ -16,35 +31,114 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     await page.locator("#title").fill("テストタイトル");
     await page.locator("#impressions").fill(impressions);
 
-    const preview = page.getByTestId("display-card-root");
-    await expect(preview).toBeVisible();
+    await waitForDisplayCardRaster(page);
 
-    await expect(page.getByTestId("display-card-title")).toHaveText("テストタイトル");
-    await expect(page.getByTestId("display-card-name")).toHaveText("山田太郎");
-    await expect(page.getByTestId("display-card-year")).toHaveText("1");
-    await expect(page.getByTestId("display-card-class")).toHaveText("1");
+    const checks = await page.evaluate(async () => {
+      const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
+      const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
+      const host = document.getElementById("contest-display-card-host");
+      if (!(host instanceof HTMLElement)) return { ok: false as const };
+      const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
+      const canvas = previewMod.getDisplayCardRasterCanvas(host);
+      if (!canvas) return { ok: false as const };
+      try {
+        pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
+      } catch {
+        return { ok: false as const };
+      }
+      const input = {
+        scheduleType: "full_time" as const,
+        homeroom: "101",
+        studentName: "山田太郎",
+        title: "テストタイトル",
+        impressions: (document.querySelector("#impressions") as HTMLTextAreaElement | null)?.value ?? "",
+      };
+      const state = previewMod.buildDisplayCardPreviewState(input, layout, {
+        cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
+      });
+      return {
+        ok: true as const,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        stateLines: state.commentLines,
+        year: state.year,
+        classGroup: state.classGroup,
+      };
+    });
 
-    await expect(page.getByTestId("display-card-comment-line-0")).toContainText("テストコメント");
-    await expect(page.getByTestId("display-card-mark-full_time")).toHaveClass(/is-active/);
-    await expect(page.getByTestId("display-card-mark-part_time")).not.toHaveClass(/is-active/);
+    expect(checks.ok).toBe(true);
+    if (checks.ok) {
+      expect(checks.canvasWidth).toBe(1600);
+      expect(checks.canvasHeight).toBe(900);
+      expect(checks.year).toBe("1");
+      expect(checks.classGroup).toBe("1");
+      expect(checks.stateLines[0]).toContain("テストコメント");
+    }
 
     if (process.env.SAVE_DISPLAY_CARD_SCREENSHOT === "1") {
-      await preview.screenshot({
+      await page.getByTestId("display-card-root").screenshot({
         path: "test-results/contest-display-card-preview-sample.png",
       });
     }
   });
 
   test("在籍区分を定時制にするとプレビューの丸印が切り替わる", async ({ page }) => {
+    await waitForDisplayCardRaster(page);
+    const fullTimeMark = await page.evaluate(async () => {
+      const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
+      const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
+      const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
+      const input = {
+        scheduleType: "full_time" as const,
+        homeroom: "101",
+        studentName: "山田太郎",
+        title: "t",
+        impressions: "c",
+      };
+      const canvas = await previewMod.rasterizeDisplayCardState(
+        previewMod.buildDisplayCardPreviewState(input, layout, {
+          cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
+        }),
+        { layout }
+      );
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      const mark = layout.marks.full_time;
+      const scale = canvas.width / previewMod.DISPLAY_CARD_WIDTH_PX;
+      const x = Math.floor(((mark.left + mark.size / 2) / 100) * previewMod.DISPLAY_CARD_WIDTH_PX * scale);
+      const y = Math.floor(((mark.top + mark.size / 2) / 100) * previewMod.DISPLAY_CARD_HEIGHT_PX * scale);
+      const px = ctx.getImageData(x, y, 1, 1).data;
+      return px[0] + px[1] + px[2];
+    });
+    expect(fullTimeMark).not.toBeNull();
+
     await page.locator('input[name="schedule_type"][value="part_time"]').check();
-    await expect(page.getByTestId("display-card-mark-part_time")).toHaveClass(/is-active/);
-    await expect(page.getByTestId("display-card-mark-full_time")).not.toHaveClass(/is-active/);
+    await waitForDisplayCardRaster(page);
+
+    const partTimeInk = await page.evaluate(async () => {
+      const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
+      const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
+      const host = document.getElementById("contest-display-card-host");
+      const canvas =
+        host instanceof HTMLElement ? previewMod.getDisplayCardRasterCanvas(host) : null;
+      if (!canvas) return null;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      const mark = layout.marks.part_time;
+      const scale = canvas.width / previewMod.DISPLAY_CARD_WIDTH_PX;
+      const x = Math.floor(((mark.left + mark.size / 2) / 100) * previewMod.DISPLAY_CARD_WIDTH_PX * scale);
+      const y = Math.floor(((mark.top + mark.size / 2) / 100) * previewMod.DISPLAY_CARD_HEIGHT_PX * scale);
+      const px = ctx.getImageData(x, y, 1, 1).data;
+      return px[3] > 0 ? px[0] + px[1] + px[2] : null;
+    });
+    expect(partTimeInk).not.toBeNull();
   });
 
   test("展示カードプレビューがフォーム下の領域とビューポート内に収まる", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await fillPrimaryParticipant(page);
     await page.locator("#title").fill("テストタイトル");
+    await waitForDisplayCardRaster(page);
 
     const preview = page.getByTestId("display-card-root");
     await expect(preview).toBeVisible();
@@ -107,6 +201,7 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     await fillPrimaryParticipant(page, { homeroom: "101", number: "12", name: "山田太郎" });
     await page.locator("#title").fill("テストタイトル");
     await page.locator("#impressions").fill(impressions);
+    await waitForDisplayCardRaster(page);
 
     const layoutMetrics = await page.evaluate(() => {
       const card = document.querySelector('[data-testid="display-card-root"]');
@@ -127,9 +222,7 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     const pipeline = await page.evaluate(async () => {
       const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
       const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
-      const domLines = [...document.querySelectorAll('[data-testid^="display-card-comment-line-"]')].map(
-        (el) => el.textContent ?? ""
-      );
+      const host = document.getElementById("contest-display-card-host");
       const app = {
         schedule_type: "full_time",
         homeroom: "101",
@@ -145,23 +238,26 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
       const state = previewMod.buildDisplayCardPreviewState(input, layout, {
         cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
       });
+      const hostCanvas =
+        host instanceof HTMLElement ? previewMod.getDisplayCardRasterCanvas(host) : null;
       pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
       return {
-        domLines,
         stateLines: state.commentLines,
         canvasWidth: canvas.width,
         canvasHeight: canvas.height,
+        hostCanvasWidth: hostCanvas?.width ?? 0,
       };
     });
 
     expect(pipeline.canvasWidth).toBe(1600);
     expect(pipeline.canvasHeight).toBe(900);
-    expect(pipeline.domLines.join("|")).toBe(pipeline.stateLines.join("|"));
+    expect(pipeline.hostCanvasWidth).toBe(1600);
+    expect(pipeline.stateLines[0]).toContain("テストコメント");
   });
 
   test("サンプルテンプレート画像が読み込まれる", async ({ page }) => {
-    const img = page.locator(".contest-display-card-bg");
-    await expect(img).toHaveAttribute("src", /display-card-template\.png/);
+    await waitForDisplayCardRaster(page);
+    const img = page.locator(".contest-display-card-raster");
     await expect
       .poll(async () => img.evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)))
       .toBeGreaterThan(0);

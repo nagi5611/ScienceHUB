@@ -16,6 +16,7 @@ import { setPrintFlowOverlay } from './print-flow-overlay.js';
 import { initContestPublicGallery } from './gallery.js';
 import {
   bindDisplayCardPreviewHostResize,
+  fitDisplayCardPreviewToHost,
   setDisplayCardLayout,
   syncDisplayCardPreviewFromForm,
 } from './display-card-preview.js';
@@ -1529,10 +1530,9 @@ async function init() {
     }
   }
   updateScheduleTypeUi();
-  bindDisplayCardPreviewHostResize(
-    document.getElementById('contest-display-card-host'),
-    refreshDisplayCardPreview
-  );
+  bindDisplayCardPreviewHostResize(document.getElementById('contest-display-card-host'), () => {
+    fitDisplayCardPreviewToHost(document.getElementById('contest-display-card-host'));
+  });
   refreshDisplayCardPreview();
 
   try {
