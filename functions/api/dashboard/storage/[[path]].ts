@@ -9,16 +9,26 @@ import { getDb } from "../../../lib/db";
 import { requireUser } from "../../../lib/auth";
 import { getStorageOverviewRowForDashboard } from "../../../lib/storage/overview";
 
-function parseRootPath(path: string | undefined): {
+function pathSegments(path: string | string[] | undefined): string[] {
+  if (!path) return [];
+  const raw = Array.isArray(path) ? path : [path];
+  return raw
+    .flatMap((p) => String(p).split("/"))
+    .filter(Boolean);
+}
+
+function parseRootPath(path: string | string[] | undefined): {
   type: "user" | "group";
   key: string;
 } | null {
-  if (!path) return null;
-  const segments = path.split("/").filter(Boolean);
+  const segments = pathSegments(path);
   if (segments.length < 2) return null;
   const type = segments[0];
   if (type !== "user" && type !== "group") return null;
-  const key = decodeURIComponent(segments.slice(1).join("/"));
+  const key = segments
+    .slice(1)
+    .map((part) => decodeURIComponent(part))
+    .join("/");
   if (!key) return null;
   return { type, key };
 }
@@ -27,7 +37,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireUser(context.request, context.env);
   if (auth instanceof Response) return auth;
 
-  const parsed = parseRootPath(context.params.path as string | undefined);
+  const parsed = parseRootPath(context.params.path);
   if (!parsed) {
     return jsonError("ストレージルートの指定が不正です", 400);
   }
