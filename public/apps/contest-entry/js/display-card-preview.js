@@ -80,6 +80,12 @@ function getDisplayCardFitShell(host) {
   return shell instanceof HTMLElement ? shell : null;
 }
 
+/** @param {HTMLElement} host */
+function getDisplayCardScaleWrap(host) {
+  const wrap = host.querySelector('.contest-display-card-scale-wrap');
+  return wrap instanceof HTMLElement ? wrap : null;
+}
+
 /** Clears inline fit styles applied by fitDisplayCardPreviewToHost. */
 function resetDisplayCardPreviewFit(host) {
   const shell = getDisplayCardFitShell(host);
@@ -88,6 +94,13 @@ function resetDisplayCardPreviewFit(host) {
     shell.style.height = '';
     shell.style.maxWidth = '';
     shell.style.overflow = '';
+  }
+  const scaleWrap = getDisplayCardScaleWrap(host);
+  if (scaleWrap) {
+    scaleWrap.style.width = '';
+    scaleWrap.style.height = '';
+    scaleWrap.style.maxWidth = '';
+    scaleWrap.style.overflow = '';
   }
   const card = host.querySelector('.contest-display-card');
   if (!(card instanceof HTMLElement)) return;
@@ -120,6 +133,7 @@ export function fitDisplayCardPreviewToHost(host) {
   if (!Number.isFinite(available) || available < 40) return;
 
   const scale = Math.min(1, available / DISPLAY_CARD_WIDTH_PX);
+  const fittedWidth = DISPLAY_CARD_WIDTH_PX * scale;
   const fittedHeight = DISPLAY_CARD_HEIGHT_PX * scale;
   card.classList.add('contest-display-card--fitted');
   card.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
@@ -128,11 +142,18 @@ export function fitDisplayCardPreviewToHost(host) {
   card.style.maxWidth = 'none';
   card.style.transform = scale < 1 ? `scale(${scale})` : 'none';
   card.style.transformOrigin = 'top left';
+  const scaleWrap = getDisplayCardScaleWrap(host);
+  if (scaleWrap) {
+    scaleWrap.style.width = `${fittedWidth}px`;
+    scaleWrap.style.maxWidth = '100%';
+    scaleWrap.style.height = `${fittedHeight}px`;
+    scaleWrap.style.overflow = 'hidden';
+  }
   if (shell) {
     shell.style.width = '100%';
     shell.style.maxWidth = '100%';
     shell.style.height = `${fittedHeight}px`;
-    shell.style.overflow = 'hidden';
+    shell.style.overflow = 'visible';
     host.style.height = '';
     host.style.overflow = '';
   } else {
@@ -153,7 +174,8 @@ export function mountDisplayCardPreviewCaptureHost(layoutWidth = DISPLAY_CARD_WI
   const container = document.createElement('div');
   container.setAttribute('aria-hidden', 'true');
   container.dataset.displayCardCapture = 'true';
-  container.style.cssText = `position:fixed;left:0;top:0;width:${layoutWidth}px;visibility:hidden;pointer-events:none;z-index:-1;overflow:hidden;`;
+  // Off-screen but painted — visibility:hidden breaks html2canvas text overlay capture.
+  container.style.cssText = `position:fixed;left:0;top:0;width:${layoutWidth}px;height:${DISPLAY_CARD_HEIGHT_PX}px;transform:translateX(-120vw);pointer-events:none;z-index:-1;overflow:visible;opacity:1;visibility:visible;`;
   const host = document.createElement('div');
   host.className = 'contest-display-card-host';
   host.style.width = `${layoutWidth}px`;
@@ -940,6 +962,8 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
     <div class="contest-display-card-fit-shell">
 
+    <div class="contest-display-card-scale-wrap">
+
     <div class="contest-display-card" data-testid="display-card-root">
 
       <img
@@ -989,6 +1013,8 @@ export function renderDisplayCardPreview(host, state, options = {}) {
         ${commentBlockHtml}
 
       </div>
+
+    </div>
 
     </div>
 

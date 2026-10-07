@@ -85,6 +85,37 @@ function assertCanvasHasPixels(canvas) {
   }
 }
 
+/** Ensures overlay text (title band) was rasterized, not just the template image. */
+export function assertDisplayCardCanvasHasOverlayInk(canvas, layout = DISPLAY_CARD_LAYOUT) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('展示カード画像の生成に失敗しました');
+  const scale = canvas.width / DISPLAY_CARD_WIDTH_PX;
+  const left = Math.floor((layout.title.left / 100) * DISPLAY_CARD_WIDTH_PX * scale);
+  const top = Math.floor((layout.title.top / 100) * DISPLAY_CARD_HEIGHT_PX * scale);
+  const width = Math.max(
+    8,
+    Math.floor((layout.title.width / 100) * DISPLAY_CARD_WIDTH_PX * scale)
+  );
+  const height = Math.max(8, Math.ceil(layout.title.fontSize * scale * 1.4));
+  const region = ctx.getImageData(
+    Math.min(left, canvas.width - 1),
+    Math.min(top, canvas.height - 1),
+    Math.min(width, canvas.width - left),
+    Math.min(height, canvas.height - top)
+  );
+  let darkPixels = 0;
+  for (let i = 0; i < region.data.length; i += 4) {
+    const alpha = region.data[i + 3];
+    const lum = region.data[i] + region.data[i + 1] + region.data[i + 2];
+    if (alpha > 16 && lum < 720) darkPixels += 1;
+  }
+  if (darkPixels < 8) {
+    throw new Error(
+      '展示カードの文字がキャプチャされていません。ページを再読み込みして再度お試しください。'
+    );
+  }
+}
+
 /**
  * Renders the same DOM as the entry preview, then captures it as a canvas bitmap.
  * @param {object} app
@@ -118,6 +149,7 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
       windowHeight: DISPLAY_CARD_HEIGHT_PX,
     });
     assertCanvasHasPixels(canvas);
+    assertDisplayCardCanvasHasOverlayInk(canvas, layout);
     return canvas;
   } finally {
     mount.dispose();

@@ -69,6 +69,29 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     expect(bounds.cardLeft).toBeGreaterThanOrEqual(bounds.asideLeft - 1);
     expect(bounds.cardRight).toBeLessThanOrEqual(bounds.asideRight + 1);
     expect(bounds.cardRight).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+
+    const scaleWrap = await page.evaluate(() => {
+      const wrap = document.querySelector(".contest-display-card-scale-wrap");
+      const card = document.querySelector('[data-testid="display-card-root"]');
+      const aside = document.querySelector(".contest-display-card-preview-aside");
+      if (!(wrap instanceof HTMLElement) || !(card instanceof HTMLElement) || !aside) return null;
+      const wrapRect = wrap.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const asideRect = aside.getBoundingClientRect();
+      return {
+        wrapLeft: wrapRect.left,
+        wrapRight: wrapRect.right,
+        cardVisualRight: cardRect.right,
+        asideLeft: asideRect.left,
+        asideRight: asideRect.right,
+      };
+    });
+    expect(scaleWrap).not.toBeNull();
+    if (scaleWrap) {
+      expect(scaleWrap.wrapLeft).toBeGreaterThanOrEqual(scaleWrap.asideLeft - 1);
+      expect(scaleWrap.wrapRight).toBeLessThanOrEqual(scaleWrap.asideRight + 1);
+      expect(scaleWrap.cardVisualRight).toBeLessThanOrEqual(scaleWrap.wrapRight + 1);
+    }
   });
 
   test("展示カードは 800×450 でレイアウトされ PDF キャプチャと同じコメント行になる", async ({
@@ -117,6 +140,7 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
       const state = previewMod.buildDisplayCardPreviewState(input, layout, {
         cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
       });
+      pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
       return {
         domLines,
         stateLines: state.commentLines,

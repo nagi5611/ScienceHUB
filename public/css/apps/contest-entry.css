@@ -630,6 +630,8 @@
 }
 
 .contest-display-card-preview-aside {
+  position: relative;
+  z-index: 2;
   border: 1px solid var(--border, #e5e7eb);
   padding: 0.75rem 0.85rem 1rem;
   background: var(--surface-muted, #fafafa);
@@ -659,6 +661,12 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+.contest-display-card-scale-wrap {
+  position: relative;
+  margin-inline: auto;
+  max-width: 100%;
 }
 
 .contest-display-card {

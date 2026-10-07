@@ -70,6 +70,28 @@ test.describe("contest-management — 展示カード PDF プレビュー", () =
       .poll(async () => img.getAttribute("src"), { timeout: 30_000 })
       .toMatch(/^data:image\/png/);
 
+    const previewHasInk = await page.evaluate(async (expectedTitle) => {
+      const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
+      const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
+      const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
+      const img = document.querySelector("[data-display-card-pdf-preview-img]");
+      if (!(img instanceof HTMLImageElement) || !img.src.startsWith("data:image/png")) return false;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      ctx.drawImage(img, 0, 0);
+      try {
+        pdfMod.assertDisplayCardCanvasHasOverlayInk(canvas, layout);
+      } catch {
+        return false;
+      }
+      return (img.alt?.length ?? 0) >= 0 && expectedTitle.length > 0;
+    }, title);
+    expect(previewHasInk).toBe(true);
+
     await modal.locator("[data-display-card-pdf-dismiss]").click();
     await expect(modal).not.toHaveClass(/open/);
   });
