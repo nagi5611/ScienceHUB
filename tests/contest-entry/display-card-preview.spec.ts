@@ -71,6 +71,65 @@ test.describe("造形物コンテスト — 展示カードプレビュー", () 
     expect(bounds.cardRight).toBeLessThanOrEqual(bounds.viewportWidth + 1);
   });
 
+  test("展示カードは 800×450 でレイアウトされ PDF キャプチャと同じコメント行になる", async ({
+    page,
+  }) => {
+    const impressions =
+      "テストコメント。造形にこだわって作りました。細部まで丁寧に仕上げています。ぜひご覧ください。";
+    await fillPrimaryParticipant(page, { homeroom: "101", number: "12", name: "山田太郎" });
+    await page.locator("#title").fill("テストタイトル");
+    await page.locator("#impressions").fill(impressions);
+
+    const layoutMetrics = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="display-card-root"]');
+      if (!(card instanceof HTMLElement)) return null;
+      return {
+        offsetWidth: card.offsetWidth,
+        offsetHeight: card.offsetHeight,
+        transform: getComputedStyle(card).transform,
+        hostWidth: document.getElementById("contest-display-card-host")?.clientWidth ?? 0,
+      };
+    });
+    expect(layoutMetrics?.offsetWidth).toBe(800);
+    expect(layoutMetrics?.offsetHeight).toBe(450);
+    if ((layoutMetrics?.hostWidth ?? 0) < 800) {
+      expect(layoutMetrics?.transform).not.toBe("none");
+    }
+
+    const pipeline = await page.evaluate(async () => {
+      const previewMod = await import("/apps/contest-entry/js/display-card-preview.js");
+      const pdfMod = await import("/apps/contest-management/js/display-card-pdf-export.js");
+      const domLines = [...document.querySelectorAll('[data-testid^="display-card-comment-line-"]')].map(
+        (el) => el.textContent ?? ""
+      );
+      const app = {
+        schedule_type: "full_time",
+        homeroom: "101",
+        student_number: 12,
+        student_name: "山田太郎",
+        title: "テストタイトル",
+        impressions: (document.querySelector("#impressions") as HTMLTextAreaElement | null)?.value ?? "",
+        members: [{ homeroom: "101", member_name: "山田太郎" }],
+      };
+      const layout = previewMod.getDisplayCardLayout?.() ?? previewMod.DISPLAY_CARD_LAYOUT;
+      const canvas = await pdfMod.renderDisplayCardPreviewCanvas(app, layout);
+      const input = pdfMod.applicationToDisplayCardInput(app);
+      const state = previewMod.buildDisplayCardPreviewState(input, layout, {
+        cardWidthPx: previewMod.DISPLAY_CARD_WIDTH_PX,
+      });
+      return {
+        domLines,
+        stateLines: state.commentLines,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+      };
+    });
+
+    expect(pipeline.canvasWidth).toBe(1600);
+    expect(pipeline.canvasHeight).toBe(900);
+    expect(pipeline.domLines.join("|")).toBe(pipeline.stateLines.join("|"));
+  });
+
   test("サンプルテンプレート画像が読み込まれる", async ({ page }) => {
     const img = page.locator(".contest-display-card-bg");
     await expect(img).toHaveAttribute("src", /display-card-template\.png/);

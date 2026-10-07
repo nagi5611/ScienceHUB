@@ -175,6 +175,100 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+const DISPLAY_CARD_PDF_MODAL_ID = 'contest-display-card-pdf-modal';
+
+/** @type {string[]} */
+let displayCardPdfPreviewObjectUrls = [];
+
+function revokeDisplayCardPdfPreviewObjectUrls() {
+  for (const url of displayCardPdfPreviewObjectUrls) {
+    URL.revokeObjectURL(url);
+  }
+  displayCardPdfPreviewObjectUrls = [];
+}
+
+/** Wires close/download handlers for the display card PDF preview modal (once). */
+export function setupDisplayCardPdfPreviewModal() {
+  const modal = document.getElementById(DISPLAY_CARD_PDF_MODAL_ID);
+  if (!(modal instanceof HTMLElement) || modal.dataset.bound === 'true') return;
+  modal.dataset.bound = 'true';
+
+  const closeModal = () => {
+    modal.classList.remove('open');
+    revokeDisplayCardPdfPreviewObjectUrls();
+    const img = modal.querySelector('[data-display-card-pdf-preview-img]');
+    if (img instanceof HTMLImageElement) {
+      img.removeAttribute('src');
+    }
+    delete modal.dataset.downloadUrl;
+    delete modal.dataset.downloadFilename;
+  };
+
+  modal.querySelector('.modal-close')?.addEventListener('click', closeModal);
+  modal.querySelector('[data-display-card-pdf-dismiss]')?.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  modal.querySelector('[data-display-card-pdf-download]')?.addEventListener('click', () => {
+    const url = modal.dataset.downloadUrl;
+    const filename = modal.dataset.downloadFilename;
+    if (!url || !filename) return;
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  });
+}
+
+/**
+ * Shows the raster used for PDF export (same canvas → PNG preview + PDF download).
+ * @param {{ canvas: HTMLCanvasElement; pdfBlob: Blob; filename: string; title?: string }} opts
+ */
+export function openDisplayCardPdfPreviewModal(opts) {
+  setupDisplayCardPdfPreviewModal();
+  const modal = document.getElementById(DISPLAY_CARD_PDF_MODAL_ID);
+  if (!(modal instanceof HTMLElement)) {
+    throw new Error('展示カードPDFプレビュー用のモーダルが見つかりません');
+  }
+
+  revokeDisplayCardPdfPreviewObjectUrls();
+
+  const titleEl = modal.querySelector('[data-display-card-pdf-title]');
+  if (titleEl) {
+    titleEl.textContent = opts.title?.trim() || '展示カード PDF';
+  }
+
+  const img = modal.querySelector('[data-display-card-pdf-preview-img]');
+  if (img instanceof HTMLImageElement) {
+    img.src = opts.canvas.toDataURL('image/png');
+    img.width = DISPLAY_CARD_WIDTH_PX;
+    img.height = DISPLAY_CARD_HEIGHT_PX;
+    img.alt = '展示カードプレビュー';
+  }
+
+  const pdfUrl = URL.createObjectURL(opts.pdfBlob);
+  displayCardPdfPreviewObjectUrls.push(pdfUrl);
+  modal.dataset.downloadUrl = pdfUrl;
+  modal.dataset.downloadFilename = opts.filename;
+
+  modal.classList.add('open');
+}
+
+/** Renders preview + opens modal (PNG preview matches PDF bitmap). */
+export async function previewDisplayCardPdfForApplication(app, layout) {
+  const canvas = await renderDisplayCardPreviewCanvas(app, layout);
+  const pdfBlob = displayCardCanvasToPdfBlob(canvas);
+  openDisplayCardPdfPreviewModal({
+    canvas,
+    pdfBlob,
+    filename: buildDisplayCardPdfFilename(app),
+    title: (app.title ?? '').trim() || '展示カード',
+  });
+}
+
 /** @param {object} app @param {typeof DISPLAY_CARD_LAYOUT} layout */
 export async function downloadDisplayCardPdfForApplication(app, layout) {
   const blob = await renderDisplayCardPdfBlob(app, layout);

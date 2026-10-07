@@ -119,19 +119,14 @@ export function fitDisplayCardPreviewToHost(host) {
   const available = host.clientWidth;
   if (!Number.isFinite(available) || available < 40) return;
 
-  if (available >= DISPLAY_CARD_WIDTH_PX - 1) {
-    resetDisplayCardPreviewFit(host);
-    return;
-  }
-
-  const scale = available / DISPLAY_CARD_WIDTH_PX;
+  const scale = Math.min(1, available / DISPLAY_CARD_WIDTH_PX);
   const fittedHeight = DISPLAY_CARD_HEIGHT_PX * scale;
   card.classList.add('contest-display-card--fitted');
   card.style.width = `${DISPLAY_CARD_WIDTH_PX}px`;
   card.style.height = `${DISPLAY_CARD_HEIGHT_PX}px`;
   card.style.aspectRatio = 'auto';
   card.style.maxWidth = 'none';
-  card.style.transform = `scale(${scale})`;
+  card.style.transform = scale < 1 ? `scale(${scale})` : 'none';
   card.style.transformOrigin = 'top left';
   if (shell) {
     shell.style.width = '100%';
@@ -158,7 +153,7 @@ export function mountDisplayCardPreviewCaptureHost(layoutWidth = DISPLAY_CARD_WI
   const container = document.createElement('div');
   container.setAttribute('aria-hidden', 'true');
   container.dataset.displayCardCapture = 'true';
-  container.style.cssText = `position:fixed;left:-12000px;top:0;width:${layoutWidth}px;pointer-events:none;`;
+  container.style.cssText = `position:fixed;left:0;top:0;width:${layoutWidth}px;visibility:hidden;pointer-events:none;z-index:-1;overflow:hidden;`;
   const host = document.createElement('div');
   host.className = 'contest-display-card-host';
   host.style.width = `${layoutWidth}px`;
@@ -215,7 +210,12 @@ export async function waitForDisplayCardPreviewAssets(host, layout = activeDispl
   for (const size of fontSizes) {
     await document.fonts.load(`${size}px "BIZ UDPGothic"`).catch(() => {});
   }
-  await document.fonts.ready;
+  await Promise.race([
+    document.fonts.ready,
+    new Promise((resolve) => {
+      setTimeout(resolve, 5000);
+    }),
+  ]);
   await new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   });
@@ -1038,8 +1038,6 @@ export function syncDisplayCardPreviewFromForm(host, form, scheduleType, partici
 
   const impressionsInput = form.querySelector('#impressions');
 
-  const cardWidthPx = measureDisplayCardHostWidthPx(host);
-
   const state = buildDisplayCardPreviewState(
 
     {
@@ -1060,7 +1058,7 @@ export function syncDisplayCardPreviewFromForm(host, form, scheduleType, partici
 
     undefined,
 
-    { cardWidthPx }
+    { cardWidthPx: DISPLAY_CARD_WIDTH_PX }
 
   );
 

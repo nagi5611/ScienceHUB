@@ -166,7 +166,6 @@ function readSampleFromDom(root) {
 }
 
 function buildEditorPreviewState(previewHost, sample) {
-  const cardWidthPx = measureDisplayCardHostWidthPx(previewHost);
   return buildDisplayCardPreviewState(
     {
       scheduleType: sample.scheduleType,
@@ -176,7 +175,7 @@ function buildEditorPreviewState(previewHost, sample) {
       impressions: sample.impressions,
     },
     editorLayout,
-    { cardWidthPx }
+    { cardWidthPx: DISPLAY_CARD_WIDTH_PX }
   );
 }
 
