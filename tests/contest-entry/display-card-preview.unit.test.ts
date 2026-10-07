@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildDisplayCardPreviewState,
+  commentLineCharsCapacity,
   parseHomeroomForDisplayCard,
   wrapDisplayCardComment,
 } from "../../public/apps/contest-entry/js/display-card-preview.js";
@@ -27,6 +28,25 @@ describe("display-card-preview", () => {
     const lines = wrapDisplayCardComment(long, 6);
     assert.ok(lines.length >= 1 && lines.length <= 6);
     assert.ok(lines.join("").includes("テストコメント"));
+  });
+
+  it("overflow moves to next line plot by lineRights width", () => {
+    const layout = {
+      left: 22,
+      top: 37,
+      width: 74,
+      fontSize: 13,
+      lineHeight: 1.52,
+      maxLines: 3,
+      lineLefts: [22, 22],
+      lineRights: [40, 96],
+    };
+    const cap0 = commentLineCharsCapacity(layout, 0);
+    const text = "あ".repeat(cap0 + 5);
+    const lines = wrapDisplayCardComment(text, 3, layout);
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0].length, cap0);
+    assert.equal(lines[1].length, 5);
   });
 
   it("buildDisplayCardPreviewState maps form fields", () => {

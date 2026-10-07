@@ -40,7 +40,32 @@ export const DISPLAY_CARD_LAYOUT = {
 
 };
 
-export const DISPLAY_CARD_COMMENT_MAX_LINES = 6;
+/** Upper bound for comment.maxLines (editable in layout admin). */
+export const DISPLAY_CARD_COMMENT_LINES_CAP = 12;
+
+export const DISPLAY_CARD_WIDTH_PX = 800;
+
+
+
+/** Comment line plot count from layout (＋ / ┃ handle count in admin editor). */
+
+export function getCommentLinePlotCount(commentLayout) {
+
+  const cap = DISPLAY_CARD_COMMENT_LINES_CAP;
+
+  const fallback = DISPLAY_CARD_LAYOUT.comment.maxLines;
+
+  const n = Number(commentLayout?.maxLines);
+
+  if (!Number.isFinite(n)) {
+
+    return Math.min(cap, Math.max(1, Math.round(fallback)));
+
+  }
+
+  return Math.min(cap, Math.max(1, Math.round(n)));
+
+}
 
 
 
@@ -224,17 +249,85 @@ export function commentLineWidthPercent(commentLayout, lineIndex) {
 
 /**
 
- * Wraps text into lines for the comment ruled area.
+ * Approximate character capacity for a comment line slot (overflow moves to the next plot).
+
+ * @param {typeof DISPLAY_CARD_LAYOUT.comment} commentLayout
+
+ * @param {number} lineIndex
+
+ * @param {number} [cardWidthPx]
+
+ */
+
+export function commentLineCharsCapacity(commentLayout, lineIndex, cardWidthPx = DISPLAY_CARD_WIDTH_PX) {
+
+  const widthPct = commentLineWidthPercent(commentLayout, lineIndex);
+
+  const widthPx = (widthPct / 100) * cardWidthPx;
+
+  const fontPx = commentLayout.fontSize ?? 13;
+
+  return Math.max(1, Math.floor(widthPx / (fontPx * 0.52)));
+
+}
+
+
+
+/**
+
+ * Splits one chunk at capacity; remainder is kept for the next line plot (no in-line wrap).
+
+ * @param {string} rest
+
+ * @param {number} cap
+
+ * @param {boolean} softBreak
+
+ */
+
+function splitCommentChunkAtCapacity(rest, cap, softBreak) {
+
+  if (rest.length <= cap) {
+
+    return { line: rest, rest: '' };
+
+  }
+
+  let breakAt = cap;
+
+  if (softBreak) {
+
+    const slice = rest.slice(0, cap + 1);
+
+    const lastSpace = slice.lastIndexOf(' ');
+
+    const lastPunct = Math.max(slice.lastIndexOf('、'), slice.lastIndexOf('。'));
+
+    if (lastPunct > cap * 0.4) breakAt = lastPunct + 1;
+
+    else if (lastSpace > cap * 0.35) breakAt = lastSpace + 1;
+
+  }
+
+  return { line: rest.slice(0, breakAt), rest: rest.slice(breakAt) };
+
+}
+
+
+
+/**
+
+ * Distributes comment text across line plots (right edge sets capacity; overflow goes to the next line).
 
  * @param {string} text
 
  * @param {number} maxLines
 
- * @param {number} charsPerLine
+ * @param {number | typeof DISPLAY_CARD_LAYOUT.comment} [charsPerLineOrLayout]
 
  */
 
-export function wrapDisplayCardComment(text, maxLines, charsPerLine = COMMENT_CHARS_PER_LINE) {
+export function wrapDisplayCardComment(text, maxLines, charsPerLineOrLayout = COMMENT_CHARS_PER_LINE) {
 
   const normalized = String(text ?? '')
 
@@ -243,6 +336,32 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLine = COMMENT_CH
     .trim();
 
   if (!normalized) return [];
+
+
+
+  const useLayout =
+
+    charsPerLineOrLayout !== null &&
+
+    typeof charsPerLineOrLayout === 'object' &&
+
+    !Array.isArray(charsPerLineOrLayout);
+
+
+
+  const capacityForIndex = (lineIndex) => {
+
+    if (useLayout) return commentLineCharsCapacity(charsPerLineOrLayout, lineIndex);
+
+    const n =
+
+      typeof charsPerLineOrLayout === 'number' ? charsPerLineOrLayout : COMMENT_CHARS_PER_LINE;
+
+    return n;
+
+  };
+
+  const softBreak = !useLayout;
 
 
 
@@ -256,31 +375,13 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLine = COMMENT_CH
 
     while (rest.length > 0 && lines.length < maxLines) {
 
-      if (rest.length <= charsPerLine) {
+      const cap = capacityForIndex(lines.length);
 
-        lines.push(rest);
+      const { line, rest: nextRest } = splitCommentChunkAtCapacity(rest, cap, softBreak);
 
-        rest = '';
+      if (line.length > 0) lines.push(line);
 
-        break;
-
-      }
-
-      let breakAt = charsPerLine;
-
-      const slice = rest.slice(0, charsPerLine + 1);
-
-      const lastSpace = slice.lastIndexOf(' ');
-
-      const lastPunct = Math.max(slice.lastIndexOf('、'), slice.lastIndexOf('。'));
-
-      if (lastPunct > charsPerLine * 0.4) breakAt = lastPunct + 1;
-
-      else if (lastSpace > charsPerLine * 0.35) breakAt = lastSpace + 1;
-
-      lines.push(rest.slice(0, breakAt).trimEnd());
-
-      rest = rest.slice(breakAt).trimStart();
+      rest = nextRest;
 
     }
 
@@ -298,7 +399,9 @@ export function wrapDisplayCardComment(text, maxLines, charsPerLine = COMMENT_CH
 
     const last = lines[lines.length - 1];
 
-    lines[lines.length - 1] = last.length >= charsPerLine - 1 ? `${last.slice(0, -1)}…` : `${last}…`;
+    const cap = capacityForIndex(lines.length - 1);
+
+    lines[lines.length - 1] = last.length >= cap - 1 ? `${last.slice(0, -1)}…` : `${last}…`;
 
   }
 
@@ -354,7 +457,9 @@ export function buildDisplayCardPreviewState(input) {
 
       input.impressions,
 
-      layout.comment.maxLines
+      layout.comment.maxLines,
+
+      layout.comment
 
     ),
 
@@ -406,7 +511,7 @@ export function defaultCommentLineTopPercent(commentLayout, lineIndex) {
 
  * @param {ReturnType<typeof buildDisplayCardPreviewState>} state
 
- * @param {{ layout?: typeof DISPLAY_CARD_LAYOUT }} [options]
+ * @param {{ layout?: typeof DISPLAY_CARD_LAYOUT; editorLinePlots?: boolean }} [options]
 
  */
 
@@ -415,6 +520,14 @@ export function renderDisplayCardPreview(host, state, options = {}) {
   if (!host) return;
 
   const layout = options.layout ?? activeDisplayCardLayout;
+
+  const plotCount = getCommentLinePlotCount(layout.comment);
+
+  const commentLinesToRender = options.editorLinePlots
+
+    ? Array.from({ length: plotCount }, (_, i) => state.commentLines[i] ?? '')
+
+    : state.commentLines;
 
   const activeMark =
 
@@ -458,13 +571,17 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
   const lineTops = layout.comment.lineTops ?? [];
 
-  const usePerLineTop = usesPerLineCommentPlacement(layout.comment);
+  const usePerLineTop =
+
+    Boolean(options.editorLinePlots) || usesPerLineCommentPlacement(layout.comment);
 
 
 
-  const commentInnerHtml = state.commentLines
+  const commentInnerHtml = commentLinesToRender
 
     .map((line, i) => {
+
+      const emptyClass = options.editorLinePlots && !line ? ' contest-display-card-comment-line--empty' : '';
 
       if (usePerLineTop) {
 
@@ -478,9 +595,9 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
           absoluteTop
 
-        )};width:${pct(widthPct)};font-size:${layout.comment.fontSize}px;line-height:${layout.comment.lineHeight};white-space:normal;word-break:break-word;overflow:hidden`;
+        )};width:${pct(widthPct)};font-size:${layout.comment.fontSize}px;line-height:${layout.comment.lineHeight};white-space:nowrap;overflow:hidden`;
 
-        return `<div class="contest-display-card-comment-line contest-display-card-comment-line--placed" data-testid="display-card-comment-line-${i}" data-layout-key="comment.line.${i}" style="${lineStyle}">${escapeText(
+        return `<div class="contest-display-card-comment-line contest-display-card-comment-line--placed${emptyClass}" data-testid="display-card-comment-line-${i}" data-layout-key="comment.line.${i}" style="${lineStyle}">${escapeText(
 
           line
 
@@ -488,7 +605,7 @@ export function renderDisplayCardPreview(host, state, options = {}) {
 
       }
 
-      return `<div class="contest-display-card-comment-line" data-testid="display-card-comment-line-${i}" data-layout-key="comment.line.${i}">${escapeText(
+      return `<div class="contest-display-card-comment-line${emptyClass}" data-testid="display-card-comment-line-${i}" data-layout-key="comment.line.${i}" style="white-space:nowrap;overflow:hidden">${escapeText(
 
         line
 

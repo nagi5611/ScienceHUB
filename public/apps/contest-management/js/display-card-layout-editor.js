@@ -2,12 +2,13 @@
 import { apiRequest } from './api.js';
 import {
   DISPLAY_CARD_LAYOUT,
-  DISPLAY_CARD_COMMENT_MAX_LINES,
+  DISPLAY_CARD_COMMENT_LINES_CAP,
   buildDisplayCardPreviewState,
   commentLineLeftPercent,
   commentLineRightPercent,
   commentLineWidthPercent,
   defaultCommentLineTopPercent,
+  getCommentLinePlotCount,
   renderDisplayCardPreview,
   setDisplayCardLayout,
 } from '../../contest-entry/js/display-card-preview.js';
@@ -126,10 +127,7 @@ export async function loadDisplayCardLayoutEditor(root) {
     const data = await apiRequest('admin/settings/display-card-layout');
     defaultLayout = structuredClone(data.defaults ?? DISPLAY_CARD_LAYOUT);
     editorLayout = structuredClone(data.layout ?? defaultLayout);
-    editorLayout.comment.maxLines = Math.min(
-      DISPLAY_CARD_COMMENT_MAX_LINES,
-      editorLayout.comment.maxLines
-    );
+    editorLayout.comment.maxLines = getCommentLinePlotCount(editorLayout.comment);
     setDisplayCardLayout(editorLayout);
     statusEl.textContent = '';
     renderEditorPreview(previewHost);
@@ -163,7 +161,7 @@ function renderEditorPreview(previewHost) {
     title: sample.title,
     impressions: sample.impressions,
   });
-  renderDisplayCardPreview(previewHost, state, { layout: editorLayout });
+  renderDisplayCardPreview(previewHost, state, { layout: editorLayout, editorLinePlots: true });
   const card = previewHost.querySelector('.contest-display-card');
   if (card) card.classList.add('contest-display-card--editor');
   injectEditorHandles(previewHost);
@@ -207,17 +205,7 @@ function injectEditorHandles(host) {
     kind: 'comment',
   });
 
-  const root = host?.closest('#panel-display-card-layout');
-  const sample = root ? readSampleFromDom(root) : SAMPLE;
-  const state = buildDisplayCardPreviewState({
-    scheduleType: sample.scheduleType,
-    homeroom: sample.homeroom,
-    studentName: sample.studentName,
-    title: sample.title,
-    impressions: sample.impressions,
-  });
-  const maxLines = Math.min(DISPLAY_CARD_COMMENT_MAX_LINES, c.maxLines);
-  const lineCount = Math.min(maxLines, Math.max(state.commentLines.length, 3));
+  const lineCount = getCommentLinePlotCount(c);
   const lineTops = c.lineTops ?? [];
   for (let i = 0; i < lineCount; i += 1) {
     const top = lineTops[i] ?? defaultCommentLineTopPercent(c, i);
@@ -233,7 +221,7 @@ function injectEditorHandles(host) {
     });
     handles.push({
       key: `comment.line.${i}.right`,
-      label: `コメント${i + 1}行 右端（改行位置）`,
+      label: `コメント${i + 1}行 右端（次行へ送る位置）`,
       left: right,
       top,
       kind: 'commentLineRight',
@@ -311,6 +299,18 @@ function syncLayoutVisualFromEditor(previewHost) {
   updateHandlePositions(previewHost);
 }
 
+function trimCommentLineArraysToMaxLines() {
+  if (!editorLayout) return;
+  const c = editorLayout.comment;
+  const n = Math.min(DISPLAY_CARD_COMMENT_LINES_CAP, Math.max(1, Math.round(c.maxLines)));
+  c.maxLines = n;
+  for (const key of ['lineTops', 'lineLefts', 'lineRights']) {
+    if (Array.isArray(c[key]) && c[key].length > n) {
+      c[key].length = n;
+    }
+  }
+}
+
 function ensureCommentLineSlots(lineIndex) {
   if (!editorLayout) return;
   const c = editorLayout.comment;
@@ -319,10 +319,10 @@ function ensureCommentLineSlots(lineIndex) {
   if (!c.lineRights) c.lineRights = [];
   const slotCount = Math.max(
     lineIndex + 1,
+    c.maxLines,
     c.lineTops.length,
     c.lineLefts.length,
-    c.lineRights.length,
-    3
+    c.lineRights.length
   );
   for (let i = 0; i < slotCount; i += 1) {
     if (c.lineTops[i] === undefined) {
@@ -545,16 +545,16 @@ function renderPropsPanel(mount) {
       [
         ['left', '左 (%)', lineLeft],
         ['lineTop', '行の上 (%)', top],
-        ['lineRight', '右端・改行位置 (%)', lineRight],
+        ['lineRight', '右端・次行へ送る位置 (%)', lineRight],
       ],
       baseKey,
       { lineIndex: index }
     );
     html += `<label class="display-card-layout-prop display-card-layout-range">
-      <span>改行位置（右端）スライダー</span>
+      <span>次行へ送る位置（右端）スライダー</span>
       <input type="range" min="${lineLeft + 2}" max="100" step="0.1" data-range-input="lineRight" data-layout-key="${escapeHtml(baseKey)}" data-line-index="${index}" value="${lineRight}" />
     </label>`;
-    html += `<p class="hint">行ごとに left / 上 / 右端（lineRights）を保存します。右端はスライダーまたは┃ハンドルをドラッグ。近い座標は自動で揃います。</p>`;
+    html += `<p class="hint">行ごとに left / 上 / 右端（lineRights）を保存します。右端より先の文字は次の行プロットへ送り、行内では折り返しません。近い座標は自動で揃います。</p>`;
   } else if (key === 'comment') {
     const c = editorLayout.comment;
     html += numberFields(
@@ -564,10 +564,11 @@ function renderPropsPanel(mount) {
         ['width', '幅 (%)', c.width],
         ['fontSize', '文字 (px)', c.fontSize],
         ['lineHeight', '行間', c.lineHeight],
-        ['maxLines', '最大行数', DISPLAY_CARD_COMMENT_MAX_LINES],
+        ['maxLines', '行数（プロット数）', c.maxLines],
       ],
       key
     );
+    html += `<p class="hint">行数は 1〜${DISPLAY_CARD_COMMENT_LINES_CAP}。行数に応じてコメント行のハンドル数が変わります。</p>`;
   } else if (editorLayout[key]) {
     const f = editorLayout[key];
     const fields = [
@@ -587,12 +588,16 @@ function renderPropsPanel(mount) {
     renderEditorPreview(previewHost);
     renderPropsPanel(mount);
   };
+  const applyFromPropInput = (input) => {
+    const propKey = input.dataset.layoutKey ?? key;
+    applyPropFromInput(propKey, input.dataset.propInput, input.value, input.dataset.lineIndex);
+    syncFromPanel();
+  };
   mount.querySelectorAll('[data-prop-input]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const propKey = input.dataset.layoutKey ?? key;
-      applyPropFromInput(propKey, input.dataset.propInput, input.value, input.dataset.lineIndex);
-      syncFromPanel();
-    });
+    input.addEventListener('change', () => applyFromPropInput(input));
+    if (input.dataset.propInput === 'maxLines') {
+      input.addEventListener('input', () => applyFromPropInput(input));
+    }
   });
   mount.querySelectorAll('[data-range-input]').forEach((input) => {
     input.addEventListener('input', () => {
@@ -610,7 +615,7 @@ function numberFields(rows, layoutKey, extra = {}) {
       ([prop, label, value]) => `
     <label class="display-card-layout-prop">
       <span>${escapeHtml(label)}</span>
-      <input type="number" step="0.1" data-prop-input="${prop}" data-layout-key="${escapeHtml(layoutKey)}"${lineAttr} value="${escapeHtml(String(value))}" />
+      <input type="number" step="${prop === 'maxLines' ? '1' : '0.1'}" data-prop-input="${prop}" data-layout-key="${escapeHtml(layoutKey)}"${lineAttr} value="${escapeHtml(String(value))}" />
     </label>`
     )
     .join('')}</div>`;
@@ -618,6 +623,21 @@ function numberFields(rows, layoutKey, extra = {}) {
 
 function applyPropFromInput(key, prop, rawValue, lineIndexAttr) {
   if (!editorLayout) return;
+
+  if (key === 'comment' && prop === 'maxLines') {
+    const value = Math.round(parseFloat(rawValue));
+    if (!Number.isFinite(value)) return;
+    editorLayout.comment.maxLines = Math.min(
+      DISPLAY_CARD_COMMENT_LINES_CAP,
+      Math.max(1, value)
+    );
+    trimCommentLineArraysToMaxLines();
+    for (let i = 0; i < editorLayout.comment.maxLines; i += 1) {
+      ensureCommentLineSlots(i);
+    }
+    return;
+  }
+
   const value = parseFloat(rawValue);
   if (!Number.isFinite(value)) return;
 

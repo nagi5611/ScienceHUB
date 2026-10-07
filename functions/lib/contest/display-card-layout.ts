@@ -28,11 +28,14 @@ export type DisplayCardCommentLayout = DisplayCardTextFieldLayout & {
   lineTops?: number[];
   /** Optional absolute left (% of card) per comment line index */
   lineLefts?: number[];
-  /** Optional absolute right edge (% of card) per comment line — wrap width */
+  /** Optional absolute right edge (% of card) per comment line — overflow goes to next line plot */
   lineRights?: number[];
 };
 
-export const DISPLAY_CARD_COMMENT_MAX_LINES = 6;
+/** Upper bound for saved comment.maxLines */
+export const DISPLAY_CARD_COMMENT_LINES_CAP = 12;
+
+export const DISPLAY_CARD_DEFAULT_COMMENT_MAX_LINES = 6;
 
 export type DisplayCardLayout = {
   marks: Record<DisplayCardMarkKey, DisplayCardMarkLayout>;
@@ -60,7 +63,7 @@ export const DEFAULT_DISPLAY_CARD_LAYOUT: DisplayCardLayout = {
     width: 74,
     fontSize: 13,
     lineHeight: 1.52,
-    maxLines: DISPLAY_CARD_COMMENT_MAX_LINES,
+    maxLines: DISPLAY_CARD_DEFAULT_COMMENT_MAX_LINES,
   },
 };
 
@@ -144,7 +147,9 @@ function readTextField(
     for (const entry of obj.lineRights) {
       if (!isFiniteNumber(entry)) continue;
       rights.push(clampPercent(entry));
-      if (rights.length >= (out.maxLines ?? extra?.maxLines ?? DISPLAY_CARD_COMMENT_MAX_LINES)) break;
+      if (rights.length >= (out.maxLines ?? extra?.maxLines ?? DISPLAY_CARD_DEFAULT_COMMENT_MAX_LINES)) {
+        break;
+      }
     }
     if (rights.length > 0) out.lineRights = rights;
   } else if (extra?.lineRights) {
@@ -196,7 +201,7 @@ export function parseDisplayCardLayout(
   });
   const commentParsed = readTextField(raw.comment, DEFAULT_DISPLAY_CARD_LAYOUT.comment, {
     maxLines: DEFAULT_DISPLAY_CARD_LAYOUT.comment.maxLines,
-    maxLinesCap: DISPLAY_CARD_COMMENT_MAX_LINES,
+    maxLinesCap: DISPLAY_CARD_COMMENT_LINES_CAP,
     lineHeight: DEFAULT_DISPLAY_CARD_LAYOUT.comment.lineHeight,
   });
 
