@@ -155,7 +155,7 @@ test.describe("画像変換 E2E", () => {
     await expect(page.locator(".icv-result-name")).toContainText("-p1.png");
   });
 
-  test("ループ4: PDF 画質「最高」で変換できる", async ({ page }) => {
+  test("ループ4: PDF 画質「ウルトラ」で変換できる", async ({ page }) => {
     await openImageConverter(page);
     await addFilesViaInput(page, ["sample.pdf"]);
     await expect(page.locator("#pdf-quality-field")).toBeVisible();

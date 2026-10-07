@@ -43,7 +43,7 @@ function chunkPageNumbers(pageNumbers, batchSize) {
  *   quality: number,
  *   maxEdge: number,
  *   pdfPages: 'all' | 'first',
- *   pdfQuality?: 'normal' | 'ultra',
+ *   pdfQuality?: import('../../../js/shared/pdf-import.js').PdfRenderQuality,
  *   icoSizes?: number[],
  * }} options
  * @param {{ onPage?: (page: { blob: Blob, pageNum: number }, progress: { done: number, total: number }) => void | Promise<void> }} [callbacks]

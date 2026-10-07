@@ -59,7 +59,7 @@ function serverRasterFormat(format) {
  *   quality: number,
  *   maxEdge: number,
  *   pdfPages: 'all' | 'first',
- *   pdfQuality?: 'normal' | 'ultra',
+ *   pdfQuality?: import('../../../js/shared/pdf-import.js').PdfRenderQuality,
  *   icoSizes?: number[],
  * }} options
  * @param {{ onProgress?: (items: Array<{ blob: Blob, pageNum?: number }>, meta?: { done: number, total: number }) => void | Promise<void> }} [callbacks]

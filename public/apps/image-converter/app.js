@@ -680,7 +680,9 @@ function getConvertOptions() {
     quality: Number(qualityInput.value),
     maxEdge: Number(maxEdgeInput.value) || 0,
     pdfPages: /** @type {'all' | 'first'} */ (pdfPagesSelect.value),
-    pdfQuality: /** @type {'normal' | 'ultra'} */ (pdfQualitySelect?.value ?? "normal"),
+    pdfQuality: /** @type {import('../../js/shared/pdf-import.js').PdfRenderQuality} */ (
+      pdfQualitySelect?.value ?? "normal"
+    ),
     icoSizes: getSelectedIcoSizes(),
   };
 }

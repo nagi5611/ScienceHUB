@@ -9,15 +9,29 @@ const PDF_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}
 
 /** PDF→画像の通常レンダリング倍率（72pt × 2 ≈ 144 DPI 相当） */
 export const PDF_RENDER_SCALE_NORMAL = 2;
-/** PDF→画像の最高画質レンダリング倍率 */
-export const PDF_RENDER_SCALE_ULTRA = 8;
+
+/** @typedef {'min' | 'low' | 'normal' | 'high' | 'max' | 'ultra'} PdfRenderQuality */
+
+/** 画質レベルごとの PDF.js scale（通常=2 を基準） */
+export const PDF_RENDER_SCALE_BY_QUALITY = {
+  min: PDF_RENDER_SCALE_NORMAL / 8,
+  low: PDF_RENDER_SCALE_NORMAL / 4,
+  normal: PDF_RENDER_SCALE_NORMAL,
+  high: 4,
+  max: 8,
+  ultra: 12,
+};
 
 /**
  * 画質レベルから PDF.js の scale を解決
- * @param {'normal' | 'ultra'} [quality]
+ * @param {PdfRenderQuality | string} [quality]
  */
 export function resolvePdfRenderScale(quality = "normal") {
-  return quality === "ultra" ? PDF_RENDER_SCALE_ULTRA : PDF_RENDER_SCALE_NORMAL;
+  const scale = PDF_RENDER_SCALE_BY_QUALITY[quality];
+  if (typeof scale === "number" && scale > 0) {
+    return scale;
+  }
+  return PDF_RENDER_SCALE_NORMAL;
 }
 
 let workerReady = false;
