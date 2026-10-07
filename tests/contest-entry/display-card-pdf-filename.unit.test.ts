@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   buildDisplayCardPdfFilename,
+  buildDisplayCardPngCaptureFilename,
   sanitizeDisplayCardPdfFilenamePart,
 } from '../../public/apps/contest-management/js/display-card-pdf-export.js';
 
@@ -21,4 +22,11 @@ test('buildDisplayCardPdfFilename joins schedule, class, number, name, title', (
     members: [],
   });
   assert.equal(name, '全日制_102_15_山田太郎_球場歯車.pdf');
+});
+
+test('buildDisplayCardPngCaptureFilename uses PDF stem with _pre-pdf.png', () => {
+  assert.equal(
+    buildDisplayCardPngCaptureFilename('全日制_102_15_山田太郎_球場歯車.pdf'),
+    '全日制_102_15_山田太郎_球場歯車_pre-pdf.png'
+  );
 });

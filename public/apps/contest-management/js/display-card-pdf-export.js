@@ -47,6 +47,12 @@ export function buildDisplayCardPdfFilename(app) {
   return `${base}.pdf`;
 }
 
+/** Same stem as PDF download; suffix marks html2canvas bitmap used for jsPDF. */
+export function buildDisplayCardPngCaptureFilename(pdfFilename) {
+  const base = String(pdfFilename ?? '').replace(/\.pdf$/i, '') || 'display-card';
+  return `${base}_pre-pdf.png`;
+}
+
 /**
  * @param {{
  *   schedule_type: string;
@@ -191,6 +197,20 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+/** Downloads the same PNG bitmap passed to displayCardCanvasToPdfBlob. */
+function downloadDisplayCardCapturePng(canvas, pdfFilename) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('展示カードのPNG生成に失敗しました'));
+        return;
+      }
+      downloadBlob(blob, buildDisplayCardPngCaptureFilename(pdfFilename));
+      resolve();
+    }, 'image/png');
+  });
+}
+
 const DISPLAY_CARD_PDF_MODAL_ID = 'contest-display-card-pdf-modal';
 
 /** @type {string[]} */
@@ -235,6 +255,7 @@ export function setupDisplayCardPdfPreviewModal() {
     const host = modal.querySelector('[data-display-card-pdf-preview-host]');
     if (!filename || !ctx?.layout || !(host instanceof HTMLElement)) return;
     const canvas = await renderDisplayCardPreviewCanvasFromHost(host, ctx.layout);
+    await downloadDisplayCardCapturePng(canvas, filename);
     const blob = displayCardCanvasToPdfBlob(canvas);
     downloadBlob(blob, filename);
   });
