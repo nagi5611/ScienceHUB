@@ -152,6 +152,47 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
  * Wraps a preview bitmap in a single-page PDF (image only, no text layer).
  * @param {HTMLCanvasElement} canvas
  */
+/** Portrait print layout: two 800×450 cards stacked (matches bulk ZIP export). */
+export const DISPLAY_CARD_2UP_PAGE_MARGIN_PX = 40;
+export const DISPLAY_CARD_2UP_GUTTER_PX = 32;
+
+/** @returns {{ pageW: number; pageH: number }} */
+export function getDisplayCardTwoUpPageSizePx() {
+  const pageW = DISPLAY_CARD_WIDTH_PX + DISPLAY_CARD_2UP_PAGE_MARGIN_PX * 2;
+  const pageH =
+    DISPLAY_CARD_HEIGHT_PX * 2 +
+    DISPLAY_CARD_2UP_GUTTER_PX +
+    DISPLAY_CARD_2UP_PAGE_MARGIN_PX * 2;
+  return { pageW, pageH };
+}
+
+/** @param {number} cardCount */
+export function getDisplayCardTwoUpPageCount(cardCount) {
+  if (!Number.isFinite(cardCount) || cardCount <= 0) return 0;
+  return Math.ceil(cardCount / 2);
+}
+
+function pdfBlobFromJsPdf(pdf) {
+  const out = pdf.output('blob');
+  if (out instanceof Blob) {
+    return out.type ? out : new Blob([out], { type: 'application/pdf' });
+  }
+  return new Blob([out], { type: 'application/pdf' });
+}
+
+/**
+ * @param {import('jspdf').jsPDF} pdf
+ * @param {HTMLCanvasElement} canvas
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
+ */
+function addDisplayCardCanvasToPdfPage(pdf, canvas, x, y, w, h) {
+  const dataUrl = canvas.toDataURL('image/png');
+  pdf.addImage(dataUrl, 'PNG', x, y, w, h);
+}
+
 export function displayCardCanvasToPdfBlob(canvas) {
   const pageW = canvas.width / DISPLAY_CARD_CAPTURE_SCALE;
   const pageH = canvas.height / DISPLAY_CARD_CAPTURE_SCALE;
@@ -161,13 +202,50 @@ export function displayCardCanvasToPdfBlob(canvas) {
     orientation: pageW >= pageH ? 'landscape' : 'portrait',
     compress: true,
   });
-  const dataUrl = canvas.toDataURL('image/png');
-  pdf.addImage(dataUrl, 'PNG', 0, 0, pageW, pageH);
-  const out = pdf.output('blob');
-  if (out instanceof Blob) {
-    return out.type ? out : new Blob([out], { type: 'application/pdf' });
+  addDisplayCardCanvasToPdfPage(pdf, canvas, 0, 0, pageW, pageH);
+  return pdfBlobFromJsPdf(pdf);
+}
+
+/**
+ * One portrait page per pair: card bitmaps stacked top / bottom (print-ready).
+ * @param {HTMLCanvasElement[]} canvases
+ */
+export function displayCardCanvasesToTwoUpPdfBlob(canvases) {
+  if (!canvases.length) {
+    throw new Error('展示カードがありません');
   }
-  return new Blob([out], { type: 'application/pdf' });
+  const { pageW, pageH } = getDisplayCardTwoUpPageSizePx();
+  const margin = DISPLAY_CARD_2UP_PAGE_MARGIN_PX;
+  const gutter = DISPLAY_CARD_2UP_GUTTER_PX;
+  const cardW = DISPLAY_CARD_WIDTH_PX;
+  const cardH = DISPLAY_CARD_HEIGHT_PX;
+
+  const pdf = new jsPDF({
+    unit: 'px',
+    format: [pageW, pageH],
+    orientation: 'portrait',
+    compress: true,
+  });
+
+  for (let i = 0; i < canvases.length; i += 2) {
+    if (i > 0) {
+      pdf.addPage([pageW, pageH], 'portrait');
+    }
+    addDisplayCardCanvasToPdfPage(pdf, canvases[i], margin, margin, cardW, cardH);
+    const bottom = canvases[i + 1];
+    if (bottom) {
+      addDisplayCardCanvasToPdfPage(
+        pdf,
+        bottom,
+        margin,
+        margin + cardH + gutter,
+        cardW,
+        cardH
+      );
+    }
+  }
+
+  return pdfBlobFromJsPdf(pdf);
 }
 
 /**
@@ -326,25 +404,18 @@ export async function downloadDisplayCardPdfForApplication(app, layout) {
  * @param {(done: number, total: number) => void} [onProgress]
  */
 export async function downloadDisplayCardPdfsZip(apps, layout, onProgress) {
-  const used = new Set();
-  const files = {};
   const total = apps.length;
+  const canvases = [];
 
   for (let i = 0; i < apps.length; i++) {
-    const app = apps[i];
-    let name = buildDisplayCardPdfFilename(app);
-    if (used.has(name)) {
-      const stem = name.replace(/\.pdf$/i, '');
-      let n = 2;
-      while (used.has(`${stem}_${n}.pdf`)) n += 1;
-      name = `${stem}_${n}.pdf`;
-    }
-    used.add(name);
-    const blob = await renderDisplayCardPdfBlob(app, layout);
-    files[name] = new Uint8Array(await blob.arrayBuffer());
+    canvases.push(await renderDisplayCardPreviewCanvas(apps[i], layout));
     onProgress?.(i + 1, total);
   }
 
+  const pdfBlob = displayCardCanvasesToTwoUpPdfBlob(canvases);
+  const files = {
+    'contest-display-cards-2up.pdf': new Uint8Array(await pdfBlob.arrayBuffer()),
+  };
   const zipped = zipSync(files);
   downloadBlob(new Blob([zipped], { type: 'application/zip' }), 'contest-display-cards.zip');
 }

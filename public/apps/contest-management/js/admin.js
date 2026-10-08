@@ -1780,7 +1780,10 @@ function setupContestApplicationsToolbar() {
       await downloadDisplayCardPdfsZip(apps, layout, (done, total) => {
         setContestApplicationsPdfStatus(`PDF生成中… ${done} / ${total}`);
       });
-      setContestApplicationsPdfStatus(`${apps.length}件をZIPでダウンロードしました`);
+      const pages = Math.ceil(apps.length / 2);
+      setContestApplicationsPdfStatus(
+        `${apps.length}件を縦2枚付きPDF（${pages}ページ）でZIPダウンロードしました`
+      );
     } catch (err) {
       setContestApplicationsPdfStatus(
         err instanceof Error ? err.message : 'ZIPの作成に失敗しました'
