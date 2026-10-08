@@ -8,7 +8,8 @@ import {
   getDisplayCardTwoUpPageCount,
   getDisplayCardTwoUpPageSizePx,
   DISPLAY_CARD_2UP_GUTTER_PX,
-  DISPLAY_CARD_2UP_PAGE_MARGIN_PX,
+  DISPLAY_CARD_2UP_PAGE_MARGIN_X_PX,
+  DISPLAY_CARD_2UP_PAGE_MARGIN_Y_PX,
 } from '../../public/apps/contest-management/js/display-card-pdf-export.js';
 import {
   DISPLAY_CARD_HEIGHT_PX,
@@ -48,11 +49,11 @@ test('getDisplayCardTwoUpPageCount pairs cards for portrait stack', () => {
 
 test('getDisplayCardTwoUpPageSizePx fits two design-size cards vertically', () => {
   const { pageW, pageH } = getDisplayCardTwoUpPageSizePx();
-  assert.equal(pageW, DISPLAY_CARD_WIDTH_PX + DISPLAY_CARD_2UP_PAGE_MARGIN_PX * 2);
+  assert.equal(pageW, DISPLAY_CARD_WIDTH_PX + DISPLAY_CARD_2UP_PAGE_MARGIN_X_PX * 2);
   assert.equal(
     pageH,
     DISPLAY_CARD_HEIGHT_PX * 2 +
       DISPLAY_CARD_2UP_GUTTER_PX +
-      DISPLAY_CARD_2UP_PAGE_MARGIN_PX * 2
+      DISPLAY_CARD_2UP_PAGE_MARGIN_Y_PX * 2
   );
 });

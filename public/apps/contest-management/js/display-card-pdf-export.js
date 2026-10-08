@@ -153,16 +153,17 @@ export async function renderDisplayCardPreviewCanvas(app, layout) {
  * @param {HTMLCanvasElement} canvas
  */
 /** Portrait print layout: two 800×450 cards stacked (matches bulk ZIP export). */
-export const DISPLAY_CARD_2UP_PAGE_MARGIN_PX = 40;
+export const DISPLAY_CARD_2UP_PAGE_MARGIN_X_PX = 0;
+export const DISPLAY_CARD_2UP_PAGE_MARGIN_Y_PX = 40;
 export const DISPLAY_CARD_2UP_GUTTER_PX = 32;
 
 /** @returns {{ pageW: number; pageH: number }} */
 export function getDisplayCardTwoUpPageSizePx() {
-  const pageW = DISPLAY_CARD_WIDTH_PX + DISPLAY_CARD_2UP_PAGE_MARGIN_PX * 2;
+  const pageW = DISPLAY_CARD_WIDTH_PX + DISPLAY_CARD_2UP_PAGE_MARGIN_X_PX * 2;
   const pageH =
     DISPLAY_CARD_HEIGHT_PX * 2 +
     DISPLAY_CARD_2UP_GUTTER_PX +
-    DISPLAY_CARD_2UP_PAGE_MARGIN_PX * 2;
+    DISPLAY_CARD_2UP_PAGE_MARGIN_Y_PX * 2;
   return { pageW, pageH };
 }
 
@@ -215,7 +216,8 @@ export function displayCardCanvasesToTwoUpPdfBlob(canvases) {
     throw new Error('展示カードがありません');
   }
   const { pageW, pageH } = getDisplayCardTwoUpPageSizePx();
-  const margin = DISPLAY_CARD_2UP_PAGE_MARGIN_PX;
+  const marginX = DISPLAY_CARD_2UP_PAGE_MARGIN_X_PX;
+  const marginY = DISPLAY_CARD_2UP_PAGE_MARGIN_Y_PX;
   const gutter = DISPLAY_CARD_2UP_GUTTER_PX;
   const cardW = DISPLAY_CARD_WIDTH_PX;
   const cardH = DISPLAY_CARD_HEIGHT_PX;
@@ -231,14 +233,14 @@ export function displayCardCanvasesToTwoUpPdfBlob(canvases) {
     if (i > 0) {
       pdf.addPage([pageW, pageH], 'portrait');
     }
-    addDisplayCardCanvasToPdfPage(pdf, canvases[i], margin, margin, cardW, cardH);
+    addDisplayCardCanvasToPdfPage(pdf, canvases[i], marginX, marginY, cardW, cardH);
     const bottom = canvases[i + 1];
     if (bottom) {
       addDisplayCardCanvasToPdfPage(
         pdf,
         bottom,
-        margin,
-        margin + cardH + gutter,
+        marginX,
+        marginY + cardH + gutter,
         cardW,
         cardH
       );
