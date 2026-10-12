@@ -1,7 +1,8 @@
 /**
  * Runa — Cloudflare AI / OpenAI 互換クライアント
  * - Workers AI 等: /chat/completions
- * - openai/gpt-5.6-luna 等: /responses（Chat Completions 非対応）
+ * - openai/gpt-6-luna 等: ツール呼び出しは /responses
+ *   （reasoning 付き function calling は Chat Completions 非対応）
  */
 
 import type { Env } from "../types";
@@ -20,6 +21,8 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** Responses API のツール往復用。会話 DB には保存しない */
+  reasoningItems?: ResponsesInputItem[];
 }
 
 export interface ToolCall {
@@ -45,6 +48,8 @@ export interface CompletionResult {
   reasoning: string | null;
   toolCalls: ToolCall[];
   finishReason: string | null;
+  /** 次のツール往復で input に返す reasoning アイテム */
+  reasoningItems?: ResponsesInputItem[];
 }
 
 export interface CompletionCallbacks {
@@ -60,7 +65,15 @@ export interface RunaCompletionOptions extends CompletionCallbacks {
 const CLOUDFLARE_AI_V1_PREFIX =
   "https://api.cloudflare.com/client/v4/accounts/";
 
+const DEFAULT_RUNA_MODEL = "openai/gpt-6-luna";
+
 type ResponsesInputItem = Record<string, unknown>;
+
+/** gpt-5.6 / gpt-6 系（gpt-6-luna, gpt-6.1-sol 等） */
+function isOpenAiReasoningModel(model: string): boolean {
+  const bare = model.includes("/") ? model.split("/").pop() ?? model : model;
+  return /^gpt-5\.6-/i.test(bare) || /^gpt-6(?:\.\d+)?-/i.test(bare);
+}
 
 function resolveAccountId(env: Env): string {
   return (
@@ -90,9 +103,9 @@ function resolveGatewayId(env: Env): string | null {
 
 /** Cloudflare AI 向けにモデル ID を正規化 */
 export function resolveRunaModel(env: Env): string {
-  const model = runaModel(env) || "openai/gpt-5.6-luna";
+  const model = runaModel(env) || DEFAULT_RUNA_MODEL;
   if (model.includes("/")) return model;
-  if (/^gpt-5\.6-/i.test(model)) return `openai/${model}`;
+  if (isOpenAiReasoningModel(model)) return `openai/${model}`;
   if (model.startsWith("@cf/")) return model;
   return model;
 }
@@ -107,10 +120,12 @@ function resolveApiKey(env: Env): string {
   return key;
 }
 
-/** gpt-5.6-luna 等は Responses API 専用 */
+/**
+ * reasoning 付き function calling は Responses API。
+ * gpt-6-luna の Chat Completions は reasoning_effort=none のときだけツール可。
+ */
 function usesResponsesApi(model: string): boolean {
-  const bare = model.includes("/") ? model.split("/").pop() ?? model : model;
-  return /^gpt-5\.6-/i.test(bare);
+  return isOpenAiReasoningModel(model);
 }
 
 function usesWorkersAiGatewayHeader(model: string): boolean {
@@ -132,7 +147,7 @@ function extractApiError(body: unknown, status: number): string {
       const message = String((error as { message: unknown }).message);
       if (status === 402 && message.includes("Gateway authentication")) {
         return (
-          "openai/gpt-5.6-luna には AI Gateway の認証（Unified Billing）が必要です。" +
+          "openai/gpt-6-luna には AI Gateway の認証（Unified Billing）が必要です。" +
           "Cloudflare ダッシュボードで AI Gateway の認証を有効にするか、" +
           "RUNA_MODEL=@cf/moonshotai/kimi-k2.6 など Chat Completions 対応モデルに変更してください。"
         );
@@ -203,6 +218,9 @@ function buildResponsesInput(messages: ChatMessage[]): {
     }
 
     if (message.role === "assistant") {
+      for (const item of message.reasoningItems ?? []) {
+        input.push(item);
+      }
       if (message.content) {
         input.push({
           role: "assistant",
@@ -256,6 +274,17 @@ function appendReasoningParts(
   return out;
 }
 
+/** 同一 reasoning アイテムの重複を除いて保持する */
+function pushReasoningItem(
+  items: ResponsesInputItem[],
+  record: Record<string, unknown>
+): void {
+  if (record.type !== "reasoning") return;
+  const id = typeof record.id === "string" ? record.id : "";
+  if (id && items.some((item) => item.id === id)) return;
+  items.push(record);
+}
+
 function parseResponsesOutput(
   body: Record<string, unknown>,
   onReasoningDelta?: (text: string) => void
@@ -264,17 +293,21 @@ function parseResponsesOutput(
   let content = "";
   let reasoning = "";
   const toolCalls: ToolCall[] = [];
+  const reasoningItems: ResponsesInputItem[] = [];
 
   for (const item of output) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
 
-    if (record.type === "reasoning" && Array.isArray(record.content)) {
-      reasoning = appendReasoningParts(
-        record.content,
-        reasoning,
-        onReasoningDelta
-      );
+    if (record.type === "reasoning") {
+      if (Array.isArray(record.content)) {
+        reasoning = appendReasoningParts(
+          record.content,
+          reasoning,
+          onReasoningDelta
+        );
+      }
+      pushReasoningItem(reasoningItems, record);
       continue;
     }
 
@@ -315,6 +348,7 @@ function parseResponsesOutput(
     reasoning: reasoning || null,
     toolCalls,
     finishReason,
+    reasoningItems,
   };
 }
 
@@ -563,6 +597,7 @@ async function requestResponsesApi(
     reasoning: { effort: "low" },
     max_output_tokens: 4096,
     store: false,
+    include: ["reasoning.encrypted_content"],
     parallel_tool_calls: true,
     stream: Boolean(callbacks?.onTextDelta || callbacks?.onReasoningDelta),
   };
@@ -604,6 +639,7 @@ async function requestResponsesApi(
   let content = "";
   let reasoning = "";
   const toolCalls: ToolCall[] = [];
+  const reasoningItems: ResponsesInputItem[] = [];
   let finishReason: string | null = null;
 
   await consumeOpenAiSseStream(response.body, (event) => {
@@ -640,12 +676,16 @@ async function requestResponsesApi(
       toolCalls.push(...parsed.toolCalls);
       finishReason = parsed.finishReason;
       if (!reasoning && parsed.reasoning) reasoning = parsed.reasoning;
+      for (const item of parsed.reasoningItems ?? []) {
+        pushReasoningItem(reasoningItems, item);
+      }
     }
 
     if (event.type === "response.output_item.done") {
       const item = event.item;
       if (item && typeof item === "object") {
         const record = item as Record<string, unknown>;
+        pushReasoningItem(reasoningItems, record);
         if (record.type === "function_call") {
           toolCalls.push({
             id: String(record.call_id ?? record.id ?? `call_${toolCalls.length}`),
@@ -669,6 +709,7 @@ async function requestResponsesApi(
     reasoning: reasoning || null,
     toolCalls,
     finishReason,
+    reasoningItems,
   };
 }
 

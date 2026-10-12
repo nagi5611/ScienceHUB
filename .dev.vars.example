@@ -6,9 +6,9 @@
 RUNA_OPENAI_API_KEY=
 # または CLOUDFLARE_API_TOKEN=
 CLOUDFLARE_ACCOUNT_ID=
-# openai/gpt-5.6-luna は Responses API 専用。AI Gateway 認証（Unified Billing）が必要
+# openai/gpt-6-luna のツール呼び出しは Responses API。AI Gateway 認証（Unified Billing）が必要
 # すぐ使う場合は RUNA_MODEL=@cf/moonshotai/kimi-k2.6 も可
-RUNA_MODEL=openai/gpt-5.6-luna
+RUNA_MODEL=openai/gpt-6-luna
 # マルチ検索後の重複除去・キュレーション（Workers AI Chat Completions）
 # RUNA_MULTI_SEARCH_SUMMARIZE_MODEL=@cf/qwen/qwen3-30b-a3b-fp8
 # RUNA_AI_GATEWAY_ID=default

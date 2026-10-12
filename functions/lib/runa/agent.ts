@@ -708,6 +708,7 @@ export async function runRunaChat(
         role: "assistant",
         content: completion.content,
         tool_calls: completion.toolCalls,
+        reasoningItems: completion.reasoningItems,
       });
 
       const toolResultCache = new Map<string, ToolRunResult>();

@@ -48,7 +48,7 @@ export const DISPLAY_CARD_WIDTH_PX = 800;
 export const DISPLAY_CARD_HEIGHT_PX = 450;
 
 /** html2canvas supersampling at design size 800×450 (bitmap = design × this). PDF export uses this scale. */
-export const DISPLAY_CARD_CAPTURE_SCALE = 16;
+export const DISPLAY_CARD_CAPTURE_SCALE = 4;
 
 /** @type {WeakMap<HTMLElement, HTMLCanvasElement>} */
 const displayCardHostRasterCanvas = new WeakMap();
