@@ -193,3 +193,146 @@ export async function testDiscordWebhook(integrations: IntegrationsState) {
 export function stlAdminUrl(reservationId: string) {
   return `${API}/admin/stl/${reservationId}`;
 }
+
+export type AdminReservation = {
+  id: string;
+  desired_date: string;
+  calendar_end_date?: string | null;
+  homeroom: string;
+  student_number: number;
+  student_name: string;
+  title: string;
+  print_scale: string;
+  status: string;
+  purpose?: string;
+  print_staff_label?: string | null;
+  printer_name?: string | null;
+  stl_filename?: string | null;
+  has_print_video?: boolean;
+  created_at: string;
+  summary?: string | null;
+  print_notes?: string | null;
+};
+
+export async function fetchAdminReservations(): Promise<AdminReservation[]> {
+  const data = await apiFetch<{ reservations: AdminReservation[] }>('admin/reservations');
+  return data.reservations;
+}
+
+export async function fetchAdminPrinters() {
+  return apiFetch<{
+    printers: {
+      id: string;
+      name: string;
+      status?: string;
+      image_url?: string | null;
+      capabilities?: { can_record_print_video?: boolean; nozzle_sizes_mm?: number[] };
+      daily_capacity?: Record<string, number>;
+    }[];
+  }>('admin/printers');
+}
+
+async function apiForm<T>(path: string, form: FormData, method = 'POST'): Promise<T> {
+  const res = await fetch(`${API}/${path}`, { method, credentials: 'include', body: form });
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data as T;
+}
+
+export async function createPrinter(name: string, image?: File) {
+  const form = new FormData();
+  form.append('name', name);
+  if (image) form.append('image', image);
+  return apiForm('admin/printers', form);
+}
+
+export async function patchPrinter(
+  id: string,
+  body: {
+    name?: string;
+    status?: string;
+    daily_capacity?: Record<string, number>;
+    capabilities?: { can_record_print_video?: boolean; nozzle_sizes_mm?: number[] };
+  }
+) {
+  return apiFetch(`admin/printers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function uploadPrinterImage(id: string, image: File) {
+  const form = new FormData();
+  form.append('image', image);
+  return apiForm(`admin/printers/${id}/image`, form, 'PUT');
+}
+
+export async function deletePrinter(id: string) {
+  return apiFetch(`admin/printers/${id}`, { method: 'DELETE' });
+}
+
+export type DayAvailability = {
+  date: string;
+  isFull?: boolean;
+  canBook?: boolean;
+  availableScales?: string[];
+};
+
+export async function fetchDayAvailability(date: string, scale?: string) {
+  const q = scale ? `&scale=${scale}` : '';
+  return apiFetch<DayAvailability>(`admin/calendar/availability?date=${date}${q}`);
+}
+
+export async function forceAdminReservation(body: Record<string, unknown>) {
+  return apiFetch<{ reservation: AdminReservation }>('admin/reservations/force', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchShiftsFull(year: number, month: number) {
+  return apiFetch<{
+    members: { id: string; name: string; homeroom: string; color_index: number }[];
+    availability: ShiftAvailabilityRow[];
+    printers: { id: string; name: string; image_url?: string | null }[];
+    printer_availability: { printer_id: string; date: string }[];
+  }>(`admin/shifts?year=${year}&month=${month}`);
+}
+
+export async function togglePrinterShift(printerId: string, date: string) {
+  return apiFetch<{ available: boolean }>('admin/shifts/printer-toggle', {
+    method: 'POST',
+    body: JSON.stringify({ printer_id: printerId, date }),
+  });
+}
+
+export async function patchMemberColor(id: string, color_index: number) {
+  return apiFetch(`admin/members/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ color_index }),
+  });
+}
+
+export async function getPrintVideoSettings() {
+  return apiFetch<{ storage_path: string; group_roots: { path: string; label: string }[] }>(
+    'admin/settings/print-video'
+  );
+}
+
+export async function patchPrintVideoSettings(storage_path: string) {
+  return apiFetch<{ storage_path: string }>('admin/settings/print-video', {
+    method: 'PATCH',
+    body: JSON.stringify({ storage_path }),
+  });
+}
+
+export async function uploadPrintVideo(reservationId: string, file: File) {
+  const form = new FormData();
+  form.append('video', file);
+  return apiForm(`admin/reservations/${reservationId}/print-video`, form);
+}
+
+export async function deletePrintVideo(reservationId: string) {
+  return apiFetch(`admin/reservations/${reservationId}/print-video`, { method: 'DELETE' });
+}
+
+export function printVideoDownloadUrl(reservationId: string) {
+  return `${API}/admin/reservations/${reservationId}/print-video/download`;
+}

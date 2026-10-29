@@ -8,7 +8,7 @@ import {
   type IntegrationsState, type AdminLogItem,
 } from '../admin-domain';
 import { KIND, STATUS, MACHINE_MAP } from '@shared/domain';
-import { stlAdminUrl } from '../admin-api';
+import { deletePrintVideo, printVideoDownloadUrl, stlAdminUrl, uploadPrintVideo } from '../admin-api';
 import {
   LOGO, machineColor, MDot, KindBadge, KIND_TONE, Tag, Chip, agoLabel, logTime,
   Header, DayStrip, CalAdmin, Drawer, Toast, SettingsDialog,
@@ -187,6 +187,45 @@ function ReviewActions({ app, onAct, initialMode }) {
   );
 }
 
+function PrintVideoSection({ appId, onToast }: { appId: string; onToast?: (m: string) => void }) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="ftitle">印刷動画</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <a className="btn btn-secondary btn-sm" href={printVideoDownloadUrl(appId)}>
+          動画DL
+        </a>
+        <label className="btn btn-primary btn-sm">
+          アップロード
+          <input
+            type="file"
+            accept="video/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              void uploadPrintVideo(appId, f)
+                .then(() => onToast?.('印刷動画をアップロードしました'))
+                .catch((err) => onToast?.(err instanceof Error ? err.message : '失敗'));
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() =>
+            void deletePrintVideo(appId)
+              .then(() => onToast?.('削除しました'))
+              .catch((err) => onToast?.(err instanceof Error ? err.message : '失敗'))
+          }
+        >
+          削除
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ReviewSheet({
   app,
   log,
@@ -194,6 +233,7 @@ function ReviewSheet({
   onAct,
   initialMode,
   staffLabel,
+  onToast,
 }: {
   app: AdminApplication | null;
   log: AdminLogItem[];
@@ -201,6 +241,7 @@ function ReviewSheet({
   onAct: (app: AdminApplication, type: string, payload?: unknown) => void;
   initialMode?: string | null;
   staffLabel?: string | null;
+  onToast?: (m: string) => void;
 }) {
   if (!app) return null;
   const sp = spanOf(app);
@@ -245,6 +286,7 @@ function ReviewSheet({
       )}
 
       <ReviewActions app={app} onAct={(type, payload) => onAct(app, type, payload)} initialMode={initialMode} />
+      <PrintVideoSection appId={app.id} onToast={onToast} />
       <AppLog log={log} appId={app.id} />
     </Drawer>
   );

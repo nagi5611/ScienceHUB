@@ -3,10 +3,15 @@ import {
   Header,
   DayStrip,
   CalAdmin,
-  Drawer,
   Toast,
-  SettingsDialog,
 } from './components/AdminUi';
+import { AdminSectionNav, type AdminSection } from './panels/AdminSectionNav';
+import { HistoryPanel } from './panels/HistoryPanel';
+import { MonthCalendarPanel } from './panels/MonthCalendarPanel';
+import { ForceReservationModal } from './panels/ForceReservationModal';
+import { PrintersPanel } from './panels/PrintersPanel';
+import { ShiftMonthPanel } from './panels/ShiftMonthPanel';
+import { LegacyReservationDrawer } from './panels/LegacyReservationDrawer';
 import { DayList } from './components/DayList';
 import { ReviewSheet } from './components/ReviewSheet';
 import { SettingsPanel, SettingsTabs } from './components/SettingsPanel';
@@ -45,7 +50,9 @@ import {
   patchReservation,
   testGoogleCalendar,
   testDiscordWebhook,
+  fetchAdminReservations,
   type ShiftAvailabilityRow,
+  type AdminReservation,
 } from './admin-api';
 
 function useMedia(query: string) {
@@ -77,6 +84,10 @@ export function AdminApp() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [settingsTab, setSettingsTab] = React.useState('shifts');
   const [toast, setToast] = React.useState<{ text: string; mark?: string } | null>(null);
+  const [section, setSection] = React.useState<AdminSection>('requests');
+  const [allReservations, setAllReservations] = React.useState<AdminReservation[]>([]);
+  const [forceDate, setForceDate] = React.useState<string | null>(null);
+  const [legacyDetail, setLegacyDetail] = React.useState<AdminReservation | null>(null);
 
   const narrow = useMedia('(max-width: 1079px)');
 
@@ -139,6 +150,8 @@ export function AdminApp() {
     const m = await fetchMembers();
     setMembers(m);
     if (!actor && m[0]) setActor(m[0].name);
+    const reservations = await fetchAdminReservations();
+    setAllReservations(reservations);
     await Promise.all([reloadApps(selected), reloadShifts(selected)]);
   }, [actor, reloadApps, reloadShifts, selected]);
 
@@ -382,10 +395,7 @@ export function AdminApp() {
           <div style={{ minWidth: 0 }}>
             <span className="badge">校内設備 / 自然科学部 3Dモデル班</span>
             <h1>3Dプリント 依頼管理</h1>
-            <p className="sub">
-              日付をクリックすると、その日の申請がすべて下に並びます。<b>依頼</b>（STLを提出して 16:30〜20:00 を使う）と
-              <b>予約</b>（時間だけ確保）は色とマークで分けて表示しています。
-            </p>
+            <AdminSectionNav section={section} onChange={setSection} />
           </div>
           <div className="head-right">
             <button type="button" className="btn btn-secondary btn-lg only-narrow" onClick={() => setSettingsOpen(true)}>
@@ -394,35 +404,55 @@ export function AdminApp() {
           </div>
         </div>
 
-        <div className="work">
-          <div className="col-main">
-            <CalAdmin apps={apps} shifts={shifts} selected={selected} onPick={setSelected} members={members} />
-            <DayStrip
-              apps={apps}
-              date={selected}
-              staff={selectedStaff}
-              onOpenSettings={() => {
-                setSettingsTab('shifts');
-                setSettingsOpen(true);
-              }}
-            />
-            <DayList
-              apps={apps}
-              date={selected}
-              onOpen={(a, mode) => {
-                setDetail(a);
-                setDetailMode(mode ?? null);
-              }}
-              onAct={(a, type) => void act(a, type)}
-            />
+        {section === 'requests' && (
+          <div className="work">
+            <div className="col-main">
+              <CalAdmin apps={apps} shifts={shifts} selected={selected} onPick={setSelected} members={members} />
+              <DayStrip
+                apps={apps}
+                date={selected}
+                staff={selectedStaff}
+                onOpenSettings={() => {
+                  setSettingsTab('shifts');
+                  setSettingsOpen(true);
+                }}
+              />
+              <DayList
+                apps={apps}
+                date={selected}
+                onOpen={(a, mode) => {
+                  setDetail(a);
+                  setDetailMode(mode ?? null);
+                }}
+                onAct={(a, type) => void act(a, type)}
+              />
+            </div>
+            {!narrow && (
+              <aside className="col-side" aria-label="設定">
+                <div className="card side-card">{settingsInner}</div>
+              </aside>
+            )}
           </div>
+        )}
 
-          {!narrow && (
-            <aside className="col-side" aria-label="設定">
-              <div className="card side-card">{settingsInner}</div>
-            </aside>
-          )}
-        </div>
+        {section === 'month' && (
+          <MonthCalendarPanel
+            reservations={allReservations}
+            onPickDate={(d) => setForceDate(d)}
+            onOpenReservation={(r) => setLegacyDetail(r)}
+            onToast={(m) => showToast(m)}
+          />
+        )}
+
+        {section === 'history' && (
+          <HistoryPanel reservations={allReservations} onOpen={(r) => setLegacyDetail(r)} />
+        )}
+
+        {section === 'printers' && (
+          <PrintersPanel onToast={(m) => showToast(m)} onReload={() => void refreshAll()} />
+        )}
+
+        {section === 'shifts' && <ShiftMonthPanel onToast={(m) => showToast(m)} />}
       </main>
 
       <footer className="ad-footer">
@@ -453,6 +483,22 @@ export function AdminApp() {
         onAct={(a, type, payload) => void act(a, type, payload as { reason?: { id: string; label: string; body: string }; note?: string })}
         initialMode={detailMode}
         staffLabel={detail ? selectedStaff : null}
+        onToast={(m) => showToast(m)}
+      />
+
+      <LegacyReservationDrawer
+        reservation={legacyDetail}
+        onClose={() => setLegacyDetail(null)}
+        onToast={(m) => showToast(m)}
+        onUpdated={() => void refreshAll()}
+      />
+
+      <ForceReservationModal
+        open={!!forceDate}
+        date={forceDate ?? ''}
+        onClose={() => setForceDate(null)}
+        onSaved={() => void refreshAll()}
+        onToast={(m) => showToast(m)}
       />
 
       <Toast toast={toast} />
