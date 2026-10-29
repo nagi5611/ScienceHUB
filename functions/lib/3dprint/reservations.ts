@@ -42,6 +42,9 @@ export interface Reservation {
   contest_storage_path?: string | null;
   contest_storage_filename?: string | null;
   contest_application_id?: string | null;
+  booking_kind?: 'reserve' | 'request' | null;
+  start_minute?: number | null;
+  end_minute?: number | null;
   created_at: string;
 }
 
@@ -326,8 +329,8 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
         print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
         user_id, source, schedule_type, contest_storage_path, contest_storage_filename,
-        contest_application_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        contest_application_id, booking_kind, start_minute, end_minute, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -360,6 +363,9 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.contest_storage_path ?? null,
       data.contest_storage_filename ?? null,
       data.contest_application_id ?? null,
+      data.booking_kind ?? null,
+      data.start_minute ?? null,
+      data.end_minute ?? null,
       data.created_at
     )
     .run();

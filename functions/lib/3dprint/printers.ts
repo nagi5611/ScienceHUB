@@ -30,6 +30,7 @@ export interface Printer {
   capabilities_json?: string | null;
   daily_capacity_json?: string | null;
   status?: string | null;
+  machine_lane?: 'ke' | 'cc' | null;
   created_at: string;
 }
 
@@ -44,6 +45,7 @@ export interface PrinterApiModel {
   bookable: boolean;
   status_label: string;
   daily_capacity: PrinterDailyCapacity;
+  machine_lane: 'ke' | 'cc' | null;
 }
 
 /** Formats a printer for API responses. */
@@ -60,7 +62,16 @@ export function formatPrinterForApi(printer: Printer, waitingCount = 0): Printer
     bookable: isPrinterBookable(status),
     status_label: PRINTER_STATUS_LABELS[status],
     daily_capacity: parsePrinterDailyCapacity(printer.daily_capacity_json),
+    machine_lane: printer.machine_lane ?? inferMachineLane(printer.name),
   };
+}
+
+/** Infers ke/cc lane from printer display name when machine_lane unset. */
+export function inferMachineLane(name: string): 'ke' | 'cc' | null {
+  const n = name.toLowerCase();
+  if (n.includes('centauri') || n.includes('carbon') || n.includes(' cc')) return 'cc';
+  if (n.includes('ender') || n.includes(' ke') || n.includes('v3 ke')) return 'ke';
+  return null;
 }
 
 /** Returns booking block message for a printer, or null if bookable. */

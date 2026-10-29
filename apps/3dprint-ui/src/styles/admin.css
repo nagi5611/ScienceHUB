@@ -1,0 +1,15 @@
+.admin-res-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.admin-res-list li button {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border, #e2e5ea);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: #fff;
+  cursor: pointer;
+}

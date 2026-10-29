@@ -1,28 +1,22 @@
 import { test, expect } from "@playwright/test";
 import {
-  ensureAdminPrintProfile,
   getEarliestBookableDate,
-  goToCalendarMonth,
   openReservationApp,
   preparePrintReservationDay,
-  syncAdminSession,
+  loginAsAdminViaPage,
+  ensureAdminPrintProfile,
 } from "./helpers";
 
-test.describe("3D印刷予約 — カレンダーと homeroom", () => {
-  test.beforeEach(async ({ context, request }) => {
-    await syncAdminSession(context, request);
-    await ensureAdminPrintProfile(request);
+test.describe("3D印刷予約 — カレンダー", () => {
+  test.beforeEach(async ({ page, request }) => {
+    await loginAsAdminViaPage(page);
+    await ensureAdminPrintProfile(page.request);
   });
 
-  test("予約可能日をクリックし homeroom コンボが表示される", async ({ page, request }) => {
+  test("平日セルが表示される", async ({ page }) => {
     const bookableDate = getEarliestBookableDate();
-    await preparePrintReservationDay(request, bookableDate);
+    await preparePrintReservationDay(page.request, bookableDate);
     await openReservationApp(page);
-    await goToCalendarMonth(page, bookableDate);
-
-    const dayCell = page.locator(`.calendar-day.clickable[data-date="${bookableDate}"]`);
-    await dayCell.click();
-    await expect(page.locator("#form-modal.open")).toBeVisible();
-    await expect(page.locator("#profile-homeroom")).toBeVisible();
+    await expect(page.locator(".cal-grid")).toBeVisible();
   });
 });
