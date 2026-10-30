@@ -119,6 +119,17 @@ a{color:var(--color-primary)}
 .cal-nav button:hover{background:var(--color-surface-muted);border-color:var(--color-border-strong);color:var(--color-text)}
 .cal-nav .cal-today{font-size:11.5px;font-weight:600}
 
+.cal-body{padding:11px 10px 14px;display:grid;grid-template-columns:34px minmax(0,1fr) 34px;gap:8px;align-items:stretch;margin:0 -4px}
+.cal-main{min-width:0}
+.cal-side{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);
+  color:var(--color-text-muted);cursor:pointer;padding:0;align-self:stretch;min-height:0;
+  transition:background .15s,border-color .15s,color .15s}
+.cal-side span[aria-hidden]{font-size:22px;line-height:1;font-weight:600}
+.cal-side-lbl{font-size:8.5px;font-weight:700;letter-spacing:.06em;writing-mode:vertical-rl;line-height:1.2}
+.cal-side:hover{background:var(--color-primary-soft);border-color:var(--color-primary-line);color:var(--color-primary-dark)}
+.cal-side:active{background:#fde8d5}
+
 .cal-wdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding-bottom:5px}
 .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:repeat(4,minmax(104px,1fr));gap:5px}
 .cal-wd{text-align:center;font-size:10.5px;font-weight:700;color:var(--color-text-faint);letter-spacing:.04em}
@@ -387,6 +398,9 @@ textarea.input{min-height:64px;resize:vertical;line-height:1.6}
   .site-title span{display:none}
   .hdr-link .lbl{display:none}
   .cal{padding:12px 10px 10px}
+  .cal-body{padding:9px 6px 12px;grid-template-columns:28px minmax(0,1fr) 28px;gap:5px;margin:0}
+  .cal-side span[aria-hidden]{font-size:18px}
+  .cal-side-lbl{display:none}
   .cal-grid{gap:3px;grid-template-rows:repeat(4,minmax(70px,1fr))}
   .cal-wdays{gap:3px;padding-bottom:3px}
   .cal-month{font-size:16px}

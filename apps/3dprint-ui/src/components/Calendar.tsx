@@ -92,29 +92,41 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr }) {
           </div>
         </div>
         <div className="cal-nav">
-          <button type="button" onClick={() => shift(-1)} aria-label="前の4週間">‹</button>
           <button type="button" className="cal-today" onClick={() => onPick(todayStr)}>今日</button>
-          <button type="button" onClick={() => shift(1)} aria-label="次の4週間">›</button>
         </div>
       </div>
 
-      <div className="cal-wdays">
-        {WD.map((w, i) => (
-          <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
-        ))}
-      </div>
+      <div className="cal-body">
+        <button type="button" className="cal-side prev" onClick={() => shift(-1)} aria-label="前の4週間">
+          <span aria-hidden="true">‹</span>
+          <span className="cal-side-lbl">前へ</span>
+        </button>
 
-      <div className="cal-grid">
-        {weeks.map((row) =>
-          row.map(d => {
-            const ds = ymd(d);
-            return (
-              <DayCell key={ds} date={d} dateStr={ds} info={computeDay(apps, ds)}
-                selected={ds === selected} today={ds === todayStr}
-                dim={d.getMonth() !== anchorMonth} onPick={onPick} />
-            );
-          })
-        )}
+        <div className="cal-main">
+          <div className="cal-wdays">
+            {WD.map((w, i) => (
+              <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
+            ))}
+          </div>
+
+          <div className="cal-grid">
+            {weeks.map((row) =>
+              row.map(d => {
+                const ds = ymd(d);
+                return (
+                  <DayCell key={ds} date={d} dateStr={ds} info={computeDay(apps, ds)}
+                    selected={ds === selected} today={ds === todayStr}
+                    dim={d.getMonth() !== anchorMonth} onPick={onPick} />
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <button type="button" className="cal-side next" onClick={() => shift(1)} aria-label="次の4週間">
+          <span aria-hidden="true">›</span>
+          <span className="cal-side-lbl">次へ</span>
+        </button>
       </div>
 
       <div className="cal-foot">
