@@ -225,14 +225,6 @@ function CalAdmin({ apps, shifts, selected, onPick, members }: { apps: AdminAppl
           }))}
         </div>
       </div>
-
-      <div className="cal-legend">
-        <span className="lg"><KindBadge kind="request" size="sm" /></span>
-        <span className="lg">データを提出して印刷枠を使う</span>
-        <span className="lg"><KindBadge kind="reserve" size="sm" /></span>
-        <span className="lg">プリンターの時間だけ確保</span>
-        <span className="lg" style={{ marginLeft: 'auto', color: 'var(--faint)' }}>日付をクリックすると、その日の申請がすべて下に並びます</span>
-      </div>
     </div>
   );
 }

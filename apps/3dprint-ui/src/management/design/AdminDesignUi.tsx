@@ -308,14 +308,6 @@ function Calendar({ apps, avail, selected, onPick }) {
           <span className="cal-side-lbl">次へ</span>
         </button>
       </div>
-
-      <div className="cal-legend">
-        <span className="lg"><KindBadge kind="request" size="sm" /></span>
-        <span className="lg">STLを提出して印刷枠を使う</span>
-        <span className="lg"><KindBadge kind="reserve" size="sm" /></span>
-        <span className="lg">プリンターの時間だけ確保</span>
-        <span className="lg lg-right">日付をクリックすると、その日の申請が右に出ます</span>
-      </div>
     </div>
   );
 }
