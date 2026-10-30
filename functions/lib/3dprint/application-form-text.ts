@@ -49,21 +49,6 @@ function hrLabel(hr: string): string {
   return `${hr[0]}-${hr.slice(1)}`;
 }
 
-function mapUiStatus(status: Reservation['status']): string {
-  switch (status) {
-    case 'accepted':
-    case 'printing':
-      return '確定';
-    case 'delivered':
-      return '完了';
-    case 'cancelled':
-    case 'failed':
-      return '取り消し';
-    default:
-      return '申請中';
-  }
-}
-
 /** Builds the plain-text「申請書」body (matches management UI export). */
 export async function buildPrintApplicationFormText(
   db: D1Database,
@@ -103,7 +88,6 @@ export async function buildPrintApplicationFormText(
     `時間        : ${minsLabel(span.start)}〜${minsLabel(span.end)}（${durationLabel(span.end - span.start)}）`,
     `機種        : ${machine.name}（${machine.maker}）`,
     `種別        : ${kindLine}`,
-    `状態        : ${mapUiStatus(reservation.status)}`,
     `担当        : ${staffNames.length ? staffNames.join(' / ') : '休み'}`,
     `申請者      : ${reservation.student_name}（${hrLabel(reservation.homeroom)}・${reservation.student_number}番）`,
     `印刷データ  : ${reservation.stl_filename || '—'}${reservation.stl_size_bytes ? `（${(reservation.stl_size_bytes / 1048576).toFixed(2)} MB）` : ''}`,

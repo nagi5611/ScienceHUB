@@ -204,7 +204,7 @@ function Header({ screen, setScreen, operatorSession, pendingCount, onCsv }) {
   );
 }
 
-/* ── カレンダー（4週） ── */
+/* ── カレンダー（月表示） ── */
 function dayHint(apps, ds) {
   const s = daySummary(apps, ds);
   return { req: s.requests.length, res: s.reserves.length, pending: s.pending };
@@ -244,24 +244,21 @@ function CalDay({ d, ds, apps, staffIds, selected, onPick, dense }) {
 
 function Calendar({ apps, avail, selected, onPick }) {
   const { run, enterClass } = useCalPeriodNav();
-  const first = weekStart(parseYmd(selected));
-  const periodKey = ymd(first);
-  const weeks = [];
-  for (let i = 0; i < 4; i++) {
-    const row = [];
-    for (let j = 0; j < 7; j++) row.push(addDays(first, i * 7 + j));
-    weeks.push(row);
-  }
-  const flat = weeks.flat();
-  const last = flat[flat.length - 1];
-  const sameMonth = flat[0].getMonth() === last.getMonth();
-  const monthLabel = sameMonth
-    ? `${flat[0].getFullYear()}年 ${pad2(flat[0].getMonth() + 1)}月`
-    : `${pad2(flat[0].getMonth() + 1)}月 → ${pad2(last.getMonth() + 1)}月`;
+  const anchor = parseYmd(selected);
+  const year = anchor.getFullYear();
+  const month = anchor.getMonth() + 1;
+  const periodKey = `${year}-${pad2(month)}`;
+  const monthLabel = `${year}年 ${pad2(month)}月`;
+  const cells = monthGrid(year, month);
 
-  const keys = flat.map(ymd);
-  const range = apps.filter(a => keys.indexOf(a.date) >= 0 && a.status !== 'cancelled');
-  const step = (n: number) => run(n, () => onPick(ymd(addDays(parseYmd(selected), n * 28))));
+  const stepMonth = (delta: number) => {
+    run(delta, () => {
+      const target = new Date(year, month - 1 + delta, 1);
+      const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+      const day = Math.min(anchor.getDate(), lastDay);
+      onPick(ymd(new Date(target.getFullYear(), target.getMonth(), day)));
+    });
+  };
 
   return (
     <div className="card cal-card">
@@ -277,7 +274,7 @@ function Calendar({ apps, avail, selected, onPick }) {
       </div>
 
       <div className="cal-body">
-        <button type="button" className="cal-side prev" onClick={() => step(-1)} aria-label="前の4週間">
+        <button type="button" className="cal-side prev" onClick={() => stepMonth(-1)} aria-label="前の月">
           <span aria-hidden="true">‹</span>
           <span className="cal-side-lbl">前へ</span>
         </button>
@@ -290,20 +287,23 @@ function Calendar({ apps, avail, selected, onPick }) {
                   <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
                 ))}
               </div>
-              <div className="cal-grid">
-                {weeks.map(row => row.map(d => {
+              <div className="cal-grid cal-grid-month">
+                {cells.map((d, i) => {
+                  if (!d) {
+                    return <span key={`pad-${periodKey}-${i}`} className="day pad" aria-hidden="true" />;
+                  }
                   const ds = ymd(d);
                   return (
                     <CalDay key={ds} d={d} ds={ds} apps={apps} staffIds={staffIdsOn(ds)}
                       selected={ds === selected} onPick={onPick} />
                   );
-                }))}
+                })}
               </div>
             </div>
           </div>
         </div>
 
-        <button type="button" className="cal-side next" onClick={() => step(1)} aria-label="次の4週間">
+        <button type="button" className="cal-side next" onClick={() => stepMonth(1)} aria-label="次の月">
           <span aria-hidden="true">›</span>
           <span className="cal-side-lbl">次へ</span>
         </button>
