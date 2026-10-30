@@ -31,6 +31,7 @@ export interface Printer {
   daily_capacity_json?: string | null;
   status?: string | null;
   machine_lane?: 'ke' | 'cc' | null;
+  description?: string | null;
   created_at: string;
 }
 
@@ -46,6 +47,7 @@ export interface PrinterApiModel {
   status_label: string;
   daily_capacity: PrinterDailyCapacity;
   machine_lane: 'ke' | 'cc' | null;
+  description: string | null;
 }
 
 /** Formats a printer for API responses. */
@@ -63,6 +65,7 @@ export function formatPrinterForApi(printer: Printer, waitingCount = 0): Printer
     status_label: PRINTER_STATUS_LABELS[status],
     daily_capacity: parsePrinterDailyCapacity(printer.daily_capacity_json),
     machine_lane: printer.machine_lane ?? inferMachineLane(printer.name),
+    description: printer.description?.trim() || null,
   };
 }
 
@@ -112,6 +115,8 @@ export async function createPrinter(
     image_r2_key?: string | null;
     capabilities?: PrinterCapabilities;
     status?: PrinterStatus;
+    machine_lane?: 'ke' | 'cc' | null;
+    description?: string | null;
   }
 ): Promise<Printer> {
   const position = await getNextPrinterPosition(db);
@@ -120,13 +125,25 @@ export async function createPrinter(
     data.capabilities ?? DEFAULT_PRINTER_CAPABILITIES
   );
   const status = normalizePrinterStatus(data.status ?? 'available');
+  const lane = data.machine_lane === 'ke' || data.machine_lane === 'cc' ? data.machine_lane : null;
+  const description = data.description?.trim() ? data.description.trim().slice(0, 2000) : null;
 
   await db
     .prepare(
-      `INSERT INTO print_printers (id, name, image_r2_key, position, capabilities_json, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO print_printers (id, name, image_r2_key, position, capabilities_json, status, machine_lane, description, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(data.id, data.name, data.image_r2_key ?? null, position, capabilitiesJson, status, createdAt)
+    .bind(
+      data.id,
+      data.name,
+      data.image_r2_key ?? null,
+      position,
+      capabilitiesJson,
+      status,
+      lane,
+      description,
+      createdAt
+    )
     .run();
 
   const printer = await getPrinterById(db, data.id);
@@ -170,6 +187,15 @@ export async function updatePrinterStatus(
   status: PrinterStatus
 ): Promise<void> {
   await db.prepare(`UPDATE print_printers SET status = ? WHERE id = ?`).bind(status, id).run();
+}
+
+/** Sets the same status on every registered printer. */
+export async function setAllPrintersStatus(
+  db: D1Database,
+  status: PrinterStatus
+): Promise<number> {
+  const result = await db.prepare(`UPDATE print_printers SET status = ?`).bind(status).run();
+  return result.meta.changes ?? 0;
 }
 
 /** Updates printer image R2 key. */

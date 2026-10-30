@@ -416,11 +416,23 @@ async function apiForm<T>(path: string, form: FormData, method = 'POST'): Promis
   return data as T;
 }
 
-export async function createPrinter(name: string, image?: File) {
+export async function createPrinter(
+  name: string,
+  opts?: { image?: File; machine_lane?: 'ke' | 'cc'; description?: string }
+) {
   const form = new FormData();
   form.append('name', name);
-  if (image) form.append('image', image);
+  if (opts?.machine_lane) form.append('machine_lane', opts.machine_lane);
+  if (opts?.description?.trim()) form.append('description', opts.description.trim());
+  if (opts?.image) form.append('image', opts.image);
   return apiForm('admin/printers', form);
+}
+
+export async function setAllPrintersStatus(status: 'available' | 'unavailable') {
+  return apiFetch<{ ok: boolean; updated: number }>('admin/printers/bulk', {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
 }
 
 export async function patchPrinter(

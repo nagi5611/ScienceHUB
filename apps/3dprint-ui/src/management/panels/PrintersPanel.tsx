@@ -10,6 +10,7 @@ import {
   listStorageFolders,
   patchPrintVideoSettings,
   patchPrinter,
+  setAllPrintersStatus,
   uploadPrinterImage,
 } from '../admin-api';
 
@@ -21,7 +22,9 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
   >([]);
   const [name, setName] = React.useState('');
   const [lane, setLane] = React.useState<'ke' | 'cc' | null>(null);
+  const [description, setDescription] = React.useState('');
   const [image, setImage] = React.useState<File | null>(null);
+  const [bulkStatus, setBulkStatus] = React.useState('');
   const [videoPath, setVideoPath] = React.useState('');
   const [edit, setEdit] = React.useState<Printer | null>(null);
   const [picker, setPicker] = React.useState(false);
@@ -42,15 +45,20 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
 
   const add = async () => {
     if (!lane) {
-      onToast('機種（KE / CC）を選んでください');
+      onToast('機種ライン（KE / CC）を選んでください');
       return;
     }
     const trimmed = name.trim();
     if (!trimmed) return;
     try {
-      await createPrinter(trimmed, image ?? undefined);
+      await createPrinter(trimmed, {
+        machine_lane: lane,
+        description: description.trim() || undefined,
+        image: image ?? undefined,
+      });
       setName('');
       setLane(null);
+      setDescription('');
       setImage(null);
       await load();
       onReload?.();
@@ -140,6 +148,38 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
       <section className="card ops-card">
         <h2 className="section-heading">プリンター管理</h2>
         <p className="hint ops-lead">登録済みプリンターの編集・削除、および新規追加ができます。</p>
+        <div className="printer-bulk-status">
+          <label className="printer-add-label" htmlFor="printer-bulk-status">
+            全プリンターの利用可否（一括）
+          </label>
+          <select
+            id="printer-bulk-status"
+            className="input printer-bulk-select"
+            value={bulkStatus}
+            onChange={(e) => {
+              const v = e.target.value as '' | 'available' | 'unavailable';
+              setBulkStatus(v);
+              if (!v) return;
+              const label = v === 'available' ? '使用可能' : '使用不可';
+              if (!confirm(`登録済みの全プリンターを「${label}」に変更しますか？`)) {
+                setBulkStatus('');
+                return;
+              }
+              void setAllPrintersStatus(v)
+                .then((res) => load().then(() => res))
+                .then((res) => {
+                  onToast(`全 ${res.updated} 台を${label}にしました`);
+                  onReload?.();
+                })
+                .catch((err) => onToast(err instanceof Error ? err.message : '一括変更に失敗'))
+                .finally(() => setBulkStatus(''));
+            }}
+          >
+            <option value="">一括変更を選ぶ…</option>
+            <option value="available">すべて使用可能にする</option>
+            <option value="unavailable">すべて使用不可にする</option>
+          </select>
+        </div>
         <div className="printer-admin-grid">
           {printers.map((p) => (
             <article key={p.id} className="printer-admin-card">
@@ -152,9 +192,13 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
                   <>
                     <h3 className="printer-admin-title">{p.name}</h3>
                     <p className="hint printer-admin-cap-summary">
-                      {p.status ?? 'available'} / ノズル {(p.capabilities?.nozzle_sizes_mm ?? []).join(', ') || '—'} /{' '}
+                      {p.status ?? 'available'} / {p.machine_lane?.toUpperCase() ?? '—'} / ノズル{' '}
+                      {(p.capabilities?.nozzle_sizes_mm ?? []).join(', ') || '—'} /{' '}
                       {p.capabilities?.can_record_print_video ? '動画撮影可' : '動画撮影不可'}
                     </p>
+                    {p.description ? (
+                      <p className="hint printer-admin-desc">{p.description}</p>
+                    ) : null}
                     <div className="printer-admin-actions">
                       <button type="button" className="btn btn-primary btn-sm" onClick={() => setEdit(p)}>
                         編集
@@ -197,12 +241,15 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
         </div>
         <div className="printer-add-card" data-testid="printer-add-form">
           <div className="printer-add-head">
-            <h3>プリンターを追加</h3>
-            <p className="hint">機種を選び、表示名と画像（任意）を設定してから追加します。</p>
+            <h3>機種（プリンター）を追加</h3>
+            <p className="hint">
+              物理プリンター本体を新規登録します。ここで選ぶ「機種」は、予約カレンダーの時間枠への割当ではなく、
+              そのプリンターが属する機種ライン（KE 系 / CC 系）の分類です。
+            </p>
           </div>
 
           <div className="printer-add-block">
-            <span className="printer-add-label">機種（どの枠に割り当てるか）</span>
+            <span className="printer-add-label">機種ライン（KE / CC）</span>
             <DndPickGrid>
               {MACHINES.map((m) => (
                 <DndPickTile
@@ -219,6 +266,21 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
                 />
               ))}
             </DndPickGrid>
+          </div>
+
+          <div className="printer-add-block">
+            <label className="printer-add-label" htmlFor="printer-add-description">
+              説明書き（任意）
+            </label>
+            <textarea
+              id="printer-add-description"
+              className="input printer-add-description"
+              rows={3}
+              maxLength={2000}
+              placeholder="設置場所、フィラメント、注意事項など（機種・プリンターに関する説明）"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
 
           <div className="printer-add-block">

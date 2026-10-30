@@ -139,6 +139,7 @@ import {
 import {
   countReservationsByPrinterId,
   createPrinter,
+  setAllPrintersStatus,
   deletePrinter,
   formatPrinterForApi,
   getAllPrinters,
@@ -2854,23 +2855,57 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ printers: printers.map(formatPrinterForApi) });
     }
 
+    // PATCH /api/3dprint/admin/printers/bulk — set status on all printers
+    if (
+      method === "PATCH" &&
+      segments[1] === "printers" &&
+      segments[2] === "bulk" &&
+      segments.length === 3
+    ) {
+      const body = await request.json<{ status?: string }>();
+      if (!body.status) return error("status が必要です");
+      if (body.status !== "available" && body.status !== "unavailable") {
+        return error("一括変更は使用可能（available）または使用不可（unavailable）のみです");
+      }
+      const statusError = validatePrinterStatusInput(body.status);
+      if (statusError) return error(statusError);
+      const updated = await setAllPrintersStatus(db, normalizePrinterStatus(body.status));
+      return json({ ok: true, updated });
+    }
+
     // POST /api/3dprint/admin/printers
     if (method === "POST" && segments[1] === "printers" && segments.length === 2) {
       const contentType = request.headers.get("content-type") ?? "";
       let name = "";
       let imageFile: File | null = null;
+      let machineLane: "ke" | "cc" | null = null;
+      let description: string | null = null;
 
       if (contentType.includes("multipart/form-data")) {
         const formData = await request.formData();
         name = String(formData.get("name") ?? "").trim();
         const image = formData.get("image");
         imageFile = image instanceof File && image.size > 0 ? image : null;
+        const laneRaw = String(formData.get("machine_lane") ?? "").trim();
+        if (laneRaw === "ke" || laneRaw === "cc") machineLane = laneRaw;
+        const descRaw = String(formData.get("description") ?? "").trim();
+        description = descRaw ? descRaw.slice(0, 2000) : null;
       } else {
-        const body = await request.json<{ name?: string }>();
+        const body = await request.json<{
+          name?: string;
+          machine_lane?: "ke" | "cc";
+          description?: string;
+        }>();
         name = body.name?.trim() ?? "";
+        if (body.machine_lane === "ke" || body.machine_lane === "cc") {
+          machineLane = body.machine_lane;
+        }
+        const descRaw = body.description?.trim() ?? "";
+        description = descRaw ? descRaw.slice(0, 2000) : null;
       }
 
       if (!name) return error("プリンター名は必須です");
+      if (!machineLane) return error("機種（KE / CC）を選んでください");
 
       const printerId = crypto.randomUUID();
       let imageR2Key: string | null = null;
@@ -2887,6 +2922,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         id: printerId,
         name,
         image_r2_key: imageR2Key,
+        machine_lane: machineLane,
+        description,
       });
       return json({ printer: formatPrinterForApi(printer) }, 201);
     }
