@@ -22,6 +22,7 @@ interface ApplicantEmailPayload {
   statusComment?: string | null;
   reservationAppUrl: string;
   applicationFormText?: string | null;
+  applicationFormPdfUrl?: string | null;
   previousDate?: string | null;
   /** Who performed the action (ScienceHUB user + linked print staff). */
   operatorSummary?: string | null;
@@ -68,6 +69,9 @@ ${printerLine}予約ID: ${payload.reservation.id}
   const operatorBlock = payload.operatorSummary?.trim()
     ? `\n\n--- 操作者 ---\n${payload.operatorSummary.trim()}\n`
     : "";
+  const pdfBlock = payload.applicationFormPdfUrl?.trim()
+    ? `\n\n--- 申請PDF ---\n${payload.applicationFormPdfUrl.trim()}\n`
+    : "";
 
   if (payload.kind === "rescheduled") {
     const prev = payload.previousDate ?? "—";
@@ -79,7 +83,7 @@ ${printerLine}予約ID: ${payload.reservation.id}
 変更前: ${prev}
 変更後: ${payload.reservation.desired_date}
 
-${common}${operatorBlock}${formBlock}
+${common}${operatorBlock}${formBlock}${pdfBlock}
 予約の確認: ${payload.reservationAppUrl}`;
     const html = `<p>3D印刷の<strong>予約日が変更</strong>されました。</p>
 <p>変更前: ${escapeHtml(prev)} → 変更後: ${escapeHtml(payload.reservation.desired_date)}</p>
@@ -99,7 +103,7 @@ ${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px
 
 担当者により予約が取り消されました。
 
-${common}${operatorBlock}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}${formBlock}
+${common}${operatorBlock}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}${formBlock}${pdfBlock}
 予約の確認: ${payload.reservationAppUrl}
 
 ※このメールに心当たりがない場合は破棄してください。`;
@@ -119,7 +123,7 @@ ${comment ? `<p>${escapeHtml(comment)}</p>` : ""}
 
 予約申請を受け付けました。担当者が内容を確認し、受領後に確定します。
 
-${common}${formBlock}
+${common}${formBlock}${pdfBlock}
 予約の確認: ${payload.reservationAppUrl}
 
 ※このメールに心当たりがない場合は破棄してください。`;
@@ -143,7 +147,7 @@ ${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px
 担当者 ${staff} が印刷を担当します。
 
 ${common}
-予約の確認: ${payload.reservationAppUrl}${operatorBlock}${formBlock}`;
+予約の確認: ${payload.reservationAppUrl}${operatorBlock}${formBlock}${pdfBlock}`;
   const html = `<p>印刷担当者が決まりました。<strong>${escapeHtml(staff)}</strong> が印刷を担当します。</p>
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>

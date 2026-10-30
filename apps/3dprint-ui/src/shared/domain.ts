@@ -66,6 +66,52 @@ export const staffFor = (str: string) => {
 export const weekStart = (d: Date) => addDays(startOfDay(d), -d.getDay());
 export const mdLabel = (d: Date) => d.getMonth() + 1 + '/' + d.getDate();
 
+export type MonthGridCell = { date: Date; dateStr: string; inMonth: boolean };
+
+/** Sun-first grid covering one calendar month (includes adjacent-month padding cells). */
+export function buildMonthGridCells(year: number, monthIndex: number): MonthGridCell[] {
+  const firstDay = new Date(year, monthIndex, 1);
+  const lastDayNum = new Date(year, monthIndex + 1, 0).getDate();
+  const startWeekday = firstDay.getDay();
+  const cells: MonthGridCell[] = [];
+
+  for (let i = 0; i < startWeekday; i++) {
+    const d = addDays(firstDay, i - startWeekday);
+    cells.push({ date: d, dateStr: ymd(d), inMonth: false });
+  }
+  for (let day = 1; day <= lastDayNum; day++) {
+    const d = new Date(year, monthIndex, day);
+    cells.push({ date: d, dateStr: ymd(d), inMonth: true });
+  }
+  const tailStart = cells.length;
+  const remaining = tailStart % 7 === 0 ? 0 : 7 - (tailStart % 7);
+  const lastInMonth = new Date(year, monthIndex, lastDayNum);
+  for (let i = 1; i <= remaining; i++) {
+    const d = addDays(lastInMonth, i);
+    cells.push({ date: d, dateStr: ymd(d), inMonth: false });
+  }
+  return cells;
+}
+
+export function monthGridFetchRange(year: number, monthIndex: number): { from: string; to: string } {
+  const cells = buildMonthGridCells(year, monthIndex);
+  return { from: cells[0]!.dateStr, to: cells[cells.length - 1]!.dateStr };
+}
+
+export function addCalendarMonths(year: number, monthIndex: number, delta: number) {
+  const d = new Date(year, monthIndex + delta, 1);
+  return { y: d.getFullYear(), m: d.getMonth() };
+}
+
+export function calendarMonthLabel(year: number, monthIndex: number) {
+  return `${year}年 ${pad2(monthIndex + 1)}月`;
+}
+
+export function monthIndexFromDateStr(dateStr: string) {
+  const d = parseYmd(dateStr);
+  return { y: d.getFullYear(), m: d.getMonth() };
+}
+
 export const slotStart = (i: number) => DAY_START + i * SLOT_MIN;
 export const minsLabel = (m: number) => pad2(Math.floor(m / 60)) + ':' + pad2(m % 60);
 export const rangeLabel = (a: number, b: number) =>

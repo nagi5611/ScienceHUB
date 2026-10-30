@@ -612,10 +612,14 @@ export function AdminDesignApp() {
             onDownload={(a, mode) => {
               if (mode === 'file') {
                 window.open(`/api/3dprint/admin/stl/${a.id}`, '_blank');
+                showToast(`${a.title} をダウンロードしました`, a.file ?? '3Dモデル');
+              } else if (mode === 'form') {
+                window.open(`/api/3dprint/admin/reservations/${a.id}/application-form.pdf`, '_blank');
+                showToast(`${a.title} をダウンロードしました`, '申請PDF');
               } else {
                 downloadAppFile(a, mode);
+                showToast(`${a.title} をダウンロードしました`, '申請書');
               }
-              showToast(`${a.title} をダウンロードしました`, mode === 'file' ? a.file : '申請書');
             }}
             onDownloadAll={(ds) => {
               const n = downloadDay(apps, ds);

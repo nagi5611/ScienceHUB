@@ -237,6 +237,7 @@ export async function notifyReservationModified(
 
 export type DiscordApplicationNotice = {
   applicationFormText?: string;
+  applicationFormPdfUrl?: string | null;
   adminDeepLink: string;
   /** Applicant (ScienceHUB user) — shown when the action is user-initiated. */
   applicantLabel?: string | null;
@@ -252,12 +253,15 @@ export async function notifyReservationBooked(
   const formSnippet = notice.applicationFormText?.trim()
     ? `\n\`\`\`\n${notice.applicationFormText.trim().slice(0, 1800)}\n\`\`\``
     : '';
+  const pdfLine = notice.applicationFormPdfUrl?.trim()
+    ? `\n\n**申請PDF:** ${notice.applicationFormPdfUrl.trim()}`
+    : '';
   const applicantLine = notice.applicantLabel?.trim()
     ? `\n\n**予約者（ScienceHUB）:** ${notice.applicantLabel.trim()}`
     : '';
 
   const payload = {
-    content: `予約されました（空き枠の自動確定）。\n${notice.adminDeepLink}${applicantLine}${formSnippet}`,
+    content: `予約されました（空き枠の自動確定）。\n${notice.adminDeepLink}${applicantLine}${pdfLine}${formSnippet}`,
     embeds: [
       {
         title: '3D印刷 予約確定',
@@ -352,9 +356,12 @@ export async function notifyReservationApplication(
     ? `\n\n申請者: ${notice.applicantLabel.trim()}`
     : '';
   const formBlock = formText ? `\n\n${formText}` : '';
+  const pdfLine = notice.applicationFormPdfUrl?.trim()
+    ? `\n\n申請PDF: ${notice.applicationFormPdfUrl.trim()}`
+    : '';
 
   const payload = {
-    content: `新しい予約申請があります。\n${notice.adminDeepLink}${applicantLine}${formBlock}`,
+    content: `新しい予約申請があります。\n${notice.adminDeepLink}${applicantLine}${pdfLine}${formBlock}`,
   };
 
   try {

@@ -61,10 +61,30 @@ function Wheel({ label, options, value, onChange, disabled }) {
     onChange(options[nx].value);
   };
 
+  const dragRef = React.useRef(null);
+  const onWheelPointerDown = e => {
+    if (disabled) return;
+    const el = boxRef.current;
+    if (!el) return;
+    dragRef.current = { y: e.clientY, scroll: el.scrollTop };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onWheelPointerMove = e => {
+    const el = boxRef.current;
+    const d = dragRef.current;
+    if (!el || !d) return;
+    el.scrollTop = d.scroll - (e.clientY - d.y);
+  };
+  const onWheelPointerUp = () => { dragRef.current = null; };
+
   return (
     <div className="wheel-field">
       <span className="flabel">{label}</span>
-      <div className="wheel-outer">
+      <div className="wheel-outer"
+        onPointerDown={onWheelPointerDown}
+        onPointerMove={onWheelPointerMove}
+        onPointerUp={onWheelPointerUp}
+        onPointerCancel={onWheelPointerUp}>
         <div className="wheel-band" aria-hidden="true" />
         <div className="wheel" ref={boxRef} role="listbox"
           aria-label={label} tabIndex={disabled ? -1 : 0}
@@ -89,49 +109,63 @@ function Wheel({ label, options, value, onChange, disabled }) {
 
 /* ── ファイルのドラッグ＆ドロップ ── */
 const ACCEPT = ['.stl', '.gcode', '.gco', '.3mf', '.obj'];
-function FileDrop({ file, setFile, error }) {
+const MAX_FILES = 10;
+
+function mapPickedFiles(list) {
+  return Array.from(list || []).slice(0, MAX_FILES).map(f => ({
+    name: f.name,
+    size: f.size,
+    ok: ACCEPT.some(ext => f.name.toLowerCase().endsWith(ext)),
+    raw: f,
+  }));
+}
+
+function FileDrop({ files, setFiles, error }) {
   const inputRef = React.useRef(null);
   const [over, setOver] = React.useState(false);
+  const filled = files.length > 0;
 
   const take = list => {
-    const f = list && list[0];
-    if (!f) return;
-    const ok = ACCEPT.some(ext => f.name.toLowerCase().endsWith(ext));
-    setFile({ name: f.name, size: f.size, ok, raw: f });
+    const next = mapPickedFiles(list);
+    if (next.length) setFiles(next);
   };
 
   return (
     <div className="filedrop-wrap">
-      <div className={'filedrop' + (over ? ' over' : '') + (error ? ' bad' : '') + (file ? ' filled' : '')}
+      <div className={'filedrop' + (over ? ' over' : '') + (error ? ' bad' : '') + (filled ? ' filled' : '')}
         onDragOver={e => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={e => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}
         onClick={() => inputRef.current && inputRef.current.click()}
         role="button" tabIndex={0}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current.click(); } }}>
-        <input ref={inputRef} type="file" accept={ACCEPT.join(',')} className="sr"
+        <input ref={inputRef} type="file" accept={ACCEPT.join(',')} multiple className="sr"
           onChange={e => take(e.target.files)} />
-        {file ? (
-          <>
-            <span className="fd-icon num">{file.name.split('.').pop().toUpperCase()}</span>
-            <span className="fd-main">
-              <b>{file.name}</b>
-              <span className="num">{(file.size / 1024 / 1024).toFixed(2)} MB ・ クリックで差し替え</span>
-            </span>
-            <button type="button" className="iconbtn" aria-label="ファイルを外す"
-              onClick={e => { e.stopPropagation(); setFile(null); }}>×</button>
-          </>
+        {filled ? (
+          <div className="fd-main" style={{ width: '100%' }}>
+            <b>{files.length}件選択</b>
+            <ul className="fd-list" style={{ margin: '6px 0 0', padding: 0, listStyle: 'none', fontSize: 12 }}>
+              {files.map((f, i) => (
+                <li key={f.name + i} className="num" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
+                  <button type="button" className="iconbtn" aria-label="ファイルを外す"
+                    onClick={e => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}>×</button>
+                </li>
+              ))}
+            </ul>
+            <span className="num help">クリックで追加・差し替え（最大{MAX_FILES}件）</span>
+          </div>
         ) : (
           <>
             <span className="fd-icon empty">+</span>
             <span className="fd-main">
               <b>STL / GCODE をドラッグ＆ドロップ</b>
-              <span>またはクリックして選択（.stl .gcode .3mf .obj）</span>
+              <span>またはクリックして選択（最大{MAX_FILES}件）</span>
             </span>
           </>
         )}
       </div>
-      {file && !file.ok && <span className="help" style={{ color: 'var(--color-warn-ink)' }}>対応していない形式です。STL か GCODE を選んでください。</span>}
+      {files.some(f => !f.ok) && <span className="help" style={{ color: 'var(--color-warn-ink)' }}>対応していない形式が含まれています。</span>}
     </div>
   );
 }
@@ -143,7 +177,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
   const [startMin, setStartMin] = React.useState(DAY_START + 60);
   const [endMin, setEndMin] = React.useState(DAY_START + 180);
   const [title, setTitle] = React.useState('');
-  const [file, setFile] = React.useState(null);
+  const [files, setFiles] = React.useState([]);
   const [note, setNote] = React.useState('');
   const [name, setName] = React.useState('');
   const [hr, setHr] = React.useState('');
@@ -157,7 +191,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
     setMachine(draft.machine || 'ke');
     setStartMin(slotStart(draft.start));
     setEndMin(slotStart(draft.end - 1) + SLOT_MIN);
-    setTitle(''); setFile(null); setNote('');
+    setTitle(''); setFiles([]); setNote('');
     setName(profile.name || ''); setHr(profile.hr || ''); setNum(profile.num || '');
   }, [open, draft]);
 
@@ -184,7 +218,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
   const dateErr = !hasShift(date);
   const nameErr = !name.trim() || !isValidHR(hr) || !/^\d{1,2}$/.test(String(num).trim());
   const titleErr = !title.trim();
-  const fileErr = !file || !file.ok;
+  const fileErr = !files.length || files.some(f => !f.ok);
   const lenErr = isReserve && endIdx <= startIdx;
   const deadlineErr = !isReserve && !requestAllowed(date);
   const canSubmit = !rangeBlocked && !dateErr && !nameErr && !titleErr && !fileErr && !lenErr && !deadlineErr;
@@ -225,9 +259,9 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
       start: isReserve ? startMin : SHIFT_START,
       end: isReserve ? endMin : SHIFT_END,
       title: title.trim(),
-      file: file.name,
-      fileSize: file.size,
-      fileRaw: file.raw,
+      file: files[0]?.name ?? '',
+      fileSize: files[0]?.size ?? 0,
+      fileRaws: files.map(f => f.raw),
       note: note.trim(),
       who: { name: name.trim(), hr, num: String(num).trim() },
     });
@@ -331,7 +365,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
 
           <div className="field">
             <span className="flabel">印刷データ<span className="req">必須</span></span>
-            <FileDrop file={file} setFile={setFile} error={touched && !file} />
+            <FileDrop files={files} setFiles={setFiles} error={touched && !files.length} />
             <span className="help num">ファイル名は「HR_番号_名前_作品名」にしてください（例：203_12_南野_stand.stl）。</span>
           </div>
 

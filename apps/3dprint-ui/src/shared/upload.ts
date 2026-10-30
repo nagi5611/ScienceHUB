@@ -2,11 +2,31 @@ import { ApiError } from './api';
 
 const API_BASE = '/api/3dprint';
 
-const ALLOWED = ['.stl', '.gcode', '.gco', '.nc', '.3mf', '.obj'];
+const ALLOWED = ['.stl', '.gcode', '.gco', '.nc', '.3mf', '.obj', '.html', '.htm'];
 
 function isAllowed(name: string) {
   const lower = name.toLowerCase();
   return ALLOWED.some((ext) => lower.endsWith(ext));
+}
+
+export async function uploadPrintFiles(files: File[]): Promise<
+  Array<{
+    r2_key: string;
+    filename: string;
+    size_bytes: number;
+  }>
+> {
+  if (!files.length) {
+    throw new ApiError('印刷データを1件以上選択してください', 400);
+  }
+  if (files.length > 10) {
+    throw new ApiError('印刷データは10件までです', 400);
+  }
+  const out = [];
+  for (const file of files) {
+    out.push(await uploadPrintFile(file));
+  }
+  return out;
 }
 
 export async function uploadPrintFile(file: File): Promise<{

@@ -355,18 +355,21 @@ function ReserveScreen({ apps, selected, onPick, onOpen, onApprove, onCancel, on
                             {(a.status === 'pending' || a.status === 'approved') && (
                               <button type="button" className="mini no" onClick={() => onOpen(a, 'cancel')}>取り消し</button>
                             )}
-                            <span className="dr-dl">
-                              <button type="button" className="mini dl" onClick={() => onDownload(a)}
-                                title="この申請のテキストをダウンロード" aria-label={`${a.title} をダウンロード`}>
+                            <details className="dr-dl dr-dl-menu">
+                              <summary className="mini dl" aria-label={`${a.title} をダウンロード`}>
                                 <DLIcon />DL
-                              </button>
-                              {a.file && (
-                                <button type="button" className="mini dl icon-only" onClick={() => onDownload(a, 'file')}
-                                  title={`${a.file} をダウンロード`} aria-label={`${a.file} をダウンロード`}>
-                                  <DLIcon />
+                              </summary>
+                              <div className="dr-dl-opts">
+                                <button type="button" className="mini dl" onClick={() => onDownload(a, 'form')}>
+                                  申請書ダウンロード
                                 </button>
-                              )}
-                            </span>
+                                {a.file && (
+                                  <button type="button" className="mini dl" onClick={() => onDownload(a, 'file')}>
+                                    3Dモデルダウンロード
+                                  </button>
+                                )}
+                              </div>
+                            </details>
                             <button type="button" className="mini arrow" onClick={() => onOpen(a)} aria-label="詳細">›</button>
                           </span>
                         </div>

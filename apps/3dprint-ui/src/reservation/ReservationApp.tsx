@@ -3,10 +3,9 @@ import type { Application } from '@shared/types';
 import {
   ymd,
   startOfDay,
-  parseYmd,
-  addDays,
-  weekStart,
   hasShift,
+  monthGridFetchRange,
+  monthIndexFromDateStr,
   isPastDate,
   computeDay,
   hasOverlap,
@@ -28,7 +27,7 @@ import {
   cancelReservation,
   fetchAuthProfile,
 } from '@shared/api';
-import { uploadPrintFile } from '@shared/upload';
+import { uploadPrintFiles } from '@shared/upload';
 import { SiteHeader, SiteFooter, Toast } from '@components/Chrome';
 import { Calendar } from '@components/Calendar';
 import { readReservationRangeCache, writeReservationRangeCache } from './reservation-cache';
@@ -46,8 +45,8 @@ type Draft = {
 };
 
 function initialRange(selected: string) {
-  const firstWeek = weekStart(parseYmd(selected));
-  return { from: ymd(firstWeek), to: ymd(addDays(firstWeek, 27)) };
+  const { y, m } = monthIndexFromDateStr(selected);
+  return monthGridFetchRange(y, m);
 }
 
 export function ReservationApp() {
@@ -64,6 +63,7 @@ export function ReservationApp() {
     cc: '',
   });
   const [selected, setSelected] = React.useState(prefs.selected || todayStr);
+  const [calendarView, setCalendarView] = React.useState(() => monthIndexFromDateStr(initialSelected));
   const [selection, setSelection] = React.useState<Selection>(null);
   const [profile, setProfileState] = React.useState(loadProfile);
   const [toast, setToast] = React.useState<{ text: string; mark?: string } | null>(null);
@@ -75,7 +75,7 @@ export function ReservationApp() {
   const [mineOpen, setMineOpen] = React.useState(false);
   const [cancelledOpen, setCancelledOpen] = React.useState(false);
   const [cancelledApps, setCancelledApps] = React.useState<Application[]>(() => bootCache?.cancelled ?? []);
-  /** True once D1 data for the current 4-week range has been fetched successfully. */
+  /** True once D1 data for the visible calendar month has been fetched successfully. */
   const [rangeLive, setRangeLive] = React.useState(false);
   const rangeFetchGen = React.useRef(0);
 
@@ -84,12 +84,10 @@ export function ReservationApp() {
     window.setTimeout(() => setToast(null), 2400);
   }, []);
 
-  const rangeForSelected = React.useMemo(() => {
-    const firstWeek = weekStart(parseYmd(selected));
-    const from = ymd(firstWeek);
-    const to = ymd(addDays(firstWeek, 27));
-    return { from, to };
-  }, [selected]);
+  const rangeForSelected = React.useMemo(
+    () => monthGridFetchRange(calendarView.y, calendarView.m),
+    [calendarView.y, calendarView.m],
+  );
 
   const applyRangeCache = React.useCallback((from: string, to: string) => {
     const cached = readReservationRangeCache(from, to);
@@ -186,6 +184,7 @@ export function ReservationApp() {
 
   const pickDate = (ds: string) => {
     setSelected(ds);
+    setCalendarView(monthIndexFromDateStr(ds));
     setSelection(null);
     setForm({ open: false, draft: null });
   };
@@ -251,7 +250,7 @@ export function ReservationApp() {
     });
   };
 
-  const submitApp = async (payload: Application & { fileRaw?: File }) => {
+  const submitApp = async (payload: Application & { fileRaw?: File; fileRaws?: File[] }) => {
     const cand = {
       id: 'new',
       date: payload.date,
@@ -274,13 +273,19 @@ export function ReservationApp() {
       showToast('プリンターが設定されていません', 'エラー');
       return;
     }
-    if (!payload.fileRaw) {
+    const rawFiles = payload.fileRaws?.length
+      ? payload.fileRaws
+      : payload.fileRaw
+        ? [payload.fileRaw]
+        : [];
+    if (!rawFiles.length) {
       showToast('印刷データを選択してください', 'エラー');
       return;
     }
     try {
       saveProfile(payload.who);
-      const uploaded = await uploadPrintFile(payload.fileRaw);
+      const uploaded = await uploadPrintFiles(rawFiles);
+      const primary = uploaded[0]!;
       const created = await createTimeSlotReservation({
         title: payload.title,
         printer_id: printerId,
@@ -288,9 +293,10 @@ export function ReservationApp() {
         booking_kind: payload.kind,
         start_minute: payload.kind === 'reserve' ? payload.start : undefined,
         end_minute: payload.kind === 'reserve' ? payload.end : undefined,
-        stl_r2_key: uploaded.r2_key,
-        stl_filename: uploaded.filename,
-        stl_size_bytes: uploaded.size_bytes,
+        stl_r2_key: primary.r2_key,
+        stl_filename: primary.filename,
+        stl_size_bytes: primary.size_bytes,
+        print_files: uploaded,
         print_notes: payload.note,
       });
       setForm({ open: false, draft: null });
@@ -365,7 +371,16 @@ export function ReservationApp() {
         )}
         <div className="workspace">
           <div className="cal-col">
-            <Calendar selected={selected} onPick={pickDate} apps={apps} todayStr={todayStr} staffDates={staffDates} />
+            <Calendar
+              selected={selected}
+              onPick={pickDate}
+              apps={apps}
+              todayStr={todayStr}
+              staffDates={staffDates}
+              viewYear={calendarView.y}
+              viewMonth={calendarView.m}
+              onViewMonthChange={(y, m) => setCalendarView({ y, m })}
+            />
             {rangeLive && (
               <ApplicationPopover
                 open={form.open}

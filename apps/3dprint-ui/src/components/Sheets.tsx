@@ -347,7 +347,7 @@ function CancelledSheet({ open, onClose, apps, onOpenApp, onRestore }) {
 
   return (
     <Sheet open={open} onClose={onClose} title="取り消した申請"
-      sub={`${mine.length}件（表示中の4週間）`}>
+      sub={`${mine.length}件（表示中の月）`}>
       {mine.length === 0 && (
         <div className="emptybox">取り消した申請はありません。</div>
       )}

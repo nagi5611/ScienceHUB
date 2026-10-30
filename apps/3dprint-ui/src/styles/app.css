@@ -139,7 +139,7 @@ a{color:var(--color-primary)}
 .cal-side:active{background:#fde8d5}
 
 .cal-wdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding-bottom:5px}
-.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:repeat(4,minmax(104px,1fr));gap:5px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:minmax(104px,1fr);gap:5px}
 .cal-wd{text-align:center;font-size:10.5px;font-weight:700;color:var(--color-text-faint);letter-spacing:.04em}
 .cal-wd.sun{color:#b4776b}
 .cal-wd.sat{color:#7c8ba4}
@@ -416,7 +416,7 @@ textarea.input{min-height:64px;resize:vertical;line-height:1.6}
   .cal-body{padding:9px 6px 12px;grid-template-columns:28px minmax(0,1fr) 28px;gap:5px;margin:0}
   .cal-side span[aria-hidden]{font-size:18px}
   .cal-side-lbl{display:none}
-  .cal-grid{gap:3px;grid-template-rows:repeat(4,minmax(70px,1fr))}
+  .cal-grid{gap:3px;grid-auto-rows:minmax(70px,1fr)}
   .cal-wdays{gap:3px;padding-bottom:3px}
   .cal-month{font-size:16px}
   .cal-sub{font-size:10.5px}

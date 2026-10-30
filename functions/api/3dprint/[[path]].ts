@@ -85,6 +85,15 @@ import {
   buildPrintApplicationFormText,
   build3dPrintAdminDeepLink,
 } from "../../lib/3dprint/application-form-text";
+import {
+  applicationFormPdfR2Key,
+  persistApplicationFormPdf,
+} from "../../lib/3dprint/application-form-pdf";
+import {
+  MAX_PRINT_RESERVATION_FILES,
+  replacePrintReservationFiles,
+  type PrintReservationFileInput,
+} from "../../lib/3dprint/print-reservation-files";
 import { softCancelReservation, restoreCancelledReservation } from "../../lib/3dprint/cancel-restore";
 import {
   build3dPrintReservationAppUrl,
@@ -396,6 +405,75 @@ async function applicationFormTextFor(
   return buildPrintApplicationFormText(db, reservation, printer);
 }
 
+function buildAdminApplicationFormPdfUrl(
+  request: Request,
+  env: Env,
+  reservationId: string
+): string {
+  const base = getOAuthRedirectBase(request, env).replace(/\/$/, "");
+  return `${base}/api/3dprint/admin/reservations/${reservationId}/application-form.pdf`;
+}
+
+async function normalizeAndValidatePrintFiles(
+  env: Env,
+  body: {
+    stl_r2_key: string;
+    stl_filename: string;
+    stl_size_bytes: number;
+    print_files?: PrintReservationFileInput[];
+  }
+): Promise<PrintReservationFileInput[] | Response> {
+  let files: PrintReservationFileInput[] = body.print_files?.length
+    ? body.print_files.map((f) => ({
+        r2_key: f.r2_key,
+        filename: f.filename,
+        size_bytes: Number(f.size_bytes),
+      }))
+    : [
+        {
+          r2_key: body.stl_r2_key,
+          filename: body.stl_filename,
+          size_bytes: Number(body.stl_size_bytes),
+        },
+      ];
+  if (files.length > MAX_PRINT_RESERVATION_FILES) {
+    return error(`印刷データは${MAX_PRINT_RESERVATION_FILES}件までです`);
+  }
+  if (!files.some((f) => f.r2_key === body.stl_r2_key)) {
+    files = [
+      {
+        r2_key: body.stl_r2_key,
+        filename: body.stl_filename,
+        size_bytes: Number(body.stl_size_bytes),
+      },
+      ...files,
+    ].slice(0, MAX_PRINT_RESERVATION_FILES);
+  }
+  for (const f of files) {
+    if (!isAllowedPrintFilename(f.filename)) {
+      return error("対応していないファイル形式です");
+    }
+    if (!(await verifyR2Key(env.FILES, f.r2_key))) {
+      return error("ファイルが見つかりません。再度アップロードしてください");
+    }
+  }
+  return files;
+}
+
+async function finalizeNewReservationSubmission(
+  env: Env,
+  db: D1Database,
+  reservation: Reservation,
+  files: PrintReservationFileInput[]
+): Promise<Reservation> {
+  await replacePrintReservationFiles(db, reservation.id, files, reservation.created_at);
+  const printer = reservation.printer_id
+    ? await getPrinterById(db, reservation.printer_id)
+    : null;
+  await persistApplicationFormPdf(env, db, reservation, printer ?? undefined);
+  return (await getReservationById(db, reservation.id)) ?? reservation;
+}
+
 /** Sends「予約申請受付」email to the applicant (non-blocking). */
 async function sendApplicantAppliedEmail(
   env: Env,
@@ -416,6 +494,7 @@ async function sendApplicantAppliedEmail(
     printerName: resolvePrinterLabel(reservation, printerMap),
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
     applicationFormText,
+    applicationFormPdfUrl: buildAdminApplicationFormPdfUrl(request, env, reservation.id),
   });
 }
 
@@ -437,8 +516,10 @@ async function notifyNewApplicationDiscordAndEmail(
   const applicantLabel = applicant
     ? `${applicant.display_name} (@${applicant.username})`
     : null;
+  const applicationFormPdfUrl = buildAdminApplicationFormPdfUrl(request, env, reservation.id);
   await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
     applicationFormText,
+    applicationFormPdfUrl,
     adminDeepLink,
     applicantLabel,
   });
@@ -467,6 +548,7 @@ async function notifyAutoConfirmedTimeSlotReserve(
     : null;
   await notifyReservationBooked(env.DISCORD_WEBHOOK_URL, {
     applicationFormText,
+    applicationFormPdfUrl: buildAdminApplicationFormPdfUrl(request, env, reservation.id),
     adminDeepLink,
     applicantLabel,
   });
@@ -568,6 +650,7 @@ async function sendApplicantAcceptedEmail(
     printStaffLabel,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
     applicationFormText,
+    applicationFormPdfUrl: buildAdminApplicationFormPdfUrl(request, env, reservation.id),
     operatorSummary,
   });
 }
@@ -944,6 +1027,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
+        print_files?: PrintReservationFileInput[];
         part_count?: number;
         booking_kind?: BookingKind;
         start_minute?: number;
@@ -1027,14 +1111,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("この日は対応可能な印刷担当者がいないため予約できません");
       }
 
-      if (!isAllowedPrintFilename(body.stl_filename)) {
-        return error("対応していないファイル形式です");
-      }
-
-      const keyExists = await verifyR2Key(env.FILES, body.stl_r2_key);
-      if (!keyExists) {
-        return error("ファイルが見つかりません。再度アップロードしてください");
-      }
+      const printFilesResult = await normalizeAndValidatePrintFiles(env, body);
+      if (printFilesResult instanceof Response) return printFilesResult;
+      const printFiles = printFilesResult;
 
       const videoResolved = await resolveRequestPrintVideo(
         db,
@@ -1110,17 +1189,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       await createReservation(db, reservation);
 
+      let submittedReservation = reservation;
+      try {
+        submittedReservation = await finalizeNewReservationSubmission(
+          env,
+          db,
+          reservation,
+          printFiles
+        );
+      } catch (err) {
+        console.error("finalizeNewReservationSubmission failed", err);
+      }
+
       if (autoConfirmReserve) {
         const member = autoStaffMemberId
           ? await getMemberById(db, autoStaffMemberId)
           : null;
         const memberMap = await buildMemberMap(db);
-        let saved = await getReservationById(db, reservationId);
+        let saved = submittedReservation;
         if (saved) {
           const calendarResult = await createCalendarEventForReservation(env, saved, memberMap);
           if (calendarResult.ok && calendarResult.eventId) {
             await setGoogleEventId(db, reservationId, calendarResult.eventId);
-            saved = await getReservationById(db, reservationId);
+            saved = (await getReservationById(db, reservationId)) ?? saved;
           }
         }
         const staffLabel = member ? formatMemberLabel(member) : "担当者（未割当）";
@@ -1129,7 +1220,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             env,
             db,
             context.request,
-            saved ?? reservation,
+            saved,
             userId,
             staffLabel
           ).catch((err) => console.error("auto-confirm notify failed", err))
@@ -1150,7 +1241,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           env,
           db,
           context.request,
-          reservation,
+          submittedReservation,
           userId
         )
       );
@@ -1851,6 +1942,39 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({
         reservations: reservations.map((r) => enrichReservationForAdmin(r, memberMap, printerMap)),
       });
+    }
+
+    // GET /api/3dprint/admin/reservations/:id/application-form.pdf
+    if (
+      method === "GET" &&
+      segments[1] === "reservations" &&
+      segments[3] === "application-form.pdf" &&
+      segments.length === 4
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+      const r2Key =
+        reservation.application_form_pdf_r2_key ??
+        applicationFormPdfR2Key(reservation.id);
+      const obj = await env.FILES.get(r2Key);
+      if (!obj) {
+        const printerMap = await buildPrinterMap(db);
+        const printer = reservation.printer_id
+          ? printerMap.get(reservation.printer_id)
+          : undefined;
+        const persisted = await persistApplicationFormPdf(env, db, reservation, printer);
+        if (!persisted) return error("申請PDFの生成に失敗しました", 500);
+        return streamPrintFile(
+          env.FILES,
+          persisted.r2Key,
+          `application-form-${reservation.id}.pdf`
+        );
+      }
+      return streamPrintFile(
+        env.FILES,
+        r2Key,
+        `application-form-${reservation.id}.pdf`
+      );
     }
 
     // GET /api/3dprint/admin/reservations/:id/application-form

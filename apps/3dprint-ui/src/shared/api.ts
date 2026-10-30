@@ -56,6 +56,7 @@ export async function createTimeSlotReservation(body: {
   stl_r2_key: string;
   stl_filename: string;
   stl_size_bytes: number;
+  print_files?: Array<{ r2_key: string; filename: string; size_bytes: number }>;
   print_notes?: string;
 }): Promise<{ id: string; message?: string; auto_confirmed?: boolean; booking_kind?: string }> {
   return apiRequest('reservations', { method: 'POST', body: JSON.stringify(body) });

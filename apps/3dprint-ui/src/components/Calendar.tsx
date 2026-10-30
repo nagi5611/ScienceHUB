@@ -1,12 +1,13 @@
 import React from 'react';
 import type { Application } from '@shared/types';
 import {
-  WD, pad2, ymd, parseYmd, addDays, startOfDay, isWeekday, hasShift, staffFor, weekStart, mdLabel,
+  WD, pad2, ymd, parseYmd, addDays, startOfDay, isWeekday, hasShift, staffFor, mdLabel,
   slotStart, minsLabel, rangeLabel, slotRangeLabel, durationLabel, slotIndex, inShiftSlot, spanOf, clampRange,
   HR_LIST, isValidHR, hrLabel, whoLabel, requestAllowed, isPastDate, todayStrOf,
   computeDay, hasOverlap, findNextOpenDate, saveProfile,
   STATUS, KIND, MACHINE_IDS, MACHINE_MAP, MACHINES, SLOT_COUNT, ROW_H, SHIFT_START, SHIFT_END,
   SHIFT_SLOT_START, SHIFT_SLOT_END, SHIFT_SLOTS, DAY_START, DAY_END, SLOT_MIN,
+  buildMonthGridCells, addCalendarMonths, calendarMonthLabel, monthIndexFromDateStr,
 } from '@shared/domain';
 import { useCalPeriodNav } from '../hooks/useCalPeriodNav';
 
@@ -50,37 +51,70 @@ function DayCell({ date, dateStr, info, selected, today, dim, onPick }) {
   );
 }
 
-function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDates }) {
+type CalendarProps = {
+  selected: string;
+  onPick: (dateStr: string) => void;
+  apps: Application[];
+  todayStr: string;
+  staffDates?: Record<string, boolean>;
+  viewYear?: number;
+  /** 0-indexed month */
+  viewMonth?: number;
+  onViewMonthChange?: (year: number, monthIndex: number) => void;
+};
+
+function Calendar({
+  selected,
+  onPick,
+  apps,
+  todayStr,
+  staffDates,
+  viewYear: viewYearProp,
+  viewMonth: viewMonthProp,
+  onViewMonthChange,
+}: CalendarProps) {
   const { run, enterClass } = useCalPeriodNav();
-  /* 選択日を含む週（日曜始まり）を第1週として4週分 */
-  const firstWeek = weekStart(parseYmd(selected));
-  const periodKey = ymd(firstWeek);
-  const weeks = [];
-  for (let i = 0; i < 4; i++) {
-    const row = [];
-    for (let j = 0; j < 7; j++) row.push(addDays(firstWeek, i * 7 + j));
-    weeks.push(row);
-  }
-  const headMonth = parseYmd(selected);
-  const lastDay = weeks[3][6];
-  const sameMonth = headMonth.getMonth() === lastDay.getMonth() && headMonth.getFullYear() === lastDay.getFullYear();
-  const monthLabel = sameMonth
-    ? `${headMonth.getFullYear()}年 ${pad2(headMonth.getMonth() + 1)}月`
-    : `${pad2(headMonth.getMonth() + 1)}月 → ${pad2(lastDay.getMonth() + 1)}月`;
+  const selectedParts = monthIndexFromDateStr(selected);
+  const [internalView, setInternalView] = React.useState(selectedParts);
+  const viewYear = viewYearProp ?? internalView.y;
+  const viewMonth = viewMonthProp ?? internalView.m;
 
-  const flat = weeks.flat();
-  const inRange = ds => flat.some(d => ymd(d) === ds);
-  const rangeApps = apps.filter(a => inRange(a.date) && a.status !== 'rejected');
-  const shiftDays = flat.filter(d => isWeekday(d)).length;
+  const setViewMonth = (y: number, m: number) => {
+    onViewMonthChange?.(y, m);
+    if (viewYearProp == null && viewMonthProp == null) {
+      setInternalView({ y, m });
+    }
+  };
+
+  const cells = buildMonthGridCells(viewYear, viewMonth);
+  const periodKey = `${viewYear}-${pad2(viewMonth + 1)}`;
+  const monthLabel = calendarMonthLabel(viewYear, viewMonth);
+  const inMonthCells = cells.filter(c => c.inMonth);
+  const rangeApps = apps.filter(
+    a => cells.some(c => c.dateStr === a.date) && a.status !== 'rejected',
+  );
+  const shiftDays = inMonthCells.filter(c => isWeekday(c.date)).length;
   const pending = rangeApps.filter(a => a.status === 'pending').length;
-  const anchorMonth = parseYmd(selected).getMonth();
+  const monthFirst = inMonthCells[0]?.date;
+  const monthLast = inMonthCells[inMonthCells.length - 1]?.date;
 
-  const shift = (n: number) => {
-    run(n, () => {
-      const x = addDays(parseYmd(selected), n * 28);
-      onPick(ymd(x));
+  const stepMonth = (delta: number) => {
+    run(delta, () => {
+      const next = addCalendarMonths(viewYear, viewMonth, delta);
+      setViewMonth(next.y, next.m);
     });
   };
+
+  const goToday = () => {
+    const { y, m } = monthIndexFromDateStr(todayStr);
+    setViewMonth(y, m);
+    onPick(todayStr);
+  };
+
+  const weeks: typeof cells[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7));
+  }
 
   return (
     <div className="card cal">
@@ -92,16 +126,19 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDa
             </div>
           </div>
           <div className="cal-sub num">
-            期間 {mdLabel(flat[0])}〜{mdLabel(lastDay)} ／ 稼働 {shiftDays}日 ／ 申請 {rangeApps.length}件（申請中 {pending}）
+            {monthFirst && monthLast
+              ? <>期間 {mdLabel(monthFirst)}〜{mdLabel(monthLast)} ／ </>
+              : null}
+            稼働 {shiftDays}日 ／ 申請 {rangeApps.length}件（申請中 {pending}）
           </div>
         </div>
         <div className="cal-nav">
-          <button type="button" className="cal-today" onClick={() => onPick(todayStr)}>今日</button>
+          <button type="button" className="cal-today" onClick={goToday}>今日</button>
         </div>
       </div>
 
       <div className="cal-body">
-        <button type="button" className="cal-side prev" onClick={() => shift(-1)} aria-label="前の4週間">
+        <button type="button" className="cal-side prev" onClick={() => stepMonth(-1)} aria-label="前の月">
           <span aria-hidden="true">‹</span>
           <span className="cal-side-lbl">前へ</span>
         </button>
@@ -115,30 +152,27 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDa
                 ))}
               </div>
 
-              <div className="cal-grid">
+              <div className="cal-grid" data-week-rows={weeks.length}>
                 {weeks.map((row) =>
-                  row.map(d => {
-                    const ds = ymd(d);
-                    return (
-                      <DayCell
-                        key={ds}
-                        date={d}
-                        dateStr={ds}
-                        info={computeDay(apps, ds, staffDates)}
-                        selected={ds === selected}
-                        today={ds === todayStr}
-                        dim={d.getMonth() !== anchorMonth}
-                        onPick={onPick}
-                      />
-                    );
-                  })
+                  row.map(({ date, dateStr, inMonth }) => (
+                    <DayCell
+                      key={dateStr}
+                      date={date}
+                      dateStr={dateStr}
+                      info={computeDay(apps, dateStr, staffDates)}
+                      selected={dateStr === selected}
+                      today={dateStr === todayStr}
+                      dim={!inMonth}
+                      onPick={onPick}
+                    />
+                  ))
                 )}
               </div>
             </div>
           </div>
         </div>
 
-        <button type="button" className="cal-side next" onClick={() => shift(1)} aria-label="次の4週間">
+        <button type="button" className="cal-side next" onClick={() => stepMonth(1)} aria-label="次の月">
           <span aria-hidden="true">›</span>
           <span className="cal-side-lbl">次へ</span>
         </button>

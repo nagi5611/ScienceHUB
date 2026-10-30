@@ -43,6 +43,7 @@ export interface Reservation {
   start_minute?: number | null;
   end_minute?: number | null;
   slot_group_id?: string | null;
+  application_form_pdf_r2_key?: string | null;
   created_at: string;
 }
 

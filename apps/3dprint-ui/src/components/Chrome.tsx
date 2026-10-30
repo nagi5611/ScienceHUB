@@ -45,12 +45,10 @@ function SiteFooter() {
           <img src={LOGO} alt="自然科学部" />
           <div>
             <b>松山南高校 自然科学部 / 3Dモデル班</b>
-            <span>予約の変更・取消は担当者（金田・田村・藤原）まで</span>
           </div>
         </div>
         <div className="footer-meta">
           <a href="mailto:diorama@mmh-virtual.jp">diorama@mmh-virtual.jp</a>
-          <span className="num">稼働 平日 16:30〜20:00</span>
         </div>
       </div>
     </footer>
