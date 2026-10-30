@@ -871,3 +871,108 @@ export async function getDefaultAppsForUser(
 
   return (result.results ?? []).map((row) => toDashboardApp(toPublicApp(row)));
 }
+
+export type AppAccessUserRow = {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string;
+  access_labels: string[];
+};
+
+/** Lists ScienceHUB users who can access the given app (group roles + hub admins). */
+export async function listUsersWithAppAccess(
+  db: D1Database,
+  appSlug: string
+): Promise<AppAccessUserRow[]> {
+  const app = await getAppBySlug(db, appSlug);
+  if (!app) return [];
+
+  const userMeta = new Map<string, Set<string>>();
+
+  const addLabel = (userId: string, label: string) => {
+    const set = userMeta.get(userId) ?? new Set<string>();
+    set.add(label);
+    userMeta.set(userId, set);
+  };
+
+  if (app.is_default) {
+    const all = await db
+      .prepare(`SELECT id FROM users`)
+      .all<{ id: string }>();
+    for (const row of all.results ?? []) {
+      addLabel(row.id, "Default App");
+    }
+  } else {
+    const { enabledGroupIds, roleRestrictions } = await loadAppAccessMeta(db, app.id);
+    if (enabledGroupIds.size > 0) {
+      const placeholders = [...enabledGroupIds].map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT
+             ugm.user_id,
+             ugm.group_id,
+             ugm.group_role_id,
+             g.display_name AS group_display_name,
+             gr.display_name AS role_display_name
+           FROM user_group_memberships ugm
+           JOIN hub_groups g ON g.id = ugm.group_id
+           JOIN group_roles gr ON gr.id = ugm.group_role_id
+           WHERE ugm.group_id IN (${placeholders})`
+        )
+        .bind(...enabledGroupIds)
+        .all<{
+          user_id: string;
+          group_id: string;
+          group_role_id: string;
+          group_display_name: string;
+          role_display_name: string;
+        }>();
+
+      for (const row of result.results ?? []) {
+        const membership = {
+          group_id: row.group_id,
+          group_role_id: row.group_role_id,
+        } as UserGroupMembership;
+        if (!membershipCanAccessApp(membership, enabledGroupIds, roleRestrictions)) {
+          continue;
+        }
+        addLabel(row.user_id, `${row.group_display_name} / ${row.role_display_name}`);
+      }
+    }
+
+    const admins = await db
+      .prepare(
+        `SELECT DISTINCT ur.user_id
+         FROM user_roles ur
+         JOIN roles r ON r.slug = ur.role_slug
+         WHERE r.is_admin = 1`
+      )
+      .all<{ user_id: string }>();
+    for (const row of admins.results ?? []) {
+      addLabel(row.user_id, "Hub 管理者");
+    }
+  }
+
+  const ids = [...userMeta.keys()];
+  if (!ids.length) return [];
+
+  const placeholders = ids.map(() => "?").join(", ");
+  const users = await db
+    .prepare(
+      `SELECT id, username, display_name, email FROM users WHERE id IN (${placeholders})`
+    )
+    .bind(...ids)
+    .all<{ id: string; username: string; display_name: string; email: string }>();
+
+  const rows: AppAccessUserRow[] = (users.results ?? []).map((u) => ({
+    id: u.id,
+    username: u.username,
+    display_name: u.display_name,
+    email: u.email,
+    access_labels: [...(userMeta.get(u.id) ?? [])].sort((a, b) => a.localeCompare(b, "ja")),
+  }));
+
+  rows.sort((a, b) => a.display_name.localeCompare(b.display_name, "ja"));
+  return rows;
+}

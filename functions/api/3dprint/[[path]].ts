@@ -5,7 +5,7 @@
 import type { Env } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { requireUser } from "../../lib/auth";
-import { canUserAccessApp } from "../../lib/apps";
+import { canUserAccessApp, listUsersWithAppAccess } from "../../lib/apps";
 import {
   getEarliestBookableDate,
   getAdminEarliestBookableDate,
@@ -42,6 +42,7 @@ import {
   toggleMemberAvailability,
   updateMemberColor,
   updateMemberDiscordUserId,
+  updateMemberUserId,
   updateReservationAdmin,
   updateReservationContent,
   deleteReservation,
@@ -66,8 +67,17 @@ import {
   build3dPrintAdminUrl,
   notifyReservationApplication,
   notifyReservationModified,
+  notifyPrintAdminOperation,
   sendDiscordStaffMentionTest,
 } from "../../lib/3dprint/discord";
+import {
+  formatPrintActorLogLabel,
+  formatPrintActorNoticeLines,
+  memberDisplayName,
+  resolvePrintActorContext,
+  type PrintActorContext,
+} from "../../lib/3dprint/print-actor";
+import { getSessionUserById } from "../../lib/auth";
 import {
   buildPrintApplicationFormText,
   build3dPrintAdminDeepLink,
@@ -422,14 +432,33 @@ async function notifyNewApplicationDiscordAndEmail(
     date: reservation.desired_date,
     appId: reservation.id,
   });
+  const applicant = await getSessionUserById(env, db, applicantUserId);
+  const applicantLabel = applicant
+    ? `${applicant.display_name} (@${applicant.username})`
+    : null;
   await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
     title: reservation.title,
     desired_date: reservation.desired_date,
     print_scale: reservation.print_scale,
     applicationFormText,
     adminDeepLink,
+    applicantLabel,
   });
   await sendApplicantAppliedEmail(env, db, request, applicantUserId, reservation);
+}
+
+async function requireAdminActor(
+  env: Env,
+  db: D1Database,
+  userId: string
+): Promise<PrintActorContext | Response> {
+  const ctx = await resolvePrintActorContext(env, db, userId);
+  if (!ctx) return error("ユーザーが見つかりません", 401);
+  return ctx;
+}
+
+function operatorEmailSummary(ctx: PrintActorContext, extra?: Parameters<typeof formatPrintActorNoticeLines>[1]) {
+  return formatPrintActorNoticeLines(ctx, extra).join("\n");
 }
 
 async function sendApplicantRescheduledEmail(
@@ -438,7 +467,8 @@ async function sendApplicantRescheduledEmail(
   request: Request,
   applicantUserId: string,
   reservation: Reservation,
-  previousDate: string
+  previousDate: string,
+  operatorSummary?: string | null
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
   const applicationFormText = await applicationFormTextFor(db, reservation, printerMap);
@@ -454,6 +484,7 @@ async function sendApplicantRescheduledEmail(
     previousDate,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
     applicationFormText,
+    operatorSummary,
   });
 }
 
@@ -464,7 +495,8 @@ async function sendApplicantAcceptedEmail(
   request: Request,
   applicantUserId: string,
   reservation: Reservation,
-  printStaffLabel: string
+  printStaffLabel: string,
+  operatorSummary?: string | null
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
   await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
@@ -478,6 +510,7 @@ async function sendApplicantAcceptedEmail(
     printerName: resolvePrinterLabel(reservation, printerMap),
     printStaffLabel,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    operatorSummary,
   });
 }
 
@@ -554,7 +587,7 @@ async function applyReservationContentEdit(
   context: EventContext<Env, string, unknown>,
   reservation: Reservation,
   body: ReservationContentInput,
-  options: { isUser: boolean }
+  options: { isUser: boolean; operatorUserId?: string }
 ): Promise<Response> {
   const { env } = context;
   const db = getDb(env);
@@ -647,17 +680,34 @@ async function applyReservationContentEdit(
     stl_size_bytes: stlSizeBytes,
   });
 
-  context.waitUntil(
-    notifyReservationModified(
-      env.DISCORD_WEBHOOK_URL,
-      build3dPrintAdminUrl(getOAuthRedirectBase(context.request, env)),
-      {
-      title: String(body.title).trim(),
-      desired_date: body.desired_date,
-      print_scale: body.print_scale,
-      }
-    )
-  );
+  if (!options.isUser && options.operatorUserId) {
+    const actor = await resolvePrintActorContext(env, db, options.operatorUserId);
+    context.waitUntil(
+      notifyReservationModified(
+        env.DISCORD_WEBHOOK_URL,
+        build3dPrintAdminUrl(getOAuthRedirectBase(context.request, env)),
+        {
+          title: String(body.title).trim(),
+          desired_date: body.desired_date,
+          print_scale: body.print_scale,
+        },
+        actor,
+        { action_label: "予約内容の修正（管理）" }
+      )
+    );
+  } else if (options.isUser) {
+    context.waitUntil(
+      notifyReservationModified(
+        env.DISCORD_WEBHOOK_URL,
+        build3dPrintAdminUrl(getOAuthRedirectBase(context.request, env)),
+        {
+          title: String(body.title).trim(),
+          desired_date: body.desired_date,
+          print_scale: body.print_scale,
+        }
+      )
+    );
+  }
 
   const updated = await getReservationById(db, reservation.id);
   const memberMap = await buildMemberMap(db);
@@ -1805,7 +1855,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         existing.status !== "cancelled" &&
         updated.user_id
       ) {
+        const actor = await resolvePrintActorContext(env, db, userId);
+        const opSummary = actor
+          ? operatorEmailSummary(actor, { action_label: "予約の取り消し（管理）" })
+          : null;
         const printerMapForMail = await buildPrinterMap(db);
+        const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
+          date: updated.desired_date,
+          appId: updated.id,
+        });
         void notifyApplicantPrintReservationEmail(env, db, updated.user_id, {
           kind: "cancelled",
           reservation: {
@@ -1817,7 +1875,32 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           printerName: resolvePrinterLabel(updated, printerMapForMail),
           statusComment: updated.status_comment,
           reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+          operatorSummary: opSummary,
         }).catch((err) => console.error("cancel email failed", err));
+        if (actor) {
+          context.waitUntil(
+            notifyPrintAdminOperation(env.DISCORD_WEBHOOK_URL, {
+              title: "3D印刷 予約取り消し（管理）",
+              color: 0xef4444,
+              summary: `管理画面から予約「${updated.title}」を取り消しました。`,
+              adminDeepLink: deepLink,
+              actor,
+              actorExtra: { action_label: "予約の取り消し" },
+              fields: [
+                { name: "タイトル", value: updated.title, inline: true },
+                { name: "希望印刷日", value: updated.desired_date, inline: true },
+              ],
+            })
+          );
+          void insertAdminLog(db, {
+            actor: formatPrintActorLogLabel(actor),
+            type: "status",
+            text: `予約「${updated.title}」を取り消し`,
+            app_id: updated.id,
+            actor_user_id: actor.user_id,
+            actor_member_id: actor.member_id,
+          }).catch(() => {});
+        }
       }
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
@@ -1838,7 +1921,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const reservation = await getReservationById(db, segments[2]);
       if (!reservation) return error("予約が見つかりません", 404);
 
-      return applyReservationContentEdit(context, reservation, body, { isUser: false });
+      return applyReservationContentEdit(context, reservation, body, {
+        isUser: false,
+        operatorUserId: userId,
+      });
     }
 
     // PATCH /api/3dprint/admin/reservations/:id/reschedule
@@ -1862,14 +1948,39 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           force: Boolean(body.force),
         });
         if (updated.user_id && updated.desired_date !== previousDate) {
+          const actor = await resolvePrintActorContext(env, db, userId);
+          const opSummary = actor
+            ? operatorEmailSummary(actor, { action_label: "予約日の変更（管理）" })
+            : null;
           void sendApplicantRescheduledEmail(
             env,
             db,
             request,
             updated.user_id,
             updated,
-            previousDate
+            previousDate,
+            opSummary
           ).catch((err) => console.error("reschedule email failed", err));
+          if (actor) {
+            const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
+              date: updated.desired_date,
+              appId: updated.id,
+            });
+            context.waitUntil(
+              notifyPrintAdminOperation(env.DISCORD_WEBHOOK_URL, {
+                title: "3D印刷 予約日変更（管理）",
+                color: 0xf59e0b,
+                summary: `「${updated.title}」の印刷日を ${previousDate} → ${updated.desired_date} に変更しました。`,
+                adminDeepLink: deepLink,
+                actor,
+                actorExtra: { action_label: "予約日の変更" },
+                fields: [
+                  { name: "タイトル", value: updated.title, inline: true },
+                  { name: "変更後", value: updated.desired_date, inline: true },
+                ],
+              })
+            );
+          }
         }
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
@@ -1890,6 +2001,27 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const restored = await restoreCancelledReservation(db, segments[2], { isAdmin: true });
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
+        const actor = await resolvePrintActorContext(env, db, userId);
+        if (actor) {
+          const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
+            date: restored.desired_date,
+            appId: restored.id,
+          });
+          context.waitUntil(
+            notifyPrintAdminOperation(env.DISCORD_WEBHOOK_URL, {
+              title: "3D印刷 取り消しの復元（管理）",
+              color: 0x3b82f6,
+              summary: `予約「${restored.title}」の取り消しを元に戻しました。`,
+              adminDeepLink: deepLink,
+              actor,
+              actorExtra: { action_label: "取り消しの復元" },
+              fields: [
+                { name: "タイトル", value: restored.title, inline: true },
+                { name: "希望印刷日", value: restored.desired_date, inline: true },
+              ],
+            })
+          );
+        }
         return json({
           ok: true,
           reservation: enrichReservationForAdmin(restored, memberMap, printerMap),
@@ -1940,6 +2072,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const member = await getMemberById(db, body.print_staff_member_id);
       if (!member) return error("指定されたメンバーが見つかりません", 400);
 
+      const actor = await requireAdminActor(env, db, userId);
+      if (actor instanceof Response) return actor;
+
       if (!(await isMemberAvailableOnReservationSpan(db, body.print_staff_member_id, existing))) {
         return error("予約期間のすべての日に対応可能なメンバーのみ割り当てできます", 400);
       }
@@ -1972,15 +2107,51 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const printerMap = await buildPrinterMap(db);
 
       if (finalReservation) {
+        const opSummary = operatorEmailSummary(actor, {
+          assigned_staff_name: member.name,
+          assigned_staff_homeroom: member.homeroom,
+          action_label: "予約受領",
+        });
+        const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(context.request, env), {
+          date: finalReservation.desired_date,
+          appId: finalReservation.id,
+        });
         context.waitUntil(
-          sendApplicantAcceptedEmail(
-            env,
-            db,
-            context.request,
-            finalReservation.user_id,
-            finalReservation,
-            formatMemberLabel(member)
-          )
+          Promise.all([
+            sendApplicantAcceptedEmail(
+              env,
+              db,
+              context.request,
+              finalReservation.user_id,
+              finalReservation,
+              formatMemberLabel(member),
+              opSummary
+            ),
+            notifyPrintAdminOperation(env.DISCORD_WEBHOOK_URL, {
+              title: "3D印刷 予約受領",
+              color: 0x22c55e,
+              summary: `予約「${finalReservation.title}」を受領しました（担当: ${memberDisplayName(member)}）。`,
+              adminDeepLink: deepLink,
+              actor,
+              actorExtra: {
+                assigned_staff_name: member.name,
+                assigned_staff_homeroom: member.homeroom,
+                action_label: "予約受領",
+              },
+              fields: [
+                { name: "タイトル", value: finalReservation.title, inline: true },
+                { name: "希望印刷日", value: finalReservation.desired_date, inline: true },
+              ],
+            }),
+            insertAdminLog(db, {
+              actor: formatPrintActorLogLabel(actor),
+              type: "status",
+              text: `予約「${finalReservation.title}」を受領（${memberDisplayName(member)}）`,
+              app_id: finalReservation.id,
+              actor_user_id: actor.user_id,
+              actor_member_id: actor.member_id,
+            }),
+          ]).catch((err) => console.error("accept notify failed", err))
         );
       }
 
@@ -2063,17 +2234,57 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ log });
     }
 
+    // GET /api/3dprint/admin/session
+    if (method === "GET" && segments[1] === "session" && segments.length === 2) {
+      const actor = await requireAdminActor(env, db, userId);
+      if (actor instanceof Response) return actor;
+      return json({
+        user: {
+          id: actor.user_id,
+          display_name: actor.user_display_name,
+          username: actor.user_username,
+        },
+        linked_member: actor.member_id
+          ? {
+              id: actor.member_id,
+              name: actor.member_name,
+              homeroom: actor.member_homeroom,
+            }
+          : null,
+      });
+    }
+
+    // GET /api/3dprint/admin/management-users
+    if (method === "GET" && segments[1] === "management-users" && segments.length === 2) {
+      const users = await listUsersWithAppAccess(db, MANAGEMENT_APP);
+      const members = await getAllMembers(db);
+      const memberByUser = new Map(
+        members.filter((m) => m.user_id).map((m) => [m.user_id as string, m])
+      );
+      return json({
+        users: users.map((u) => ({
+          ...u,
+          linked_member_id: memberByUser.get(u.id)?.id ?? null,
+          linked_member_name: memberByUser.get(u.id)?.name ?? null,
+        })),
+      });
+    }
+
     // POST /api/3dprint/admin/log
     if (method === "POST" && segments[1] === "log" && segments.length === 2) {
-      const body = await request.json<{ actor: string; type: string; text: string; app_id?: string | null }>();
-      if (!body.actor?.trim() || !body.type?.trim() || !body.text?.trim()) {
-        return error("actor, type, text が必要です");
+      const body = await request.json<{ type: string; text: string; app_id?: string | null }>();
+      if (!body.type?.trim() || !body.text?.trim()) {
+        return error("type, text が必要です");
       }
+      const actor = await requireAdminActor(env, db, userId);
+      if (actor instanceof Response) return actor;
       const row = await insertAdminLog(db, {
-        actor: body.actor.trim(),
+        actor: formatPrintActorLogLabel(actor),
         type: body.type.trim(),
         text: body.text.trim(),
         app_id: body.app_id ?? null,
+        actor_user_id: actor.user_id,
+        actor_member_id: actor.member_id,
       });
       return json({ ok: true, entry: row });
     }
@@ -2142,6 +2353,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         name: String(body.name).trim(),
         color_index: existingMembers.length % 8,
         discord_user_id: body.discord_user_id?.trim() || null,
+        user_id: null,
         created_at: new Date().toISOString(),
       };
 
@@ -2156,12 +2368,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // PATCH /api/3dprint/admin/members/:id
     if (method === "PATCH" && segments[1] === "members" && segments.length === 3) {
-      const body = await request.json<{ color_index?: number; discord_user_id?: string | null }>();
+      const body = await request.json<{
+        color_index?: number;
+        discord_user_id?: string | null;
+        user_id?: string | null;
+      }>();
       const hasColor = body.color_index !== undefined;
       const hasDiscord = body.discord_user_id !== undefined;
+      const hasUser = body.user_id !== undefined;
 
-      if (!hasColor && !hasDiscord) {
-        return error("color_index または discord_user_id が必要です");
+      if (!hasColor && !hasDiscord && !hasUser) {
+        return error("color_index、discord_user_id、user_id のいずれかが必要です");
       }
 
       if (hasColor && !isValidColorIndex(body.color_index!)) {
@@ -2181,6 +2398,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (hasDiscord) {
         const discordId = body.discord_user_id?.trim() || null;
         await updateMemberDiscordUserId(db, segments[2], discordId);
+      }
+      if (hasUser) {
+        const linkId = body.user_id?.trim() || null;
+        if (linkId) {
+          const userRow = await db
+            .prepare("SELECT id FROM users WHERE id = ?")
+            .bind(linkId)
+            .first<{ id: string }>();
+          if (!userRow) return error("指定された ScienceHUB ユーザーが見つかりません", 404);
+          const allowed = await canUserAccessApp(db, linkId, MANAGEMENT_APP);
+          if (!allowed) {
+            return error("このユーザーは 3D印刷管理アプリにアクセスできません", 400);
+          }
+        }
+        try {
+          await updateMemberUserId(db, segments[2], linkId);
+        } catch (err) {
+          return error(err instanceof Error ? err.message : "ユーザー紐づけに失敗しました", 409);
+        }
       }
 
       const updated = await getMemberById(db, segments[2]);

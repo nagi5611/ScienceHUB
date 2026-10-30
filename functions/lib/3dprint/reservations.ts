@@ -58,6 +58,7 @@ export interface Member {
   name: string;
   color_index: number;
   discord_user_id: string | null;
+  user_id: string | null;
   created_at: string;
 }
 
@@ -676,12 +677,20 @@ export async function getMemberById(db: D1Database, id: string): Promise<Member 
   return db.prepare('SELECT * FROM print_members WHERE id = ?').bind(id).first<Member>();
 }
 
+/** Fetches a print staff member linked to a ScienceHUB user. */
+export async function getMemberByUserId(db: D1Database, userId: string): Promise<Member | null> {
+  return db
+    .prepare('SELECT * FROM print_members WHERE user_id = ? LIMIT 1')
+    .bind(userId)
+    .first<Member>();
+}
+
 /** Inserts a new member. */
 export async function createMember(db: D1Database, data: Member): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO print_members (id, homeroom, student_number, name, color_index, discord_user_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO print_members (id, homeroom, student_number, name, color_index, discord_user_id, user_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -690,6 +699,7 @@ export async function createMember(db: D1Database, data: Member): Promise<void> 
       data.name,
       data.color_index ?? 0,
       data.discord_user_id ?? null,
+      data.user_id ?? null,
       data.created_at
     )
     .run();
@@ -710,6 +720,24 @@ export async function updateMemberDiscordUserId(
 /** Updates a member's shift color index. */
 export async function updateMemberColor(db: D1Database, id: string, colorIndex: number): Promise<void> {
   await db.prepare('UPDATE print_members SET color_index = ? WHERE id = ?').bind(colorIndex, id).run();
+}
+
+/** Links or unlinks a print staff member to a ScienceHUB user (unique per user). */
+export async function updateMemberUserId(
+  db: D1Database,
+  memberId: string,
+  userId: string | null
+): Promise<void> {
+  if (userId) {
+    const taken = await db
+      .prepare('SELECT id FROM print_members WHERE user_id = ? AND id != ? LIMIT 1')
+      .bind(userId, memberId)
+      .first<{ id: string }>();
+    if (taken) {
+      throw new Error('この ScienceHUB アカウントは別の印刷担当者に既に紐づいています');
+    }
+  }
+  await db.prepare('UPDATE print_members SET user_id = ? WHERE id = ?').bind(userId, memberId).run();
 }
 
 /** Deletes a member by ID. */

@@ -157,7 +157,7 @@ function agoLabel(iso) {
 const logTime = iso => { const d = new Date(iso); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
 
 /* ── ヘッダー ── */
-function Header({ screen, setScreen, actor, setActor, members, pendingCount, onCsv }) {
+function Header({ screen, setScreen, operatorSession, pendingCount, onCsv }) {
   return (
     <header className="site-header">
       <div className="header-inner">
@@ -186,12 +186,15 @@ function Header({ screen, setScreen, actor, setActor, members, pendingCount, onC
         </nav>
 
         <div className="hdr-right">
-          <label className="actor">
-            <span>操作者</span>
-            <select value={actor} onChange={e => setActor(e.target.value)}>
-              {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-            </select>
-          </label>
+          <div className="actor actor-readonly" title={operatorSession?.user.username ?? ''}>
+            <span>ログイン</span>
+            <strong>{operatorSession?.user.display_name ?? '—'}</strong>
+            {operatorSession?.linked_member ? (
+              <span className="actor-staff">／印刷担当 {operatorSession.linked_member.name}</span>
+            ) : (
+              <span className="actor-staff actor-staff-warn">／印刷担当未紐づけ</span>
+            )}
+          </div>
           {screen === 'reserve' && <button type="button" className="hdr-link" onClick={onCsv}>CSV出力</button>}
           <a className="hdr-link" href="/apps/3dprint-reservation/">申請フォーム</a>
         </div>

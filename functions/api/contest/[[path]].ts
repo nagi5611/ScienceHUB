@@ -2418,6 +2418,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         name: String(body.name).trim(),
         color_index: existingMembers.length % 8,
         discord_user_id: body.discord_user_id?.trim() || null,
+        user_id: null,
         created_at: new Date().toISOString(),
       };
 
