@@ -289,23 +289,14 @@ export async function notifyReservationApplication(
 ): Promise<void> {
   if (!webhookUrl) return;
 
-  const formSnippet = notice.applicationFormText?.trim()
-    ? `\n\`\`\`\n${notice.applicationFormText.trim().slice(0, 1800)}\n\`\`\``
-    : '';
+  const formText = notice.applicationFormText?.trim().slice(0, 1800) ?? '';
   const applicantLine = notice.applicantLabel?.trim()
-    ? `\n\n**申請者（ScienceHUB）:** ${notice.applicantLabel.trim()}`
+    ? `\n\n申請者: ${notice.applicantLabel.trim()}`
     : '';
+  const formBlock = formText ? `\n\n${formText}` : '';
 
   const payload = {
-    content: `新しい予約申請があります。\n${notice.adminDeepLink}${applicantLine}${formSnippet}`,
-    embeds: [
-      {
-        title: '3D印刷 予約申請',
-        color: 0xf6821f,
-        description: '申請書（上のコードブロック）に作品名・日付・時間などが含まれています。',
-        footer: { text: 'リンク先で該当日付が選択されます。担当者を選び「予約を受領」してください' },
-      },
-    ],
+    content: `新しい予約申請があります。\n${notice.adminDeepLink}${applicantLine}${formBlock}`,
   };
 
   try {

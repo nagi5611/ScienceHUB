@@ -30,6 +30,7 @@ function SettingsScreen({
   onRemoveMember,
   onPaintAvail,
   shiftDraftPending,
+  shiftDraftSummary,
   shiftApplying,
   onConfirmShiftDraft,
   onDiscardShiftDraft,
@@ -56,12 +57,12 @@ function SettingsScreen({
 
   const loadedMonthKey = React.useRef('');
   React.useEffect(() => {
-    if (tab !== 'shift' || shiftDraftPending) return;
+    if (tab !== 'shift') return;
     const key = `${month.y}-${month.m}`;
     if (loadedMonthKey.current === key) return;
     loadedMonthKey.current = key;
     void onLoadShiftMonth(month.y, month.m);
-  }, [tab, month.y, month.m, onLoadShiftMonth, shiftDraftPending]);
+  }, [tab, month.y, month.m, onLoadShiftMonth]);
 
   const tabs = [
     ['shift', 'シフト表'],
@@ -70,15 +71,13 @@ function SettingsScreen({
   ];
 
   const changeMonth = n => {
-    if (shiftDraftPending) {
-      const msg = n === 0
-        ? '未保存のシフト変更があります。破棄して今月へ移動しますか？'
-        : '未保存のシフト変更があります。破棄して月を移動しますか？';
-      if (!window.confirm(msg)) return;
-      onDiscardShiftDraft();
+    if (n !== 0) loadedMonthKey.current = '';
+    if (n === 0) {
+      const d = new Date();
       loadedMonthKey.current = '';
+      setMonth({ y: d.getFullYear(), m: d.getMonth() + 1 });
+      return;
     }
-    if (n === 0) { const d = new Date(); setMonth({ y: d.getFullYear(), m: d.getMonth() + 1 }); return; }
     setMonth(prev => {
       let y = prev.y, m = prev.m + n;
       if (m < 1) { m = 12; y -= 1; }
@@ -86,6 +85,15 @@ function SettingsScreen({
       return { y, m };
     });
   };
+
+  const draftSummaryLabel = shiftDraftSummary && shiftDraftPending
+    ? [
+        shiftDraftSummary.addedSlots > 0 && `追加${shiftDraftSummary.addedSlots}枠`,
+        shiftDraftSummary.removedSlots > 0 && `削除${shiftDraftSummary.removedSlots}枠`,
+        shiftDraftSummary.addedDates > 0 && `＋${shiftDraftSummary.addedDates}日`,
+        shiftDraftSummary.removedDates > 0 && `−${shiftDraftSummary.removedDates}日`,
+      ].filter(Boolean).join(' · ')
+    : '';
 
   const cur = members.find(m => m.id === memberId);
 
@@ -103,7 +111,10 @@ function SettingsScreen({
         <div className="shifttab">
           {shiftDraftPending && (
             <div className="shift-confirm-bar" role="status">
-              <span className="shift-confirm-bar-text">未保存のシフト変更があります</span>
+              <span className="shift-confirm-bar-text">
+                未保存のシフト変更があります
+                {draftSummaryLabel ? `（${draftSummaryLabel}）` : ''}
+              </span>
               <div className="shift-confirm-bar-actions">
                 <button type="button" className="btn btn-secondary btn-sm" disabled={shiftApplying} onClick={onDiscardShiftDraft}>
                   変更を破棄

@@ -119,6 +119,83 @@ export function mergeMonthMemberAvailability(
   return next;
 }
 
+function datesInMonth(year: number, month: number): string[] {
+  const total = new Date(year, month, 0).getDate();
+  const out: string[] = [];
+  for (let d = 1; d <= total; d++) {
+    out.push(
+      `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
+  }
+  return out;
+}
+
+/** Load a month from the server without overwriting in-progress draft edits. */
+export function mergeMonthMemberAvailabilityPreservingDraft(
+  avail: Record<string, string[]>,
+  saved: Record<string, string[]>,
+  monthRows: ShiftAvailabilityRow[],
+  year: number,
+  month: number
+): { avail: Record<string, string[]>; saved: Record<string, string[]> } {
+  const server = availabilityRowsToMemberAvail(monthRows);
+  const memberIds = new Set([
+    ...Object.keys(avail),
+    ...Object.keys(saved),
+    ...Object.keys(server),
+  ]);
+  const monthDates = datesInMonth(year, month);
+  const nextAvail: Record<string, string[]> = {};
+  const nextSaved: Record<string, string[]> = {};
+
+  for (const id of memberIds) {
+    const a0 = new Set(avail[id] || []);
+    const s0 = new Set(saved[id] || []);
+    const srv = new Set(server[id] || []);
+    const a = new Set([...a0].filter((ds) => !isAvailabilityDateInMonth(ds, year, month)));
+    const s = new Set([...s0].filter((ds) => !isAvailabilityDateInMonth(ds, year, month)));
+
+    for (const ds of monthDates) {
+      const drafted = s0.has(ds) !== a0.has(ds);
+      if (drafted) {
+        if (a0.has(ds)) a.add(ds);
+        if (s0.has(ds)) s.add(ds);
+      } else if (srv.has(ds)) {
+        a.add(ds);
+        s.add(ds);
+      }
+    }
+    nextAvail[id] = [...a].sort();
+    nextSaved[id] = [...s].sort();
+  }
+  return { avail: nextAvail, saved: nextSaved };
+}
+
+export type ShiftDraftSummary = {
+  addedSlots: number;
+  removedSlots: number;
+  addedDates: number;
+  removedDates: number;
+};
+
+export function summarizeMemberShiftDraft(
+  saved: Record<string, string[]>,
+  draft: Record<string, string[]>
+): ShiftDraftSummary {
+  const before = memberAvailToRows(saved);
+  const after = memberAvailToRows(draft);
+  const beforeKeys = new Set(before.map((r) => `${r.member_id}\0${r.date}`));
+  const afterKeys = new Set(after.map((r) => `${r.member_id}\0${r.date}`));
+  const added = after.filter((r) => !beforeKeys.has(`${r.member_id}\0${r.date}`));
+  const removed = before.filter((r) => !afterKeys.has(`${r.member_id}\0${r.date}`));
+  return {
+    addedSlots: added.length,
+    removedSlots: removed.length,
+    addedDates: new Set(added.map((r) => r.date)).size,
+    removedDates: new Set(removed.map((r) => r.date)).size,
+  };
+}
+
 export function shiftMapForCalendar(
   members: AdminMember[],
   availability: ShiftAvailabilityRow[],

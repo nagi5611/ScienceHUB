@@ -33,7 +33,8 @@ import {
   designStatusToDbStatus,
   availabilityRowsToMemberAvail,
   memberAvailToRows,
-  mergeMonthMemberAvailability,
+  mergeMonthMemberAvailabilityPreservingDraft,
+  summarizeMemberShiftDraft,
   resolveOperatorStaffMemberId,
   formatOperatorDisplayLabel,
   toDesignMembers,
@@ -83,6 +84,10 @@ export function AdminDesignApp() {
   const [apps, setApps] = React.useState<DesignApplication[]>([]);
   const [avail, setAvail] = React.useState<Record<string, string[]>>({});
   const [savedAvail, setSavedAvail] = React.useState<Record<string, string[]>>({});
+  const availRef = React.useRef(avail);
+  const savedAvailRef = React.useRef(savedAvail);
+  availRef.current = avail;
+  savedAvailRef.current = savedAvail;
   const [shiftApplying, setShiftApplying] = React.useState(false);
   const [screen, setScreen] = React.useState(() => prefs.screen || 'reserve');
   const [selected, setSelected] = React.useState(() => prefs.selected || TODAY);
@@ -415,6 +420,11 @@ export function AdminDesignApp() {
     []
   );
 
+  const shiftDraftSummary = React.useMemo(
+    () => summarizeMemberShiftDraft(savedAvail, avail),
+    [savedAvail, avail]
+  );
+
   const discardShiftDraft = () => {
     const next: Record<string, string[]> = {};
     for (const [id, dates] of Object.entries(savedAvail)) next[id] = [...dates];
@@ -451,14 +461,16 @@ export function AdminDesignApp() {
     async (year: number, month: number) => {
       try {
         const shiftData = await fetchShifts(year, month);
-        const merge = (prev: Record<string, string[]>) =>
-          mergeMonthMemberAvailability(prev, shiftData.availability, year, month);
-        setSavedAvail((prev) => merge(prev));
-        setAvail((prev) => {
-          const next = merge(prev);
-          setAvailability(next);
-          return next;
-        });
+        const merged = mergeMonthMemberAvailabilityPreservingDraft(
+          availRef.current,
+          savedAvailRef.current,
+          shiftData.availability,
+          year,
+          month
+        );
+        setSavedAvail(merged.saved);
+        setAvail(merged.avail);
+        setAvailability(merged.avail);
       } catch (e) {
         showToastRef.current(e instanceof Error ? e.message : 'シフト読込に失敗しました', 'エラー');
       }
@@ -585,6 +597,7 @@ export function AdminDesignApp() {
             onRemoveMember={(id) => void removeMember(id)}
             onPaintAvail={paintAvail}
             shiftDraftPending={shiftDraftPending}
+            shiftDraftSummary={shiftDraftSummary}
             shiftApplying={shiftApplying}
             onConfirmShiftDraft={() => void confirmShiftDraft()}
             onDiscardShiftDraft={discardShiftDraft}
