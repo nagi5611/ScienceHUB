@@ -20,21 +20,38 @@ type ApplicationApiModel = {
 
 const API = '/api/3dprint';
 
+export class AdminApiError extends Error {
+  status: number;
+  code?: string;
+  date?: string;
+  reservations?: { id: string; title?: string; desired_date?: string }[];
+  constructor(
+    message: string,
+    status: number,
+    extra?: { code?: string; date?: string; reservations?: { id: string; title?: string; desired_date?: string }[] }
+  ) {
+    super(message);
+    this.status = status;
+    this.code = extra?.code;
+    this.date = extra?.date;
+    this.reservations = extra?.reservations;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}/${path}`, {
     credentials: 'include',
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string>) },
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string; date?: string; reservations?: unknown[] };
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+    date?: string;
+    reservations?: { id: string; title?: string; desired_date?: string }[];
+  };
   if (!res.ok) {
-    const err = new Error(data.error || `HTTP ${res.status}`) as Error & {
-      status?: number;
-      payload?: typeof data;
-    };
-    err.status = res.status;
-    err.payload = data;
-    throw err;
+    throw new AdminApiError(data.error || `HTTP ${res.status}`, res.status, data);
   }
   return data as T;
 }
@@ -226,7 +243,7 @@ export async function fetchAdminPrinters() {
       name: string;
       status?: string;
       image_url?: string | null;
-      capabilities?: { can_record_print_video?: boolean; nozzle_sizes_mm?: number[] };
+      capabilities?: { can_record_print_video?: boolean; nozzle_sizes_mm?: string[] };
       daily_capacity?: Record<string, number>;
     }[];
   }>('admin/printers');
@@ -252,7 +269,7 @@ export async function patchPrinter(
     name?: string;
     status?: string;
     daily_capacity?: Record<string, number>;
-    capabilities?: { can_record_print_video?: boolean; nozzle_sizes_mm?: number[] };
+        capabilities?: { can_record_print_video?: boolean; nozzle_sizes_mm?: string[] };
   }
 ) {
   return apiFetch(`admin/printers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -301,6 +318,30 @@ export async function togglePrinterShift(printerId: string, date: string) {
     method: 'POST',
     body: JSON.stringify({ printer_id: printerId, date }),
   });
+}
+
+export async function setPrinterDatesAvailability(printerId: string, dates: string[], available: boolean) {
+  return apiFetch<{ ok: boolean }>('admin/shifts/printer-availability', {
+    method: 'PUT',
+    body: JSON.stringify({ printer_id: printerId, dates, available }),
+  });
+}
+
+export async function rescheduleReservation(id: string, desired_date: string) {
+  return apiFetch(`admin/reservations/${id}/reschedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({ desired_date }),
+  });
+}
+
+export async function createAdminReservation(body: Record<string, unknown>) {
+  return apiFetch('admin/reservations', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function listStorageFolders(path: string) {
+  return apiFetch<{ items: { path: string; name: string; type: string }[] }>(
+    `admin/settings/storage-list?path=${encodeURIComponent(path)}`
+  );
 }
 
 export async function patchMemberColor(id: string, color_index: number) {

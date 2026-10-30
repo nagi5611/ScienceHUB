@@ -4,10 +4,13 @@ import {
   deletePrinter,
   fetchAdminPrinters,
   getPrintVideoSettings,
+  listStorageFolders,
   patchPrintVideoSettings,
   patchPrinter,
   uploadPrinterImage,
 } from '../admin-api';
+
+type Printer = Awaited<ReturnType<typeof fetchAdminPrinters>>['printers'][number];
 
 export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => void; onReload?: () => void }) {
   const [printers, setPrinters] = React.useState<
@@ -16,13 +19,17 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
   const [name, setName] = React.useState('');
   const [image, setImage] = React.useState<File | null>(null);
   const [videoPath, setVideoPath] = React.useState('');
-  const [editId, setEditId] = React.useState<string | null>(null);
-  const [editName, setEditName] = React.useState('');
+  const [edit, setEdit] = React.useState<Printer | null>(null);
+  const [picker, setPicker] = React.useState(false);
+  const [roots, setRoots] = React.useState<{ path: string; label: string }[]>([]);
+  const [browsePath, setBrowsePath] = React.useState('');
+  const [folders, setFolders] = React.useState<{ path: string; name: string }[]>([]);
 
   const load = React.useCallback(async () => {
     const [pr, vid] = await Promise.all([fetchAdminPrinters(), getPrintVideoSettings()]);
     setPrinters(pr.printers);
     setVideoPath(vid.storage_path ?? '');
+    setRoots(vid.group_roots ?? []);
   }, []);
 
   React.useEffect(() => {
@@ -53,15 +60,40 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
   };
 
   const saveEdit = async () => {
-    if (!editId || !editName.trim()) return;
+    if (!edit) return;
+    const nozzles = (edit.capabilities?.nozzle_sizes_mm ?? ['0.4']).map(String).filter(Boolean);
     try {
-      await patchPrinter(editId, { name: editName.trim() });
-      setEditId(null);
+      await patchPrinter(edit.id, {
+        name: edit.name.trim(),
+        status: edit.status,
+        capabilities: {
+          can_record_print_video: !!edit.capabilities?.can_record_print_video,
+          nozzle_sizes_mm: nozzles,
+        },
+        daily_capacity: edit.daily_capacity,
+      });
+      setEdit(null);
       await load();
       onToast('更新しました');
     } catch (e) {
       onToast(e instanceof Error ? e.message : '更新失敗');
     }
+  };
+
+  const openPicker = async () => {
+    setPicker(true);
+    setBrowsePath('');
+    setFolders([]);
+  };
+
+  const loadFolders = async (path: string) => {
+    setBrowsePath(path);
+    if (!path) {
+      setFolders([]);
+      return;
+    }
+    const data = await listStorageFolders(path);
+    setFolders(data.items.map((i) => ({ path: i.path, name: i.name })));
   };
 
   return (
@@ -71,13 +103,18 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
         <p className="hint">管理画面からアップロードする印刷動画のクラウドストレージフォルダ（legacy 同等）。</p>
         <div className="form-group">
           <label htmlFor="print-video-storage-path">保存先フォルダ</label>
-          <input
-            id="print-video-storage-path"
-            className="input"
-            value={videoPath}
-            onChange={(e) => setVideoPath(e.target.value)}
-            placeholder="グループ/フォルダ/パス"
-          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              id="print-video-storage-path"
+              className="input"
+              value={videoPath}
+              readOnly
+              placeholder="未設定（参照から選択）"
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void openPicker()}>
+              参照…
+            </button>
+          </div>
         </div>
         <button type="button" className="btn btn-primary btn-sm" onClick={() => void saveVideoPath()}>
           保存先を保存
@@ -95,33 +132,14 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
                 <div className="printer-admin-image printer-admin-image-placeholder">🖨️</div>
               )}
               <div className="printer-admin-body">
-                {editId === p.id ? (
-                  <>
-                    <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                    <div className="printer-admin-actions">
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => void saveEdit()}>
-                        保存
-                      </button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>
-                        取消
-                      </button>
-                    </div>
-                  </>
-                ) : (
                   <>
                     <h3 className="printer-admin-title">{p.name}</h3>
                     <p className="hint printer-admin-cap-summary">
+                      {p.status ?? 'available'} / ノズル {(p.capabilities?.nozzle_sizes_mm ?? []).join(', ') || '—'} /{' '}
                       {p.capabilities?.can_record_print_video ? '動画撮影可' : '動画撮影不可'}
                     </p>
                     <div className="printer-admin-actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => {
-                          setEditId(p.id);
-                          setEditName(p.name);
-                        }}
-                      >
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setEdit(p)}>
                         編集
                       </button>
                       <button
@@ -156,7 +174,6 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
                       </label>
                     </div>
                   </>
-                )}
               </div>
             </article>
           ))}
@@ -169,6 +186,130 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
           </button>
         </div>
       </section>
+
+      {edit && (
+        <div className="legacy-modal open" role="dialog" aria-modal="true">
+          <div className="legacy-modal-scrim" onClick={() => setEdit(null)} />
+          <div className="legacy-modal-body card">
+            <h2>{edit.name} を編集</h2>
+            <label className="form-group">
+              名前
+              <input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            </label>
+            <label className="form-group">
+              ステータス
+              <select
+                className="input"
+                value={edit.status ?? 'available'}
+                onChange={(e) => setEdit({ ...edit, status: e.target.value })}
+              >
+                <option value="available">稼働</option>
+                <option value="maintenance">メンテ</option>
+                <option value="unavailable">印刷不能</option>
+              </select>
+            </label>
+            <label className="form-group">
+              ノズル径（カンマ区切り）
+              <input
+                className="input"
+                value={(edit.capabilities?.nozzle_sizes_mm ?? []).join(', ')}
+                onChange={(e) =>
+                  setEdit({
+                    ...edit,
+                    capabilities: {
+                      ...edit.capabilities,
+                      nozzle_sizes_mm: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="chk">
+              <input
+                type="checkbox"
+                checked={!!edit.capabilities?.can_record_print_video}
+                onChange={(e) =>
+                  setEdit({
+                    ...edit,
+                    capabilities: { ...edit.capabilities, can_record_print_video: e.target.checked },
+                  })
+                }
+              />
+              動画撮影可
+            </label>
+            <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 8 }}>
+              {(['max_small', 'max_small_with_main', 'max_medium', 'max_large'] as const).map((key) => (
+                <label key={key}>
+                  {key}
+                  <input
+                    className="input"
+                    type="number"
+                    value={edit.daily_capacity?.[key] ?? 0}
+                    onChange={(e) =>
+                      setEdit({
+                        ...edit,
+                        daily_capacity: { ...edit.daily_capacity, [key]: Number(e.target.value) },
+                      })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="legacy-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEdit(null)}>
+                キャンセル
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => void saveEdit()}>
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {picker && (
+        <div className="legacy-modal open" role="dialog" aria-modal="true">
+          <div className="legacy-modal-scrim" onClick={() => setPicker(false)} />
+          <div className="legacy-modal-body card">
+            <h2>保存先フォルダ</h2>
+            <p className="hint">{browsePath || 'チームを選んでください'}</p>
+            <div style={{ display: 'grid', gap: 6, maxHeight: 280, overflow: 'auto' }}>
+              {!browsePath &&
+                roots.map((r) => (
+                  <button key={r.path} type="button" className="btn btn-secondary" onClick={() => void loadFolders(r.path)}>
+                    {r.label}
+                  </button>
+                ))}
+              {browsePath && (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadFolders('')}>
+                  チームへ戻る
+                </button>
+              )}
+              {folders.map((f) => (
+                <button key={f.path} type="button" className="btn btn-secondary" onClick={() => void loadFolders(f.path)}>
+                  {f.name}
+                </button>
+              ))}
+            </div>
+            <div className="legacy-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setPicker(false)}>
+                閉じる
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!browsePath}
+                onClick={() => {
+                  setVideoPath(browsePath);
+                  setPicker(false);
+                }}
+              >
+                このフォルダを選択
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
