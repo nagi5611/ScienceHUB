@@ -335,7 +335,6 @@ export function ReservationApp() {
         cancelledCount={cancelledCount}
         onOpenMine={() => setMineOpen(true)}
         onOpenCancelled={() => setCancelledOpen(true)}
-        onNew={openNew}
       />
       <div
         className="main-content"

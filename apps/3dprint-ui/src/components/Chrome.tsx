@@ -28,7 +28,9 @@ function SiteHeader({ mineCount, cancelledCount, onOpenMine, onOpenCancelled, on
               取り消し一覧 {cancelledCount > 0 && <span className="hdr-count num">{cancelledCount}</span>}
             </button>
           )}
-          <button type="button" className="btn btn-primary" onClick={onNew}>新規申請</button>
+          {onNew ? (
+            <button type="button" className="btn btn-primary" onClick={onNew}>新規申請</button>
+          ) : null}
         </div>
       </div>
     </header>
