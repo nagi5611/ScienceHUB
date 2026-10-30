@@ -465,6 +465,22 @@ export async function testDiscordIntegration() {
   return apiFetch<{ ok: boolean }>('admin/integrations/discord/test', { method: 'POST', body: '{}' });
 }
 
+export type DiscordMentionTestResult = {
+  ok: boolean;
+  sent: { member_id: string; name: string; homeroom: string; discord_user_id: string }[];
+  skipped: { member_id: string; name: string; reason: string }[];
+  content: string;
+};
+
+export async function testDiscordMention(memberIds: string[]) {
+  const ids = memberIds.map((id) => id.trim()).filter(Boolean);
+  if (!ids.length) throw new Error('メンションする担当者を1人以上選んでください');
+  return apiFetch<DiscordMentionTestResult>('admin/integrations/discord/test-mention', {
+    method: 'POST',
+    body: JSON.stringify({ member_ids: ids }),
+  });
+}
+
 export async function testAdminEmail(to: string) {
   const trimmed = to.trim();
   if (!trimmed) throw new Error('送信先メールアドレスを入力してください');

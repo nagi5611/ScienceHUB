@@ -65,6 +65,7 @@ import {
   build3dPrintAdminUrl,
   notifyReservationApplication,
   notifyReservationModified,
+  sendDiscordStaffMentionTest,
 } from "../../lib/3dprint/discord";
 import {
   build3dPrintReservationAppUrl,
@@ -1869,6 +1870,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
       if (!res.ok) return error(`Discord 送信に失敗しました（HTTP ${res.status}）`, 502);
       return json({ ok: true });
+    }
+
+    // POST /api/3dprint/admin/integrations/discord/test-mention
+    if (
+      method === "POST" &&
+      segments[1] === "integrations" &&
+      segments[2] === "discord" &&
+      segments[3] === "test-mention"
+    ) {
+      const body = await request.json<{ member_ids?: string[] }>();
+      const memberIds = Array.isArray(body.member_ids) ? body.member_ids : [];
+      const allMembers = await getAllMembers(db);
+      const result = await sendDiscordStaffMentionTest(env.DISCORD_WEBHOOK_URL, allMembers, memberIds);
+      if (!result.ok) {
+        if (result.error.includes("Webhook")) return error(result.error, 503);
+        if (result.status) return error(result.error, 502);
+        return error(result.error, 400);
+      }
+      return json({
+        ok: true,
+        sent: result.sent,
+        skipped: result.skipped,
+        content: result.content,
+      });
     }
 
     // GET /api/3dprint/admin/log
