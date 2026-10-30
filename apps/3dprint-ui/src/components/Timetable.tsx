@@ -9,6 +9,7 @@ import {
   SHIFT_SLOT_START, SHIFT_SLOT_END, SHIFT_SLOTS, DAY_START, DAY_END, SLOT_MIN,
 } from '@shared/domain';
 import { Chip, Notice, StatusTag, MachineDot } from '@components/Chrome';
+import type { LanePrinterMeta } from '@shared/api';
 
 function SlotCell({ i, sel, first, last }) {
   const shift = inShiftSlot(i);
@@ -48,7 +49,7 @@ function Block({ app, onOpen }) {
   );
 }
 
-function Lane({ machineId, info, selection, onSelect, closed, onOpenApp, kind }) {
+function Lane({ machineId, info, selection, onSelect, closed, printerUnusable, onOpenApp, kind }) {
   const laneRef = React.useRef(null);
   const drag = React.useRef(null);
   const [ghost, setGhost] = React.useState(null);
@@ -93,11 +94,28 @@ function Lane({ machineId, info, selection, onSelect, closed, onOpenApp, kind })
     ? { start: ghost.start, end: ghost.end + 1 }
     : selection && selection.machine === machineId ? selection : null;
 
+  const laneClass =
+    'lane' +
+    (closed ? ' closed' : '') +
+    (printerUnusable ? ' printer-unavail' : '');
+
   return (
-    <div className={'lane' + (closed ? ' closed' : '')} ref={laneRef}
+    <div className={laneClass} ref={laneRef}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={finish}
       onPointerCancel={() => { drag.current = null; setGhost(null); }}
-      aria-label={MACHINE_MAP[machineId].name + ' の時間割'}>
+      aria-label={
+        MACHINE_MAP[machineId].name +
+        (printerUnusable ? '（使用不可）' : '') +
+        ' の時間割'
+      }>
+      {printerUnusable && (
+        <div className="lane-unavail-badge" aria-hidden="false">
+          <span className="lane-unavail-label">使用不可</span>
+          {printerUnusable.status_label && printerUnusable.status !== 'unavailable' ? (
+            <span className="lane-unavail-sub">{printerUnusable.status_label}</span>
+          ) : null}
+        </div>
+      )}
       {Array.from({ length: SLOT_COUNT }).map((_, i) => (
         <SlotCell key={i} i={i} sel={!!view && i >= view.start && i < view.end}
           first={!!view && i === view.start} last={!!view && i === view.end - 1} />
@@ -109,7 +127,33 @@ function Lane({ machineId, info, selection, onSelect, closed, onOpenApp, kind })
   );
 }
 
-function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onClearSel, onOpenApp, onJumpNext, nextOpen, bookingLive = true }) {
+function DayPanel({
+  dateStr,
+  info,
+  apps,
+  selection,
+  laneMeta,
+  onSelect,
+  onPickRange,
+  onClearSel,
+  onOpenApp,
+  onJumpNext,
+  nextOpen,
+  bookingLive = true,
+}: {
+  dateStr: string;
+  info: ReturnType<typeof computeDay>;
+  apps: Application[];
+  selection: { machine: 'ke' | 'cc'; start: number; end: number } | null;
+  laneMeta?: Record<'ke' | 'cc', LanePrinterMeta | null>;
+  onSelect: (sel: { machine: 'ke' | 'cc'; start: number; end: number }) => void;
+  onPickRange: (sel: { machine: 'ke' | 'cc'; start: number; end: number }) => void;
+  onClearSel: () => void;
+  onOpenApp: (app: Application) => void;
+  onJumpNext: (date: string) => void;
+  nextOpen: string | null;
+  bookingLive?: boolean;
+}) {
   const d = parseYmd(dateStr);
   const wd = d.getDay();
   const todayStr = ymd(startOfDay(new Date()));
@@ -117,7 +161,10 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
   const ttRef = React.useRef(null);
 
   const dayApps = [...info.list].sort((a, b) => spanOf(a).start - spanOf(b).start || MACHINE_IDS.indexOf(a.machine) - MACHINE_IDS.indexOf(b.machine));
-  const totalFree = info.machines.ke.free + info.machines.cc.free;
+  const laneBookable = (id: 'ke' | 'cc') => laneMeta?.[id]?.bookable !== false;
+  const machineFree = (id: 'ke' | 'cc') =>
+    info.shift && laneBookable(id) ? info.machines[id].free : 0;
+  const totalFree = machineFree('ke') + machineFree('cc');
   const totalSlots = SLOT_COUNT * 2;
   const selMachine = selection ? MACHINE_MAP[selection.machine] : null;
 
@@ -164,13 +211,21 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
 
       <div className="tt-headrow">
         <span className="tt-haxis">時刻</span>
-        {MACHINE_IDS.map(id => (
-          <div className="lane-h" key={id}>
-            <span className="dot" style={{ background: id === 'ke' ? 'var(--color-primary)' : 'var(--color-tip)' }} />
-            <b>{MACHINE_MAP[id].name}</b>
-            <span className="cnt num">{info.shift ? `空き${info.machines[id].free}` : '休み'}</span>
-          </div>
-        ))}
+        {MACHINE_IDS.map(id => {
+          const meta = laneMeta?.[id];
+          const unusable = meta && !meta.bookable;
+          return (
+            <div className={'lane-h' + (unusable ? ' lane-h-unavail' : '')} key={id}>
+              <span className="dot" style={{ background: id === 'ke' ? 'var(--color-primary)' : 'var(--color-tip)' }} />
+              <b>{MACHINE_MAP[id].name}</b>
+              {unusable ? (
+                <span className="cnt lane-h-unavail-tag">{meta.unusableLabel ?? '使用不可'}</span>
+              ) : (
+                <span className="cnt num">{info.shift ? `空き${info.machines[id].free}` : '休み'}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="tt-scroll" ref={ttRef}>
@@ -186,10 +241,22 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
             })}
             <span className="num axis-end">{minsLabel(DAY_END)}</span>
           </div>
-          {MACHINE_IDS.map(id => (
-            <Lane key={id} machineId={id} info={info.machines[id]} selection={selection}
-              onSelect={onPickRange} closed={!info.shift || !bookingLive} onOpenApp={onOpenApp} />
-          ))}
+          {MACHINE_IDS.map(id => {
+            const meta = laneMeta?.[id];
+            const printerUnusable = meta && !meta.bookable ? meta : null;
+            return (
+              <Lane
+                key={id}
+                machineId={id}
+                info={info.machines[id]}
+                selection={selection}
+                onSelect={onPickRange}
+                closed={!info.shift || !bookingLive || !!printerUnusable}
+                printerUnusable={printerUnusable}
+                onOpenApp={onOpenApp}
+              />
+            );
+          })}
         </div>
       </div>
 

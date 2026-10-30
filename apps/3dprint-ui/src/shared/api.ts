@@ -33,11 +33,66 @@ export interface PrinterRow {
   name: string;
   machine_lane: 'ke' | 'cc' | null;
   bookable: boolean;
+  status: 'available' | 'unavailable' | 'maintenance' | string;
+  status_label: string;
+  shift_available?: boolean;
 }
 
-export async function fetchPrinters(): Promise<PrinterRow[]> {
-  const data = await apiRequest<{ printers: PrinterRow[] }>('printers');
+/** Label shown on the timeline when a lane printer cannot accept bookings. */
+export function timelinePrinterUnusableLabel(printer: Pick<PrinterRow, 'bookable' | 'status'>): string | null {
+  if (printer.bookable) return null;
+  return '使用不可';
+}
+
+export type LanePrinterMeta = {
+  printerId: string;
+  bookable: boolean;
+  status: string;
+  status_label: string;
+  unusableLabel: string | null;
+};
+
+export async function fetchPrinters(date?: string): Promise<PrinterRow[]> {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  const data = await apiRequest<{ printers: PrinterRow[] }>(`printers${qs}`);
   return data.printers;
+}
+
+/** Maps API printers to ke/cc lanes (first printer per lane). */
+export function mapPrintersToLanes(printers: PrinterRow[]): {
+  printerByMachine: Record<'ke' | 'cc', string>;
+  laneMeta: Record<'ke' | 'cc', LanePrinterMeta | null>;
+} {
+  const printerByMachine = { ke: '', cc: '' } as Record<'ke' | 'cc', string>;
+  const laneMeta = { ke: null, cc: null } as Record<'ke' | 'cc', LanePrinterMeta | null>;
+
+  const toMeta = (p: PrinterRow): LanePrinterMeta => ({
+    printerId: p.id,
+    bookable: p.bookable,
+    status: p.status,
+    status_label: p.status_label,
+    unusableLabel: timelinePrinterUnusableLabel(p),
+  });
+
+  for (const p of printers) {
+    if (p.machine_lane === 'ke' && !printerByMachine.ke) {
+      printerByMachine.ke = p.id;
+      laneMeta.ke = toMeta(p);
+    }
+    if (p.machine_lane === 'cc' && !printerByMachine.cc) {
+      printerByMachine.cc = p.id;
+      laneMeta.cc = toMeta(p);
+    }
+  }
+  if (!printerByMachine.ke && printers[0]) {
+    printerByMachine.ke = printers[0].id;
+    laneMeta.ke = toMeta(printers[0]);
+  }
+  if (!printerByMachine.cc && printers[1]) {
+    printerByMachine.cc = printers[1].id;
+    laneMeta.cc = toMeta(printers[1]);
+  }
+  return { printerByMachine, laneMeta };
 }
 
 export async function fetchApplications(from: string, to: string): Promise<{

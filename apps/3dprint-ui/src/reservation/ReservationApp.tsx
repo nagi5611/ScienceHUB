@@ -17,12 +17,15 @@ import {
   SLOT_COUNT,
   slotStart,
   todayStrOf,
+  MACHINE_MAP,
 } from '@shared/domain';
 import {
   fetchApplications,
   fetchCancelledApplications,
   restoreReservation,
   fetchPrinters,
+  mapPrintersToLanes,
+  type LanePrinterMeta,
   createTimeSlotReservation,
   cancelReservation,
   fetchAuthProfile,
@@ -61,6 +64,10 @@ export function ReservationApp() {
   const [printerByMachine, setPrinterByMachine] = React.useState<Record<'ke' | 'cc', string>>({
     ke: '',
     cc: '',
+  });
+  const [laneMeta, setLaneMeta] = React.useState<Record<'ke' | 'cc', LanePrinterMeta | null>>({
+    ke: null,
+    cc: null,
   });
   const [selected, setSelected] = React.useState(prefs.selected || todayStr);
   const [calendarView, setCalendarView] = React.useState(() => monthIndexFromDateStr(initialSelected));
@@ -132,15 +139,6 @@ export function ReservationApp() {
   React.useEffect(() => {
     void (async () => {
       try {
-        const printers = await fetchPrinters();
-        const map = { ke: '', cc: '' } as Record<'ke' | 'cc', string>;
-        for (const p of printers) {
-          if (p.machine_lane === 'ke' && !map.ke) map.ke = p.id;
-          if (p.machine_lane === 'cc' && !map.cc) map.cc = p.id;
-        }
-        if (!map.ke && printers[0]) map.ke = printers[0].id;
-        if (!map.cc && printers[1]) map.cc = printers[1].id;
-        setPrinterByMachine(map);
         const auth = await fetchAuthProfile();
         if (auth.homeroom && auth.student_name) {
           setProfileState({
@@ -154,6 +152,19 @@ export function ReservationApp() {
       }
     })();
   }, [showToast]);
+
+  React.useEffect(() => {
+    void (async () => {
+      try {
+        const printers = await fetchPrinters(selected);
+        const { printerByMachine: map, laneMeta: meta } = mapPrintersToLanes(printers);
+        setPrinterByMachine(map);
+        setLaneMeta(meta);
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : 'プリンター情報の取得に失敗しました', 'エラー');
+      }
+    })();
+  }, [selected, showToast]);
 
   React.useEffect(() => {
     const { from, to } = rangeForSelected;
@@ -198,6 +209,12 @@ export function ReservationApp() {
   const pickRange = (range: { machine: 'ke' | 'cc'; start: number; end: number }) => {
     if (!ensureBookingLive()) return;
     setSelection(range);
+    const lane = laneMeta[range.machine];
+    if (lane && !lane.bookable) {
+      showToast(`${MACHINE_MAP[range.machine].short} は${lane.unusableLabel ?? '使用不可'}です`, '不可');
+      setSelection(null);
+      return;
+    }
     if (!hasShift(selected, staffDates)) {
       showToast('この日は担当者がいません', '休み');
       return;
@@ -413,6 +430,7 @@ export function ReservationApp() {
             info={info}
             apps={apps}
             selection={selection}
+            laneMeta={laneMeta}
             onSelect={setSelection}
             onPickRange={pickRange}
             onClearSel={() => setSelection(null)}
