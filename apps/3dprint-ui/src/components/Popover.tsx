@@ -97,7 +97,7 @@ function FileDrop({ file, setFile, error }) {
     const f = list && list[0];
     if (!f) return;
     const ok = ACCEPT.some(ext => f.name.toLowerCase().endsWith(ext));
-    setFile({ name: f.name, size: f.size, ok });
+    setFile({ name: f.name, size: f.size, ok, raw: f });
   };
 
   return (
@@ -227,6 +227,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
       title: title.trim(),
       file: file.name,
       fileSize: file.size,
+      fileRaw: file.raw,
       note: note.trim(),
       who: { name: name.trim(), hr, num: String(num).trim() },
     });
@@ -378,7 +379,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
 
         <div className="pop-f">
           <button type="button" className="btn btn-secondary" onClick={onClose}>キャンセル</button>
-          <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit}>申請する</button>
+          <button type="button" className="btn btn-primary" data-testid="btn-submit-application" onClick={submit} disabled={!canSubmit}>申請する</button>
         </div>
       </div>
     </div>
