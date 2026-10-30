@@ -172,6 +172,7 @@ function ShiftCalendar({ year, month, avail, memberId, onPaint, onChangeMonth })
                       onPointerDown={e => begin(ds, e)}
                       aria-pressed={on}
                       aria-label={`${d.getMonth() + 1}月${d.getDate()}日 ${ids.length ? ids.map(memberName).join('・') : '担当なし'}`}>
+                      <span className="num">{d.getDate()}</span>
                       <span className="scal-dots">
                         {ids.slice(0, 4).map(id => (
                           <span key={id} className="scal-dot" style={{ background: memberColor(id) }} />
