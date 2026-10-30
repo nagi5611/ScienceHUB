@@ -388,7 +388,6 @@ export function ReservationApp() {
             onSelect={setSelection}
             onPickRange={pickRange}
             onClearSel={() => setSelection(null)}
-            onNew={openNew}
             onOpenApp={(app) => setDetail(app)}
             onJumpNext={pickDate}
             nextOpen={nextOpen}

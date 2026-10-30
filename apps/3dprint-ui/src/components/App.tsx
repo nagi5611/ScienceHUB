@@ -136,7 +136,7 @@ function App() {
           <DayPanel dateStr={selected} info={info} apps={apps}
             selection={selection} onSelect={setSelection} onPickRange={pickRange}
             onClearSel={() => setSelection(null)}
-            onNew={openNew} onOpenApp={openDetail} onJumpNext={pickDate} nextOpen={nextOpen} />
+            onOpenApp={openDetail} onJumpNext={pickDate} nextOpen={nextOpen} />
         </div>
       </div>
 

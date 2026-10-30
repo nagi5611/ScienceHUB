@@ -109,7 +109,7 @@ function Lane({ machineId, info, selection, onSelect, closed, onOpenApp, kind })
   );
 }
 
-function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onClearSel, onNew, onOpenApp, onJumpNext, nextOpen, bookingLive = true }) {
+function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onClearSel, onOpenApp, onJumpNext, nextOpen, bookingLive = true }) {
   const d = parseYmd(dateStr);
   const wd = d.getDay();
   const todayStr = ymd(startOfDay(new Date()));
@@ -120,8 +120,6 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
   const totalFree = info.machines.ke.free + info.machines.cc.free;
   const totalSlots = SLOT_COUNT * 2;
   const selMachine = selection ? MACHINE_MAP[selection.machine] : null;
-  const selOk = selection && info.shift && !info.machines[selection.machine].blocked
-    .slice(selection.start, selection.end).some(Boolean);
 
   /* 日付が変わったら朝（6:00）から表示 */
   React.useEffect(() => {
@@ -217,28 +215,23 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
             </>
           )}
         </div>
-        <div className="btns">
-          {selection ? (
-            <>
-              <div className="quick" aria-label="長さを変える">
-                {[1, 2, 3, 4].map(n => {
-                  const fits = selection.start + n <= SLOT_COUNT &&
-                    !info.machines[selection.machine].blocked.slice(selection.start, selection.start + n).some(Boolean);
-                  return (
-                    <button key={n} type="button" disabled={!fits}
-                      onClick={() => onSelect({ machine: selection.machine, start: selection.start, end: selection.start + n })}>
-                      {durationLabel(n * SLOT_MIN)}
-                    </button>
-                  );
-                })}
-              </div>
-              <button type="button" className="btn btn-ghost" onClick={onClearSel}>解除</button>
-              <button type="button" className="btn btn-primary" disabled={!selOk || !bookingLive} onClick={onNew}>申請へ進む</button>
-            </>
-          ) : (
-            <button type="button" className="btn btn-primary" disabled={!info.shift || info.full || !bookingLive} onClick={onNew}>申請へ進む</button>
-          )}
-        </div>
+        {selection ? (
+          <div className="btns">
+            <div className="quick" aria-label="長さを変える">
+              {[1, 2, 3, 4].map(n => {
+                const fits = selection.start + n <= SLOT_COUNT &&
+                  !info.machines[selection.machine].blocked.slice(selection.start, selection.start + n).some(Boolean);
+                return (
+                  <button key={n} type="button" disabled={!fits}
+                    onClick={() => onSelect({ machine: selection.machine, start: selection.start, end: selection.start + n })}>
+                    {durationLabel(n * SLOT_MIN)}
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={onClearSel}>解除</button>
+          </div>
+        ) : null}
       </div>
 
       <div className="daylist">
