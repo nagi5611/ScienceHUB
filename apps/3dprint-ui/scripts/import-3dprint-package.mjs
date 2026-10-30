@@ -53,6 +53,11 @@ import {
 } from '@shared/domain';
 `.trim();
 
+const reservationChromeImports = {
+  Timetable: "import { Chip, Notice, StatusTag, MachineDot } from '@components/Chrome';",
+  Sheets: "import { Chip, Sheet, StatusTag } from '@components/Chrome';",
+};
+
 function convertReservationComponents() {
   const compDir = path.join(uiRoot, 'src/components');
   for (const name of ['Chrome', 'Calendar', 'Timetable', 'Sheets', 'Popover']) {
@@ -65,9 +70,12 @@ function convertReservationComponents() {
     const exports = [];
     for (const m of body.matchAll(/^function (\w+)/gm)) exports.push(m[1]);
     const exportBlock = exports.length ? `\nexport { ${exports.join(', ')} };\n` : '';
+    const base = file.replace('.jsx', '');
+    const chromeImport = reservationChromeImports[base];
+    const chromeBlock = chromeImport ? `\n${chromeImport}\n` : '';
     fs.writeFileSync(
-      path.join(compDir, file.replace('.jsx', '.tsx')),
-      `${domainImports}\n\n${body}\n${exportBlock}`
+      path.join(compDir, `${base}.tsx`),
+      `${domainImports}${chromeBlock}\n${body}\n${exportBlock}`
     );
     fs.unlinkSync(path.join(compDir, file));
     console.log('reservation component', file.replace('.jsx', '.tsx'), exports);
