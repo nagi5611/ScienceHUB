@@ -1,6 +1,4 @@
-import type { APIRequestContext } from "@playwright/test";
-
-const LEAD_TIME_DAYS = 2;
+import type { APIRequestContext, Page } from "@playwright/test";
 
 /** JST の今日 (YYYY-MM-DD) */
 export function todayJst(): string {
@@ -15,14 +13,72 @@ export function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** 一般ユーザーがカレンダーから選べる最早日 */
-export function earliestUserBookableDate(): string {
-  return addDays(todayJst(), LEAD_TIME_DAYS);
+function parseYmdUtc(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
-/** 予約可能日からのオフセット日 */
+/** 次の平日（当日含む） */
+export function nextWeekdayOnOrAfter(isoDate: string): string {
+  let cur = isoDate;
+  for (let i = 0; i < 14; i++) {
+    const w = parseYmdUtc(cur).getUTCDay();
+    if (w >= 1 && w <= 5) return cur;
+    cur = addDays(cur, 1);
+  }
+  return isoDate;
+}
+
+/** 新 UI: 予約（reserve）は当日以降の平日 */
+export function getEarliestBookableDate(): string {
+  return nextWeekdayOnOrAfter(todayJst());
+}
+
+export function earliestUserBookableDate(): string {
+  return getEarliestBookableDate();
+}
+
 export function bookableDateWithOffset(offsetDays: number): string {
-  return addDays(earliestUserBookableDate(), offsetDays);
+  let d = getEarliestBookableDate();
+  let left = offsetDays;
+  while (left > 0) {
+    d = addDays(d, 1);
+    const w = parseYmdUtc(d).getUTCDay();
+    if (w >= 1 && w <= 5) left--;
+  }
+  return d;
+}
+
+export async function loginAsAdminViaPage(page: Page) {
+  const login = await page.request.post("/api/auth/login", {
+    data: { username: "admin", password: "mmh@2048@5431" },
+  });
+  if (!login.ok()) {
+    throw new Error(`login failed: ${login.status()}`);
+  }
+}
+
+export async function ensureAdminPrintProfile(request: APIRequestContext) {
+  await request.patch("/api/auth/profile", {
+    data: {
+      homeroom: "301",
+      student_number: 1,
+      student_name: "E2E Admin",
+    },
+  });
+}
+
+export async function openReservationApp(page: Page) {
+  await page.goto("/apps/3dprint-reservation/?e2e=1");
+  await page.getByTestId("reservation-app").waitFor({ state: "visible", timeout: 60_000 });
+}
+
+export async function goToCalendarMonth(_page: Page, _date: string) {
+  /* 4週表示のため月移動は不要 */
+}
+
+export async function mockBookableCalendarDay(_page: Page, _date: string) {
+  /* preparePrintReservationDay を使用 */
 }
 
 export interface TestPrinterPair {
@@ -30,7 +86,6 @@ export interface TestPrinterPair {
   maintenanceId: string;
 }
 
-/** E2E 用プリンター2台（稼働可・メンテ）を用意 */
 export async function ensureTestPrinters(
   request: APIRequestContext,
   label: string
@@ -40,27 +95,18 @@ export async function ensureTestPrinters(
     const res = await request.post("/api/3dprint/admin/printers", {
       data: { name },
     });
-    if (!res.ok()) {
-      throw new Error(`プリンター作成失敗: ${res.status()} ${await res.text()}`);
-    }
+    if (!res.ok()) throw new Error(`プリンター作成失敗: ${res.status()}`);
     const body = await res.json();
     return body.printer.id as string;
   };
-
-  const availableId = await create(`E2E 稼働 ${suffix}`);
-  const maintenanceId = await create(`E2E メンテ ${suffix}`);
-
-  const patchRes = await request.patch(`/api/3dprint/admin/printers/${maintenanceId}`, {
+  const availableId = await create(`Ender-3 V3 KE E2E ${suffix}`);
+  const maintenanceId = await create(`Centauri Carbon E2E ${suffix}`);
+  await request.patch(`/api/3dprint/admin/printers/${maintenanceId}`, {
     data: { status: "maintenance" },
   });
-  if (!patchRes.ok()) {
-    throw new Error(`プリンターステータス更新失敗: ${patchRes.status()}`);
-  }
-
   return { availableId, maintenanceId };
 }
 
-/** 指定日のスタッフ・プリンターシフトを有効化 */
 export async function enableShiftsForDate(
   request: APIRequestContext,
   date: string,
@@ -73,32 +119,20 @@ export async function enableShiftsForDate(
       name: `E2E Staff ${Date.now().toString(36)}`,
     },
   });
-  if (!memberRes.ok()) {
-    throw new Error(`メンバー作成失敗: ${memberRes.status()} ${await memberRes.text()}`);
-  }
+  if (!memberRes.ok()) throw new Error(`メンバー作成失敗: ${memberRes.status()}`);
   const { member } = await memberRes.json();
-
-  const staffRes = await request.put("/api/3dprint/admin/shifts/availability", {
-    data: {
-      member_id: member.id,
-      dates: [date],
-      available: true,
-    },
+  await request.put("/api/3dprint/admin/shifts/availability", {
+    data: { member_id: member.id, dates: [date], available: true },
   });
-  if (!staffRes.ok()) {
-    throw new Error(`スタッフシフト失敗: ${staffRes.status()}`);
-  }
-
   for (const printerId of printerIds) {
-    const printerRes = await request.put("/api/3dprint/admin/shifts/printer-availability", {
-      data: {
-        printer_id: printerId,
-        dates: [date],
-        available: true,
-      },
+    await request.put("/api/3dprint/admin/shifts/printer-availability", {
+      data: { printer_id: printerId, dates: [date], available: true },
     });
-    if (!printerRes.ok()) {
-      throw new Error(`プリンターシフト失敗: ${printerRes.status()}`);
-    }
   }
+}
+
+export async function preparePrintReservationDay(request: APIRequestContext, date: string) {
+  const printers = await ensureTestPrinters(request, "day");
+  await enableShiftsForDate(request, date, [printers.availableId, printers.maintenanceId]);
+  return printers;
 }

@@ -29,6 +29,7 @@ import {
   getMemberById,
   getReservationById,
   getReservationsInRange,
+  getReservationsByDateAndPrinter,
   getUserUpcomingReservations,
   getUserRecentPastReservations,
   hasUserReservationsBeforeDate,
@@ -74,8 +75,12 @@ import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
   deleteCalendarEvent,
+  isGoogleCalendarConfigured,
   testGoogleCalendarConnection,
 } from "../../lib/3dprint/google-calendar";
+import { insertAdminLog, listAdminLog } from "../../lib/3dprint/admin-log";
+import { splitApplicationSlots } from "../../lib/3dprint/split-application-slots";
+import { isEmailSendingConfigured } from "../../lib/email/cloudflare-email";
 import {
   createAdminForcePrintReservation,
   type AdminForceReservationInput,
@@ -166,6 +171,16 @@ import { parseLogicalPath } from "../../lib/storage/keys";
 import { streamStorageFile } from "../../lib/storage/operations";
 import { listDirectory } from "../../lib/storage/list";
 import { authorizeStoragePath } from "../../lib/storage/permissions";
+import { reservationToApplication } from "../../lib/3dprint/applications-api";
+import {
+  hasTimeSlotOverlap,
+  isAllowedPrintFilename,
+  isRequestDateBookable,
+  isReserveDateBookable,
+  isWeekdayYmd,
+  validateTimeSlotInput,
+  type BookingKind,
+} from "../../lib/3dprint/time-slots";
 
 const RESERVATION_APP = "3dprint-reservation";
 const MANAGEMENT_APP = "3dprint-management";
@@ -750,30 +765,37 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       const body = await request.json<{
         title: string;
-        purpose: "ss_s_tan" | "club" | "other";
+        purpose?: "ss_s_tan" | "club" | "other";
         purpose_other?: string;
         summary?: string;
         print_notes?: string;
         request_print_video?: boolean;
-        print_scale: PrintScale;
+        print_scale?: PrintScale;
         printer_id: string;
         desired_date: string;
         stl_r2_key: string;
         stl_filename: string;
         stl_size_bytes: number;
         part_count?: number;
+        booking_kind?: BookingKind;
+        start_minute?: number;
+        end_minute?: number;
       }>();
 
-      const required = [
-        "title",
-        "purpose",
-        "print_scale",
-        "printer_id",
-        "desired_date",
-        "stl_r2_key",
-        "stl_filename",
-        "stl_size_bytes",
-      ] as const;
+      const timeSlotMode = body.booking_kind === "reserve" || body.booking_kind === "request";
+
+      const required = timeSlotMode
+        ? (["title", "printer_id", "desired_date", "stl_r2_key", "stl_filename", "stl_size_bytes"] as const)
+        : ([
+            "title",
+            "purpose",
+            "print_scale",
+            "printer_id",
+            "desired_date",
+            "stl_r2_key",
+            "stl_filename",
+            "stl_size_bytes",
+          ] as const);
 
       for (const field of required) {
         if (body[field] === undefined || body[field] === null || body[field] === "") {
@@ -781,42 +803,71 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         }
       }
 
+      if (timeSlotMode && !body.booking_kind) {
+        return error("booking_kind は必須です");
+      }
+
       const printerError = await validatePrinterId(db, body.printer_id);
       if (printerError) return error(printerError);
 
-      if (!["small", "medium", "large"].includes(body.print_scale)) {
+      const purpose = body.purpose ?? "club";
+      const printScale: PrintScale = body.print_scale ?? "small";
+
+      if (!["small", "medium", "large"].includes(printScale)) {
         return error("印刷規模が不正です");
       }
 
-      if (!["ss_s_tan", "club", "other"].includes(body.purpose)) {
+      if (!["ss_s_tan", "club", "other"].includes(purpose)) {
         return error("目的が不正です");
       }
 
-      if (body.purpose === "other" && !body.purpose_other?.trim()) {
+      if (purpose === "other" && !body.purpose_other?.trim()) {
         return error("目的が「その他」の場合は内容を入力してください");
       }
 
-      if (!isDateBookable(body.desired_date)) {
+      if (timeSlotMode) {
+        if (!isWeekdayYmd(body.desired_date)) {
+          return error("土日は予約・依頼を受け付けていません");
+        }
+        if (body.booking_kind === "reserve" && !isReserveDateBookable(body.desired_date)) {
+          return error("過ぎた日には予約できません");
+        }
+        if (body.booking_kind === "request" && !isRequestDateBookable(body.desired_date)) {
+          return error("依頼は前日までです（当日の依頼は不可）");
+        }
+        const slotInputError = validateTimeSlotInput({
+          booking_kind: body.booking_kind!,
+          start_minute: body.start_minute,
+          end_minute: body.end_minute,
+        });
+        if (slotInputError) return error(slotInputError);
+      } else if (!isDateBookable(body.desired_date)) {
         return error(`希望印刷日は ${getEarliestBookableDate()} 以降を選択してください`);
       }
 
       const partCount = normalizePartCount(body.part_count ?? 1);
-      const span = syncReservationSpanFields(body.desired_date, partCount, body.print_scale);
+      const span = syncReservationSpanFields(body.desired_date, partCount, printScale);
 
-      const slotError = await validatePrinterReservationSpan(
-        db,
-        body.desired_date,
-        body.printer_id,
-        span.print_scale,
-        span.part_count,
-        "",
-        { isAdmin: false }
-      );
-      if (slotError) return error(slotError);
+      if (!timeSlotMode) {
+        const slotError = await validatePrinterReservationSpan(
+          db,
+          body.desired_date,
+          body.printer_id,
+          span.print_scale,
+          span.part_count,
+          "",
+          { isAdmin: false }
+        );
+        if (slotError) return error(slotError);
+      }
 
       const staffAvailable = await hasStaffOnDate(db, body.desired_date);
       if (!staffAvailable) {
         return error("この日は対応可能な印刷担当者がいないため予約できません");
+      }
+
+      if (!isAllowedPrintFilename(body.stl_filename)) {
+        return error("対応していないファイル形式です");
       }
 
       const keyExists = await verifyR2Key(env.FILES, body.stl_r2_key);
@@ -831,14 +882,32 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
       if (!videoResolved.ok) return error(videoResolved.error);
 
+      const reservationId = crypto.randomUUID();
+
+      if (timeSlotMode) {
+        const sameDay = await getReservationsByDateAndPrinter(db, body.desired_date, body.printer_id);
+        const candidate = {
+          id: reservationId,
+          desired_date: body.desired_date,
+          printer_id: body.printer_id,
+          booking_kind: body.booking_kind!,
+          start_minute: body.start_minute ?? null,
+          end_minute: body.end_minute ?? null,
+          status: "applied",
+        };
+        if (hasTimeSlotOverlap(sameDay, candidate)) {
+          return error("同じ時間帯にすでに申請があります", 409);
+        }
+      }
+
       const reservation: Reservation = {
-        id: crypto.randomUUID(),
+        id: reservationId,
         grade: gradeFromHomeroom(profile.homeroom),
         homeroom: profile.homeroom,
         student_number: profile.student_number,
         student_name: profile.student_name,
         title: String(body.title).trim(),
-        purpose: body.purpose,
+        purpose,
         purpose_other: body.purpose_other ?? null,
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
@@ -863,6 +932,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         user_id: userId,
         source: 'standard',
         schedule_type: null,
+        booking_kind: timeSlotMode ? body.booking_kind! : null,
+        start_minute: timeSlotMode ? (body.start_minute ?? null) : null,
+        end_minute: timeSlotMode ? (body.end_minute ?? null) : null,
         created_at: new Date().toISOString(),
       };
 
@@ -890,6 +962,32 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     const RECENT_PAST_DAYS = 7;
     const OLDER_PAGE_SIZE = 15;
+
+    // GET /api/3dprint/calendar/applications
+    if (
+      method === "GET" &&
+      segments[0] === "calendar" &&
+      segments[1] === "applications" &&
+      segments.length === 2
+    ) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return error("from と to (YYYY-MM-DD) が必要です");
+      }
+      const rows = await getReservationsInRange(db, from, to, "standard");
+      const printerMap = await buildPrinterMap(db);
+      const applications = rows
+        .map((r) => reservationToApplication(r, printerMap, { viewerId: userId }))
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+      const staffDates: Record<string, boolean> = {};
+      for (const d of applications.map((a) => a.date)) {
+        if (!(d in staffDates)) {
+          staffDates[d] = await hasStaffOnDate(db, d);
+        }
+      }
+      return json({ applications, staff_dates: staffDates, from, to });
+    }
 
     // GET /api/3dprint/calendar/reservation-list
     if (
@@ -1594,6 +1692,26 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           updated = await getReservationById(db, segments[2]);
         }
       }
+      if (
+        updated &&
+        body.status === "cancelled" &&
+        existing.status !== "cancelled" &&
+        updated.user_id
+      ) {
+        const printerMapForMail = await buildPrinterMap(db);
+        void notifyApplicantPrintReservationEmail(env, db, updated.user_id, {
+          kind: "cancelled",
+          reservation: {
+            id: updated.id,
+            title: updated.title,
+            desired_date: updated.desired_date,
+            print_scale: updated.print_scale,
+          },
+          printerName: resolvePrinterLabel(updated, printerMapForMail),
+          statusComment: updated.status_comment,
+          reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+        }).catch((err) => console.error("cancel email failed", err));
+      }
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
@@ -1623,13 +1741,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[3] === "reschedule" &&
       segments.length === 4
     ) {
-      const body = await request.json<{ desired_date: string }>();
+      const body = await request.json<{ desired_date: string; force?: boolean }>();
       if (!body.desired_date || !/^\d{4}-\d{2}-\d{2}$/.test(body.desired_date)) {
         return error("desired_date が不正です");
       }
 
       try {
-        const updated = await adminRescheduleReservation(env, segments[2], body.desired_date);
+        const updated = await adminRescheduleReservation(env, segments[2], body.desired_date, {
+          force: Boolean(body.force),
+        });
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
         return json({ reservation: enrichReservationForAdmin(updated, memberMap, printerMap) });
@@ -1715,6 +1835,91 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[1] === "calendar" && segments[2] === "status") {
       const status = await testGoogleCalendarConnection(env);
       return json(status);
+    }
+
+    // GET /api/3dprint/admin/integrations/status
+    if (method === "GET" && segments[1] === "integrations" && segments[2] === "status") {
+      const gcalStatus = isGoogleCalendarConfigured(env)
+        ? await testGoogleCalendarConnection(env)
+        : { ok: false, error: "未設定" };
+      return json({
+        discord: { configured: Boolean(env.DISCORD_WEBHOOK_URL?.trim()) },
+        gcal: {
+          configured: isGoogleCalendarConfigured(env),
+          ok: gcalStatus.ok,
+          error: gcalStatus.error,
+        },
+        email: {
+          configured: isEmailSendingConfigured(env, env.PRINT_3D_EMAIL_FROM?.trim()),
+        },
+      });
+    }
+
+    // POST /api/3dprint/admin/integrations/discord/test
+    if (method === "POST" && segments[1] === "integrations" && segments[2] === "discord" && segments[3] === "test") {
+      const url = env.DISCORD_WEBHOOK_URL?.trim();
+      if (!url) return error("Discord Webhook がサーバーに設定されていません", 503);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: "ScienceHUB 3Dプリント管理のテスト通知です。",
+          username: "ScienceHUB 3Dプリント",
+        }),
+      });
+      if (!res.ok) return error(`Discord 送信に失敗しました（HTTP ${res.status}）`, 502);
+      return json({ ok: true });
+    }
+
+    // GET /api/3dprint/admin/log
+    if (method === "GET" && segments[1] === "log" && segments.length === 2) {
+      const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
+      const log = await listAdminLog(db, limit);
+      return json({ log });
+    }
+
+    // POST /api/3dprint/admin/log
+    if (method === "POST" && segments[1] === "log" && segments.length === 2) {
+      const body = await request.json<{ actor: string; type: string; text: string; app_id?: string | null }>();
+      if (!body.actor?.trim() || !body.type?.trim() || !body.text?.trim()) {
+        return error("actor, type, text が必要です");
+      }
+      const row = await insertAdminLog(db, {
+        actor: body.actor.trim(),
+        type: body.type.trim(),
+        text: body.text.trim(),
+        app_id: body.app_id ?? null,
+      });
+      return json({ ok: true, entry: row });
+    }
+
+    // POST /api/3dprint/admin/applications/:id/split-slots
+    if (
+      method === "POST" &&
+      segments[1] === "applications" &&
+      segments[3] === "split-slots" &&
+      segments.length === 4
+    ) {
+      const body = await request.json<{
+        slot_indexes: number[];
+        target_status: "pending" | "approved" | "done" | "cancelled";
+      }>();
+      if (!Array.isArray(body.slot_indexes) || !body.target_status) {
+        return error("slot_indexes と target_status が必要です");
+      }
+      try {
+        const printerMap = await buildPrinterMap(db);
+        const applications = await splitApplicationSlots(
+          db,
+          segments[2],
+          body.slot_indexes,
+          body.target_status,
+          printerMap
+        );
+        return json({ applications });
+      } catch (err) {
+        return error(err instanceof Error ? err.message : "分割に失敗しました");
+      }
     }
 
     // GET /api/3dprint/admin/members

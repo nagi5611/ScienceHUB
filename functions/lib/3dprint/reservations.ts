@@ -42,6 +42,10 @@ export interface Reservation {
   contest_storage_path?: string | null;
   contest_storage_filename?: string | null;
   contest_application_id?: string | null;
+  booking_kind?: 'reserve' | 'request' | null;
+  start_minute?: number | null;
+  end_minute?: number | null;
+  slot_group_id?: string | null;
   created_at: string;
 }
 
@@ -326,8 +330,8 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
         print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
         user_id, source, schedule_type, contest_storage_path, contest_storage_filename,
-        contest_application_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        contest_application_id, booking_kind, start_minute, end_minute, slot_group_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -360,6 +364,10 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.contest_storage_path ?? null,
       data.contest_storage_filename ?? null,
       data.contest_application_id ?? null,
+      data.booking_kind ?? null,
+      data.start_minute ?? null,
+      data.end_minute ?? null,
+      data.slot_group_id ?? null,
       data.created_at
     )
     .run();
@@ -563,6 +571,9 @@ export async function updateReservationAdmin(
     print_staff_member_id?: string | null;
     status?: string;
     status_comment?: string | null;
+    start_minute?: number;
+    end_minute?: number;
+    slot_group_id?: string | null;
   }
 ): Promise<void> {
   const sets: string[] = [];
@@ -580,11 +591,23 @@ export async function updateReservationAdmin(
     sets.push('status_comment = ?');
     values.push(fields.status_comment);
   }
+  if (fields.start_minute !== undefined) {
+    sets.push('start_minute = ?');
+    values.push(fields.start_minute);
+  }
+  if (fields.end_minute !== undefined) {
+    sets.push('end_minute = ?');
+    values.push(fields.end_minute);
+  }
+  if (fields.slot_group_id !== undefined) {
+    sets.push('slot_group_id = ?');
+    values.push(fields.slot_group_id);
+  }
 
   if (sets.length === 0) return;
 
   values.push(id);
-  await db.prepare(`UPDATE print_reservations SET ${sets.join(', ')} WHERE id = ?`).bind(...values)    .run();
+  await db.prepare(`UPDATE print_reservations SET ${sets.join(', ')} WHERE id = ?`).bind(...values).run();
 }
 
 /** Stores the Google Calendar event ID for a reservation. */

@@ -18,7 +18,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: `npm run db:migrate:local && npx wrangler pages dev public --port ${PORT} --d1 sciencehub_db=sciencehub-db --r2 sciencehub_files=sciencehub-files`,
+    command: `npm run build:3dprint-ui:reservation && npm run db:migrate:local && npx wrangler pages dev public --port ${PORT} --d1 sciencehub_db=sciencehub-db --r2 sciencehub_files=sciencehub-files`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

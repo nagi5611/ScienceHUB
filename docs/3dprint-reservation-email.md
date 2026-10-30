@@ -31,7 +31,7 @@ ScienceHUB は **Cloudflare Pages Functions** のため、送信は **REST API**
 
 ## 管理画面でのテスト
 
-3D印刷管理 → **メンバー一覧** →「予約者向けメール」→ `POST /api/3dprint/admin/settings/test-email`
+3D印刷管理 → **シフト・設定** → **外部連携** タブ →「予約者向けメール」で送信先を入力してテスト送信 → `POST /api/3dprint/admin/settings/test-email`（body: `{ "to": "..." }`）
 
 ## ローカル
 

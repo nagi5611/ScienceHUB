@@ -5,7 +5,7 @@
 import { now, type Env } from "../../lib/types";
 import { getDb } from "../../lib/db";
 import { requireUser } from "../../lib/auth";
-import { canUserAccessApp } from "../../lib/apps";
+import { canUserAccessApp, getAppBySlug } from "../../lib/apps";
 import {
   getEarliestBookableDate,
   getAdminEarliestBookableDate,
@@ -252,6 +252,11 @@ async function requireAppAccess(
   if (auth instanceof Response) return auth;
 
   const db = getDb(env);
+  const app = await getAppBySlug(db, slug);
+  if (!app) {
+    return error("アプリが見つかりません", 404);
+  }
+
   const allowed = await canUserAccessApp(db, auth.id, slug);
   if (!allowed) {
     return error("このアプリへのアクセス権限がありません", 403);
