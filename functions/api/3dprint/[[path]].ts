@@ -2292,11 +2292,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           date: updated.desired_date,
           appId: updated.id,
         });
-        void sendApplicantCancelledEmail(env, db, request, updated.user_id, updated, {
-          cancelledBy: "admin",
-          statusComment: updated.status_comment,
-          operatorSummary: opSummary,
-        }).catch((err) => console.error("cancel email failed", err));
+        context.waitUntil(
+          sendApplicantCancelledEmail(env, db, request, updated.user_id, updated, {
+            cancelledBy: "admin",
+            statusComment: updated.status_comment,
+            operatorSummary: opSummary,
+          }).catch((err) => console.error("cancel email failed", err))
+        );
         if (actor) {
           context.waitUntil(
             notifyPrintAdminOperation(env.DISCORD_WEBHOOK_URL, {
@@ -2372,15 +2374,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           const opSummary = actor
             ? operatorEmailSummary(actor, { action_label: "予約日の変更（管理）" })
             : null;
-          void sendApplicantRescheduledEmail(
-            env,
-            db,
-            request,
-            updated.user_id,
-            updated,
-            previousDate,
-            opSummary
-          ).catch((err) => console.error("reschedule email failed", err));
+          context.waitUntil(
+            sendApplicantRescheduledEmail(
+              env,
+              db,
+              request,
+              updated.user_id,
+              updated,
+              previousDate,
+              opSummary
+            ).catch((err) => console.error("reschedule email failed", err))
+          );
           if (actor) {
             const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
               date: updated.desired_date,

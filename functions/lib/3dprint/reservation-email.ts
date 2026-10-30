@@ -275,6 +275,15 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function redactEmailForLog(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 0) return "***";
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  if (local.length <= 1) return `*${domain}`;
+  return `${local[0]}***${domain}`;
+}
+
 /** Sends a transactional email to the user who created the reservation. */
 export async function notifyApplicantPrintReservationEmail(
   env: Env,
@@ -282,19 +291,31 @@ export async function notifyApplicantPrintReservationEmail(
   userId: string,
   payload: ApplicantEmailPayload
 ): Promise<void> {
+  const reservationId = payload.reservation.id;
+  const kind = payload.kind;
   const from = getFromAddress(env);
-  if (!isEmailSendingConfigured(env, from)) {
+  const configured = isEmailSendingConfigured(env, from);
+  if (!configured) {
+    console.warn("3D print applicant email skipped: not configured", {
+      kind,
+      reservationId,
+      configured: false,
+    });
     return;
   }
 
   const to = await getUserEmailById(db, userId);
   if (!to) {
-    console.warn("3D print applicant email skipped: no user email", userId);
+    console.warn("3D print applicant email skipped: no user email", {
+      kind,
+      reservationId,
+      userId,
+    });
     return;
   }
 
   const { subject, html, text } = buildApplicantMessage(payload);
-  await sendTransactionalEmail(env, {
+  const sent = await sendTransactionalEmail(env, {
     to,
     from: { email: from!, name: getFromName(env) },
     subject,
@@ -302,6 +323,21 @@ export async function notifyApplicantPrintReservationEmail(
     text,
     replyTo: env.PRINT_3D_EMAIL_REPLY_TO?.trim() || undefined,
   });
+  if (sent) {
+    console.log("3D print applicant email sent", {
+      kind,
+      reservationId,
+      to: redactEmailForLog(to),
+      configured: true,
+    });
+  } else {
+    console.warn("3D print applicant email REST send failed", {
+      kind,
+      reservationId,
+      to: redactEmailForLog(to),
+      configured: true,
+    });
+  }
 }
 
 /** Public path to the 3D print reservation app. */
