@@ -64,7 +64,6 @@ import {
 } from "../../lib/3dprint/shift-guard";
 import {
   build3dPrintAdminUrl,
-  notifyReservationApplication,
   notifyReservationBooked,
   notifyReservationModified,
   notifyReservationStaffAssigned,
@@ -91,7 +90,6 @@ import {
 } from "../../lib/3dprint/application-form-pdf";
 import {
   MAX_PRINT_RESERVATION_FILES,
-  replacePrintReservationFiles,
   type PrintReservationFileInput,
 } from "../../lib/3dprint/print-reservation-files";
 import { softCancelReservation, restoreCancelledReservation } from "../../lib/3dprint/cancel-restore";
@@ -101,6 +99,10 @@ import {
   releaseReservationIdempotencyKey,
   type CompletedReservationResponse,
 } from "../../lib/3dprint/reservation-idempotency";
+import {
+  runReservationSubmissionAsync,
+  type SubmissionAsyncContext,
+} from "../../lib/3dprint/reservation-submission-async";
 import {
   build3dPrintReservationAppUrl,
   notifyApplicantPrintReservationEmail,
@@ -467,18 +469,55 @@ async function normalizeAndValidatePrintFiles(
   return files;
 }
 
-async function finalizeNewReservationSubmission(
+function buildSubmissionAsyncContext(
   env: Env,
   db: D1Database,
+  request: Request,
   reservation: Reservation,
-  files: PrintReservationFileInput[]
-): Promise<Reservation> {
-  await replacePrintReservationFiles(db, reservation.id, files, reservation.created_at);
-  const printer = reservation.printer_id
-    ? await getPrinterById(db, reservation.printer_id)
-    : null;
-  await persistApplicationFormPdf(env, db, reservation, printer ?? undefined);
-  return (await getReservationById(db, reservation.id)) ?? reservation;
+  applicantUserId: string,
+  printFiles: PrintReservationFileInput[]
+): SubmissionAsyncContext {
+  return {
+    env,
+    db,
+    request,
+    reservation,
+    applicantUserId,
+    printFiles,
+    adminDeepLink: build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
+      date: reservation.desired_date,
+      appId: reservation.id,
+    }),
+    buildPdfUrl: (reservationId) => buildAdminApplicationFormPdfUrl(request, env, reservationId),
+  };
+}
+
+function scheduleReservationSubmissionAsync(
+  context: { waitUntil: (promise: Promise<unknown>) => void },
+  submissionCtx: SubmissionAsyncContext,
+  opts: { immediateDiscord: boolean; pdfFollowUpDiscord: boolean; applicantEmail: boolean }
+): void {
+  context.waitUntil(
+    (async () => {
+      try {
+        await runReservationSubmissionAsync(submissionCtx, {
+          immediateDiscord: opts.immediateDiscord,
+          pdfFollowUpDiscord: opts.pdfFollowUpDiscord,
+        });
+        if (opts.applicantEmail) {
+          await sendApplicantAppliedEmail(
+            submissionCtx.env,
+            submissionCtx.db,
+            submissionCtx.request,
+            submissionCtx.applicantUserId,
+            submissionCtx.reservation
+          );
+        }
+      } catch (err) {
+        console.error("reservation submission async failed", submissionCtx.reservation.id, err);
+      }
+    })()
+  );
 }
 
 /** Sends「予約申請受付」email to the applicant (non-blocking). */
@@ -503,70 +542,6 @@ async function sendApplicantAppliedEmail(
     applicationFormText,
     applicationFormPdfUrl: buildAdminApplicationFormPdfUrl(request, env, reservation.id),
   });
-}
-
-async function notifyNewApplicationDiscordAndEmail(
-  env: Env,
-  db: D1Database,
-  request: Request,
-  reservation: Reservation,
-  applicantUserId: string
-): Promise<void> {
-  const printerMap = await buildPrinterMap(db);
-  const printer = reservation.printer_id ? printerMap.get(reservation.printer_id) : undefined;
-  const applicationFormText = await buildPrintApplicationFormText(db, reservation, printer);
-  const adminDeepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
-    date: reservation.desired_date,
-    appId: reservation.id,
-  });
-  const applicant = await getSessionUserById(env, db, applicantUserId);
-  const applicantLabel = applicant
-    ? `${applicant.display_name} (@${applicant.username})`
-    : null;
-  const applicationFormPdfUrl = buildAdminApplicationFormPdfUrl(request, env, reservation.id);
-  const discord = await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
-    applicationFormText,
-    applicationFormPdfUrl,
-    adminDeepLink,
-    applicantLabel,
-  });
-  if (!discord.ok) {
-    console.error(
-      "Discord application webhook failed after retries:",
-      discord.status,
-      discord.error,
-      `(attempts=${discord.attempts}, reservation=${reservation.id})`
-    );
-  }
-  await sendApplicantAppliedEmail(env, db, request, applicantUserId, reservation);
-}
-
-/** Sends applicant Discord + email after HTTP response (retries inside webhook helper). */
-async function runNewApplicationNotifications(
-  env: Env,
-  db: D1Database,
-  request: Request,
-  reservation: Reservation,
-  applicantUserId: string
-): Promise<void> {
-  try {
-    await notifyNewApplicationDiscordAndEmail(env, db, request, reservation, applicantUserId);
-  } catch (err) {
-    console.error("new application notifications failed", reservation.id, err);
-  }
-}
-
-function scheduleNewApplicationNotifications(
-  context: { waitUntil: (promise: Promise<unknown>) => void },
-  env: Env,
-  db: D1Database,
-  request: Request,
-  reservation: Reservation,
-  applicantUserId: string
-): void {
-  context.waitUntil(
-    runNewApplicationNotifications(env, db, request, reservation, applicantUserId)
-  );
 }
 
 /** Auto-confirmed time-slot「予約のみ」: applicant email + Discord「予約されました」. */
@@ -1277,41 +1252,54 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("予約の保存に失敗しました", 500);
       }
 
-      let submittedReservation = reservation;
-      try {
-        submittedReservation = await finalizeNewReservationSubmission(
-          env,
-          db,
-          reservation,
-          printFiles
-        );
-      } catch (err) {
-        console.error("finalizeNewReservationSubmission failed", err);
-      }
+      const submissionCtx = buildSubmissionAsyncContext(
+        env,
+        db,
+        context.request,
+        reservation,
+        userId,
+        printFiles
+      );
 
       if (autoConfirmReserve) {
         const member = autoStaffMemberId
           ? await getMemberById(db, autoStaffMemberId)
           : null;
         const memberMap = await buildMemberMap(db);
-        let saved = submittedReservation;
-        if (saved) {
-          const calendarResult = await createCalendarEventForReservation(env, saved, memberMap);
-          if (calendarResult.ok && calendarResult.eventId) {
-            await setGoogleEventId(db, reservationId, calendarResult.eventId);
-            saved = (await getReservationById(db, reservationId)) ?? saved;
-          }
+        let saved = reservation;
+        const calendarResult = await createCalendarEventForReservation(env, saved, memberMap);
+        if (calendarResult.ok && calendarResult.eventId) {
+          await setGoogleEventId(db, reservationId, calendarResult.eventId);
+          saved = (await getReservationById(db, reservationId)) ?? saved;
         }
         const staffLabel = member ? formatMemberLabel(member) : "担当者（未割当）";
+        const autoCtx = buildSubmissionAsyncContext(
+          env,
+          db,
+          context.request,
+          saved,
+          userId,
+          printFiles
+        );
         context.waitUntil(
-          notifyAutoConfirmedTimeSlotReserve(
-            env,
-            db,
-            context.request,
-            saved,
-            userId,
-            staffLabel
-          ).catch((err) => console.error("auto-confirm notify failed", err))
+          (async () => {
+            try {
+              await runReservationSubmissionAsync(autoCtx, {
+                immediateDiscord: false,
+                pdfFollowUpDiscord: true,
+              });
+              await notifyAutoConfirmedTimeSlotReserve(
+                env,
+                db,
+                context.request,
+                saved,
+                userId,
+                staffLabel
+              );
+            } catch (err) {
+              console.error("auto-confirm async pipeline failed", err);
+            }
+          })()
         );
         const autoPayload: CompletedReservationResponse = {
           id: reservation.id,
@@ -1323,14 +1311,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return json(autoPayload, 201);
       }
 
-      scheduleNewApplicationNotifications(
-        context,
-        env,
-        db,
-        context.request,
-        submittedReservation,
-        userId
-      );
+      scheduleReservationSubmissionAsync(context, submissionCtx, {
+        immediateDiscord: true,
+        pdfFollowUpDiscord: true,
+        applicantEmail: true,
+      });
 
       const pendingMessage =
         timeSlotMode && body.booking_kind === "request"
@@ -1644,13 +1629,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
 
-        scheduleNewApplicationNotifications(
+        scheduleReservationSubmissionAsync(
           context,
-          env,
-          db,
-          context.request,
-          created,
-          userId
+          buildSubmissionAsyncContext(env, db, context.request, created, userId, []),
+          { immediateDiscord: true, pdfFollowUpDiscord: true, applicantEmail: true }
         );
 
         return json({
@@ -1919,13 +1901,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       await createReservation(db, reservation);
 
-      scheduleNewApplicationNotifications(
+      scheduleReservationSubmissionAsync(
         context,
-        env,
-        db,
-        context.request,
-        reservation,
-        targetUserId
+        buildSubmissionAsyncContext(env, db, context.request, reservation, targetUserId, []),
+        { immediateDiscord: true, pdfFollowUpDiscord: true, applicantEmail: false }
       );
 
       const memberMap = await buildMemberMap(db);

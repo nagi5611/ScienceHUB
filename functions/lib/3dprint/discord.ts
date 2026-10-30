@@ -391,6 +391,84 @@ export async function notifyReservationCancelledByUser(
   }
 }
 
+export type DiscordApplicationImmediateNotice = {
+  adminDeepLink: string;
+  applicantName: string;
+  title: string;
+  submittedAtJst: string;
+  machineLabel: string;
+};
+
+/** Short real-time Discord notice when an application is saved (no PDF yet). */
+export async function notifyReservationApplicationImmediate(
+  webhookUrl: string | undefined,
+  notice: DiscordApplicationImmediateNotice
+): Promise<DiscordWebhookDeliveryResult> {
+  if (!webhookUrl?.trim()) {
+    return { ok: true, attempts: 0 };
+  }
+
+  const payload = {
+    content: [
+      '**申請がありました**',
+      '',
+      `申請URL: ${notice.adminDeepLink.trim()}`,
+      `申請者: ${notice.applicantName.trim() || '—'}`,
+      `作品名: ${notice.title.trim() || '—'}`,
+      `申請日時: ${notice.submittedAtJst}`,
+      `機種: ${notice.machineLabel}`,
+    ].join('\n'),
+  };
+
+  const delivered = await postDiscordWebhookWithRetry(webhookUrl, payload);
+  if (!delivered.ok) {
+    console.error(
+      'Discord immediate application webhook failed:',
+      delivered.status,
+      delivered.error,
+      `(attempts=${delivered.attempts})`
+    );
+  }
+  return delivered;
+}
+
+export type DiscordApplicationPdfReadyNotice = {
+  title: string;
+  pdfUrl: string;
+  adminDeepLink: string;
+};
+
+/** Follow-up Discord when the application PDF is stored in R2. */
+export async function notifyReservationApplicationPdfReady(
+  webhookUrl: string | undefined,
+  notice: DiscordApplicationPdfReadyNotice
+): Promise<DiscordWebhookDeliveryResult> {
+  if (!webhookUrl?.trim()) {
+    return { ok: true, attempts: 0 };
+  }
+
+  const payload = {
+    content: [
+      '**申請PDFの準備ができました**',
+      '',
+      `作品名: ${notice.title.trim() || '—'}`,
+      `PDF: ${notice.pdfUrl.trim()}`,
+      `申請URL: ${notice.adminDeepLink.trim()}`,
+    ].join('\n'),
+  };
+
+  const delivered = await postDiscordWebhookWithRetry(webhookUrl, payload);
+  if (!delivered.ok) {
+    console.error(
+      'Discord PDF-ready webhook failed:',
+      delivered.status,
+      delivered.error,
+      `(attempts=${delivered.attempts})`
+    );
+  }
+  return delivered;
+}
+
 /** Sends a Discord webhook notification for a new reservation application. */
 export async function notifyReservationApplication(
   webhookUrl: string | undefined,

@@ -13,6 +13,19 @@ const MACHINE_META: Record<'ke' | 'cc', { name: string; maker: string }> = {
   cc: { name: 'Centauri Carbon', maker: 'Elegoo' },
 };
 
+/** Display label for Discord / UI (machine line). */
+export function formatPrinterMachineLabel(printer: Printer | undefined): string {
+  const lane =
+    printer?.machine_lane === 'ke' || printer?.machine_lane === 'cc'
+      ? printer.machine_lane
+      : inferMachineLane(printer?.name ?? '');
+  if (lane === 'ke' || lane === 'cc') {
+    const m = MACHINE_META[lane];
+    return `${m.name}（${m.maker}）`;
+  }
+  return printer?.name?.trim() || '—';
+}
+
 function parseYmd(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d);
