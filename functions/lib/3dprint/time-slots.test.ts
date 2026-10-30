@@ -53,21 +53,14 @@ describe('time-slots', () => {
     assert.equal(isRequestDateBookable(today), false);
   });
 
-  it('canUserRestoreCancelledReservation request allows through day after print date', () => {
+  it('canUserRestoreCancelledReservation requires print date after today', () => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(
       new Date()
     );
-    const printDate = addDays(today, -1);
-    assert.equal(canUserRestoreCancelledReservation('request', printDate), true);
-    const twoDaysAgo = addDays(today, -2);
-    assert.equal(canUserRestoreCancelledReservation('request', twoDaysAgo), false);
-  });
-
-  it('canUserRestoreCancelledReservation reserve requires future print date', () => {
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(
-      new Date()
-    );
+    const tomorrow = addDays(today, 1);
+    assert.equal(canUserRestoreCancelledReservation('request', today), false);
+    assert.equal(canUserRestoreCancelledReservation('request', tomorrow), true);
     assert.equal(canUserRestoreCancelledReservation('reserve', today), false);
-    assert.equal(canUserRestoreCancelledReservation('reserve', addDays(today, 1)), true);
+    assert.equal(canUserRestoreCancelledReservation('reserve', tomorrow), true);
   });
 });

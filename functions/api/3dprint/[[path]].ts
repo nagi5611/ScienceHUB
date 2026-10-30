@@ -1554,7 +1554,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!canUserRestoreCancelledReservation(reservation.booking_kind, reservation.desired_date)) {
         const msg =
           reservation.booking_kind === "request"
-            ? "依頼日の翌日を過ぎると取り消しを元に戻せません"
+            ? "印刷日当日以降は取り消しを元に戻せません"
             : "過ぎた日（当日を含む）の申請は取り消しを元に戻せません";
         return error(msg, 409);
       }

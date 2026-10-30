@@ -174,20 +174,12 @@ type Who = Application['who'];
 export const todayStrOf = () => ymd(startOfDay(new Date()));
 export const requestAllowed = (dateStr: string) => dateStr > todayStrOf();
 export const isPastDate = (dateStr: string) => dateStr < todayStrOf();
-export const ymdAddDays = (dateStr: string, days: number) => ymd(addDays(parseYmd(dateStr), days));
-
-/** User restore eligibility for cancelled applications on the reservation site. */
-export const canRestoreCancelledApplication = (dateStr: string, kind: Kind) => {
-  const today = todayStrOf();
-  if (kind === 'request') {
-    return today <= ymdAddDays(dateStr, 1);
-  }
-  return dateStr > today;
-};
+/** User restore eligibility: print date strictly after today (依頼・予約共通). */
+export const canRestoreCancelledApplication = (dateStr: string, _kind?: Kind) => dateStr > todayStrOf();
 
 export const restoreCancelledBlockedMessage = (kind: Kind) =>
   kind === 'request'
-    ? '依頼日の翌日を過ぎると取り消しを元に戻せません'
+    ? '印刷日当日以降は取り消しを元に戻せません'
     : '過ぎた日（当日を含む）の申請は取り消しを元に戻せません';
 
 export function readJSON<T>(key: string, fallback: T): T {
