@@ -107,6 +107,7 @@ import {
 } from "../../lib/3dprint/reservation-submission-async";
 import {
   build3dPrintReservationAppUrl,
+  buildReservationContentChangeSummary,
   notifyApplicantPrintReservationEmail,
   sendPrintReservationAdminTestEmail,
 } from "../../lib/3dprint/reservation-email";
@@ -648,6 +649,68 @@ async function sendApplicantRescheduledEmail(
 }
 
 /** Sends「予約確定」email to the applicant (non-blocking). */
+/** Sends cancellation notice to the reservation owner. */
+async function sendApplicantCancelledEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  applicantUserId: string,
+  reservation: Reservation,
+  options: {
+    cancelledBy: "admin" | "user";
+    statusComment?: string | null;
+    operatorSummary?: string | null;
+  }
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
+    kind: "cancelled",
+    cancelledBy: options.cancelledBy,
+    reservation: {
+      id: reservation.id,
+      title: reservation.title,
+      desired_date: reservation.desired_date,
+    },
+    printerName: resolvePrinterLabel(reservation, printerMap),
+    statusComment: options.statusComment,
+    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    operatorSummary: options.operatorSummary,
+  });
+}
+
+/** Sends content-modification notice with a field-level change summary. */
+async function sendApplicantContentModifiedEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  applicantUserId: string,
+  before: Reservation,
+  after: Reservation,
+  operatorSummary?: string | null
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  const modificationLines = buildReservationContentChangeSummary(
+    before,
+    after,
+    resolvePrinterLabel(before, printerMap),
+    resolvePrinterLabel(after, printerMap)
+  );
+  if (!modificationLines.length) return;
+
+  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
+    kind: "modified",
+    reservation: {
+      id: after.id,
+      title: after.title,
+      desired_date: after.desired_date,
+    },
+    printerName: resolvePrinterLabel(after, printerMap),
+    modificationLines,
+    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    operatorSummary,
+  });
+}
+
 async function sendApplicantAcceptedEmail(
   env: Env,
   db: D1Database,
@@ -838,7 +901,51 @@ async function applyReservationContentEdit(
     stl_size_bytes: stlSizeBytes,
   });
 
-  if (!options.isUser && options.operatorUserId) {
+  const updated = await getReservationById(db, reservation.id);
+
+  if (updated?.user_id) {
+    const actor =
+      !options.isUser && options.operatorUserId
+        ? await resolvePrintActorContext(env, db, options.operatorUserId)
+        : null;
+    const opSummary = actor
+      ? operatorEmailSummary(actor, { action_label: "予約内容の修正（管理）" })
+      : null;
+    context.waitUntil(
+      (async () => {
+        if (!options.isUser && actor) {
+          await notifyReservationModified(
+            env.DISCORD_WEBHOOK_URL,
+            build3dPrintAdminUrl(getOAuthRedirectBase(context.request, env)),
+            {
+              title: String(body.title).trim(),
+              desired_date: body.desired_date,
+            },
+            actor,
+            { action_label: "予約内容の修正（管理）" }
+          );
+        } else if (options.isUser) {
+          await notifyReservationModified(
+            env.DISCORD_WEBHOOK_URL,
+            build3dPrintAdminUrl(getOAuthRedirectBase(context.request, env)),
+            {
+              title: String(body.title).trim(),
+              desired_date: body.desired_date,
+            }
+          );
+        }
+        await sendApplicantContentModifiedEmail(
+          env,
+          db,
+          context.request,
+          updated.user_id!,
+          reservation,
+          updated,
+          opSummary
+        );
+      })().catch((err) => console.error("content modify notify failed", err))
+    );
+  } else if (!options.isUser && options.operatorUserId) {
     const actor = await resolvePrintActorContext(env, db, options.operatorUserId);
     context.waitUntil(
       notifyReservationModified(
@@ -865,7 +972,6 @@ async function applyReservationContentEdit(
     );
   }
 
-  const updated = await getReservationById(db, reservation.id);
   const memberMap = await buildMemberMap(db);
   const printerMap = await buildPrinterMap(db);
   return json({
@@ -1676,18 +1782,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               : null;
         const studentLabel = `${updated.student_name}（${updated.homeroom}・${updated.student_number}番）`;
         context.waitUntil(
-          notifyReservationCancelledByUser(env.DISCORD_WEBHOOK_URL, {
-            adminDeepLink: build3dPrintAdminDeepLink(getOAuthRedirectBase(context.request, env), {
-              date: updated.desired_date,
-              appId: updated.id,
-            }),
-            applicantLabel,
-            title: updated.title,
-            desiredDate: updated.desired_date,
-            studentLabel,
-            kindLabel,
-            printerName: resolvePrinterLabel(updated, printerMap),
-          }).catch((err) => console.error("user cancel discord notify failed", err))
+          (async () => {
+            await notifyReservationCancelledByUser(env.DISCORD_WEBHOOK_URL, {
+              adminDeepLink: build3dPrintAdminDeepLink(getOAuthRedirectBase(context.request, env), {
+                date: updated.desired_date,
+                appId: updated.id,
+              }),
+              applicantLabel,
+              title: updated.title,
+              desiredDate: updated.desired_date,
+              studentLabel,
+              kindLabel,
+              printerName: resolvePrinterLabel(updated, printerMap),
+            });
+            await sendApplicantCancelledEmail(env, db, context.request, userId, updated, {
+              cancelledBy: "user",
+              statusComment: updated.status_comment,
+            });
+          })().catch((err) => console.error("user cancel notify failed", err))
         );
         return json({ ok: true, message: "予約を取り消しました" });
       } catch (err) {
@@ -2176,21 +2288,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const opSummary = actor
           ? operatorEmailSummary(actor, { action_label: "予約の取り消し（管理）" })
           : null;
-        const printerMapForMail = await buildPrinterMap(db);
         const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
           date: updated.desired_date,
           appId: updated.id,
         });
-        void notifyApplicantPrintReservationEmail(env, db, updated.user_id, {
-          kind: "cancelled",
-          reservation: {
-            id: updated.id,
-            title: updated.title,
-            desired_date: updated.desired_date,
-          },
-          printerName: resolvePrinterLabel(updated, printerMapForMail),
+        void sendApplicantCancelledEmail(env, db, request, updated.user_id, updated, {
+          cancelledBy: "admin",
           statusComment: updated.status_comment,
-          reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
           operatorSummary: opSummary,
         }).catch((err) => console.error("cancel email failed", err));
         if (actor) {

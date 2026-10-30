@@ -9,7 +9,14 @@ export type PrintReservationEmailKind =
   | "applied"
   | "accepted"
   | "cancelled"
-  | "rescheduled";
+  | "rescheduled"
+  | "modified";
+
+const PURPOSE_LABELS: Record<Reservation["purpose"], string> = {
+  ss_s_tan: "SS・S探",
+  club: "部活",
+  other: "その他",
+};
 
 interface ApplicantEmailPayload {
   kind: PrintReservationEmailKind;
@@ -26,6 +33,68 @@ interface ApplicantEmailPayload {
   previousDate?: string | null;
   /** Who performed the action (ScienceHUB user + linked print staff). */
   operatorSummary?: string | null;
+  /** cancelled: admin vs applicant self-service. */
+  cancelledBy?: "admin" | "user";
+  /** modified: human-readable change lines (field: before → after). */
+  modificationLines?: string[];
+}
+
+/** Builds change summary lines for content-edit applicant emails. */
+export function buildReservationContentChangeSummary(
+  before: Reservation,
+  after: Reservation,
+  printerLabelBefore: string | null,
+  printerLabelAfter: string | null
+): string[] {
+  const lines: string[] = [];
+  if (before.title !== after.title) {
+    lines.push(`作品名: 「${before.title}」→「${after.title}」`);
+  }
+  if (before.desired_date !== after.desired_date) {
+    lines.push(`希望印刷日: ${before.desired_date} → ${after.desired_date}`);
+  }
+  if (before.printer_id !== after.printer_id) {
+    lines.push(`機種: ${printerLabelBefore ?? "—"} → ${printerLabelAfter ?? "—"}`);
+  }
+  if (before.purpose !== after.purpose) {
+    lines.push(
+      `利用目的: ${PURPOSE_LABELS[before.purpose]} → ${PURPOSE_LABELS[after.purpose]}`
+    );
+  }
+  if (before.purpose_other !== after.purpose_other) {
+    const b = before.purpose_other?.trim() || "—";
+    const a = after.purpose_other?.trim() || "—";
+    if (b !== a) lines.push(`利用目的（その他）: ${b} → ${a}`);
+  }
+  if ((before.summary ?? "") !== (after.summary ?? "")) {
+    lines.push("概要・説明が更新されました");
+  }
+  if ((before.print_notes ?? "") !== (after.print_notes ?? "")) {
+    lines.push("備考が更新されました");
+  }
+  if (before.part_count !== after.part_count) {
+    lines.push(`パーツ数: ${before.part_count} → ${after.part_count}`);
+  }
+  if (before.stl_r2_key !== after.stl_r2_key || before.stl_filename !== after.stl_filename) {
+    const b = before.stl_filename ?? "—";
+    const a = after.stl_filename ?? "—";
+    lines.push(`印刷データ: ${b} → ${a}`);
+  }
+  if (before.request_print_video !== after.request_print_video) {
+    const b = before.request_print_video === 1 ? "希望する" : "希望しない";
+    const a = after.request_print_video === 1 ? "希望する" : "希望しない";
+    lines.push(`印刷動画: ${b} → ${a}`);
+  }
+  if (
+    before.student_name !== after.student_name ||
+    before.homeroom !== after.homeroom ||
+    before.student_number !== after.student_number
+  ) {
+    lines.push(
+      `申請者: ${before.student_name}（${before.homeroom}・${before.student_number}番）→ ${after.student_name}（${after.homeroom}・${after.student_number}番）`
+    );
+  }
+  return lines;
 }
 
 /** Loads the applicant's email from D1. */
@@ -99,20 +168,59 @@ ${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px
   if (payload.kind === "cancelled") {
     const subject = "【ScienceHUB】3D印刷の予約が取り消されました";
     const comment = payload.statusComment?.trim();
+    const byUser = payload.cancelledBy === "user";
+    const lead = byUser
+      ? "ご自身の操作により、予約・依頼が取り消されました。"
+      : "担当者により予約が取り消されました。";
     const text = `${subject}
 
-担当者により予約が取り消されました。
+${lead}
 
-${common}${operatorBlock}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}${formBlock}${pdfBlock}
+${common}${operatorBlock}${comment ? `\n${byUser ? "メモ" : "担当者からの連絡"}:\n${comment}\n` : ""}${formBlock}${pdfBlock}
 予約の確認: ${payload.reservationAppUrl}
 
 ※このメールに心当たりがない場合は破棄してください。`;
-    const html = `<p>担当者により予約が<strong>取り消され</strong>ました。</p>
+    const html = `<p>${byUser ? "ご自身の操作により、予約・依頼が<strong>取り消され</strong>ました。" : "担当者により予約が<strong>取り消され</strong>ました。"}</p>
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
 <li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
+${payload.printerName ? `<li>機種: ${escapeHtml(payload.printerName)}</li>` : ""}
+<li>予約ID: ${escapeHtml(payload.reservation.id)}</li>
 </ul>
 ${comment ? `<p>${escapeHtml(comment)}</p>` : ""}
+<p><a href="${escapeHtml(payload.reservationAppUrl)}">予約アプリで確認</a></p>`;
+    return { subject, html, text };
+  }
+
+  if (payload.kind === "modified") {
+    const subject = "【ScienceHUB】3D印刷の予約内容が変更されました";
+    const changeLines = payload.modificationLines?.length
+      ? payload.modificationLines
+      : ["内容が更新されました（詳細は予約アプリでご確認ください）"];
+    const changesText = changeLines.map((l) => `・${l}`).join("\n");
+    const changesHtml = changeLines
+      .map((l) => `<li>${escapeHtml(l)}</li>`)
+      .join("");
+    const text = `${subject}
+
+予約・依頼の内容が変更されました。
+
+${common}
+変更内容:
+${changesText}
+${operatorBlock}
+予約の確認: ${payload.reservationAppUrl}
+
+※このメールに心当たりがない場合は破棄してください。`;
+    const html = `<p>予約・依頼の<strong>内容が変更</strong>されました。</p>
+<ul>
+<li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
+<li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
+${payload.printerName ? `<li>機種: ${escapeHtml(payload.printerName)}</li>` : ""}
+<li>予約ID: ${escapeHtml(payload.reservation.id)}</li>
+</ul>
+<p><strong>変更内容</strong></p>
+<ul>${changesHtml}</ul>
 <p><a href="${escapeHtml(payload.reservationAppUrl)}">予約アプリで確認</a></p>`;
     return { subject, html, text };
   }
