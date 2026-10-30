@@ -230,9 +230,9 @@ a{color:var(--color-primary)}
 .day.sat .d{color:#5d7ca8}
 .day.closed .d{color:var(--color-text-faint)}
 /* 担当の有無だけを示すフラグ */
-.d-staffflag{margin-left:auto;font-size:8.5px;font-weight:700;line-height:1.8;padding:0;border-radius:0;white-space:nowrap;flex-shrink:0;min-width:0;text-align:right;box-sizing:border-box;
-  background:transparent;color:var(--color-text-faint);border:none}
-.d-staffflag.on{color:var(--color-primary-dark)}
+.d-staffflag{margin-left:auto;font-size:8.5px;font-weight:700;line-height:1.8;padding:0 5px;border-radius:3px;white-space:nowrap;flex-shrink:0;min-width:2.85rem;text-align:center;box-sizing:border-box;
+  background:#f2f4f7;color:var(--color-text-faint);border:1px solid transparent}
+.d-staffflag.on{background:var(--color-primary-soft);color:var(--color-primary-dark);border-color:var(--color-primary-line)}
 
 .c-kinds{display:grid;gap:3px;margin-top:1px;align-self:start}
 .c-k{display:flex;align-items:center;gap:4px;font-size:9.5px;font-weight:600;color:var(--color-text-muted);line-height:1.55;white-space:nowrap}
@@ -246,7 +246,7 @@ a{color:var(--color-primary)}
 .c-k.zero i{background:#dfe3e9}
 .c-k.zero b{color:#b9c0ca}
 .c-pend{min-height:15px;display:flex;align-items:flex-end;align-self:end}
-.pend{font-size:8.5px;font-weight:700;color:var(--color-warn-ink);background:transparent;border:none;border-radius:0;padding:0;line-height:1.7;white-space:nowrap}
+.pend{font-size:8.5px;font-weight:700;color:var(--color-warn-ink);background:var(--color-warn-bg);border:1px solid var(--color-warn-line);border-radius:3px;padding:0 4px;line-height:1.7;white-space:nowrap}
 
 .cal-legend{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;padding:10px 16px 12px;border-top:1px solid var(--color-track);font-size:10px;color:var(--color-text-muted);line-height:1.5}
 .lg{display:flex;align-items:center;gap:5px;white-space:nowrap}
