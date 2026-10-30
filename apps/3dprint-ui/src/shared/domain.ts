@@ -174,6 +174,8 @@ type Who = Application['who'];
 export const todayStrOf = () => ymd(startOfDay(new Date()));
 export const requestAllowed = (dateStr: string) => dateStr > todayStrOf();
 export const isPastDate = (dateStr: string) => dateStr < todayStrOf();
+/** Cancelled applications on strictly future dates can be restored by the applicant. */
+export const canRestoreCancelledApplication = (dateStr: string) => dateStr > todayStrOf();
 
 export function readJSON<T>(key: string, fallback: T): T {
   try {

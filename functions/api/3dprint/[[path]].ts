@@ -195,6 +195,7 @@ import { reservationToApplication } from "../../lib/3dprint/applications-api";
 import {
   hasTimeSlotOverlap,
   isAllowedPrintFilename,
+  isFuturePrintDate,
   isRequestDateBookable,
   isReserveDateBookable,
   isWeekdayYmd,
@@ -1546,6 +1547,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!reservation) return error("予約が見つかりません", 404);
       if (reservation.user_id !== userId) {
         return error("この予約にアクセスする権限がありません", 403);
+      }
+      if (reservation.status !== "cancelled") {
+        return error("取り消し済みの申請のみ復元できます", 400);
+      }
+      if (!isFuturePrintDate(reservation.desired_date)) {
+        return error("過ぎた日（当日を含む）の申請は取り消しを元に戻せません", 409);
       }
       try {
         const restored = await restoreCancelledReservation(db, segments[1], { isAdmin: false });

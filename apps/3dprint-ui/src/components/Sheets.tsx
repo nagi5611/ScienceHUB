@@ -3,7 +3,7 @@ import type { Application } from '@shared/types';
 import {
   WD, pad2, ymd, parseYmd, addDays, startOfDay, isWeekday, hasShift, staffFor, weekStart, mdLabel,
   slotStart, minsLabel, rangeLabel, slotRangeLabel, durationLabel, slotIndex, inShiftSlot, spanOf, clampRange,
-  HR_LIST, isValidHR, hrLabel, whoLabel, requestAllowed, isPastDate, todayStrOf,
+  HR_LIST, isValidHR, hrLabel, whoLabel, requestAllowed, isPastDate, todayStrOf, canRestoreCancelledApplication,
   computeDay, hasOverlap, findNextOpenDate, saveProfile,
   STATUS, KIND, MACHINE_IDS, MACHINE_MAP, MACHINES, SLOT_COUNT, ROW_H, SHIFT_START, SHIFT_END,
   SHIFT_SLOT_START, SHIFT_SLOT_END, SHIFT_SLOTS, DAY_START, DAY_END, SLOT_MIN,
@@ -250,8 +250,11 @@ function DetailSheet({ open, onClose, app, onCancel, onRestore }) {
           {app.mine && (st === 'pending' || st === 'approved') && (
             <button type="button" className="btn btn-primary" onClick={() => { onCancel(app.id); }}>申請を取り消す</button>
           )}
-          {app.mine && st === 'rejected' && onRestore && (
+          {app.mine && st === 'rejected' && onRestore && canRestoreCancelledApplication(app.date) && (
             <button type="button" className="btn btn-primary" data-testid="btn-restore-application" onClick={() => { onRestore(app.id); }}>取り消しを取消</button>
+          )}
+          {app.mine && st === 'rejected' && onRestore && !canRestoreCancelledApplication(app.date) && (
+            <span className="help">過ぎた日の申請は取り消しを元に戻せません</span>
           )}
         </>
       }>
@@ -359,9 +362,13 @@ function CancelledSheet({ open, onClose, apps, onOpenApp, onRestore }) {
             <span>·</span>
             <span>{MACHINE_MAP[a.machine].short}</span>
           </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
             <button type="button" className="btn btn-secondary" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => onOpenApp(a)}>詳細</button>
-            <button type="button" className="btn btn-primary" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => onRestore(a.id)}>取り消しを取消</button>
+            {canRestoreCancelledApplication(a.date) ? (
+              <button type="button" className="btn btn-primary" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => onRestore(a.id)}>取り消しを取消</button>
+            ) : (
+              <span className="help" style={{ margin: 0 }}>過ぎた日は復元不可</span>
+            )}
           </div>
         </div>
       ))}

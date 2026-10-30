@@ -52,6 +52,11 @@ export function isPastDate(dateStr: string): boolean {
   return dateStr < getTodayJstDate();
 }
 
+/** True when the print date is strictly after today (JST). */
+export function isFuturePrintDate(dateStr: string): boolean {
+  return dateStr > getTodayJstDate();
+}
+
 export function slotIndexFromMinute(mins: number): number {
   return Math.round((mins - DAY_START) / SLOT_MIN);
 }
@@ -114,7 +119,7 @@ export function validateTimeSlotInput(input: {
   return null;
 }
 
-const STL_EXT = /\.(stl|gcode|gco|3mf|obj)$/i;
+const STL_EXT = /\.(stl|gcode|gco|3mf|obj|html?|htm)$/i;
 
 export function isAllowedPrintFilename(name: string): boolean {
   return STL_EXT.test(name.trim());
