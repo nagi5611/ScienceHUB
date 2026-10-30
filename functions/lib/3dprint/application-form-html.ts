@@ -50,7 +50,7 @@ const SECTIONS: { title: string; labels: string[] }[] = [
   },
   {
     title: '印刷予約',
-    labels: ['日付', '時間', '機種', '種別', '状態', '担当'],
+    labels: ['日付', '時間', '機種', '種別', '担当'],
   },
   {
     title: 'データ・備考',
