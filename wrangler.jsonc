@@ -6,13 +6,6 @@
 	"limits": {
 		"cpu_ms": 30000
 	},
-	"observability": {
-		"enabled": true,
-		"logs": {
-			"invocation_logs": true,
-			"head_sampling_rate": 1
-		}
-	},
 	"d1_databases": [
 		{
 			"binding": "DB",
