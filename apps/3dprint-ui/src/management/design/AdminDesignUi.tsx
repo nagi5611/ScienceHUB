@@ -161,7 +161,7 @@ function Header({ screen, setScreen, actor, setActor, members, pendingCount, onC
   return (
     <header className="site-header">
       <div className="header-inner">
-        <a className="brand" href="#" onClick={e => e.preventDefault()}>
+        <a className="brand" href="/">
           <img src={LOGO} alt="" />
           ScienceHUB
           <span className="sep" />
