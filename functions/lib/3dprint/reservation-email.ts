@@ -30,6 +30,8 @@ interface ApplicantEmailPayload {
   reservationAppUrl: string;
   applicationFormText?: string | null;
   previousDate?: string | null;
+  /** Who performed the action (ScienceHUB user + linked print staff). */
+  operatorSummary?: string | null;
 }
 
 /** Loads the applicant's email from D1. */
@@ -74,6 +76,9 @@ ${printerLine}予約ID: ${payload.reservation.id}
   const formBlock = payload.applicationFormText?.trim()
     ? `\n\n--- 申請書 ---\n${payload.applicationFormText.trim()}\n`
     : "";
+  const operatorBlock = payload.operatorSummary?.trim()
+    ? `\n\n--- 操作者 ---\n${payload.operatorSummary.trim()}\n`
+    : "";
 
   if (payload.kind === "rescheduled") {
     const prev = payload.previousDate ?? "—";
@@ -85,7 +90,7 @@ ${printerLine}予約ID: ${payload.reservation.id}
 変更前: ${prev}
 変更後: ${payload.reservation.desired_date}
 
-${common}${formBlock}
+${common}${operatorBlock}${formBlock}
 予約の確認: ${payload.reservationAppUrl}`;
     const html = `<p>3D印刷の<strong>予約日が変更</strong>されました。</p>
 <p>変更前: ${escapeHtml(prev)} → 変更後: ${escapeHtml(payload.reservation.desired_date)}</p>
@@ -105,7 +110,7 @@ ${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px
 
 担当者により予約が取り消されました。
 
-${common}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}${formBlock}
+${common}${operatorBlock}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}${formBlock}
 予約の確認: ${payload.reservationAppUrl}
 
 ※このメールに心当たりがない場合は破棄してください。`;
@@ -151,7 +156,7 @@ ${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px
 
 ${common}印刷担当: ${staff}
 
-予約の確認: ${payload.reservationAppUrl}${formBlock}`;
+予約の確認: ${payload.reservationAppUrl}${operatorBlock}${formBlock}`;
   const html = `<p>3D印刷の予約が<strong>確定</strong>しました。</p>
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>

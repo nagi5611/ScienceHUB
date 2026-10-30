@@ -118,6 +118,22 @@ export async function fetchApplicationsRange(
 export type AdminMemberRow = AdminMember & {
   color_index?: number;
   discord_user_id?: string | null;
+  user_id?: string | null;
+};
+
+export type ManagementSession = {
+  user: { id: string; display_name: string; username: string };
+  linked_member: { id: string; name: string; homeroom: string | null } | null;
+};
+
+export type ManagementAccessUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string;
+  access_labels: string[];
+  linked_member_id: string | null;
+  linked_member_name: string | null;
 };
 
 export async function fetchMembers(): Promise<AdminMemberRow[]> {
@@ -129,6 +145,7 @@ export async function fetchMembers(): Promise<AdminMemberRow[]> {
       student_number: number;
       color_index?: number;
       discord_user_id?: string | null;
+      user_id?: string | null;
     }[];
   }>('admin/members');
   return data.members.map((m) => ({
@@ -138,7 +155,24 @@ export async function fetchMembers(): Promise<AdminMemberRow[]> {
     student_number: m.student_number,
     color_index: m.color_index,
     discord_user_id: m.discord_user_id,
+    user_id: m.user_id ?? null,
   }));
+}
+
+export async function fetchManagementSession(): Promise<ManagementSession> {
+  return apiFetch<ManagementSession>('admin/session');
+}
+
+export async function fetchManagementAccessUsers(): Promise<ManagementAccessUser[]> {
+  const data = await apiFetch<{ users: ManagementAccessUser[] }>('admin/management-users');
+  return data.users;
+}
+
+export async function patchMemberUserLink(memberId: string, userId: string | null) {
+  return apiFetch<{ member: AdminMemberRow }>(`admin/members/${memberId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ user_id: userId }),
+  });
 }
 
 export async function createMember(body: {
@@ -508,7 +542,6 @@ export async function testAdminEmail(to: string) {
 }
 
 export async function appendAdminLog(entry: {
-  actor: string;
   type: string;
   text: string;
   app_id?: string | null;

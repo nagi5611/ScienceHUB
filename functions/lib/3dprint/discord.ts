@@ -1,5 +1,7 @@
 ﻿// functions/api/lib/discord.ts
 import type { PrintScale } from './slots';
+import type { PrintActorContext, PrintActorNoticeExtra } from './print-actor';
+import { formatPrintActorNoticeLines } from './print-actor';
 
 const SCALE_LABELS: Record<PrintScale, string> = {
   small: 'スモール',
@@ -8,6 +10,15 @@ const SCALE_LABELS: Record<PrintScale, string> = {
 };
 
 const ADMIN_PATH = '/apps/3dprint-management/';
+
+function actorDiscordBlock(
+  actor?: PrintActorContext | null,
+  extra?: PrintActorNoticeExtra
+): string {
+  if (!actor) return '';
+  const lines = formatPrintActorNoticeLines(actor, extra);
+  return `\n\n**操作者情報**\n${lines.map((l) => `• ${l}`).join('\n')}`;
+}
 
 /** Builds the full 3D print management app URL from the site base URL. */
 export function build3dPrintAdminUrl(baseUrl: string): string {
@@ -199,14 +210,17 @@ export async function sendDailyStaffMentions(
 export async function notifyReservationModified(
   webhookUrl: string | undefined,
   adminUrl: string,
-  reservation: { title: string; desired_date: string; print_scale: PrintScale }
+  reservation: { title: string; desired_date: string; print_scale: PrintScale },
+  actor?: PrintActorContext | null,
+  actorExtra?: PrintActorNoticeExtra
 ): Promise<void> {
   if (!webhookUrl) return;
 
   const scaleLabel = SCALE_LABELS[reservation.print_scale] ?? reservation.print_scale;
+  const actorBlock = actorDiscordBlock(actor, { ...actorExtra, action_label: actorExtra?.action_label ?? '予約内容の修正' });
 
   const payload = {
-    content: `予約内容が修正されました。再承認が必要です。\n${adminUrl}`,
+    content: `予約内容が修正されました。再承認が必要です。\n${adminUrl}${actorBlock}`,
     embeds: [
       {
         title: '3D印刷 予約修正',
@@ -242,6 +256,8 @@ export type DiscordApplicationNotice = {
   print_scale: PrintScale;
   applicationFormText?: string;
   adminDeepLink: string;
+  /** Applicant (ScienceHUB user) — shown when the action is user-initiated. */
+  applicantLabel?: string | null;
 };
 
 /** Sends a Discord webhook notification for a new reservation application. */
@@ -261,9 +277,12 @@ export async function notifyReservationApplication(
   const formSnippet = notice.applicationFormText?.trim()
     ? `\n\`\`\`\n${notice.applicationFormText.trim().slice(0, 1800)}\n\`\`\``
     : '';
+  const applicantLine = notice.applicantLabel?.trim()
+    ? `\n\n**申請者（ScienceHUB）:** ${notice.applicantLabel.trim()}`
+    : '';
 
   const payload = {
-    content: `新しい予約申請があります。\n${notice.adminDeepLink}${formSnippet}`,
+    content: `新しい予約申請があります。\n${notice.adminDeepLink}${applicantLine}${formSnippet}`,
     embeds: [
       {
         title: '3D印刷 予約申請',
@@ -290,5 +309,49 @@ export async function notifyReservationApplication(
     }
   } catch (err) {
     console.error('Discord webhook error:', err);
+  }
+}
+
+export type PrintAdminDiscordNotice = {
+  title: string;
+  color: number;
+  summary: string;
+  fields?: { name: string; value: string; inline?: boolean }[];
+  adminDeepLink?: string;
+  actor: PrintActorContext;
+  actorExtra?: PrintActorNoticeExtra;
+};
+
+/** Management action notice (accept, cancel, reschedule, restore, etc.). */
+export async function notifyPrintAdminOperation(
+  webhookUrl: string | undefined,
+  notice: PrintAdminDiscordNotice
+): Promise<void> {
+  if (!webhookUrl) return;
+
+  const actorBlock = actorDiscordBlock(notice.actor, notice.actorExtra);
+  const link = notice.adminDeepLink ? `\n${notice.adminDeepLink}` : '';
+  const payload = {
+    content: `${notice.summary}${link}${actorBlock}`,
+    embeds: [
+      {
+        title: notice.title,
+        color: notice.color,
+        fields: notice.fields ?? [],
+      },
+    ],
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('Discord admin operation webhook failed:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('Discord admin operation webhook error:', err);
   }
 }

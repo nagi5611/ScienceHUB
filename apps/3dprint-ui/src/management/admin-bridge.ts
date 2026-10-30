@@ -13,6 +13,7 @@ export type DesignMember = {
   num: number;
   discord: string;
   color: string;
+  userId: string | null;
 };
 
 export function toDesignMembers(rows: AdminMemberRow[]): DesignMember[] {
@@ -23,6 +24,7 @@ export function toDesignMembers(rows: AdminMemberRow[]): DesignMember[] {
     num: m.student_number ?? 0,
     discord: m.discord_user_id ?? '',
     color: MEMBER_COLORS[(m.color_index ?? 0) % MEMBER_COLORS.length],
+    userId: m.user_id ?? null,
   }));
 }
 
@@ -126,9 +128,23 @@ export function shiftMapForCalendar(
   return buildShiftDisplayMap(members, availability, from, 140);
 }
 
-export function resolveActorMemberId(members: AdminMember[], actorName: string): string | null {
-  const m = members.find((x) => x.name === actorName);
-  return m?.id ?? members[0]?.id ?? null;
+/** Print staff member id for reservation accept (linked ScienceHUB account). */
+export function resolveOperatorStaffMemberId(
+  members: Pick<DesignMember, 'id'>[],
+  linkedMemberId: string | null
+): string | null {
+  if (!linkedMemberId) return null;
+  return members.some((m) => m.id === linkedMemberId) ? linkedMemberId : null;
+}
+
+export function formatOperatorDisplayLabel(session: {
+  user: { display_name: string };
+  linked_member: { name: string } | null;
+}): string {
+  if (session.linked_member) {
+    return `${session.user.display_name}（印刷担当: ${session.linked_member.name}）`;
+  }
+  return session.user.display_name;
 }
 
 export function defaultIntegrationsState(): IntegrationsState {

@@ -20,6 +20,7 @@ import {
   Header, Calendar, CalDay, dayHint, Drawer, Modal, Toast,
   DLIcon, downloadAppFile, downloadDay, saveText,
 } from './AdminDesignUi';;
+import { fetchManagementAccessUsers, type ManagementAccessUser } from '../admin-api';
 
 /* 月カレンダー（シフト塗り用）。
    - 日付をドラッグでなぞる：触れた日をまとめて追加／削除
@@ -194,17 +195,44 @@ function ShiftCalendar({ year, month, avail, memberId, onPaint, onChangeMonth })
 /* メンバー管理 */
 function MemberForm({ members, onAdd, onUpdate, onRemove }) {
   const [editing, setEditing] = React.useState(null);      // memberId | 'new'
-  const [form, setForm] = React.useState({ name: '', hr: '101', num: '', discord: '', color: MEMBER_COLORS[0] });
+  const [form, setForm] = React.useState({
+    name: '', hr: '101', num: '', discord: '', color: MEMBER_COLORS[0], hubUserId: null as string | null,
+  });
   const [error, setError] = React.useState('');
+  const [hubUsers, setHubUsers] = React.useState<ManagementAccessUser[]>([]);
+  const [hubLoading, setHubLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!editing || editing === 'new') return;
+    setHubLoading(true);
+    void fetchManagementAccessUsers()
+      .then(setHubUsers)
+      .catch(() => setHubUsers([]))
+      .finally(() => setHubLoading(false));
+  }, [editing]);
 
   const startEdit = m => {
     setEditing(m.id);
-    setForm({ name: m.name, hr: m.hr, num: String(m.num), discord: m.discord || '', color: m.color });
+    setForm({
+      name: m.name,
+      hr: m.hr,
+      num: String(m.num),
+      discord: m.discord || '',
+      color: m.color,
+      hubUserId: m.userId ?? null,
+    });
     setError('');
   };
   const startNew = () => {
     setEditing('new');
-    setForm({ name: '', hr: '101', num: '', discord: '', color: MEMBER_COLORS[members.length % MEMBER_COLORS.length] });
+    setForm({
+      name: '',
+      hr: '101',
+      num: '',
+      discord: '',
+      color: MEMBER_COLORS[members.length % MEMBER_COLORS.length],
+      hubUserId: null,
+    });
     setError('');
   };
 
@@ -226,6 +254,7 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
       num: Number(form.num),
       discord: form.discord.trim(),
       color: form.color,
+      hubUserId: form.hubUserId,
     };
     if (editing === 'new') onAdd(payload);
     else onUpdate(editing, payload);
@@ -250,6 +279,7 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
           <span>HR</span>
           <span>番号</span>
           <span>Discord ID</span>
+          <span>ScienceHUB</span>
           <span />
         </div>
         {members.map(m => (
@@ -259,6 +289,7 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
             <span className="num">{hrLabel(m.hr)}</span>
             <span className="num">{m.num}番</span>
             <span className="num mtd-discord">{m.discord || <em className="mtd-none">未設定</em>}</span>
+            <span className="mtd-hub">{m.userId ? '紐づけ済' : <em className="mtd-none">未紐づけ</em>}</span>
             <span className="mtd-acts">
               <button type="button" className="mini" onClick={() => startEdit(m)}>編集</button>
               <button type="button" className="mini no" disabled={members.length <= 1}
@@ -299,6 +330,43 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
                 onChange={e => setForm(f => ({ ...f, discord: e.target.value }))} placeholder="朝6時のメンション用" />
             </label>
           </div>
+          {editing !== 'new' && (
+            <div className="fl">
+              <span className="fl-l">ScienceHUB アカウント<span className="fl-opt">3D印刷管理にアクセス可能なユーザー</span></span>
+              {hubLoading ? (
+                <p className="fl-h">読み込み中…</p>
+              ) : (
+                <div className="hub-user-pick" role="radiogroup" aria-label="ScienceHUB アカウントの紐づけ">
+                  <button
+                    type="button"
+                    className={'hub-user-opt' + (form.hubUserId === null ? ' on' : '')}
+                    onClick={() => setForm(f => ({ ...f, hubUserId: null }))}
+                  >
+                    <b>紐づけなし</b>
+                    <span>この印刷担当者は ScienceHUB ログインと結びつきません</span>
+                  </button>
+                  {hubUsers.map(u => {
+                    const taken = u.linked_member_id && u.linked_member_id !== editing;
+                    return (
+                      <button
+                        type="button"
+                        key={u.id}
+                        disabled={Boolean(taken)}
+                        className={'hub-user-opt' + (form.hubUserId === u.id ? ' on' : '')}
+                        onClick={() => setForm(f => ({ ...f, hubUserId: u.id }))}
+                      >
+                        <b>{u.display_name}</b>
+                        <span>@{u.username} · {u.email}</span>
+                        <em>{u.access_labels.join(' / ')}</em>
+                        {taken ? <em>（別の印刷担当に紐づけ済: {u.linked_member_name}）</em> : null}
+                        {u.linked_member_id === editing ? <em>（この担当者に紐づけ中）</em> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div className="fl">
             <span className="fl-l">シフト表の色</span>
             <div className="color-pick">

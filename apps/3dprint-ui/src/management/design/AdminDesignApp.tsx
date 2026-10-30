@@ -33,7 +33,8 @@ import {
   availabilityRowsToMemberAvail,
   memberAvailToRows,
   mergeMonthMemberAvailability,
-  resolveActorMemberId,
+  resolveOperatorStaffMemberId,
+  formatOperatorDisplayLabel,
   toDesignMembers,
   colorIndexFromDesign,
   applicationsToCsv,
@@ -64,6 +65,9 @@ import {
   testAdminEmail,
   appendAdminLog,
   fetchAdminLog,
+  fetchManagementSession,
+  patchMemberUserLink,
+  type ManagementSession,
 } from '../admin-api';
 import { LOGO, Header, Toast, downloadAppFile, downloadDay } from './AdminDesignUi';
 import { ReserveScreen, AppSheet } from './ReserveScreen';
@@ -81,7 +85,7 @@ export function AdminDesignApp() {
   const [shiftApplying, setShiftApplying] = React.useState(false);
   const [screen, setScreen] = React.useState(() => prefs.screen || 'reserve');
   const [selected, setSelected] = React.useState(() => prefs.selected || TODAY);
-  const [actor, setActor] = React.useState(() => prefs.actor || '');
+  const [operatorSession, setOperatorSession] = React.useState<ManagementSession | null>(null);
   const [integrations, setIntegrations] = React.useState(() => loadIntegrations() ?? defaultIntegrationsState());
   const [log, setLog] = React.useState(() => loadLog());
   const [detail, setDetail] = React.useState<DesignApplication | null>(null);
@@ -119,7 +123,11 @@ export function AdminDesignApp() {
     setAvail(a);
     setSavedAvail(a);
     syncGlobals(designMembers, a);
-    if (!actor && designMembers[0]) setActor(designMembers[0].name);
+    try {
+      setOperatorSession(await fetchManagementSession());
+    } catch {
+      /* session optional until API ready */
+    }
     await reloadApps(selected);
     try {
       const status = await fetchIntegrationsStatus();
@@ -150,7 +158,7 @@ export function AdminDesignApp() {
     } catch {
       /* optional */
     }
-  }, [actor, reloadApps, selected, syncGlobals]);
+  }, [reloadApps, selected, syncGlobals]);
 
   React.useEffect(() => {
     void (async () => {
@@ -181,8 +189,8 @@ export function AdminDesignApp() {
   }, [loading, apps]);
 
   React.useEffect(() => {
-    savePrefs({ screen, selected, actor });
-  }, [screen, selected, actor]);
+    savePrefs({ screen, selected });
+  }, [screen, selected]);
   React.useEffect(() => {
     saveIntegrations(integrations);
   }, [integrations]);
@@ -190,9 +198,7 @@ export function AdminDesignApp() {
     saveLog(log);
   }, [log]);
 
-  React.useEffect(() => {
-    if (!members.find((m) => m.name === actor) && members[0]) setActor(members[0].name);
-  }, [members, actor]);
+  const operatorLabel = operatorSession ? formatOperatorDisplayLabel(operatorSession) : '—';
 
   const showToastRef = React.useRef<(text: string, mark?: string) => void>(() => {});
   const showToast = React.useCallback((text: string, mark?: string) => {
@@ -207,16 +213,16 @@ export function AdminDesignApp() {
         {
           id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
           at: new Date().toISOString(),
-          actor,
+          actor: operatorLabel,
           type,
           text,
           appId,
         },
         ...prev,
       ]);
-      void appendAdminLog({ actor, type, text, app_id: appId }).catch(() => {});
+      void appendAdminLog({ type, text, app_id: appId }).catch(() => {});
     },
-    [actor]
+    [operatorLabel]
   );
 
   const openDetail = (app: DesignApplication, mode?: string | null) => {
@@ -246,20 +252,24 @@ export function AdminDesignApp() {
       return;
     }
     if (!status) return;
-    const staffId = resolveActorMemberId(
-      members.map((m) => ({ id: m.id, name: m.name })),
-      actor
+    const staffId = resolveOperatorStaffMemberId(
+      members,
+      operatorSession?.linked_member?.id ?? null
     );
     try {
       if (status === 'approved' && app.status === 'pending') {
-        if (!staffId) throw new Error('操作者を選択してください');
+        if (!staffId) {
+          throw new Error(
+            '予約を受領するには、担当者タブで ScienceHUB アカウントと印刷担当者を紐づけてください'
+          );
+        }
         await acceptReservation(app.id, staffId);
       } else if (app.status === 'cancelled' && status === 'pending') {
         await restoreAdminReservation(app.id);
       } else {
         await patchReservation(app.id, { status: designStatusToDbStatus(status) });
       }
-      patchLocalApp(app.id, { status, ...(extra || {}), by: actor });
+      patchLocalApp(app.id, { status, ...(extra || {}), by: operatorLabel });
       const label = STATUS[status];
       pushLog(status === 'cancelled' ? 'cancel' : 'approve', `「${app.title}」を${label}（${dateLabelW(app.date)}・${KIND[app.kind]}）`, app.id);
       showToast(`${app.title} を${label}にしました`, label);
@@ -353,11 +363,20 @@ export function AdminDesignApp() {
     }
   };
 
-  const updateMember = async (id: string, data: { name: string; hr: string; num: number; discord: string; color: string }) => {
+  const updateMember = async (
+    id: string,
+    data: { name: string; hr: string; num: number; discord: string; color: string; hubUserId: string | null }
+  ) => {
     try {
       await patchMemberColor(id, colorIndexFromDesign(data.color));
       await patchMemberDiscord(id, data.discord.trim() || null);
+      await patchMemberUserLink(id, data.hubUserId);
       await refreshAll();
+      try {
+        setOperatorSession(await fetchManagementSession());
+      } catch {
+        /* ignore */
+      }
       const old = memberById(id);
       pushLog('member', `担当者「${old ? old.name : id}」を更新`, null);
       showToast(`${data.name} を更新しました`);
@@ -513,9 +532,7 @@ export function AdminDesignApp() {
       <Header
         screen={screen}
         setScreen={setScreen}
-        actor={actor}
-        setActor={setActor}
-        members={members}
+        operatorSession={operatorSession}
         pendingCount={pending.length}
         onCsv={csv}
       />
