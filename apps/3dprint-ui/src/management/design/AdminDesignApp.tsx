@@ -600,7 +600,7 @@ export function AdminDesignApp() {
             pendingPre={settingsPre}
           />
         ) : (
-          <AdminOpsScreen onBack={() => setScreen('reserve')} showToast={showToast} />
+          <AdminOpsScreen showToast={showToast} />
         )}
       </main>
 

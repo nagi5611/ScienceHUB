@@ -138,7 +138,7 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
           <span className={'wd' + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : '')}>{WD[wd]}</span>
           {isToday && <span className="badge">今日</span>}
           <span className="dp-spacer" />
-          {info.shift ? <Chip tone="orange">{info.staff}</Chip> : <Chip tone="gray">休み</Chip>}
+          {info.shift ? <Chip tone="orange">担当あり</Chip> : <Chip tone="gray">担当なし</Chip>}
           <Chip>空き <span className="num">{info.shift ? totalFree : 0}/{totalSlots}</span></Chip>
           {isToday && <Chip tone="blue">当日は予約のみ</Chip>}
         </div>

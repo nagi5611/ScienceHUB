@@ -18,7 +18,8 @@ function DayCell({ date, dateStr, info, selected, today, dim, onPick }) {
   if (wd === 6) cls.push('sat');
   if (today) cls.push('today');
   if (selected) cls.push('sel');
-  if (!info.shift) cls.push('closed');
+  if (info.shift) cls.push('staff-on');
+  else cls.push('closed');
   if (dim) cls.push('dim');
 
   const evs = [...info.list].sort((a, b) => spanOf(a).start - spanOf(b).start);
@@ -28,13 +29,10 @@ function DayCell({ date, dateStr, info, selected, today, dim, onPick }) {
   return (
     <button type="button" className={cls.join(' ')} onClick={() => onPick(dateStr)}
       aria-pressed={selected}
-      aria-label={`${date.getMonth() + 1}月${date.getDate()}日 ${info.shift ? '担当 ' + info.staff : '休み'} 申請${evs.length}件`}>
+      aria-label={`${date.getMonth() + 1}月${date.getDate()}日 ${info.shift ? '担当あり' : '担当なし'} 申請${evs.length}件`}>
       <span className="d-top">
         <span className="d num">{date.getDate()}</span>
         <span className="d-sub num">{date.getMonth() + 1}月</span>
-        {info.shift
-          ? <span className="stf">{info.staff}</span>
-          : <span className="stf closed">休み</span>}
       </span>
       <span className="evs" aria-hidden="true">
         {shown.map(a => (
@@ -51,7 +49,7 @@ function DayCell({ date, dateStr, info, selected, today, dim, onPick }) {
   );
 }
 
-function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr }) {
+function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDates }) {
   /* 選択日を含む週（日曜始まり）を第1週として4週分 */
   const firstWeek = weekStart(parseYmd(selected));
   const weeks = [];
@@ -85,7 +83,6 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr }) {
         <div>
           <div className="cal-month">
             <span>{monthLabel}</span>
-            <small>4週表示</small>
           </div>
           <div className="cal-sub num">
             期間 {mdLabel(flat[0])}〜{mdLabel(lastDay)} ／ 稼働 {shiftDays}日 ／ 申請 {rangeApps.length}件（申請中 {pending}）
@@ -114,9 +111,9 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr }) {
               row.map(d => {
                 const ds = ymd(d);
                 return (
-                  <DayCell key={ds} date={d} dateStr={ds} info={computeDay(apps, ds)}
-                    selected={ds === selected} today={ds === todayStr}
-                    dim={d.getMonth() !== anchorMonth} onPick={onPick} />
+              <DayCell key={ds} date={d} dateStr={ds} info={computeDay(apps, ds, staffDates)}
+                selected={ds === selected} today={ds === todayStr}
+                dim={d.getMonth() !== anchorMonth} onPick={onPick} />
                 );
               })
             )}
@@ -130,11 +127,9 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr }) {
       </div>
 
       <div className="cal-foot">
-        <div className="lg"><i className="ke" /><span>Ender-3 V3 KE</span></div>
-        <div className="lg"><i className="cc" /><span>Centauri Carbon</span></div>
-        <div className="lg"><span className="stf-sample">金田</span><span>担当者のシフトあり</span></div>
-        <div className="lg"><span className="stf-sample closed">休み</span><span>土日は受付なし</span></div>
-        <div className="lg"><span className="stf-sample due">前日</span><span>印刷依頼の締切（当日の依頼は不可）</span></div>
+        <div className="lg"><span className="stf-sample staff-dot">●</span><span>担当あり（明るいマス）</span></div>
+        <div className="lg"><span className="stf-sample closed staff-dot">●</span><span>担当なし（暗いマス）</span></div>
+        <div className="lg"><span className="stf-sample due">前日</span><span className="lg-txt">印刷依頼の締切（当日不可）</span></div>
       </div>
     </div>
   );

@@ -111,7 +111,7 @@ function App() {
       <div className="main-content">
         <div className="page-head">
           <div style={{ minWidth: 0 }}>
-            <span className="badge">校内設備の予約 / 自然科学部 3Dモデル班</span>
+            <span className="badge">自然科学部 3Dモデル班</span>
             <h1 className="page-heading">3Dプリントの依頼・予約</h1>
             <div className="page-sub">
               4週表示のカレンダーから日付を選び、6:00〜20:00 のタイムラインで空いている時間を指定すると申請ポップが開きます。

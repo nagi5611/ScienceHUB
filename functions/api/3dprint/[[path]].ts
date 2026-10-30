@@ -66,6 +66,7 @@ import {
 import {
   build3dPrintAdminUrl,
   notifyReservationApplication,
+  notifyReservationBooked,
   notifyReservationModified,
   notifyPrintAdminOperation,
   sendDiscordStaffMentionTest,
@@ -445,6 +446,45 @@ async function notifyNewApplicationDiscordAndEmail(
     applicantLabel,
   });
   await sendApplicantAppliedEmail(env, db, request, applicantUserId, reservation);
+}
+
+/** Auto-confirmed time-slot「予約のみ」: applicant email + Discord「予約されました」. */
+async function notifyAutoConfirmedTimeSlotReserve(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  reservation: Reservation,
+  applicantUserId: string,
+  printStaffLabel: string
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  const printer = reservation.printer_id ? printerMap.get(reservation.printer_id) : undefined;
+  const applicationFormText = await buildPrintApplicationFormText(db, reservation, printer);
+  const adminDeepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
+    date: reservation.desired_date,
+    appId: reservation.id,
+  });
+  const applicant = await getSessionUserById(env, db, applicantUserId);
+  const applicantLabel = applicant
+    ? `${applicant.display_name} (@${applicant.username})`
+    : null;
+  await notifyReservationBooked(env.DISCORD_WEBHOOK_URL, {
+    title: reservation.title,
+    desired_date: reservation.desired_date,
+    print_scale: reservation.print_scale,
+    applicationFormText,
+    adminDeepLink,
+    applicantLabel,
+  });
+  await sendApplicantAcceptedEmail(
+    env,
+    db,
+    request,
+    applicantUserId,
+    reservation,
+    printStaffLabel,
+    null
+  );
 }
 
 async function requireAdminActor(
@@ -1016,6 +1056,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         }
       }
 
+      const autoConfirmReserve =
+        timeSlotMode && body.booking_kind === "reserve";
+      let autoStaffMemberId: string | null = null;
+      if (autoConfirmReserve) {
+        const staffIds = await getAvailableMemberIdsOnDate(db, body.desired_date);
+        autoStaffMemberId = staffIds[0] ?? null;
+      }
+      const initialStatus =
+        autoConfirmReserve && autoStaffMemberId ? "accepted" : "applied";
+
       const reservation: Reservation = {
         id: reservationId,
         grade: gradeFromHomeroom(profile.homeroom),
@@ -1035,10 +1085,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         stl_r2_key: body.stl_r2_key,
         stl_filename: body.stl_filename,
         stl_size_bytes: Number(body.stl_size_bytes),
-        status: "applied",
+        status: initialStatus,
         status_comment: null,
         print_staff: null,
-        print_staff_member_id: null,
+        print_staff_member_id: autoStaffMemberId,
         delivery_staff: null,
         google_event_id: null,
         request_print_video: videoResolved.value ? 1 : 0,
@@ -1056,6 +1106,39 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       await createReservation(db, reservation);
 
+      if (initialStatus === "accepted" && autoStaffMemberId) {
+        const member = await getMemberById(db, autoStaffMemberId);
+        const memberMap = await buildMemberMap(db);
+        let saved = await getReservationById(db, reservationId);
+        if (saved) {
+          const calendarResult = await createCalendarEventForReservation(env, saved, memberMap);
+          if (calendarResult.ok && calendarResult.eventId) {
+            await setGoogleEventId(db, reservationId, calendarResult.eventId);
+            saved = await getReservationById(db, reservationId);
+          }
+        }
+        const staffLabel = member ? formatMemberLabel(member) : "担当者";
+        context.waitUntil(
+          notifyAutoConfirmedTimeSlotReserve(
+            env,
+            db,
+            context.request,
+            saved ?? reservation,
+            userId,
+            staffLabel
+          ).catch((err) => console.error("auto-confirm notify failed", err))
+        );
+        return json(
+          {
+            id: reservation.id,
+            message: "予約が確定しました",
+            auto_confirmed: true,
+            booking_kind: body.booking_kind,
+          },
+          201
+        );
+      }
+
       context.waitUntil(
         notifyNewApplicationDiscordAndEmail(
           env,
@@ -1066,7 +1149,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         )
       );
 
-      return json({ id: reservation.id, message: "予約申請を受け付けました" }, 201);
+      const pendingMessage =
+        timeSlotMode && body.booking_kind === "request"
+          ? "印刷依頼を受け付けました（担当者の受領待ち）"
+          : "予約申請を受け付けました";
+      return json(
+        {
+          id: reservation.id,
+          message: pendingMessage,
+          auto_confirmed: false,
+          booking_kind: body.booking_kind ?? null,
+        },
+        201
+      );
     }
 
     const RECENT_PAST_DAYS = 7;

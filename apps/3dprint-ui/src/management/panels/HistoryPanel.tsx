@@ -1,5 +1,6 @@
 import React from 'react';
 import type { AdminReservation } from '../admin-api';
+import { downloadPrintHistoryCsv } from './history-csv';
 
 const STATUS: Record<string, string> = {
   applied: '申請中',
@@ -30,6 +31,19 @@ export function HistoryPanel({
 
   return (
     <div className="card legacy-panel">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 0 10px', flexWrap: 'wrap' }}>
+        <p className="hint" style={{ margin: 0 }}>
+          全 {sorted.length} 件
+        </p>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={!sorted.length}
+          onClick={() => downloadPrintHistoryCsv(sorted)}
+        >
+          CSVエクスポート
+        </button>
+      </div>
       <div className="table-wrap admin-table-wrap">
         <table>
           <thead>

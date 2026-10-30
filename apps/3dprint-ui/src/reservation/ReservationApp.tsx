@@ -227,7 +227,7 @@ export function ReservationApp() {
     try {
       saveProfile(payload.who);
       const uploaded = await uploadPrintFile(payload.fileRaw);
-      await createTimeSlotReservation({
+      const created = await createTimeSlotReservation({
         title: payload.title,
         printer_id: printerId,
         desired_date: payload.date,
@@ -242,10 +242,13 @@ export function ReservationApp() {
       setForm({ open: false, draft: null });
       setSelection(null);
       await reloadApps();
-      showToast(
-        payload.kind === 'request' ? '依頼を受け付けました（申請中）' : '予約を申請しました（申請中）',
-        payload.title
-      );
+      const toastMsg =
+        created.auto_confirmed && payload.kind === 'reserve'
+          ? '予約が確定しました'
+          : payload.kind === 'request'
+            ? '依頼を受け付けました（担当者の受領待ち）'
+            : '予約を申請しました（申請中）';
+      showToast(toastMsg, payload.title);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '申請に失敗しました', 'エラー');
     }
@@ -286,7 +289,7 @@ export function ReservationApp() {
         {loading && <p data-testid="reservation-loading">読み込み中…</p>}
         <div className="page-head">
           <div style={{ minWidth: 0 }}>
-            <span className="badge">校内設備の予約 / 自然科学部 3Dモデル班</span>
+            <span className="badge">自然科学部 3Dモデル班</span>
             <h1 className="page-heading">3Dプリントの依頼・予約</h1>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -297,7 +300,7 @@ export function ReservationApp() {
         </div>
         <div className="workspace">
           <div className="cal-col">
-            <Calendar selected={selected} onPick={pickDate} apps={apps} todayStr={todayStr} />
+            <Calendar selected={selected} onPick={pickDate} apps={apps} todayStr={todayStr} staffDates={staffDates} />
             <ApplicationPopover
               open={form.open}
               draft={form.draft}

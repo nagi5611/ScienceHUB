@@ -260,6 +260,48 @@ export type DiscordApplicationNotice = {
   applicantLabel?: string | null;
 };
 
+/** Discord notice when a time-slot「予約のみ」is auto-confirmed (空き枠). */
+export async function notifyReservationBooked(
+  webhookUrl: string | undefined,
+  notice: DiscordApplicationNotice
+): Promise<void> {
+  if (!webhookUrl) return;
+
+  const scaleLabel = SCALE_LABELS[notice.print_scale] ?? notice.print_scale;
+  const applicantLine = notice.applicantLabel?.trim()
+    ? `\n\n**予約者（ScienceHUB）:** ${notice.applicantLabel.trim()}`
+    : '';
+
+  const payload = {
+    content: `予約されました（空き枠の自動確定）。\n${notice.adminDeepLink}${applicantLine}`,
+    embeds: [
+      {
+        title: '3D印刷 予約確定',
+        color: 0x22c55e,
+        fields: [
+          { name: 'タイトル', value: notice.title, inline: true },
+          { name: '希望印刷日', value: notice.desired_date, inline: true },
+          { name: '印刷規模', value: scaleLabel, inline: true },
+        ],
+        footer: { text: '時間枠の予約のみ自動確定。依頼（STL）は従来どおり担当者が受領します' },
+      },
+    ],
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('Discord booked webhook failed:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('Discord booked webhook error:', err);
+  }
+}
+
 /** Sends a Discord webhook notification for a new reservation application. */
 export async function notifyReservationApplication(
   webhookUrl: string | undefined,
