@@ -47,6 +47,7 @@ function SettingsScreen({
   pendingPre,
 }) {
   const [tab, setTab] = React.useState(pendingPre || 'shift');
+  const [memberFocus, setMemberFocus] = React.useState(null);
   const [memberId, setMemberId] = React.useState(members[0] ? members[0].id : null);
   const [month, setMonth] = React.useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
 
@@ -160,11 +161,29 @@ function SettingsScreen({
                 onPaint={(dates, on) => onPaintAvail(memberId, dates, on)} onChangeMonth={changeMonth} />
             </div>
           </div>
+
+          <MemberForm
+            members={members}
+            onAdd={onAddMember}
+            onUpdate={onUpdateMember}
+            onRemove={onRemoveMember}
+            sectionHint="シフト担当者の編集と ScienceHUB アカウント紐づけ"
+            focusRequest={memberFocus}
+            onFocusHandled={() => setMemberFocus(null)}
+          />
         </div>
       )}
 
       {tab === 'member' && (
-        <MemberForm members={members} onAdd={onAddMember} onUpdate={onUpdateMember} onRemove={onRemoveMember} />
+        <MemberForm
+          members={members}
+          onAdd={onAddMember}
+          onUpdate={onUpdateMember}
+          onRemove={onRemoveMember}
+          sectionHint="印刷担当者の登録・編集・ScienceHUB 紐づけ"
+          focusRequest={memberFocus}
+          onFocusHandled={() => setMemberFocus(null)}
+        />
       )}
 
       {tab === 'integ' && (

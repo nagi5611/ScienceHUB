@@ -545,19 +545,21 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 
 /* メンバー */
 .mform{display:grid;gap:12px}
+.shifttab .mform{margin-top:14px}
 .mform-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .mform-h b{font-size:13px;font-weight:700;color:var(--color-heading)}
 .mform-h .num{font-size:10.5px;color:var(--color-text-faint)}
 .mform-h .btn{margin-left:auto}
 .mtable{border:1px solid var(--color-border);border-radius:var(--radius-md);overflow:hidden}
-.mtr{display:grid;grid-template-columns:30px minmax(90px,1.3fr) 88px 60px minmax(120px,1.5fr) auto;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--color-track);font-size:11.5px}
+.mtr{display:grid;grid-template-columns:30px minmax(84px,1.1fr) 72px 48px minmax(96px,1fr) minmax(88px,1fr) minmax(108px,auto);gap:6px 8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--color-track);font-size:11.5px}
 .mtr:last-child{border-bottom:0}
 .mtr-h{background:var(--color-surface-muted);font-size:9.5px;font-weight:700;color:var(--color-text-faint);letter-spacing:.05em;padding:6px 12px}
 .mtd-av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700}
 .mtd-name{font-weight:700;color:var(--color-heading)}
 .mtd-discord{font-size:10.5px;color:var(--color-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mtd-none{font-style:normal;color:var(--color-text-faint);font-family:var(--font);font-size:10px}
-.mtd-acts{display:flex;gap:4px;justify-self:end}
+.mtd-hub{font-size:10.5px;color:var(--color-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtd-acts{display:flex;gap:4px;justify-self:end;flex-wrap:wrap}
 .medit{border:1.5px solid var(--color-primary);border-radius:var(--radius-md);padding:12px;display:grid;gap:10px;background:var(--color-primary-soft)}
 .medit-h{display:flex;align-items:center;gap:8px}
 .medit-h b{font-size:12.5px;font-weight:700;color:var(--color-heading)}
@@ -644,12 +646,13 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
   .sheet.on{transform:none}
   .sheet-f .btn{flex:1}
   .slotgrid{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .mtr{grid-template-columns:26px minmax(70px,1fr) auto;grid-template-areas:'av name acts' '. hr disc';row-gap:2px;padding:8px 10px}
+  .mtr{grid-template-columns:26px minmax(70px,1fr) auto;grid-template-areas:'av name acts' 'hub hub acts' 'hr disc acts';row-gap:4px;padding:8px 10px}
   .mtr-h{display:none}
   .mtd-av{grid-area:av}
   .mtd-name{grid-area:name}
   .mtd-discord{grid-area:disc;font-size:9.5px}
-  .mtd-acts{grid-area:acts}
+  .mtd-hub{grid-area:hub;font-size:10px}
+  .mtd-acts{grid-area:acts;align-self:start}
   .mtr > span:nth-child(3){grid-area:hr;font-size:10px;color:var(--color-text-faint)}
   .mtr > span:nth-child(4){display:none}
   .medit-grid{grid-template-columns:1fr 1fr}

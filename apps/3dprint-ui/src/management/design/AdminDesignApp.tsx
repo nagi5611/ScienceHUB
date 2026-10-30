@@ -377,14 +377,25 @@ export function AdminDesignApp() {
     }
   };
 
-  const addMember = async (data: { name: string; hr: string; num: number; discord: string; color: string }) => {
+  const addMember = async (data: {
+    name: string;
+    hr: string;
+    num: number;
+    discord: string;
+    color: string;
+    hubUserId?: string | null;
+  }) => {
     try {
-      await createMember({
+      const created = await createMember({
         name: data.name,
         homeroom: data.hr,
         student_number: data.num,
         discord_user_id: data.discord || null,
       });
+      if (data.hubUserId) {
+        await patchMemberUserLink(created.member.id, data.hubUserId);
+      }
+      await patchMemberColor(created.member.id, colorIndexFromDesign(data.color));
       await refreshAll();
       pushLog('member', `担当者「${data.name}」を追加`, null);
       showToast(`${data.name} を追加しました`);

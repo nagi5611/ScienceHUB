@@ -201,26 +201,65 @@ function ShiftCalendar({ year, month, avail, memberId, onPaint, onChangeMonth })
 }
 
 /* メンバー管理 */
-function MemberForm({ members, onAdd, onUpdate, onRemove }) {
+function MemberForm({
+  members,
+  onAdd,
+  onUpdate,
+  onRemove,
+  sectionHint,
+  focusRequest,
+  onFocusHandled,
+}: {
+  members: unknown[];
+  onAdd: (data: unknown) => void;
+  onUpdate: (id: string, data: unknown) => void;
+  onRemove: (id: string) => void;
+  sectionHint?: string;
+  focusRequest?: { memberId: string; hub?: boolean } | null;
+  onFocusHandled?: () => void;
+}) {
   const [editing, setEditing] = React.useState(null);      // memberId | 'new'
+  const [hubPanelOpen, setHubPanelOpen] = React.useState(false);
   const [form, setForm] = React.useState({
     name: '', hr: '101', num: '', discord: '', color: MEMBER_COLORS[0], hubUserId: null as string | null,
   });
   const [error, setError] = React.useState('');
   const [hubUsers, setHubUsers] = React.useState<ManagementAccessUser[]>([]);
   const [hubLoading, setHubLoading] = React.useState(false);
+  const hubSectionRef = React.useRef<HTMLDivElement | null>(null);
 
-  React.useEffect(() => {
-    if (!editing || editing === 'new') return;
+  const loadHubUsers = React.useCallback(() => {
     setHubLoading(true);
-    void fetchManagementAccessUsers()
+    return fetchManagementAccessUsers()
       .then(setHubUsers)
       .catch(() => setHubUsers([]))
       .finally(() => setHubLoading(false));
-  }, [editing]);
+  }, []);
+
+  React.useEffect(() => {
+    void loadHubUsers();
+  }, [loadHubUsers]);
+
+  React.useEffect(() => {
+    if (!editing || editing === 'new') return;
+    void loadHubUsers();
+  }, [editing, loadHubUsers]);
+
+  React.useEffect(() => {
+    if (hubPanelOpen && hubSectionRef.current) {
+      hubSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [hubPanelOpen, editing]);
+
+  const hubLabelFor = (userId: string | null | undefined) => {
+    if (!userId) return null;
+    const u = hubUsers.find(h => h.id === userId);
+    return u ? `${u.display_name} (@${u.username})` : '紐づけ済';
+  };
 
   const startEdit = m => {
     setEditing(m.id);
+    setHubPanelOpen(false);
     setForm({
       name: m.name,
       hr: m.hr,
@@ -231,7 +270,23 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
     });
     setError('');
   };
+
+  const startEditHub = m => {
+    startEdit(m);
+    setHubPanelOpen(true);
+  };
+
+  React.useEffect(() => {
+    if (!focusRequest?.memberId) return;
+    const m = members.find((x: { id: string }) => x.id === focusRequest.memberId);
+    if (!m) return;
+    if (focusRequest.hub) startEditHub(m);
+    else startEdit(m);
+    onFocusHandled?.();
+  }, [focusRequest, members, onFocusHandled]);
+
   const startNew = () => {
+    setHubPanelOpen(false);
     setEditing('new');
     setForm({
       name: '',
@@ -271,10 +326,11 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
   };
 
   return (
-    <div className="mform">
+    <div className="mform" data-testid="print-staff-directory">
       <div className="mform-h">
-        <b>印刷担当者</b>
+        <b>担当者一覧</b>
         <span className="num">{members.length}人</span>
+        {sectionHint ? <span className="fl-h">{sectionHint}</span> : null}
         {editing !== 'new' && (
           <button type="button" className="btn btn-primary btn-sm" onClick={startNew}>担当者を追加</button>
         )}
@@ -297,9 +353,14 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
             <span className="num">{hrLabel(m.hr)}</span>
             <span className="num">{m.num}番</span>
             <span className="num mtd-discord">{m.discord || <em className="mtd-none">未設定</em>}</span>
-            <span className="mtd-hub">{m.userId ? '紐づけ済' : <em className="mtd-none">未紐づけ</em>}</span>
+            <span className="mtd-hub">
+              {m.userId
+                ? (hubLabelFor(m.userId) ?? <em className="mtd-none">紐づけ済</em>)
+                : <em className="mtd-none">未紐づけ</em>}
+            </span>
             <span className="mtd-acts">
-              <button type="button" className="mini" onClick={() => startEdit(m)}>編集</button>
+              <button type="button" className="mini" data-testid={`staff-edit-${m.id}`} onClick={() => startEdit(m)}>編集</button>
+              <button type="button" className="mini" data-testid={`staff-link-${m.id}`} onClick={() => startEditHub(m)}>紐づけ</button>
               <button type="button" className="mini no" disabled={members.length <= 1}
                 onClick={() => { if (confirm(`${m.name} を削除します。この人のシフトも消えます。`)) onRemove(m.id); }}>
                 削除
@@ -338,8 +399,8 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
                 onChange={e => setForm(f => ({ ...f, discord: e.target.value }))} placeholder="朝6時のメンション用" />
             </label>
           </div>
-          {editing !== 'new' && (
-            <div className="fl">
+          {editing && (
+            <div className="fl" ref={hubSectionRef}>
               <span className="fl-l">ScienceHUB アカウント<span className="fl-opt">3D印刷管理にアクセス可能なユーザー</span></span>
               {hubLoading ? (
                 <p className="fl-h">読み込み中…</p>
