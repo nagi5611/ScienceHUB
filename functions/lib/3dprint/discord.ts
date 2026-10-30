@@ -282,6 +282,64 @@ export async function notifyReservationBooked(
   }
 }
 
+export type DiscordUserCancelNotice = {
+  adminDeepLink: string;
+  title: string;
+  desiredDate: string;
+  studentLabel: string;
+  kindLabel?: string | null;
+  printerName?: string | null;
+  applicantLabel?: string | null;
+};
+
+/** Discord notice when the applicant cancels their own reservation/application. */
+export async function notifyReservationCancelledByUser(
+  webhookUrl: string | undefined,
+  notice: DiscordUserCancelNotice
+): Promise<void> {
+  if (!webhookUrl) return;
+
+  const applicantLine = notice.applicantLabel?.trim()
+    ? `\n\n**申請者（ScienceHUB）:** ${notice.applicantLabel.trim()}`
+    : '';
+  const fields: { name: string; value: string; inline?: boolean }[] = [
+    { name: '作品名', value: notice.title.slice(0, 256), inline: false },
+    { name: '希望印刷日', value: notice.desiredDate, inline: true },
+    { name: '生徒', value: notice.studentLabel.slice(0, 256), inline: true },
+  ];
+  if (notice.kindLabel?.trim()) {
+    fields.push({ name: '種別', value: notice.kindLabel.trim(), inline: true });
+  }
+  if (notice.printerName?.trim()) {
+    fields.push({ name: 'プリンター', value: notice.printerName.trim(), inline: true });
+  }
+
+  const payload = {
+    content: `利用者が申請を取り消しました。\n${notice.adminDeepLink}${applicantLine}`,
+    embeds: [
+      {
+        title: '3D印刷 申請取り消し',
+        color: 0xef4444,
+        description: '予約サイトから利用者本人が取り消しました。',
+        fields,
+      },
+    ],
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('Discord user-cancel webhook failed:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('Discord user-cancel webhook error:', err);
+  }
+}
+
 /** Sends a Discord webhook notification for a new reservation application. */
 export async function notifyReservationApplication(
   webhookUrl: string | undefined,

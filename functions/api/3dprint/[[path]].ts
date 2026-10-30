@@ -68,6 +68,7 @@ import {
   notifyReservationBooked,
   notifyReservationModified,
   notifyReservationStaffAssigned,
+  notifyReservationCancelledByUser,
   notifyPrintAdminOperation,
   sendDiscordStaffMentionTest,
 } from "../../lib/3dprint/discord";
@@ -1501,7 +1502,33 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       try {
-        await softCancelReservation(env, db, segments[1], { byUser: true });
+        const updated = await softCancelReservation(env, db, segments[1], { byUser: true });
+        const printerMap = await buildPrinterMap(db);
+        const applicant = await getSessionUserById(env, db, userId);
+        const applicantLabel = applicant
+          ? `${applicant.display_name} (@${applicant.username})`
+          : null;
+        const kindLabel =
+          updated.booking_kind === "request"
+            ? "依頼"
+            : updated.booking_kind === "reserve"
+              ? "予約"
+              : null;
+        const studentLabel = `${updated.student_name}（${updated.homeroom}・${updated.student_number}番）`;
+        context.waitUntil(
+          notifyReservationCancelledByUser(env.DISCORD_WEBHOOK_URL, {
+            adminDeepLink: build3dPrintAdminDeepLink(getOAuthRedirectBase(context.request, env), {
+              date: updated.desired_date,
+              appId: updated.id,
+            }),
+            applicantLabel,
+            title: updated.title,
+            desiredDate: updated.desired_date,
+            studentLabel,
+            kindLabel,
+            printerName: resolvePrinterLabel(updated, printerMap),
+          }).catch((err) => console.error("user cancel discord notify failed", err))
+        );
         return json({ ok: true, message: "予約を取り消しました" });
       } catch (err) {
         return error(err instanceof Error ? err.message : "取り消しに失敗しました");
