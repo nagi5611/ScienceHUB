@@ -97,7 +97,7 @@ function FileDrop({ file, setFile, error }) {
     const f = list && list[0];
     if (!f) return;
     const ok = ACCEPT.some(ext => f.name.toLowerCase().endsWith(ext));
-    setFile({ name: f.name, size: f.size, ok, raw: f });
+    setFile({ name: f.name, size: f.size, ok });
   };
 
   return (
@@ -227,7 +227,6 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
       title: title.trim(),
       file: file.name,
       fileSize: file.size,
-      fileRaw: file.raw,
       note: note.trim(),
       who: { name: name.trim(), hr, num: String(num).trim() },
     });

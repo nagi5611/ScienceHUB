@@ -264,6 +264,7 @@ export function ReservationApp() {
             <h1 className="page-heading">3Dプリントの依頼・予約</h1>
             <div className="page-sub">
               4週表示のカレンダーから日付を選び、6:00〜20:00 のタイムラインで空いている時間を指定すると申請ポップが開きます。
+              予約は時間を指定して確保、依頼は時間指定なしで 16:30〜20:00 の枠を使います。どちらも担当者のいる日のみ。
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

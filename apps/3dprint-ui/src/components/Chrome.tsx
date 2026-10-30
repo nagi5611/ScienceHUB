@@ -9,7 +9,7 @@ import {
   SHIFT_SLOT_START, SHIFT_SLOT_END, SHIFT_SLOTS, DAY_START, DAY_END, SLOT_MIN,
 } from '@shared/domain';
 
-const LOGO = '/icons/apple-touch-icon.png';
+const LOGO = '/apps/3dprint-management/assets/icon-192.png';
 
 function SiteHeader({ mineCount, onOpenMine, onNew }) {
   return (

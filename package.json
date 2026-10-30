@@ -12,6 +12,7 @@
     "build:3dprint-ui": "npm run build:3dprint-ui:reservation && npm run build:3dprint-ui:management",
     "build:3dprint-ui:reservation": "VITE_3DPRINT_TARGET=reservation vite build --config apps/3dprint-ui/vite.config.ts",
     "build:3dprint-ui:management": "VITE_3DPRINT_TARGET=management vite build --config apps/3dprint-ui/vite.config.ts",
+    "import:3dprint-package": "node apps/3dprint-ui/scripts/import-3dprint-package.mjs",
     "dev:3dprint-ui": "vite --config apps/3dprint-ui/vite.config.ts",
     "test:3dprint-time-slots": "npx tsx --test functions/lib/3dprint/time-slots.test.ts",
     "test:3dprint-reservation": "playwright test -c playwright.3dprint-reservation.config.ts",

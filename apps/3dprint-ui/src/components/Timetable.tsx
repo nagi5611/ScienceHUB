@@ -8,7 +8,6 @@ import {
   STATUS, KIND, MACHINE_IDS, MACHINE_MAP, MACHINES, SLOT_COUNT, ROW_H, SHIFT_START, SHIFT_END,
   SHIFT_SLOT_START, SHIFT_SLOT_END, SHIFT_SLOTS, DAY_START, DAY_END, SLOT_MIN,
 } from '@shared/domain';
-import { Chip, Notice, StatusTag, MachineDot } from './Chrome';
 
 function SlotCell({ i, sel, first, last }) {
   const shift = inShiftSlot(i);
