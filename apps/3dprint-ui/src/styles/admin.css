@@ -760,7 +760,8 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 .printer-admin-body{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
 .printer-admin-title{margin:0;font-size:14px;font-weight:700;color:var(--color-heading)}
 .printer-admin-cap-summary{margin:0;font-size:11px;line-height:1.45}
-.printer-admin-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.printer-admin-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;align-items:center}
+.printer-availability-select{min-width:5.5rem;max-width:100%;padding:4px 8px;font-size:12px;line-height:1.35;min-height:30px}
 .printer-admin-card-editing{grid-column:1/-1;flex-wrap:wrap;border-color:var(--color-primary-line);background:var(--color-surface-muted);box-shadow:var(--shadow-sm)}
 .printer-admin-inline-form{display:grid;gap:14px;width:100%;margin-top:8px;padding-top:12px;border-top:1px solid var(--color-border)}
 .printer-admin-inline-form .form-group{margin:0}

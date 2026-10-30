@@ -14,6 +14,35 @@ import {
 } from '../admin-api';
 
 type Printer = Awaited<ReturnType<typeof fetchAdminPrinters>>['printers'][number];
+type PrinterAvailability = 'available' | 'unavailable';
+
+/** Maps API `status` to the 2-option admin select (maintenance → 不可). */
+function printerAvailabilityValue(status?: string | null): PrinterAvailability {
+  return status === 'available' ? 'available' : 'unavailable';
+}
+
+function PrinterAvailabilitySelect({
+  printerId,
+  value,
+  onChange,
+}: {
+  printerId: string;
+  value: PrinterAvailability;
+  onChange: (status: PrinterAvailability) => void;
+}) {
+  return (
+    <select
+      id={`printer-availability-${printerId}`}
+      className="input printer-availability-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value as PrinterAvailability)}
+      aria-label="利用可否"
+    >
+      <option value="available">利用可</option>
+      <option value="unavailable">不可</option>
+    </select>
+  );
+}
 
 function PrinterInlineEditForm({
   draft,
@@ -28,6 +57,14 @@ function PrinterInlineEditForm({
 }) {
   return (
     <div className="printer-admin-inline-form">
+      <label className="form-group" htmlFor={`printer-availability-edit-${draft.id}`}>
+        <span className="printer-add-label">利用可否</span>
+        <PrinterAvailabilitySelect
+          printerId={`edit-${draft.id}`}
+          value={printerAvailabilityValue(draft.status)}
+          onChange={(status) => setDraft((d) => (d ? { ...d, status } : d))}
+        />
+      </label>
       <label className="form-group">
         <span className="printer-add-label">名前</span>
         <input
@@ -187,6 +224,7 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
     try {
       await patchPrinter(editDraft.id, {
         name: editDraft.name.trim(),
+        status: printerAvailabilityValue(editDraft.status),
         capabilities: {
           can_record_print_video: !!editDraft.capabilities?.can_record_print_video,
           nozzle_sizes_mm: nozzles,
@@ -215,6 +253,23 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
     }
     const data = await listStorageFolders(path);
     setFolders(data.items.map((i) => ({ path: i.path, name: i.name })));
+  };
+
+  const setPrinterAvailability = async (printerId: string, status: PrinterAvailability) => {
+    try {
+      await patchPrinter(printerId, { status });
+      setPrinters((prev) =>
+        prev.map((row) => (row.id === printerId ? { ...row, status } : row))
+      );
+      if (editDraft?.id === printerId) {
+        setEditDraft((d) => (d ? { ...d, status } : d));
+      }
+      onReload?.();
+      onToast(status === 'available' ? '利用可にしました' : '不可にしました');
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : '利用可否の更新に失敗');
+      await load();
+    }
   };
 
   return (
@@ -281,6 +336,11 @@ export function PrintersPanel({ onToast, onReload }: { onToast: (m: string) => v
                         <p className="hint printer-admin-desc">{p.description}</p>
                       ) : null}
                       <div className="printer-admin-actions">
+                        <PrinterAvailabilitySelect
+                          printerId={p.id}
+                          value={printerAvailabilityValue(p.status)}
+                          onChange={(status) => void setPrinterAvailability(p.id, status)}
+                        />
                         <button type="button" className="btn btn-primary btn-sm" onClick={() => openEdit(p)}>
                           編集
                         </button>
