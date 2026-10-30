@@ -179,6 +179,10 @@ function Header({ screen, setScreen, actor, setActor, members, pendingCount, onC
             className={screen === 'settings' ? 'on' : ''} onClick={() => setScreen('settings')}>
             シフト・設定
           </button>
+          <button type="button" aria-current={screen === 'ops' ? 'page' : undefined}
+            className={screen === 'ops' ? 'on' : ''} onClick={() => setScreen('ops')}>
+            運用
+          </button>
         </nav>
 
         <div className="hdr-right">

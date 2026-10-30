@@ -323,13 +323,15 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
 }
 
 /* 外部連携 */
-function Integrations({ value, onChange, onTestDiscord, onTestGcal }) {
+function Integrations({ value, onChange, onTestDiscord, onTestGcal, onTestEmail }) {
   const d = value.discord || {};
   const g = value.gcal || {};
   const setD = patch => onChange({ ...value, discord: { ...d, ...patch } });
   const setG = patch => onChange({ ...value, gcal: { ...g, ...patch } });
-  const webhookOk = /^https:\/\/discord(app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(d.webhook || '');
-  const calOk = /^[\w.+-]+@[\w-]+\.(calendar\.google\.com|group\.calendar\.google\.com)$/.test(g.calendarId || '');
+  const serverWebhook = (d.webhook || '').includes('サーバー設定');
+  const webhookOk = serverWebhook || /^https:\/\/discord(app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(d.webhook || '');
+  const serverGcal = (g.calendarId || '').includes('サーバー設定');
+  const calOk = serverGcal || /^[\w.+-]+@[\w-]+\.(calendar\.google\.com|group\.calendar\.google\.com)$/.test(g.calendarId || '');
 
   return (
     <div className="integ">
@@ -432,6 +434,20 @@ function Integrations({ value, onChange, onTestDiscord, onTestGcal }) {
           <span className="fl-h">保存は自動です。</span>
         </div>
       </section>
+
+      {onTestEmail && (
+        <section className="intg">
+          <div className="intg-h">
+            <b>予約者向けメール</b>
+          </div>
+          <p className="fl-h">Cloudflare Email Service（サーバー環境変数）で申請・受領通知を送信します。</p>
+          <div className="intg-f">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onTestEmail}>
+              テスト送信
+            </button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

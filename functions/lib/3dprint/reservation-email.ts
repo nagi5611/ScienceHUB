@@ -12,7 +12,7 @@ const SCALE_LABELS: Record<PrintScale, string> = {
 
 const DEFAULT_FROM_NAME = "ScienceHUB 3D印刷";
 
-export type PrintReservationEmailKind = "applied" | "accepted";
+export type PrintReservationEmailKind = "applied" | "accepted" | "cancelled";
 
 interface ApplicantEmailPayload {
   kind: PrintReservationEmailKind;
@@ -22,6 +22,7 @@ interface ApplicantEmailPayload {
   >;
   printerName?: string | null;
   printStaffLabel?: string | null;
+  statusComment?: string | null;
   reservationAppUrl: string;
 }
 
@@ -63,6 +64,27 @@ function buildApplicantMessage(payload: ApplicantEmailPayload): {
 印刷規模: ${scale}
 ${printerLine}予約ID: ${payload.reservation.id}
 `;
+
+  if (payload.kind === "cancelled") {
+    const subject = "【ScienceHUB】3D印刷の予約が取り消されました";
+    const comment = payload.statusComment?.trim();
+    const text = `${subject}
+
+担当者により予約が取り消されました。
+
+${common}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}
+予約の確認: ${payload.reservationAppUrl}
+
+※このメールに心当たりがない場合は破棄してください。`;
+    const html = `<p>担当者により予約が<strong>取り消され</strong>ました。</p>
+<ul>
+<li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
+<li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
+</ul>
+${comment ? `<p>${escapeHtml(comment)}</p>` : ""}
+<p><a href="${escapeHtml(payload.reservationAppUrl)}">予約アプリで確認</a></p>`;
+    return { subject, html, text };
+  }
 
   if (payload.kind === "applied") {
     const subject = "【ScienceHUB】3D印刷の予約申請を受け付けました";

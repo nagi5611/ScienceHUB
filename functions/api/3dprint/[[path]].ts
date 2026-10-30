@@ -75,8 +75,12 @@ import { getOAuthRedirectBase } from "../../lib/oauth";
 import {
   createCalendarEventForReservation,
   deleteCalendarEvent,
+  isGoogleCalendarConfigured,
   testGoogleCalendarConnection,
 } from "../../lib/3dprint/google-calendar";
+import { insertAdminLog, listAdminLog } from "../../lib/3dprint/admin-log";
+import { splitApplicationSlots } from "../../lib/3dprint/split-application-slots";
+import { isEmailSendingConfigured } from "../../lib/email/cloudflare-email";
 import {
   createAdminForcePrintReservation,
   type AdminForceReservationInput,
@@ -1688,6 +1692,26 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           updated = await getReservationById(db, segments[2]);
         }
       }
+      if (
+        updated &&
+        body.status === "cancelled" &&
+        existing.status !== "cancelled" &&
+        updated.user_id
+      ) {
+        const printerMapForMail = await buildPrinterMap(db);
+        void notifyApplicantPrintReservationEmail(env, db, updated.user_id, {
+          kind: "cancelled",
+          reservation: {
+            id: updated.id,
+            title: updated.title,
+            desired_date: updated.desired_date,
+            print_scale: updated.print_scale,
+          },
+          printerName: resolvePrinterLabel(updated, printerMapForMail),
+          statusComment: updated.status_comment,
+          reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+        }).catch((err) => console.error("cancel email failed", err));
+      }
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
       return json({
@@ -1717,13 +1741,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[3] === "reschedule" &&
       segments.length === 4
     ) {
-      const body = await request.json<{ desired_date: string }>();
+      const body = await request.json<{ desired_date: string; force?: boolean }>();
       if (!body.desired_date || !/^\d{4}-\d{2}-\d{2}$/.test(body.desired_date)) {
         return error("desired_date が不正です");
       }
 
       try {
-        const updated = await adminRescheduleReservation(env, segments[2], body.desired_date);
+        const updated = await adminRescheduleReservation(env, segments[2], body.desired_date, {
+          force: Boolean(body.force),
+        });
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
         return json({ reservation: enrichReservationForAdmin(updated, memberMap, printerMap) });
@@ -1809,6 +1835,91 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === "GET" && segments[1] === "calendar" && segments[2] === "status") {
       const status = await testGoogleCalendarConnection(env);
       return json(status);
+    }
+
+    // GET /api/3dprint/admin/integrations/status
+    if (method === "GET" && segments[1] === "integrations" && segments[2] === "status") {
+      const gcalStatus = isGoogleCalendarConfigured(env)
+        ? await testGoogleCalendarConnection(env)
+        : { ok: false, error: "未設定" };
+      return json({
+        discord: { configured: Boolean(env.DISCORD_WEBHOOK_URL?.trim()) },
+        gcal: {
+          configured: isGoogleCalendarConfigured(env),
+          ok: gcalStatus.ok,
+          error: gcalStatus.error,
+        },
+        email: {
+          configured: isEmailSendingConfigured(env, env.PRINT_3D_EMAIL_FROM?.trim()),
+        },
+      });
+    }
+
+    // POST /api/3dprint/admin/integrations/discord/test
+    if (method === "POST" && segments[1] === "integrations" && segments[2] === "discord" && segments[3] === "test") {
+      const url = env.DISCORD_WEBHOOK_URL?.trim();
+      if (!url) return error("Discord Webhook がサーバーに設定されていません", 503);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: "ScienceHUB 3Dプリント管理のテスト通知です。",
+          username: "ScienceHUB 3Dプリント",
+        }),
+      });
+      if (!res.ok) return error(`Discord 送信に失敗しました（HTTP ${res.status}）`, 502);
+      return json({ ok: true });
+    }
+
+    // GET /api/3dprint/admin/log
+    if (method === "GET" && segments[1] === "log" && segments.length === 2) {
+      const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
+      const log = await listAdminLog(db, limit);
+      return json({ log });
+    }
+
+    // POST /api/3dprint/admin/log
+    if (method === "POST" && segments[1] === "log" && segments.length === 2) {
+      const body = await request.json<{ actor: string; type: string; text: string; app_id?: string | null }>();
+      if (!body.actor?.trim() || !body.type?.trim() || !body.text?.trim()) {
+        return error("actor, type, text が必要です");
+      }
+      const row = await insertAdminLog(db, {
+        actor: body.actor.trim(),
+        type: body.type.trim(),
+        text: body.text.trim(),
+        app_id: body.app_id ?? null,
+      });
+      return json({ ok: true, entry: row });
+    }
+
+    // POST /api/3dprint/admin/applications/:id/split-slots
+    if (
+      method === "POST" &&
+      segments[1] === "applications" &&
+      segments[3] === "split-slots" &&
+      segments.length === 4
+    ) {
+      const body = await request.json<{
+        slot_indexes: number[];
+        target_status: "pending" | "approved" | "done" | "cancelled";
+      }>();
+      if (!Array.isArray(body.slot_indexes) || !body.target_status) {
+        return error("slot_indexes と target_status が必要です");
+      }
+      try {
+        const printerMap = await buildPrinterMap(db);
+        const applications = await splitApplicationSlots(
+          db,
+          segments[2],
+          body.slot_indexes,
+          body.target_status,
+          printerMap
+        );
+        return json({ applications });
+      } catch (err) {
+        return error(err instanceof Error ? err.message : "分割に失敗しました");
+      }
     }
 
     // GET /api/3dprint/admin/members

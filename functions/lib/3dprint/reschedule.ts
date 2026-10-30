@@ -10,7 +10,8 @@ import { normalizePartCount } from './calendar-span';
 export async function adminRescheduleReservation(
   env: GoogleCalendarEnv & { DB: D1Database },
   reservationId: string,
-  desiredDate: string
+  desiredDate: string,
+  options: { force?: boolean } = {}
 ): Promise<Reservation> {
   const reservation = await getReservationById(env.DB, reservationId);
   if (!reservation) {
@@ -26,19 +27,21 @@ export async function adminRescheduleReservation(
     return reservation;
   }
 
-  const slotError = await validateReservationSlot(
-    env.DB,
-    desiredDate,
-    reservation.print_scale,
-    reservation.id,
-    reservation.printer_id ?? undefined,
-    {
-      isAdmin: true,
-      partCount: normalizePartCount(reservation.part_count ?? 1),
+  if (!options.force) {
+    const slotError = await validateReservationSlot(
+      env.DB,
+      desiredDate,
+      reservation.print_scale,
+      reservation.id,
+      reservation.printer_id ?? undefined,
+      {
+        isAdmin: true,
+        partCount: normalizePartCount(reservation.part_count ?? 1),
+      }
+    );
+    if (slotError) {
+      throw new Error(slotError);
     }
-  );
-  if (slotError) {
-    throw new Error(slotError);
   }
 
   await updateReservationDesiredDate(env.DB, reservation.id, desiredDate);

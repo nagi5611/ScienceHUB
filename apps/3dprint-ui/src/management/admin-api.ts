@@ -16,6 +16,7 @@ type ApplicationApiModel = {
   created_at?: string;
   printer_id: string;
   status_comment?: string | null;
+  adminNote?: string;
 };
 
 const API = '/api/3dprint';
@@ -83,22 +84,43 @@ export function mapApiApplication(a: ApplicationApiModel & { status_comment?: st
   };
 }
 
-export async function fetchApplicationsRange(from: string, to: string): Promise<AdminApplication[]> {
-  const data = await apiFetch<{ applications: ApplicationApiModel[] }>(
-    `calendar/applications?from=${from}&to=${to}`
-  );
-  return data.applications.map((a) => mapApiApplication(a));
+export async function fetchApplicationsRange(
+  from: string,
+  to: string
+): Promise<{ applications: AdminApplication[]; staff_dates: Record<string, boolean> }> {
+  const data = await apiFetch<{
+    applications: (ApplicationApiModel & { status_comment?: string | null })[];
+    staff_dates?: Record<string, boolean>;
+  }>(`calendar/applications?from=${from}&to=${to}`);
+  return {
+    applications: data.applications.map((a) => mapApiApplication(a)),
+    staff_dates: data.staff_dates ?? {},
+  };
 }
 
-export async function fetchMembers(): Promise<AdminMember[]> {
-  const data = await apiFetch<{ members: { id: string; name: string; homeroom: string; student_number: number }[] }>(
-    'admin/members'
-  );
+export type AdminMemberRow = AdminMember & {
+  color_index?: number;
+  discord_user_id?: string | null;
+};
+
+export async function fetchMembers(): Promise<AdminMemberRow[]> {
+  const data = await apiFetch<{
+    members: {
+      id: string;
+      name: string;
+      homeroom: string;
+      student_number: number;
+      color_index?: number;
+      discord_user_id?: string | null;
+    }[];
+  }>('admin/members');
   return data.members.map((m) => ({
     id: m.id,
     name: m.name,
     homeroom: m.homeroom,
     student_number: m.student_number,
+    color_index: m.color_index,
+    discord_user_id: m.discord_user_id,
   }));
 }
 
@@ -327,11 +349,55 @@ export async function setPrinterDatesAvailability(printerId: string, dates: stri
   });
 }
 
-export async function rescheduleReservation(id: string, desired_date: string) {
+export async function rescheduleReservation(id: string, desired_date: string, force = false) {
   return apiFetch(`admin/reservations/${id}/reschedule`, {
     method: 'PATCH',
-    body: JSON.stringify({ desired_date }),
+    body: JSON.stringify({ desired_date, force }),
   });
+}
+
+export async function splitApplicationSlots(
+  id: string,
+  body: { slot_indexes: number[]; target_status: 'pending' | 'approved' | 'done' | 'cancelled' }
+) {
+  return apiFetch<{ applications: ApplicationApiModel[] }>(`admin/applications/${id}/split-slots`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchIntegrationsStatus() {
+  return apiFetch<{
+    discord: { configured: boolean };
+    gcal: { configured: boolean; ok?: boolean; error?: string };
+    email: { configured: boolean };
+  }>('admin/integrations/status');
+}
+
+export async function testDiscordIntegration() {
+  return apiFetch<{ ok: boolean }>('admin/integrations/discord/test', { method: 'POST', body: '{}' });
+}
+
+export async function testAdminEmail() {
+  return apiFetch<{ ok: boolean }>('admin/settings/test-email', { method: 'POST', body: '{}' });
+}
+
+export async function appendAdminLog(entry: {
+  actor: string;
+  type: string;
+  text: string;
+  app_id?: string | null;
+}) {
+  return apiFetch<{ ok: boolean }>('admin/log', {
+    method: 'POST',
+    body: JSON.stringify(entry),
+  });
+}
+
+export async function fetchAdminLog(limit = 100) {
+  return apiFetch<{ log: { id: string; at: string; actor: string; type: string; text: string; app_id: string | null }[] }>(
+    `admin/log?limit=${limit}`
+  );
 }
 
 export async function createAdminReservation(body: Record<string, unknown>) {
@@ -348,6 +414,13 @@ export async function patchMemberColor(id: string, color_index: number) {
   return apiFetch(`admin/members/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ color_index }),
+  });
+}
+
+export async function patchMemberDiscord(id: string, discord_user_id: string | null) {
+  return apiFetch(`admin/members/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ discord_user_id }),
   });
 }
 

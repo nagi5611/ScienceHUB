@@ -17,8 +17,8 @@ test.describe("3D印刷管理", () => {
     await preparePrintReservationDay(page.request, date);
     await page.goto("/apps/3dprint-management/");
     await expect(page.getByTestId("management-app")).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByRole("heading", { name: "3Dプリント 依頼管理" })).toBeVisible();
-    await expect(page.getByTestId("admin-nav-month")).toBeVisible();
-    await expect(page.getByTestId("admin-nav-printers")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "3Dプリント 申請の管理" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "シフト・設定" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "運用" })).toBeVisible();
   });
 });
