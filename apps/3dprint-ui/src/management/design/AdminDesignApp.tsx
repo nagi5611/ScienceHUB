@@ -269,7 +269,18 @@ export function AdminDesignApp() {
       } else if (app.status === 'cancelled' && status === 'pending') {
         await restoreAdminReservation(app.id);
       } else {
-        await patchReservation(app.id, { status: designStatusToDbStatus(status) });
+        const payload: {
+          status: string;
+          status_comment?: string;
+          notify_reason?: string;
+        } = { status: designStatusToDbStatus(status) };
+        const noteText =
+          typeof extra?.adminNote === 'string' ? extra.adminNote.trim() : '';
+        if (status === 'cancelled' && noteText) {
+          payload.status_comment = noteText;
+          payload.notify_reason = noteText;
+        }
+        await patchReservation(app.id, payload);
       }
       patchLocalApp(app.id, { status, ...(extra || {}), by: operatorLabel });
       const label = STATUS[status];
@@ -360,11 +371,15 @@ export function AdminDesignApp() {
     await setStatusAll(app, 'cancelled', reason ? { rejectReason: reason.id, adminNote } : { adminNote });
   };
 
-  const moveTo = async (app: DesignApplication, ds: string, meta?: { forced?: boolean }) => {
+  const moveTo = async (
+    app: DesignApplication,
+    ds: string,
+    meta?: { forced?: boolean; notifyReason?: string }
+  ) => {
     if (!ds || ds === app.date) return;
     const from = app.date;
     try {
-      await rescheduleReservation(app.id, ds, Boolean(meta?.forced));
+      await rescheduleReservation(app.id, ds, Boolean(meta?.forced), meta?.notifyReason);
       pushLog(
         'move',
         `「${app.title}」を ${dateLabelW(from)} → ${dateLabelW(ds)} に変更（${KIND[app.kind]}${meta?.forced ? '・強制' : ''}）`,
