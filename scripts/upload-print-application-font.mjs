@@ -19,6 +19,8 @@ const fontPath = join(
 );
 
 const local = process.argv.includes('--local');
+/** Production R2 unless --local (wrangler defaults to local storage). */
+const remoteFlag = local ? ['--local'] : ['--remote'];
 const bucket = 'sciencehub-files';
 
 let font;
@@ -45,8 +47,8 @@ const args = [
   'font/woff2',
   '-c',
   'wrangler.jsonc',
+  ...remoteFlag,
 ];
-if (local) args.push('--local');
 
 const result = spawnSync('npx', ['wrangler', ...args], {
   cwd: root,
