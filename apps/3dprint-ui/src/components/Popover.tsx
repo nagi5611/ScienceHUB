@@ -244,7 +244,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
             <b className="num">{d.getFullYear()}/{pad2(d.getMonth() + 1)}/{pad2(d.getDate())}</b>
             <span className={'wd' + (d.getDay() === 0 ? ' sun' : d.getDay() === 6 ? ' sat' : '')}>{WD[d.getDay()]}曜日</span>
           </div>
-          <button type="button" className="iconbtn" onClick={onClose} aria-label="閉じる">×</button>
+          <button type="button" className="pop-close" onClick={onClose} aria-label="閉じる">×</button>
         </div>
 
         <div className="pop-body">
