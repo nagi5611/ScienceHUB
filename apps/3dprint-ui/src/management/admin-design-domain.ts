@@ -16,7 +16,7 @@ const SHIFT_START = 990, SHIFT_END = 1200;
 const SHIFT_SLOT_START = (SHIFT_START - DAY_START) / SLOT_MIN;  // 13
 const SHIFT_SLOTS = 7;
 
-const STATUS = { pending: '申請中', approved: '確定', done: '完了', cancelled: '取り消し' };
+const STATUS = { pending: '申請中', approved: '承認済', done: '完了', cancelled: '取り消し' };
 const KIND = { request: '依頼', reserve: '予約' };
 const MACHINE_STATE = { running: '稼働中', stopped: '停止', maintenance: 'メンテ' };
 

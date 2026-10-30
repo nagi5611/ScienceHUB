@@ -44,7 +44,7 @@ function SlotGrid({ app, selected, onToggle, disabled }) {
 }
 
 /* 時間単位の操作パネル */
-function SlotActions({ app, onPartial, onCancelAll, onMove }) {
+function SlotActions({ app, onPartial, onCancelAll, onApproveRequest, onMove }) {
   const [sel, setSel] = React.useState([]);
   const [mode, setMode] = React.useState(null);   // 'cancel' | 'reject' | 'note'
   const [reason, setReason] = React.useState(null);
@@ -92,15 +92,15 @@ function SlotActions({ app, onPartial, onCancelAll, onMove }) {
       <div className={'selbar' + (sel.length ? ' on' : '')}>
         {sel.length
           ? <><b className="num">{selLabel}</b><span>{partial ? 'この枠だけを操作します（残りはそのまま）' : '申請全体を操作します'}</span></>
-          : <span>枠を選ぶと、その時間だけを取り消し・確定できます。未選択なら申請全体が対象です。</span>}
+          : <span>枠を選ぶと、その時間だけを取り消し・承認できます。未選択なら申請全体が対象です。</span>}
       </div>
 
       {canAct && (
         <div className="actrow">
           {app.status === 'pending' && (
             <button type="button" className="btn btn-primary"
-              onClick={() => (sel.length ? onPartial(app, sel, 'approved', {}) : onCancelAll(app, null, '', 'approved'))}>
-              確定{partial ? `（${sel.length}枠）` : ''}
+              onClick={() => (sel.length ? onPartial(app, sel, 'approved', {}) : onApproveRequest(app))}>
+              承認{partial ? `（${sel.length}枠）` : ''}
             </button>
           )}
           <button type="button" className="btn btn-secondary move"
@@ -216,7 +216,7 @@ function SlotActions({ app, onPartial, onCancelAll, onMove }) {
 }
 
 /* 申請の詳細（ドロワー） */
-function AppSheet({ app, onClose, onPartial, onCancelAll, onMove, log }) {
+function AppSheet({ app, onClose, onPartial, onCancelAll, onApproveRequest, onMove, log }) {
   if (!app) return null;
   const sp = spanOf(app);
   const staffs = staffIdsOn(app.date);
@@ -260,7 +260,7 @@ function AppSheet({ app, onClose, onPartial, onCancelAll, onMove, log }) {
         </div>
       )}
 
-      <SlotActions app={app} onPartial={onPartial} onCancelAll={onCancelAll} onMove={onMove} />
+      <SlotActions app={app} onPartial={onPartial} onCancelAll={onCancelAll} onApproveRequest={onApproveRequest} onMove={onMove} />
 
       {hist.length > 0 && (
         <div>
@@ -347,7 +347,7 @@ function ReserveScreen({ apps, selected, onPick, onOpen, onApprove, onCancel, on
                           </span>
                           <span className="dr-acts">
                             {a.status === 'pending' && (
-                              <button type="button" className="mini ok" onClick={() => onApprove(a)}>確定</button>
+                              <button type="button" className="mini ok" onClick={() => onApprove(a)}>承認</button>
                             )}
                             {(a.status === 'pending' || a.status === 'approved' || a.status === 'done') && (
                               <button type="button" className="mini move" onClick={() => onMove(a)}>変更</button>

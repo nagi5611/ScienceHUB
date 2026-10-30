@@ -137,20 +137,18 @@ ${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px
   }
 
   const staff = payload.printStaffLabel ?? "担当者";
-  const subject = "【ScienceHUB】3D印刷の予約が確定しました";
+  const subject = "【ScienceHUB】印刷担当者が決まりました";
   const text = `${subject}
 
-予約が確定しました。
+担当者 ${staff} が印刷を担当します。
 
-${common}印刷担当: ${staff}
-
+${common}
 予約の確認: ${payload.reservationAppUrl}${operatorBlock}${formBlock}`;
-  const html = `<p>3D印刷の予約が<strong>確定</strong>しました。</p>
+  const html = `<p>印刷担当者が決まりました。<strong>${escapeHtml(staff)}</strong> が印刷を担当します。</p>
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
 <li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
 ${payload.printerName ? `<li>プリンター: ${escapeHtml(payload.printerName)}</li>` : ""}
-<li>印刷担当: ${escapeHtml(staff)}</li>
 <li>予約ID: ${escapeHtml(payload.reservation.id)}</li>
 </ul>
 <p><a href="${escapeHtml(payload.reservationAppUrl)}">予約アプリで確認</a></p>`;

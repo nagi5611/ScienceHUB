@@ -324,6 +324,50 @@ export type PrintAdminDiscordNotice = {
   actorExtra?: PrintActorNoticeExtra;
 };
 
+export type DiscordStaffAssignedNotice = {
+  staffMember: { name: string; homeroom: string; discord_user_id?: string | null };
+  applicationFormText?: string;
+  adminDeepLink?: string;
+};
+
+/** Discord notice when print staff is assigned on approval (with mention when configured). */
+export async function notifyReservationStaffAssigned(
+  webhookUrl: string | undefined,
+  notice: DiscordStaffAssignedNotice
+): Promise<void> {
+  if (!webhookUrl) return;
+
+  const discordId = notice.staffMember.discord_user_id?.trim();
+  const staffLabel = `${notice.staffMember.name}（${notice.staffMember.homeroom}）`;
+  const mentionLine = discordId ? `<@${discordId}>` : staffLabel;
+  const formText = notice.applicationFormText?.trim().slice(0, 1800) ?? '';
+  const formBlock = formText ? `\n\n${formText}` : '';
+  const link = notice.adminDeepLink ? `\n${notice.adminDeepLink}` : '';
+
+  const payload: {
+    content: string;
+    allowed_mentions?: { users: string[] };
+  } = {
+    content: `担当者が確定しました。\n${mentionLine}${link}${formBlock}`,
+  };
+  if (discordId) {
+    payload.allowed_mentions = { users: [discordId] };
+  }
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('Discord staff-assigned webhook failed:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('Discord staff-assigned webhook error:', err);
+  }
+}
+
 /** Management action notice (accept, cancel, reschedule, restore, etc.). */
 export async function notifyPrintAdminOperation(
   webhookUrl: string | undefined,

@@ -67,6 +67,7 @@ import {
   notifyReservationApplication,
   notifyReservationBooked,
   notifyReservationModified,
+  notifyReservationStaffAssigned,
   notifyPrintAdminOperation,
   sendDiscordStaffMentionTest,
 } from "../../lib/3dprint/discord";
@@ -528,6 +529,7 @@ async function sendApplicantAcceptedEmail(
   operatorSummary?: string | null
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
+  const applicationFormText = await applicationFormTextFor(db, reservation, printerMap);
   await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
     kind: "accepted",
     reservation: {
@@ -538,6 +540,7 @@ async function sendApplicantAcceptedEmail(
     printerName: resolvePrinterLabel(reservation, printerMap),
     printStaffLabel,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    applicationFormText,
     operatorSummary,
   });
 }
@@ -2171,6 +2174,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           date: finalReservation.desired_date,
           appId: finalReservation.id,
         });
+        const applicationFormText = await applicationFormTextFor(
+          db,
+          finalReservation,
+          printerMap
+        );
         context.waitUntil(
           Promise.all([
             sendApplicantAcceptedEmail(
@@ -2182,21 +2190,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               formatMemberLabel(member),
               opSummary
             ),
-            notifyPrintAdminOperation(env.DISCORD_WEBHOOK_URL, {
-              title: "3D印刷 予約受領",
-              color: 0x22c55e,
-              summary: `予約「${finalReservation.title}」を受領しました（担当: ${memberDisplayName(member)}）。`,
+            notifyReservationStaffAssigned(env.DISCORD_WEBHOOK_URL, {
+              staffMember: member,
+              applicationFormText,
               adminDeepLink: deepLink,
-              actor,
-              actorExtra: {
-                assigned_staff_name: member.name,
-                assigned_staff_homeroom: member.homeroom,
-                action_label: "予約受領",
-              },
-              fields: [
-                { name: "タイトル", value: finalReservation.title, inline: true },
-                { name: "希望印刷日", value: finalReservation.desired_date, inline: true },
-              ],
             }),
             insertAdminLog(db, {
               actor: formatPrintActorLogLabel(actor),

@@ -35,7 +35,6 @@ import {
   memberAvailToRows,
   mergeMonthMemberAvailabilityPreservingDraft,
   summarizeMemberShiftDraft,
-  resolveOperatorStaffMemberId,
   formatOperatorDisplayLabel,
   toDesignMembers,
   colorIndexFromDesign,
@@ -73,6 +72,7 @@ import {
 } from '../admin-api';
 import { LOGO, Header, Toast, downloadAppFile, downloadDay } from './AdminDesignUi';
 import { ReserveScreen, AppSheet } from './ReserveScreen';
+import { ApproveStaffModal } from './ApproveStaffModal';
 import { MoveDialog } from './MoveDialog';
 import { SettingsScreen } from './SettingsScreen';
 import { AdminOpsScreen } from './AdminOpsScreen';
@@ -97,6 +97,8 @@ export function AdminDesignApp() {
   const [detail, setDetail] = React.useState<DesignApplication | null>(null);
   const [detailMode, setDetailMode] = React.useState<string | null>(null);
   const [moving, setMoving] = React.useState<DesignApplication | null>(null);
+  const [approveFlow, setApproveFlow] = React.useState<{ app: DesignApplication } | null>(null);
+  const [approveBusy, setApproveBusy] = React.useState(false);
   const [settingsPre, setSettingsPre] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<{ text: string; mark?: string } | null>(null);
   const [emailConfigured, setEmailConfigured] = React.useState(false);
@@ -258,18 +260,9 @@ export function AdminDesignApp() {
       return;
     }
     if (!status) return;
-    const staffId = resolveOperatorStaffMemberId(
-      members,
-      operatorSession?.linked_member?.id ?? null
-    );
     try {
       if (status === 'approved' && app.status === 'pending') {
-        if (!staffId) {
-          throw new Error(
-            '予約を受領するには、担当者タブで ScienceHUB アカウントと印刷担当者を紐づけてください'
-          );
-        }
-        await acceptReservation(app.id, staffId);
+        throw new Error('承認は担当者を選ぶダイアログから行ってください');
       } else if (app.status === 'cancelled' && status === 'pending') {
         await restoreAdminReservation(app.id);
       } else {
@@ -313,6 +306,33 @@ export function AdminDesignApp() {
     }
   };
 
+  const openApproveFlow = (app: DesignApplication) => {
+    setApproveFlow({ app });
+  };
+
+  const confirmApprove = async (staffMemberId: string) => {
+    if (!approveFlow || approveBusy) return;
+    const { app } = approveFlow;
+    setApproveBusy(true);
+    try {
+      await acceptReservation(app.id, staffMemberId);
+      patchLocalApp(app.id, { status: 'approved', by: operatorLabel });
+      pushLog(
+        'approve',
+        `「${app.title}」を承認（${dateLabelW(app.date)}・${KIND[app.kind]}）`,
+        app.id
+      );
+      showToast(`${app.title} を承認しました`, '承認');
+      await reloadApps(selected);
+      if (detail?.id === app.id) closeDetail();
+      setApproveFlow(null);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '承認に失敗しました', 'エラー');
+    } finally {
+      setApproveBusy(false);
+    }
+  };
+
   const cancelAll = async (
     app: DesignApplication,
     reason: { id: string; body: string } | null,
@@ -323,7 +343,11 @@ export function AdminDesignApp() {
       await setStatusAll(app, null, undefined, note);
       return;
     }
-    if (mode === 'approved' || mode === 'pending' || mode === 'done') {
+    if (mode === 'approved') {
+      openApproveFlow(app);
+      return;
+    }
+    if (mode === 'pending' || mode === 'done') {
       await setStatusAll(app, mode as DesignApplication['status']);
       return;
     }
@@ -570,7 +594,7 @@ export function AdminDesignApp() {
             selected={selected}
             onPick={setSelected}
             onOpen={openDetail}
-            onApprove={(a) => void setStatusAll(a, 'approved')}
+            onApprove={(a) => openApproveFlow(a)}
             onCancel={(a, r, n, m) => void cancelAll(a, r, n, m)}
             onPartial={(a, s, st, ex) => void setStatusPartial(a, s, st, ex)}
             log={log}
@@ -638,7 +662,17 @@ export function AdminDesignApp() {
         onClose={closeDetail}
         onPartial={(a, s, st, ex) => void setStatusPartial(a, s, st, ex)}
         onCancelAll={(a, r, n, m) => void cancelAll(a, r, n, m)}
+        onApproveRequest={(a) => openApproveFlow(a)}
         onMove={(a) => setMoving(a)}
+      />
+
+      <ApproveStaffModal
+        open={!!approveFlow}
+        app={approveFlow?.app ?? null}
+        members={members}
+        busy={approveBusy}
+        onClose={() => !approveBusy && setApproveFlow(null)}
+        onConfirm={(id) => void confirmApprove(id)}
       />
 
       <MoveDialog open={!!moving} app={moving} apps={apps} onClose={() => setMoving(null)} onMove={moveTo} />
