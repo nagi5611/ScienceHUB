@@ -84,6 +84,23 @@ export function mapApiApplication(a: ApplicationApiModel & { status_comment?: st
   };
 }
 
+export async function fetchCancelledApplicationsRange(
+  from: string,
+  to: string
+): Promise<{ applications: AdminApplication[] }> {
+  const data = await apiFetch<{ applications: ApplicationApiModel[] }>(
+    `admin/calendar/cancelled-applications?from=${from}&to=${to}`
+  );
+  return { applications: data.applications.map((a) => mapApiApplication(a)) };
+}
+
+export async function restoreAdminReservation(id: string) {
+  return apiFetch<{ ok: boolean; reservation: unknown }>(`admin/reservations/${id}/restore`, {
+    method: 'POST',
+    body: '{}',
+  });
+}
+
 export async function fetchApplicationsRange(
   from: string,
   to: string

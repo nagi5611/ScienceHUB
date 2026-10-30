@@ -12,7 +12,11 @@ const SCALE_LABELS: Record<PrintScale, string> = {
 
 const DEFAULT_FROM_NAME = "ScienceHUB 3D印刷";
 
-export type PrintReservationEmailKind = "applied" | "accepted" | "cancelled";
+export type PrintReservationEmailKind =
+  | "applied"
+  | "accepted"
+  | "cancelled"
+  | "rescheduled";
 
 interface ApplicantEmailPayload {
   kind: PrintReservationEmailKind;
@@ -24,6 +28,8 @@ interface ApplicantEmailPayload {
   printStaffLabel?: string | null;
   statusComment?: string | null;
   reservationAppUrl: string;
+  applicationFormText?: string | null;
+  previousDate?: string | null;
 }
 
 /** Loads the applicant's email from D1. */
@@ -65,6 +71,33 @@ function buildApplicantMessage(payload: ApplicantEmailPayload): {
 ${printerLine}予約ID: ${payload.reservation.id}
 `;
 
+  const formBlock = payload.applicationFormText?.trim()
+    ? `\n\n--- 申請書 ---\n${payload.applicationFormText.trim()}\n`
+    : "";
+
+  if (payload.kind === "rescheduled") {
+    const prev = payload.previousDate ?? "—";
+    const subject = "【ScienceHUB】3D印刷の予約日が変更されました";
+    const text = `${subject}
+
+印刷日が変更されました。
+
+変更前: ${prev}
+変更後: ${payload.reservation.desired_date}
+
+${common}${formBlock}
+予約の確認: ${payload.reservationAppUrl}`;
+    const html = `<p>3D印刷の<strong>予約日が変更</strong>されました。</p>
+<p>変更前: ${escapeHtml(prev)} → 変更後: ${escapeHtml(payload.reservation.desired_date)}</p>
+<ul>
+<li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
+<li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
+</ul>
+${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f5;padding:12px;border-radius:8px">${escapeHtml(payload.applicationFormText)}</pre>` : ""}
+<p><a href="${escapeHtml(payload.reservationAppUrl)}">予約アプリで確認</a></p>`;
+    return { subject, html, text };
+  }
+
   if (payload.kind === "cancelled") {
     const subject = "【ScienceHUB】3D印刷の予約が取り消されました";
     const comment = payload.statusComment?.trim();
@@ -72,7 +105,7 @@ ${printerLine}予約ID: ${payload.reservation.id}
 
 担当者により予約が取り消されました。
 
-${common}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}
+${common}${comment ? `\n担当者からの連絡:\n${comment}\n` : ""}${formBlock}
 予約の確認: ${payload.reservationAppUrl}
 
 ※このメールに心当たりがない場合は破棄してください。`;
@@ -92,7 +125,7 @@ ${comment ? `<p>${escapeHtml(comment)}</p>` : ""}
 
 予約申請を受け付けました。担当者が内容を確認し、受領後に確定します。
 
-${common}
+${common}${formBlock}
 予約の確認: ${payload.reservationAppUrl}
 
 ※このメールに心当たりがない場合は破棄してください。`;
@@ -104,6 +137,7 @@ ${common}
 ${payload.printerName ? `<li>プリンター: ${escapeHtml(payload.printerName)}</li>` : ""}
 <li>予約ID: ${escapeHtml(payload.reservation.id)}</li>
 </ul>
+${payload.applicationFormText ? `<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f5;padding:12px;border-radius:8px">${escapeHtml(payload.applicationFormText)}</pre>` : ""}
 <p><a href="${escapeHtml(payload.reservationAppUrl)}">予約アプリで確認</a></p>
 <p style="color:#666;font-size:12px">このメールに心当たりがない場合は破棄してください。</p>`;
     return { subject, html, text };
@@ -117,7 +151,7 @@ ${payload.printerName ? `<li>プリンター: ${escapeHtml(payload.printerName)}
 
 ${common}印刷担当: ${staff}
 
-予約の確認: ${payload.reservationAppUrl}`;
+予約の確認: ${payload.reservationAppUrl}${formBlock}`;
   const html = `<p>3D印刷の予約が<strong>確定</strong>しました。</p>
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>

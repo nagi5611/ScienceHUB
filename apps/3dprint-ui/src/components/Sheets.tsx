@@ -237,7 +237,7 @@ function NewApplicationSheet({ open, onClose, draft, apps, profile, setProfile, 
   );
 }
 
-function DetailSheet({ open, onClose, app, onCancel }) {
+function DetailSheet({ open, onClose, app, onCancel, onRestore }) {
   if (!open || !app) return null;
   const d = parseYmd(app.date);
   const st = app.status;
@@ -249,6 +249,9 @@ function DetailSheet({ open, onClose, app, onCancel }) {
           <button type="button" className="btn btn-secondary" onClick={onClose}>閉じる</button>
           {app.mine && (st === 'pending' || st === 'approved') && (
             <button type="button" className="btn btn-primary" onClick={() => { onCancel(app.id); }}>申請を取り消す</button>
+          )}
+          {app.mine && st === 'rejected' && onRestore && (
+            <button type="button" className="btn btn-primary" data-testid="btn-restore-application" onClick={() => { onRestore(app.id); }}>取り消しを取消</button>
           )}
         </>
       }>
@@ -336,4 +339,34 @@ function MineItem({ app, onOpen }) {
   );
 }
 
-export { Field, NewApplicationSheet, DetailSheet, MineSheet, MineItem };
+function CancelledSheet({ open, onClose, apps, onOpenApp, onRestore }) {
+  const mine = apps.filter(a => a.mine && a.status === 'rejected').sort((a, b) => (b.date + b.start).localeCompare(a.date + a.start));
+
+  return (
+    <Sheet open={open} onClose={onClose} title="取り消した申請"
+      sub={`${mine.length}件（表示中の4週間）`}>
+      {mine.length === 0 && (
+        <div className="emptybox">取り消した申請はありません。</div>
+      )}
+      {mine.map(a => (
+        <div className="mine-item" key={a.id}>
+          <div className="top">
+            <b>{a.title}</b>
+            <StatusTag status={a.status} />
+          </div>
+          <div className="l2">
+            <span className="num">{a.date}</span>
+            <span>·</span>
+            <span>{MACHINE_MAP[a.machine].short}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-secondary" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => onOpenApp(a)}>詳細</button>
+            <button type="button" className="btn btn-primary" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => onRestore(a.id)}>取り消しを取消</button>
+          </div>
+        </div>
+      ))}
+    </Sheet>
+  );
+}
+
+export { Field, NewApplicationSheet, DetailSheet, MineSheet, MineItem, CancelledSheet };

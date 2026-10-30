@@ -11,7 +11,7 @@ import {
 
 const LOGO = '/apps/3dprint-management/assets/icon-192.png';
 
-function SiteHeader({ mineCount, onOpenMine, onNew }) {
+function SiteHeader({ mineCount, cancelledCount, onOpenMine, onOpenCancelled, onNew }) {
   return (
     <header className="site-header">
       <div className="header-inner">
@@ -23,6 +23,11 @@ function SiteHeader({ mineCount, onOpenMine, onNew }) {
           <button type="button" className="hdr-link" onClick={onOpenMine}>
             申請一覧 {mineCount > 0 && <span className="hdr-count num">{mineCount}</span>}
           </button>
+          {onOpenCancelled && (
+            <button type="button" className="hdr-link" data-testid="btn-cancelled-list" onClick={onOpenCancelled}>
+              取り消し一覧 {cancelledCount > 0 && <span className="hdr-count num">{cancelledCount}</span>}
+            </button>
+          )}
           <button type="button" className="btn btn-primary" onClick={onNew}>新規申請</button>
         </div>
       </div>

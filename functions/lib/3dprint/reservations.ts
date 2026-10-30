@@ -173,6 +173,31 @@ export async function getReservationsInRange(
   return result.results ?? [];
 }
 
+/** Fetches cancelled reservations overlapping a date range. */
+export async function getCancelledReservationsInRange(
+  db: D1Database,
+  startDate: string,
+  endDate: string,
+  options: { userId?: string; source?: ReservationSource | null } = {}
+): Promise<Reservation[]> {
+  let sql = `SELECT * FROM print_reservations
+    WHERE status = 'cancelled'
+      AND desired_date <= ?
+      AND COALESCE(NULLIF(calendar_end_date, ''), desired_date) >= ?`;
+  const binds: string[] = [endDate, startDate];
+  if (options.userId) {
+    sql += ` AND user_id = ?`;
+    binds.push(options.userId);
+  }
+  if (options.source) {
+    sql += ` AND source = ?`;
+    binds.push(options.source);
+  }
+  sql += ` ORDER BY desired_date DESC, created_at DESC`;
+  const result = await db.prepare(sql).bind(...binds).all<Reservation>();
+  return result.results ?? [];
+}
+
 /** Cursor for paginating older public reservations. */
 export interface ReservationListCursor {
   desired_date: string;
