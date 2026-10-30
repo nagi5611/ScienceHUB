@@ -1,0 +1,19 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "print-application-pdf",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-07-06",
+	"limits": {
+		"cpu_ms": 30000
+	},
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"invocation_logs": true,
+			"head_sampling_rate": 1
+		}
+	},
+	"browser": {
+		"binding": "BROWSER"
+	}
+}

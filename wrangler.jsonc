@@ -6,6 +6,13 @@
 	"limits": {
 		"cpu_ms": 30000
 	},
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"invocation_logs": true,
+			"head_sampling_rate": 1
+		}
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -50,6 +57,10 @@
 		{
 			"binding": "IMAGE_CONVERTER",
 			"service": "image-converter"
+		},
+		{
+			"binding": "PRINT_APPLICATION_PDF",
+			"service": "print-application-pdf"
 		}
 	]
 }

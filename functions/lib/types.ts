@@ -113,6 +113,10 @@ export interface Env {
   IMAGE_CONVERTER_PUBLIC_URL?: string;
   /** 画像変換 Worker 内部認証 */
   IMAGE_CONVERTER_WORKER_SECRET?: string;
+  /** 3D印刷 申請書 PDF（Browser Run）Worker */
+  PRINT_APPLICATION_PDF?: Fetcher;
+  /** print-application-pdf Worker 内部認証 */
+  PRINT_APPLICATION_PDF_WORKER_SECRET?: string;
   /** Cloudflare アカウント ID（Runa / R2 等） */
   CLOUDFLARE_ACCOUNT_ID?: string;
   /** Cloudflare API トークン（Runa の代替キーとしても使用可） */
