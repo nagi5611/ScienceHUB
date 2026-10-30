@@ -81,6 +81,7 @@ export function AdminDesignApp() {
   const [moving, setMoving] = React.useState<DesignApplication | null>(null);
   const [settingsPre, setSettingsPre] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<{ text: string; mark?: string } | null>(null);
+  const [emailConfigured, setEmailConfigured] = React.useState(false);
 
   const syncGlobals = React.useCallback((m: DesignMember[], a: Record<string, string[]>) => {
     setMembers(m);
@@ -106,6 +107,7 @@ export function AdminDesignApp() {
     await reloadApps(selected);
     try {
       const status = await fetchIntegrationsStatus();
+      setEmailConfigured(Boolean(status.email.configured));
       setIntegrations((prev) => ({
         ...prev,
         discord: { ...prev.discord, webhook: status.discord.configured ? '(サーバー設定)' : '' },
@@ -385,13 +387,10 @@ export function AdminDesignApp() {
     }
   };
 
-  const testEmail = async () => {
-    try {
-      await testAdminEmail();
-      showToast('テストメールを送信しました', 'メール');
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'メール送信に失敗しました', 'エラー');
-    }
+  const testEmail = async (to: string) => {
+    const result = await testAdminEmail(to);
+    pushLog('integ', `テストメールを ${result.to} に送信`, null);
+    return result;
   };
 
   const csv = () => {
@@ -493,7 +492,8 @@ export function AdminDesignApp() {
             setIntegrations={setIntegrations}
             onTestDiscord={() => void testDiscord()}
             onTestGcal={() => void testGcal()}
-            onTestEmail={() => void testEmail()}
+            onTestEmail={testEmail}
+            emailConfigured={emailConfigured}
             log={log}
             pendingPre={settingsPre}
           />

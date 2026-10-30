@@ -323,7 +323,83 @@ function MemberForm({ members, onAdd, onUpdate, onRemove }) {
 }
 
 /* 外部連携 */
-function Integrations({ value, onChange, onTestDiscord, onTestGcal, onTestEmail }) {
+function EmailTestSection({ configured, onSend }) {
+  const [to, setTo] = React.useState('');
+  const [status, setStatus] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const send = async () => {
+    const addr = to.trim();
+    if (!addr) {
+      setStatus({ ok: false, text: '送信先メールアドレスを入力してください' });
+      return;
+    }
+    setBusy(true);
+    setStatus({ ok: null, text: '送信中…' });
+    try {
+      const data = await onSend(addr);
+      setStatus({ ok: true, text: `送信しました（${data.to ?? addr}）` });
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof Error ? e.message : '送信に失敗しました' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="intg" data-testid="email-test-section">
+      <div className="intg-h">
+        <b>予約者向けメール（Cloudflare Email Sending）</b>
+        <span className={'intg-state ' + (configured ? 'ok' : 'warn')}>{configured ? '設定済み' : '未設定'}</span>
+      </div>
+      <p className="fl-h">
+        申請・受領通知はサーバー環境変数（PRINT_3D_EMAIL_FROM、CLOUDFLARE_API_TOKEN 等）経由で送信されます。
+        下の欄に任意のアドレスを入れて、同じ経路のテストメールを送れます。
+      </p>
+      {!configured && (
+        <div className="note warn">
+          <span>メール送信が未設定です。Cloudflare Email Service のドメイン認証と Pages のシークレットを確認してください。</span>
+        </div>
+      )}
+      <label className="fl">
+        <span className="fl-l">テスト送信先</span>
+        <input
+          className="input"
+          type="email"
+          autoComplete="email"
+          spellCheck={false}
+          data-testid="email-test-to"
+          value={to}
+          onChange={e => setTo(e.target.value)}
+          placeholder="you@example.com"
+          disabled={!configured || busy}
+        />
+      </label>
+      <div className="intg-f">
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          data-testid="email-test-send"
+          disabled={!configured || busy || !to.trim()}
+          onClick={() => void send()}
+        >
+          テスト送信
+        </button>
+      </div>
+      {status && (
+        <p
+          className={'fl-h' + (status.ok === true ? '' : status.ok === false ? ' warn' : '')}
+          role="status"
+          data-testid="email-test-result"
+        >
+          {status.text}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function Integrations({ value, onChange, onTestDiscord, onTestGcal, onTestEmail, emailConfigured }) {
   const d = value.discord || {};
   const g = value.gcal || {};
   const setD = patch => onChange({ ...value, discord: { ...d, ...patch } });
@@ -436,17 +512,7 @@ function Integrations({ value, onChange, onTestDiscord, onTestGcal, onTestEmail 
       </section>
 
       {onTestEmail && (
-        <section className="intg">
-          <div className="intg-h">
-            <b>予約者向けメール</b>
-          </div>
-          <p className="fl-h">Cloudflare Email Service（サーバー環境変数）で申請・受領通知を送信します。</p>
-          <div className="intg-f">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onTestEmail}>
-              テスト送信
-            </button>
-          </div>
-        </section>
+        <EmailTestSection configured={emailConfigured} onSend={onTestEmail} />
       )}
     </div>
   );

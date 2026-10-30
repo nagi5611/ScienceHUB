@@ -378,8 +378,13 @@ export async function testDiscordIntegration() {
   return apiFetch<{ ok: boolean }>('admin/integrations/discord/test', { method: 'POST', body: '{}' });
 }
 
-export async function testAdminEmail() {
-  return apiFetch<{ ok: boolean }>('admin/settings/test-email', { method: 'POST', body: '{}' });
+export async function testAdminEmail(to: string) {
+  const trimmed = to.trim();
+  if (!trimmed) throw new Error('送信先メールアドレスを入力してください');
+  return apiFetch<{ ok: boolean; to: string }>('admin/settings/test-email', {
+    method: 'POST',
+    body: JSON.stringify({ to: trimmed }),
+  });
 }
 
 export async function appendAdminLog(entry: {
