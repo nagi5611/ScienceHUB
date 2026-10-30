@@ -2,7 +2,10 @@ import type { Env } from '../types';
 import type { Reservation } from './reservations';
 import type { PrintReservationFileInput } from './print-reservation-files';
 import { replacePrintReservationFiles } from './print-reservation-files';
-import { persistApplicationFormPdf } from './application-form-pdf';
+import {
+  applicationFormPdfDiscordFilename,
+  persistApplicationFormPdf,
+} from './application-form-pdf';
 import { buildPrintApplicationFormText, formatPrinterMachineLabel } from './application-form-text';
 import { getPrinterById, type Printer } from './printers';
 import {
@@ -37,7 +40,11 @@ export function formatApplicationSubmittedAtJst(iso: string): string {
 /** Persists print files + application PDF to R2 (off the HTTP critical path). */
 export async function persistReservationArtifacts(
   ctx: SubmissionAsyncContext
-): Promise<{ printer: Printer | undefined; pdfUrl: string | null }> {
+): Promise<{
+  printer: Printer | undefined;
+  pdfUrl: string | null;
+  pdfResult: { r2Key: string; bytes: Uint8Array } | null;
+}> {
   const { env, db, reservation, printFiles } = ctx;
   await replacePrintReservationFiles(db, reservation.id, printFiles, reservation.created_at);
   const printer = reservation.printer_id
@@ -50,7 +57,7 @@ export async function persistReservationArtifacts(
     printer ?? undefined
   );
   const pdfUrl = pdfResult ? ctx.buildPdfUrl(reservation.id) : null;
-  return { printer: printer ?? undefined, pdfUrl };
+  return { printer: printer ?? undefined, pdfUrl, pdfResult };
 }
 
 /** Background pipeline: files + PDF, then optional Discord phases. */
@@ -74,19 +81,20 @@ export async function runReservationSubmissionAsync(
     });
   }
 
-  let pdfUrl: string | null = null;
+  let pdfResult: { r2Key: string; bytes: Uint8Array } | null = null;
   try {
     const persisted = await persistReservationArtifacts(ctx);
-    pdfUrl = persisted.pdfUrl;
+    pdfResult = persisted.pdfResult;
   } catch (err) {
     console.error('persistReservationArtifacts failed', reservation.id, err);
   }
 
-  if (opts.pdfFollowUpDiscord && pdfUrl) {
+  if (opts.pdfFollowUpDiscord && pdfResult) {
     await notifyReservationApplicationPdfReady(webhook, {
       title: reservation.title,
-      pdfUrl,
       adminDeepLink: ctx.adminDeepLink,
+      pdfBytes: pdfResult.bytes,
+      pdfFilename: applicationFormPdfDiscordFilename(reservation.id),
     });
   }
 }
