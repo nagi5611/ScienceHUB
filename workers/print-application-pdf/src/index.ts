@@ -54,7 +54,7 @@ export default {
           timeout: 15_000,
         },
         waitForSelector: {
-          selector: 'pre.form-body',
+          selector: '.form-body',
           visible: true,
           timeout: 10_000,
         },
