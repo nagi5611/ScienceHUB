@@ -517,13 +517,38 @@ async function notifyNewApplicationDiscordAndEmail(
     ? `${applicant.display_name} (@${applicant.username})`
     : null;
   const applicationFormPdfUrl = buildAdminApplicationFormPdfUrl(request, env, reservation.id);
-  await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
+  const discord = await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
     applicationFormText,
     applicationFormPdfUrl,
     adminDeepLink,
     applicantLabel,
   });
+  if (!discord.ok) {
+    throw new Error(
+      `Discord通知の送信に失敗しました（${discord.attempts}回試行）。時間をおいて再度お試しください。`
+    );
+  }
   await sendApplicantAppliedEmail(env, db, request, applicantUserId, reservation);
+}
+
+/** Discord must succeed before the application is considered submitted; rolls back on failure. */
+async function deliverNewApplicationNotifications(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  reservation: Reservation,
+  applicantUserId: string
+): Promise<void> {
+  try {
+    await notifyNewApplicationDiscordAndEmail(env, db, request, reservation, applicantUserId);
+  } catch (err) {
+    await softCancelReservation(env, db, reservation.id, {
+      statusComment: "Discord通知送信失敗のため申請を取り消しました",
+    }).catch((cancelErr) =>
+      console.error("discord notify rollback cancel failed", cancelErr)
+    );
+    throw err;
+  }
 }
 
 /** Auto-confirmed time-slot「予約のみ」: applicant email + Discord「予約されました」. */
@@ -1236,15 +1261,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         );
       }
 
-      context.waitUntil(
-        notifyNewApplicationDiscordAndEmail(
+      try {
+        await deliverNewApplicationNotifications(
           env,
           db,
           context.request,
           submittedReservation,
           userId
-        )
-      );
+        );
+      } catch (err) {
+        return error(
+          err instanceof Error ? err.message : "Discord通知の送信に失敗しました",
+          503
+        );
+      }
 
       const pendingMessage =
         timeSlotMode && body.booking_kind === "request"
@@ -1559,15 +1589,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
 
-        context.waitUntil(
-          notifyNewApplicationDiscordAndEmail(
+        try {
+          await deliverNewApplicationNotifications(
             env,
             db,
             context.request,
             created,
             userId
-          )
-        );
+          );
+        } catch (err) {
+          return error(
+            err instanceof Error ? err.message : "Discord通知の送信に失敗しました",
+            503
+          );
+        }
 
         return json({
           reservation: userReservationDetail(created, memberMap, printerMap),
@@ -1835,15 +1870,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       await createReservation(db, reservation);
 
-      context.waitUntil(
-        notifyNewApplicationDiscordAndEmail(
+      try {
+        await deliverNewApplicationNotifications(
           env,
           db,
           context.request,
           reservation,
           targetUserId
-        )
-      );
+        );
+      } catch (err) {
+        return error(
+          err instanceof Error ? err.message : "Discord通知の送信に失敗しました",
+          503
+        );
+      }
 
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);

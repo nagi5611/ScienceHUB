@@ -4,6 +4,61 @@ import { formatPrintActorNoticeLines } from './print-actor';
 
 const ADMIN_PATH = '/apps/3dprint-management/';
 
+const DEFAULT_WEBHOOK_MAX_ATTEMPTS = 5;
+const DEFAULT_WEBHOOK_BASE_DELAY_MS = 400;
+
+export type DiscordWebhookDeliveryResult =
+  | { ok: true; attempts: number }
+  | { ok: false; error: string; status?: number; attempts: number };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableDiscordStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+/** POST JSON to a Discord webhook with exponential backoff until success or attempts exhausted. */
+export async function postDiscordWebhookWithRetry(
+  webhookUrl: string,
+  payload: unknown,
+  opts?: { maxAttempts?: number; baseDelayMs?: number }
+): Promise<DiscordWebhookDeliveryResult> {
+  const maxAttempts = opts?.maxAttempts ?? DEFAULT_WEBHOOK_MAX_ATTEMPTS;
+  const baseDelayMs = opts?.baseDelayMs ?? DEFAULT_WEBHOOK_BASE_DELAY_MS;
+  const url = webhookUrl.trim();
+  let lastError = 'Discord webhook failed';
+  let lastStatus: number | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        return { ok: true, attempts: attempt };
+      }
+      lastStatus = res.status;
+      lastError = (await res.text().catch(() => res.statusText)).slice(0, 500);
+      if (!isRetryableDiscordStatus(res.status) || attempt === maxAttempts) {
+        return { ok: false, error: lastError, status: lastStatus, attempts: attempt };
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (attempt === maxAttempts) {
+        return { ok: false, error: lastError, attempts: attempt };
+      }
+    }
+    const jitter = Math.floor(Math.random() * 150);
+    await sleep(baseDelayMs * 2 ** (attempt - 1) + jitter);
+  }
+
+  return { ok: false, error: lastError, status: lastStatus, attempts: maxAttempts };
+}
+
 function actorDiscordBlock(
   actor?: PrintActorContext | null,
   extra?: PrintActorNoticeExtra
@@ -272,17 +327,9 @@ export async function notifyReservationBooked(
     ],
   };
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      console.error('Discord booked webhook failed:', res.status, await res.text());
-    }
-  } catch (err) {
-    console.error('Discord booked webhook error:', err);
+  const delivered = await postDiscordWebhookWithRetry(webhookUrl, payload);
+  if (!delivered.ok) {
+    console.error('Discord booked webhook failed:', delivered.status, delivered.error);
   }
 }
 
@@ -348,8 +395,10 @@ export async function notifyReservationCancelledByUser(
 export async function notifyReservationApplication(
   webhookUrl: string | undefined,
   notice: DiscordApplicationNotice
-): Promise<void> {
-  if (!webhookUrl) return;
+): Promise<DiscordWebhookDeliveryResult> {
+  if (!webhookUrl?.trim()) {
+    return { ok: true, attempts: 0 };
+  }
 
   const formText = notice.applicationFormText?.trim().slice(0, 1800) ?? '';
   const applicantLine = notice.applicantLabel?.trim()
@@ -364,19 +413,16 @@ export async function notifyReservationApplication(
     content: `新しい予約申請があります。\n${notice.adminDeepLink}${applicantLine}${pdfLine}${formBlock}`,
   };
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      console.error('Discord webhook failed:', res.status, await res.text());
-    }
-  } catch (err) {
-    console.error('Discord webhook error:', err);
+  const delivered = await postDiscordWebhookWithRetry(webhookUrl, payload);
+  if (!delivered.ok) {
+    console.error(
+      'Discord application webhook failed:',
+      delivered.status,
+      delivered.error,
+      `(attempts=${delivered.attempts})`
+    );
   }
+  return delivered;
 }
 
 export type PrintAdminDiscordNotice = {
