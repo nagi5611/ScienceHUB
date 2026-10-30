@@ -72,3 +72,28 @@ export async function persistApplicationFormPdf(
     return null;
   }
 }
+
+/** Loads application-form PDF from R2, generating and persisting if missing. */
+export async function ensureApplicationFormPdfBytes(
+  env: ApplicationFormPdfRenderEnv,
+  db: D1Database,
+  reservation: Reservation,
+  printer: Printer | undefined
+): Promise<{ bytes: Uint8Array; filename: string } | null> {
+  const filename = applicationFormPdfDiscordFilename(reservation.id);
+  const r2Key =
+    reservation.application_form_pdf_r2_key ?? applicationFormPdfR2Key(reservation.id);
+  try {
+    const obj = await env.FILES.get(r2Key);
+    if (obj) {
+      const bytes = new Uint8Array(await obj.arrayBuffer());
+      return { bytes, filename };
+    }
+  } catch (err) {
+    logPersistFailure('load_r2', reservation.id, err, { r2Key });
+  }
+
+  const persisted = await persistApplicationFormPdf(env, db, reservation, printer);
+  if (!persisted) return null;
+  return { bytes: persisted.bytes, filename };
+}
