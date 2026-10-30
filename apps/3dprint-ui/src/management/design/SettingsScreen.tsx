@@ -98,6 +98,7 @@ function SettingsScreen({
         ))}
       </div>
 
+      <div className="set-tab-stage">
       {tab === 'shift' && (
         <div className="shifttab">
           {shiftDraftPending && (
@@ -142,19 +143,10 @@ function SettingsScreen({
             <div className="card-h">
               <b>シフト表</b>
               <span className="meta">{cur ? `${cur.name} の稼働日` : '担当者を選択'}</span>
-              {cur && <span className="chip" style={{ marginLeft: 'auto', borderColor: cur.color, color: cur.color }}>ドラッグで追加</span>}
             </div>
-            <div className="shifttab-body">
+            <div className="shifttab-body shifttab-body--cal-only">
               <ShiftCalendar year={month.y} month={month.m} avail={avail} memberId={memberId}
                 onPaint={(dates, on) => onPaintAvail(memberId, dates, on)} onChangeMonth={changeMonth} />
-
-              <div className="srule-wrap">
-                <div className="srule-h">
-                  <b>この月の担当</b>
-                  <span className="fl-h">日付をドラッグでなぞるか、上の曜日をクリックすると一括で切り替わります。編集後は「変更を確定」でまとめて保存します。</span>
-                </div>
-                <ShiftLegend members={members} avail={avail} month={month} onPickMember={setMemberId} />
-              </div>
             </div>
           </div>
         </div>
@@ -171,6 +163,7 @@ function SettingsScreen({
           emailConfigured={emailConfigured} discordConfigured={discordConfigured}
           members={members} />
       )}
+      </div>
     </div>
   );
 }

@@ -540,7 +540,7 @@ export function AdminDesignApp() {
       <main className="main-content" data-testid="management-app">
         <div className="page-head">
           <div style={{ minWidth: 0 }}>
-            <span className="badge">校内設備 / 自然科学部 3Dモデル班</span>
+            <span className="badge">自然科学部 3Dモデル班</span>
             <h1 className="page-heading">
               {screen === 'reserve'
                 ? '3Dプリント 申請の管理'

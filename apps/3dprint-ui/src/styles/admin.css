@@ -398,7 +398,8 @@ a{color:var(--color-primary)}
 
 /* ── 画面2 ── */
 .set-wrap{display:grid;gap:14px}
-.set-tabs{display:flex;gap:2px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:3px;box-shadow:var(--shadow-sm);justify-self:start}
+.set-tab-stage{min-height:520px;display:grid;align-content:start}
+.set-tabs{display:flex;gap:2px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:3px;box-shadow:var(--shadow-sm);justify-self:start;width:fit-content;max-width:100%}
 .set-tabs button{border:0;background:none;border-radius:var(--radius-sm);padding:7px 15px;font-size:12.5px;font-weight:600;color:var(--color-text-muted);cursor:pointer;transition:.15s;white-space:nowrap}
 .set-tabs button:hover{color:var(--color-text)}
 .set-tabs button.on{background:var(--color-primary-soft);color:var(--color-primary-dark);box-shadow:var(--shadow-seg)}
@@ -411,7 +412,7 @@ a{color:var(--color-primary)}
 .memberpick{padding:12px 16px 14px}
 .mp-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .mp-h b{font-size:13px;font-weight:700;color:var(--color-heading)}
-.mp-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.mp-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,max-content));gap:8px;justify-content:start}
 .mp{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);cursor:pointer;text-align:left;transition:.15s;min-height:48px}
 .mp:hover{background:var(--color-surface-muted)}
 .mp.on{box-shadow:var(--shadow-seg)}
@@ -422,6 +423,7 @@ a{color:var(--color-primary)}
 .mp-count{font-size:10px;font-weight:700;color:var(--color-text-muted);flex-shrink:0}
 
 .shifttab-body{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;padding:14px 16px 16px}
+.shifttab-body--cal-only{grid-template-columns:minmax(0,1fr);max-width:640px}
 .scal{min-width:0}
 .scal-h{display:flex;align-items:center;gap:6px;margin-bottom:8px}
 .scal-h b{font-size:13px;font-weight:700;color:var(--color-heading)}
@@ -448,9 +450,9 @@ a{color:var(--color-primary)}
 .scal-wd.all.sat{background:#7c8ba4}
 .scal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;touch-action:none;-webkit-user-select:none;user-select:none}
 .scal-grid.painting{cursor:crosshair}
-.scal-cell{position:relative;display:grid;place-items:center;min-height:52px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);cursor:pointer;transition:background .1s,border-color .1s;padding:0}
+.scal-cell{position:relative;display:flex;align-items:center;justify-content:center;min-height:58px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);cursor:pointer;transition:background .1s,border-color .1s;padding:6px 4px}
 .scal-cell .num{font-size:11.5px;font-weight:700;color:var(--color-text);line-height:1}
-.scal-cell.pad{background:transparent;border:0;cursor:default;min-height:52px}
+.scal-cell.pad{background:transparent;border:0;cursor:default;min-height:58px}
 .scal-cell.sun .num{color:#a8584a}
 .scal-cell.sat .num{color:#5d7ca8}
 .scal-cell.today{box-shadow:inset 0 0 0 1.5px var(--color-heading)}
@@ -459,7 +461,7 @@ a{color:var(--color-primary)}
 .scal-cell.on{border-color:transparent;background:var(--color-primary-soft)}
 .scal-cell.on .num{color:var(--color-primary-dark)}
 .scal-cell.mine .num{font-weight:700}
-.scal-cell .scal-dots{display:flex;gap:2px;align-items:center;position:absolute;bottom:5px;left:0;right:0;justify-content:center}
+.scal-cell .scal-dots{display:flex;gap:3px;align-items:center;justify-content:center;flex-wrap:wrap;max-width:100%;padding:0 4px}
 .scal-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
 .scal-dot.more{width:auto;height:auto;border-radius:0;background:none !important;font-size:7px;font-weight:700;color:var(--color-text-faint);line-height:1}
 .scal-cell.pv-on{background:var(--color-primary-soft);border-color:var(--color-primary)}
