@@ -10,6 +10,12 @@ export function applicationFormPdfR2Key(reservationId: string): string {
   return `print/applications/${reservationId}/application-form.pdf`;
 }
 
+/** Discord attachment filename for the application-form PDF. */
+export function applicationFormPdfDiscordFilename(reservationId: string): string {
+  const safe = reservationId.replace(/[^\w.-]/g, '_');
+  return `application-form-${safe || 'reservation'}.pdf`;
+}
+
 function logPersistFailure(
   stage: string,
   reservationId: string,
@@ -65,4 +71,29 @@ export async function persistApplicationFormPdf(
     logPersistFailure('persist', reservationId, err);
     return null;
   }
+}
+
+/** Loads application-form PDF from R2, generating and persisting if missing. */
+export async function ensureApplicationFormPdfBytes(
+  env: ApplicationFormPdfRenderEnv,
+  db: D1Database,
+  reservation: Reservation,
+  printer: Printer | undefined
+): Promise<{ bytes: Uint8Array; filename: string } | null> {
+  const filename = applicationFormPdfDiscordFilename(reservation.id);
+  const r2Key =
+    reservation.application_form_pdf_r2_key ?? applicationFormPdfR2Key(reservation.id);
+  try {
+    const obj = await env.FILES.get(r2Key);
+    if (obj) {
+      const bytes = new Uint8Array(await obj.arrayBuffer());
+      return { bytes, filename };
+    }
+  } catch (err) {
+    logPersistFailure('load_r2', reservation.id, err, { r2Key });
+  }
+
+  const persisted = await persistApplicationFormPdf(env, db, reservation, printer);
+  if (!persisted) return null;
+  return { bytes: persisted.bytes, filename };
 }

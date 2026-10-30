@@ -85,7 +85,9 @@ import {
   build3dPrintAdminDeepLink,
 } from "../../lib/3dprint/application-form-text";
 import {
+  applicationFormPdfDiscordFilename,
   applicationFormPdfR2Key,
+  ensureApplicationFormPdfBytes,
   persistApplicationFormPdf,
 } from "../../lib/3dprint/application-form-pdf";
 import {
@@ -2426,40 +2428,42 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           assigned_staff_homeroom: member.homeroom,
           action_label: "予約受領",
         });
-        const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(context.request, env), {
-          date: finalReservation.desired_date,
-          appId: finalReservation.id,
-        });
-        const applicationFormText = await applicationFormTextFor(
-          db,
-          finalReservation,
-          printerMap
-        );
+        const printerForPdf = finalReservation.printer_id
+          ? printerMap.get(finalReservation.printer_id)
+          : undefined;
         context.waitUntil(
-          Promise.all([
-            sendApplicantAcceptedEmail(
+          (async () => {
+            const pdf = await ensureApplicationFormPdfBytes(
               env,
               db,
-              context.request,
-              finalReservation.user_id,
               finalReservation,
-              formatMemberLabel(member),
-              opSummary
-            ),
-            notifyReservationStaffAssigned(env.DISCORD_WEBHOOK_URL, {
-              staffMember: member,
-              applicationFormText,
-              adminDeepLink: deepLink,
-            }),
-            insertAdminLog(db, {
-              actor: formatPrintActorLogLabel(actor),
-              type: "status",
-              text: `予約「${finalReservation.title}」を受領（${memberDisplayName(member)}）`,
-              app_id: finalReservation.id,
-              actor_user_id: actor.user_id,
-              actor_member_id: actor.member_id,
-            }),
-          ]).catch((err) => console.error("accept notify failed", err))
+              printerForPdf
+            );
+            await Promise.all([
+              sendApplicantAcceptedEmail(
+                env,
+                db,
+                context.request,
+                finalReservation.user_id,
+                finalReservation,
+                formatMemberLabel(member),
+                opSummary
+              ),
+              notifyReservationStaffAssigned(env.DISCORD_WEBHOOK_URL, {
+                staffMember: member,
+                pdfBytes: pdf?.bytes,
+                pdfFilename: pdf?.filename ?? applicationFormPdfDiscordFilename(finalReservation.id),
+              }),
+              insertAdminLog(db, {
+                actor: formatPrintActorLogLabel(actor),
+                type: "status",
+                text: `予約「${finalReservation.title}」を受領（${memberDisplayName(member)}）`,
+                app_id: finalReservation.id,
+                actor_user_id: actor.user_id,
+                actor_member_id: actor.member_id,
+              }),
+            ]);
+          })().catch((err) => console.error("accept notify failed", err))
         );
       }
 
