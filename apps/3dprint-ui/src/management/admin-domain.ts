@@ -174,7 +174,7 @@ export function exportCSV(
   fromStr: string,
   toStr: string,
   members: AdminMember[],
-  shiftMap: Record<string, string | null>
+  shiftMap: Record<string, string | null> = {}
 ) {
   const rows = apps
     .filter((a) => a.date >= fromStr && a.date <= toStr)
@@ -211,7 +211,7 @@ export function exportCSV(
         WD[d.getDay()],
         minsLabel(sp.start),
         minsLabel(sp.end),
-        MACHINE_MAP[a.machine].name,
+        MACHINE_MAP[a.machine]?.name ?? a.machine,
         KIND[a.kind],
         a.title,
         a.who.name,

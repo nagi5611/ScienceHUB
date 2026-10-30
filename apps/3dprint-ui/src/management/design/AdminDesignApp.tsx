@@ -26,9 +26,8 @@ import {
   loadIntegrations,
   saveIntegrations,
 } from '../admin-design-domain';
-import { dateLabel, dateLabelW } from '../admin-domain';
+import { availabilityToShiftMap, dateLabel, dateLabelW } from '../admin-domain';
 import {
-  calendarRangeForSelected,
   mapAdminAppToDesign,
   designStatusToDbStatus,
   availabilityRowsToMemberAvail,
@@ -39,6 +38,7 @@ import {
   toDesignMembers,
   colorIndexFromDesign,
   applicationsToCsv,
+  monthRangeForSelected,
   defaultIntegrationsState,
   type DesignApplication,
   type DesignMember,
@@ -110,7 +110,7 @@ export function AdminDesignApp() {
   }, []);
 
   const reloadApps = React.useCallback(async (anchor: string) => {
-    const { from, to } = calendarRangeForSelected(anchor);
+    const { from, to } = monthRangeForSelected(anchor);
     const [{ applications }, cancelled] = await Promise.all([
       fetchApplicationsRange(from, to),
       fetchCancelledApplicationsRange(from, to),
@@ -550,19 +550,25 @@ export function AdminDesignApp() {
   };
 
   const csv = () => {
-    const from = weekStart(parseYmd(selected));
-    const to = addDays(from, 27);
-    const text = applicationsToCsv(apps, ymd(from), ymd(to), members.map((m) => ({ id: m.id, name: m.name })));
-    const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `3dprint_${ymd(from)}_${ymd(to)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('CSVを書き出しました', `${mdLabel(from)}–${mdLabel(to)}`);
+    try {
+      const { from, to } = monthRangeForSelected(selected);
+      const shiftMap = availabilityToShiftMap(memberAvailToRows(avail));
+      const memberRows = members.map((m) => ({ id: m.id, name: m.name }));
+      const text = applicationsToCsv(apps, from, to, memberRows, shiftMap);
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `3dprint_${from}_${to}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const rowCount = Math.max(0, text.split(/\r?\n/).length - 1);
+      showToast('CSVを書き出しました', `${from}–${to}（${rowCount}行）`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'CSVの書き出しに失敗しました', 'エラー');
+    }
   };
 
   const pending = pendingQueue(apps);

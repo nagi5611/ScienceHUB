@@ -232,11 +232,20 @@ export function applicationsToCsv(
   apps: DesignApplication[],
   from: string,
   to: string,
-  members: AdminMember[]
+  members: AdminMember[],
+  shiftMap: Record<string, string | null> = {}
 ): string {
   const mapped = apps.map((a) => ({
     ...a,
     status: a.status === 'cancelled' ? ('rejected' as UiStatus) : (a.status as UiStatus),
   })) as AdminApplication[];
-  return exportCSV(mapped, from, to, members);
+  return exportCSV(mapped, from, to, members, shiftMap);
+}
+
+/** Inclusive calendar month bounds for the anchor date (YYYY-MM-DD). */
+export function monthRangeForSelected(selected: string): { from: string; to: string } {
+  const d = parseYmd(selected);
+  const from = ymd(new Date(d.getFullYear(), d.getMonth(), 1));
+  const to = ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  return { from, to };
 }
