@@ -157,8 +157,52 @@ function agoLabel(iso) {
 }
 const logTime = iso => { const d = new Date(iso); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
 
+/* ── エクスポート（CSV / Excel） ── */
+function ExportMenu({ onExport }) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const pick = (format) => {
+    setOpen(false);
+    onExport(format);
+  };
+
+  return (
+    <div className="hdr-export" ref={rootRef}>
+      <button
+        type="button"
+        className="hdr-link hdr-export-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        エクスポート <span aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="hdr-export-menu" role="menu">
+          <button type="button" role="menuitem" className="hdr-export-item" onClick={() => pick('csv')}>
+            CSV
+          </button>
+          <button type="button" role="menuitem" className="hdr-export-item" onClick={() => pick('xlsx')}>
+            Excel (XLSX)
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ── ヘッダー ── */
-function Header({ screen, setScreen, operatorSession, pendingCount, onCsv }) {
+function Header({ screen, setScreen, operatorSession, pendingCount, onExport }) {
   return (
     <header className="site-header">
       <div className="header-inner">
@@ -196,7 +240,7 @@ function Header({ screen, setScreen, operatorSession, pendingCount, onCsv }) {
               <span className="actor-staff actor-staff-warn">／印刷担当未紐づけ</span>
             )}
           </div>
-          {screen === 'reserve' && <button type="button" className="hdr-link" onClick={onCsv}>CSV出力</button>}
+          {screen === 'reserve' && onExport ? <ExportMenu onExport={onExport} /> : null}
           <a className="hdr-link" href="/apps/3dprint-reservation/">申請フォーム</a>
         </div>
       </div>

@@ -64,6 +64,8 @@ export function downloadPrintHistoryCsv(reservations: AdminReservation[]): void 
   const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
   a.download = `3dprint_history_${stamp}.csv`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -228,15 +228,46 @@ export function defaultIntegrationsState(): IntegrationsState {
   return JSON.parse(JSON.stringify(DEFAULT_INTEG)) as IntegrationsState;
 }
 
+function mapDesignAppsForExport(apps: DesignApplication[]): AdminApplication[] {
+  return apps.map((a) => ({
+    ...a,
+    status: a.status === 'cancelled' ? ('rejected' as UiStatus) : (a.status as UiStatus),
+  })) as AdminApplication[];
+}
+
 export function applicationsToCsv(
   apps: DesignApplication[],
   from: string,
   to: string,
-  members: AdminMember[]
+  members: AdminMember[],
+  shiftMap: Record<string, string | null> = {}
 ): string {
-  const mapped = apps.map((a) => ({
-    ...a,
-    status: a.status === 'cancelled' ? ('rejected' as UiStatus) : (a.status as UiStatus),
-  })) as AdminApplication[];
-  return exportCSV(mapped, from, to, members);
+  return exportCSV(mapDesignAppsForExport(apps), from, to, members, shiftMap);
+}
+
+export async function applicationsToXlsxBuffer(
+  apps: DesignApplication[],
+  from: string,
+  to: string,
+  members: AdminMember[],
+  shiftMap: Record<string, string | null> = {}
+): Promise<ArrayBuffer> {
+  const { buildApplicationsXlsxBuffer } = await import('./application-export-xlsx');
+  return buildApplicationsXlsxBuffer(
+    mapDesignAppsForExport(apps),
+    from,
+    to,
+    members,
+    shiftMap
+  );
+}
+
+export type ApplicationExportFormat = 'csv' | 'xlsx';
+
+/** Inclusive calendar month bounds for the anchor date (YYYY-MM-DD). */
+export function monthRangeForSelected(selected: string): { from: string; to: string } {
+  const d = parseYmd(selected);
+  const from = ymd(new Date(d.getFullYear(), d.getMonth(), 1));
+  const to = ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  return { from, to };
 }
