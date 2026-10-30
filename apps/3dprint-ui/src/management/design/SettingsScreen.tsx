@@ -22,9 +22,29 @@ import {
 } from './AdminDesignUi';
 import { ShiftCalendar, MemberForm, Integrations } from './ShiftsPanels';
 
-function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveMember, onSetAvail, onPaintAvail,
-  integrations, setIntegrations, onTestDiscord, onTestDiscordMention, onTestGcal, onTestEmail, emailConfigured,
-  discordConfigured, log, pendingPre }) {
+function SettingsScreen({
+  members,
+  avail,
+  onAddMember,
+  onUpdateMember,
+  onRemoveMember,
+  onPaintAvail,
+  shiftDraftPending,
+  shiftApplying,
+  onConfirmShiftDraft,
+  onDiscardShiftDraft,
+  onLoadShiftMonth,
+  integrations,
+  setIntegrations,
+  onTestDiscord,
+  onTestDiscordMention,
+  onTestGcal,
+  onTestEmail,
+  emailConfigured,
+  discordConfigured,
+  log,
+  pendingPre,
+}) {
   const [tab, setTab] = React.useState(pendingPre || 'shift');
   const [memberId, setMemberId] = React.useState(members[0] ? members[0].id : null);
   const [month, setMonth] = React.useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
@@ -34,6 +54,15 @@ function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveM
     if (members.length && !members.find(m => m.id === memberId)) setMemberId(members[0].id);
   }, [members]);
 
+  const loadedMonthKey = React.useRef('');
+  React.useEffect(() => {
+    if (tab !== 'shift' || shiftDraftPending) return;
+    const key = `${month.y}-${month.m}`;
+    if (loadedMonthKey.current === key) return;
+    loadedMonthKey.current = key;
+    void onLoadShiftMonth(month.y, month.m);
+  }, [tab, month.y, month.m, onLoadShiftMonth, shiftDraftPending]);
+
   const tabs = [
     ['shift', 'シフト表'],
     ['member', '担当者'],
@@ -41,6 +70,14 @@ function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveM
   ];
 
   const changeMonth = n => {
+    if (shiftDraftPending) {
+      const msg = n === 0
+        ? '未保存のシフト変更があります。破棄して今月へ移動しますか？'
+        : '未保存のシフト変更があります。破棄して月を移動しますか？';
+      if (!window.confirm(msg)) return;
+      onDiscardShiftDraft();
+      loadedMonthKey.current = '';
+    }
     if (n === 0) { const d = new Date(); setMonth({ y: d.getFullYear(), m: d.getMonth() + 1 }); return; }
     setMonth(prev => {
       let y = prev.y, m = prev.m + n;
@@ -63,10 +100,24 @@ function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveM
 
       {tab === 'shift' && (
         <div className="shifttab">
+          {shiftDraftPending && (
+            <div className="shift-confirm-bar" role="status">
+              <span className="shift-confirm-bar-text">未保存のシフト変更があります</span>
+              <div className="shift-confirm-bar-actions">
+                <button type="button" className="btn btn-secondary btn-sm" disabled={shiftApplying} onClick={onDiscardShiftDraft}>
+                  変更を破棄
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={shiftApplying} onClick={onConfirmShiftDraft}>
+                  {shiftApplying ? '保存中…' : '変更を確定'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="card memberpick">
             <div className="mp-h">
               <b>担当者を選んで、日付を塗る</b>
-              <span className="fl-h">選択した担当者の稼働日をカレンダー上で直接追加・削除できます。</span>
+              <span className="fl-h">選択した担当者の稼働日をカレンダー上で直接追加・削除できます。確定するまでサーバーには保存されません。</span>
             </div>
             <div className="mp-list">
               {members.map(m => {
@@ -100,16 +151,11 @@ function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveM
               <div className="srule-wrap">
                 <div className="srule-h">
                   <b>この月の担当</b>
-                  <span className="fl-h">日付をドラッグでなぞるか、上の曜日をクリックすると一括で切り替わります。</span>
+                  <span className="fl-h">日付をドラッグでなぞるか、上の曜日をクリックすると一括で切り替わります。編集後は「変更を確定」でまとめて保存します。</span>
                 </div>
                 <ShiftLegend members={members} avail={avail} month={month} onPickMember={setMemberId} />
               </div>
             </div>
-          </div>
-
-          <div className="card">
-            <div className="card-h"><b>この4週間のシフト</b><span className="meta">日付ごとの担当</span></div>
-            <ShiftOverview members={members} avail={avail} onSetAvail={onSetAvail} />
           </div>
         </div>
       )}
@@ -153,46 +199,4 @@ function ShiftLegend({ members, avail, month, onPickMember }) {
   );
 }
 
-/* 日付ごとの担当（横断表示・その場で切替） */
-function ShiftOverview({ members, avail, onSetAvail }) {
-  const [offset, setOffset] = React.useState(0);
-  const base = addDays(weekStart(todayDate()), offset * 28);
-  const days = [];
-  for (let i = 0; i < 28; i++) days.push(addDays(base, i));
-
-  return (
-    <div className="sover">
-      <div className="sover-h">
-        <span className="num">{mdLabel(days[0])}〜{mdLabel(days[27])}</span>
-        <div className="right">
-          <button type="button" className="mini" onClick={() => setOffset(o => o - 1)}>‹ 前</button>
-          <button type="button" className="mini" onClick={() => setOffset(0)}>今日</button>
-          <button type="button" className="mini" onClick={() => setOffset(o => o + 1)}>次 ›</button>
-        </div>
-      </div>
-      <div className="sover-list">
-        {days.map(d => {
-          const ds = ymd(d);
-          const wd = d.getDay();
-          const ids = staffIdsOn(ds);
-          const past = ds < TODAY;
-          return (
-            <div className={'sover-row' + (wd === 0 || wd === 6 ? ' we' : '') + (past ? ' past' : '') + (ds === TODAY ? ' today' : '')} key={ds}>
-              <span className="sover-d num">{mdLabel(d)}<span>{WD[wd]}</span></span>
-              <span className="sover-opts">
-                {members.map(m => (
-                  <button type="button" key={m.id} className={ids.indexOf(m.id) >= 0 ? 'on' : ''}
-                    style={ids.indexOf(m.id) >= 0 ? { color: m.color, borderColor: m.color, background: m.color + '14' } : undefined}
-                    onClick={() => onSetAvail(m.id, ds, ids.indexOf(m.id) < 0)}>
-                    {m.name}
-                  </button>
-                ))}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-export { SettingsScreen, ShiftLegend, ShiftOverview };
+export { SettingsScreen, ShiftLegend };

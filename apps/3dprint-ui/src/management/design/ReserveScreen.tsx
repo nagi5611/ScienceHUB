@@ -20,6 +20,7 @@ import {
   Header, Calendar, CalDay, dayHint, Drawer, Modal, Toast,
   DLIcon, downloadAppFile, downloadDay, saveText,
 } from './AdminDesignUi';;
+import { StlBlock } from '../components/StlBlock';
 
 function SlotGrid({ app, selected, onToggle, disabled }) {
   const sp = spanOf(app);
@@ -214,29 +215,6 @@ function SlotActions({ app, onPartial, onCancelAll, onMove }) {
   );
 }
 
-function StlBlock({ app }) {
-  const size = app.fileSize ? (app.fileSize / 1048576).toFixed(2) + ' MB' : null;
-  return (
-    <div className="stl">
-      <div className="stl-canvas">
-        <span className="stl-tag">{app.kind === 'request' ? 'STL' : 'RESERVE'}</span>
-        <span className="stl-note">{app.kind === 'request' ? 'サムネイル未生成' : 'データ提出なし'}</span>
-      </div>
-      <div className="stl-meta">
-        <span className="stl-ext">{app.file ? app.file.split('.').pop().toUpperCase() : '—'}</span>
-        <span className="stl-name">
-          <b className="num">{app.file || 'データなし（予約のみ）'}</b>
-          <span>{size ? `${size} ・ 更新 ${agoLabel(app.createdAt)}` : '予約枠のみの申請'}</span>
-        </span>
-        <span className="stl-actions">
-          <button type="button" className="mini" disabled={!app.file}>DL</button>
-          <button type="button" className="mini" disabled={!app.file}>開く</button>
-        </span>
-      </div>
-    </div>
-  );
-}
-
 /* 申請の詳細（ドロワー） */
 function AppSheet({ app, onClose, onPartial, onCancelAll, onMove, log }) {
   if (!app) return null;
@@ -425,4 +403,4 @@ function ReserveScreen({ apps, selected, onPick, onOpen, onApprove, onCancel, on
     </div>
   );
 }
-export { SlotGrid, SlotActions, StlBlock, AppSheet, ReserveScreen };
+export { SlotGrid, SlotActions, AppSheet, ReserveScreen };
