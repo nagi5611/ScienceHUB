@@ -45,6 +45,8 @@ import {
   rescheduleReservation,
   splitApplicationSlots,
   fetchApplicationsRange,
+  fetchCancelledApplicationsRange,
+  restoreAdminReservation,
   fetchMembers,
   createMember,
   deleteMember,
@@ -92,8 +94,14 @@ export function AdminDesignApp() {
 
   const reloadApps = React.useCallback(async (anchor: string) => {
     const { from, to } = calendarRangeForSelected(anchor);
-    const { applications } = await fetchApplicationsRange(from, to);
-    setApps(applications.map((row) => mapAdminAppToDesign(row)));
+    const [{ applications }, cancelled] = await Promise.all([
+      fetchApplicationsRange(from, to),
+      fetchCancelledApplicationsRange(from, to),
+    ]);
+    const merged = new Map<string, DesignApplication>();
+    for (const row of applications) merged.set(row.id, mapAdminAppToDesign(row));
+    for (const row of cancelled.applications) merged.set(row.id, mapAdminAppToDesign(row));
+    setApps([...merged.values()]);
   }, []);
 
   const refreshAll = React.useCallback(async () => {
@@ -149,6 +157,22 @@ export function AdminDesignApp() {
       }
     })();
   }, [refreshAll]);
+
+  React.useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const sel = params.get('selected');
+    const appId = params.get('app');
+    if (sel && /^\d{4}-\d{2}-\d{2}$/.test(sel)) setSelected(sel);
+    if (appId) {
+      const found = apps.find((a) => a.id === appId);
+      if (found) {
+        setSelected(found.date);
+        setDetail(found);
+        setDetailMode('view');
+      }
+    }
+  }, [loading, apps]);
 
   React.useEffect(() => {
     savePrefs({ screen, selected, actor });
@@ -224,6 +248,8 @@ export function AdminDesignApp() {
       if (status === 'approved' && app.status === 'pending') {
         if (!staffId) throw new Error('操作者を選択してください');
         await acceptReservation(app.id, staffId);
+      } else if (app.status === 'cancelled' && status === 'pending') {
+        await restoreAdminReservation(app.id);
       } else {
         await patchReservation(app.id, { status: designStatusToDbStatus(status) });
       }

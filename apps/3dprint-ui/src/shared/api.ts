@@ -65,6 +65,17 @@ export async function cancelReservation(id: string): Promise<void> {
   await apiRequest(`reservations/${id}/cancel`, { method: 'POST', body: '{}' });
 }
 
+export async function restoreReservation(id: string): Promise<{ application: Application }> {
+  return apiRequest(`reservations/${id}/restore`, { method: 'POST', body: '{}' });
+}
+
+export async function fetchCancelledApplications(from: string, to: string): Promise<{
+  applications: Application[];
+}> {
+  const qs = new URLSearchParams({ from, to });
+  return apiRequest(`calendar/cancelled-applications?${qs}`);
+}
+
 export async function checkAppAccess(): Promise<{ allowed: boolean }> {
   const res = await fetch('/api/apps/3dprint-reservation/access', { credentials: 'include' });
   if (res.status === 403) return { allowed: false };

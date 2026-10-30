@@ -29,6 +29,7 @@ import {
   getMemberById,
   getReservationById,
   getReservationsInRange,
+  getCancelledReservationsInRange,
   getReservationsByDateAndPrinter,
   getUserUpcomingReservations,
   getUserRecentPastReservations,
@@ -67,6 +68,11 @@ import {
   notifyReservationModified,
   sendDiscordStaffMentionTest,
 } from "../../lib/3dprint/discord";
+import {
+  buildPrintApplicationFormText,
+  build3dPrintAdminDeepLink,
+} from "../../lib/3dprint/application-form-text";
+import { softCancelReservation, restoreCancelledReservation } from "../../lib/3dprint/cancel-restore";
 import {
   build3dPrintReservationAppUrl,
   notifyApplicantPrintReservationEmail,
@@ -369,6 +375,15 @@ async function buildMemberMap(db: D1Database): Promise<Map<string, Member>> {
   return new Map(members.map((m) => [m.id, m]));
 }
 
+async function applicationFormTextFor(
+  db: D1Database,
+  reservation: Reservation,
+  printerMap: Map<string, Printer>
+): Promise<string> {
+  const printer = reservation.printer_id ? printerMap.get(reservation.printer_id) : undefined;
+  return buildPrintApplicationFormText(db, reservation, printer);
+}
+
 /** Sends「予約申請受付」email to the applicant (non-blocking). */
 async function sendApplicantAppliedEmail(
   env: Env,
@@ -378,6 +393,7 @@ async function sendApplicantAppliedEmail(
   reservation: Reservation
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
+  const applicationFormText = await applicationFormTextFor(db, reservation, printerMap);
   await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
     kind: "applied",
     reservation: {
@@ -388,6 +404,56 @@ async function sendApplicantAppliedEmail(
     },
     printerName: resolvePrinterLabel(reservation, printerMap),
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    applicationFormText,
+  });
+}
+
+async function notifyNewApplicationDiscordAndEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  reservation: Reservation,
+  applicantUserId: string
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  const printer = reservation.printer_id ? printerMap.get(reservation.printer_id) : undefined;
+  const applicationFormText = await buildPrintApplicationFormText(db, reservation, printer);
+  const adminDeepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
+    date: reservation.desired_date,
+    appId: reservation.id,
+  });
+  await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
+    title: reservation.title,
+    desired_date: reservation.desired_date,
+    print_scale: reservation.print_scale,
+    applicationFormText,
+    adminDeepLink,
+  });
+  await sendApplicantAppliedEmail(env, db, request, applicantUserId, reservation);
+}
+
+async function sendApplicantRescheduledEmail(
+  env: Env,
+  db: D1Database,
+  request: Request,
+  applicantUserId: string,
+  reservation: Reservation,
+  previousDate: string
+): Promise<void> {
+  const printerMap = await buildPrinterMap(db);
+  const applicationFormText = await applicationFormTextFor(db, reservation, printerMap);
+  await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
+    kind: "rescheduled",
+    reservation: {
+      id: reservation.id,
+      title: reservation.title,
+      desired_date: reservation.desired_date,
+      print_scale: reservation.print_scale,
+    },
+    printerName: resolvePrinterLabel(reservation, printerMap),
+    previousDate,
+    reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
+    applicationFormText,
   });
 }
 
@@ -630,7 +696,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   const segments = parsePath(params.path as string);
   const method = request.method;
   const db = getDb(env);
-  const adminUrl = build3dPrintAdminUrl(getOAuthRedirectBase(request, env));
 
   if (method === "OPTIONS") {
     return new Response(null, {
@@ -942,20 +1007,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        (async () => {
-          await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-            title: reservation.title,
-            desired_date: reservation.desired_date,
-            print_scale: reservation.print_scale,
-          });
-          await sendApplicantAppliedEmail(
-            env,
-            db,
-            context.request,
-            userId,
-            reservation
-          );
-        })()
+        notifyNewApplicationDiscordAndEmail(
+          env,
+          db,
+          context.request,
+          reservation,
+          userId
+        )
       );
 
       return json({ id: reservation.id, message: "予約申請を受け付けました" }, 201);
@@ -988,6 +1046,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         }
       }
       return json({ applications, staff_dates: staffDates, from, to });
+    }
+
+    // GET /api/3dprint/calendar/cancelled-applications
+    if (
+      method === "GET" &&
+      segments[0] === "calendar" &&
+      segments[1] === "cancelled-applications" &&
+      segments.length === 2
+    ) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return error("from と to (YYYY-MM-DD) が必要です");
+      }
+      const rows = await getCancelledReservationsInRange(db, from, to, {
+        userId,
+        source: "standard",
+      });
+      const printerMap = await buildPrinterMap(db);
+      const applications = rows
+        .map((r) => reservationToApplication(r, printerMap, { viewerId: userId }))
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+      return json({ applications, from, to });
     }
 
     // GET /api/3dprint/calendar/reservation-list
@@ -1238,20 +1319,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const printerMap = await buildPrinterMap(db);
 
         context.waitUntil(
-          (async () => {
-            await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-              title: created.title,
-              desired_date: created.desired_date,
-              print_scale: created.print_scale,
-            });
-            await sendApplicantAppliedEmail(
-              env,
-              db,
-              context.request,
-              userId,
-              created
-            );
-          })()
+          notifyNewApplicationDiscordAndEmail(
+            env,
+            db,
+            context.request,
+            created,
+            userId
+          )
         );
 
         return json({
@@ -1278,10 +1352,34 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("この予約にアクセスする権限がありません", 403);
       }
 
-      await deleteCalendarEvent(env, reservation.google_event_id);
-      await env.FILES.delete(reservation.stl_r2_key);
-      await deleteReservation(db, segments[1]);
-      return json({ ok: true, message: "予約を取り消しました" });
+      try {
+        await softCancelReservation(env, db, segments[1], { byUser: true });
+        return json({ ok: true, message: "予約を取り消しました" });
+      } catch (err) {
+        return error(err instanceof Error ? err.message : "取り消しに失敗しました");
+      }
+    }
+
+    // POST /api/3dprint/reservations/:id/restore
+    if (
+      method === "POST" &&
+      segments[0] === "reservations" &&
+      segments[2] === "restore" &&
+      segments.length === 3
+    ) {
+      const reservation = await getReservationById(db, segments[1]);
+      if (!reservation) return error("予約が見つかりません", 404);
+      if (reservation.user_id !== userId) {
+        return error("この予約にアクセスする権限がありません", 403);
+      }
+      try {
+        const restored = await restoreCancelledReservation(db, segments[1], { isAdmin: false });
+        const printerMap = await buildPrinterMap(db);
+        const app = reservationToApplication(restored, printerMap, { viewerId: userId });
+        return json({ ok: true, application: app, message: "取り消しを取消しました" });
+      } catch (err) {
+        return error(err instanceof Error ? err.message : "復元に失敗しました", 409);
+      }
     }
 
     // GET /api/3dprint/calendar/availability
@@ -1468,20 +1566,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       await createReservation(db, reservation);
 
       context.waitUntil(
-        (async () => {
-          await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-            title: reservation.title,
-            desired_date: reservation.desired_date,
-            print_scale: reservation.print_scale,
-          });
-          await sendApplicantAppliedEmail(
-            env,
-            db,
-            context.request,
-            targetUserId,
-            reservation
-          );
-        })()
+        notifyNewApplicationDiscordAndEmail(
+          env,
+          db,
+          context.request,
+          reservation,
+          targetUserId
+        )
       );
 
       const memberMap = await buildMemberMap(db);
@@ -1581,6 +1672,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({
         reservations: reservations.map((r) => enrichReservationForAdmin(r, memberMap, printerMap)),
       });
+    }
+
+    // GET /api/3dprint/admin/reservations/:id/application-form
+    if (
+      method === "GET" &&
+      segments[1] === "reservations" &&
+      segments[3] === "application-form" &&
+      segments.length === 4
+    ) {
+      const reservation = await getReservationById(db, segments[2]);
+      if (!reservation) return error("予約が見つかりません", 404);
+      const printerMap = await buildPrinterMap(db);
+      const printer = reservation.printer_id ? printerMap.get(reservation.printer_id) : undefined;
+      const text = await buildPrintApplicationFormText(db, reservation, printer);
+      return json({ text, reservation_id: reservation.id });
     }
 
     // GET /api/3dprint/admin/reservations/:id
@@ -1747,16 +1853,70 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return error("desired_date が不正です");
       }
 
+      const existing = await getReservationById(db, segments[2]);
+      if (!existing) return error("予約が見つかりません", 404);
+      const previousDate = existing.desired_date;
+
       try {
         const updated = await adminRescheduleReservation(env, segments[2], body.desired_date, {
           force: Boolean(body.force),
         });
+        if (updated.user_id && updated.desired_date !== previousDate) {
+          void sendApplicantRescheduledEmail(
+            env,
+            db,
+            request,
+            updated.user_id,
+            updated,
+            previousDate
+          ).catch((err) => console.error("reschedule email failed", err));
+        }
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
         return json({ reservation: enrichReservationForAdmin(updated, memberMap, printerMap) });
       } catch (err) {
         return error(err instanceof Error ? err.message : "リスケに失敗しました");
       }
+    }
+
+    // POST /api/3dprint/admin/reservations/:id/restore
+    if (
+      method === "POST" &&
+      segments[1] === "reservations" &&
+      segments[3] === "restore" &&
+      segments.length === 4
+    ) {
+      try {
+        const restored = await restoreCancelledReservation(db, segments[2], { isAdmin: true });
+        const memberMap = await buildMemberMap(db);
+        const printerMap = await buildPrinterMap(db);
+        return json({
+          ok: true,
+          reservation: enrichReservationForAdmin(restored, memberMap, printerMap),
+        });
+      } catch (err) {
+        return error(err instanceof Error ? err.message : "復元に失敗しました", 409);
+      }
+    }
+
+    // GET /api/3dprint/admin/calendar/cancelled-applications
+    if (
+      method === "GET" &&
+      segments[1] === "calendar" &&
+      segments[2] === "cancelled-applications" &&
+      segments.length === 3
+    ) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return error("from と to (YYYY-MM-DD) が必要です");
+      }
+      const rows = await getCancelledReservationsInRange(db, from, to, { source: "standard" });
+      const printerMap = await buildPrinterMap(db);
+      const applications = rows
+        .map((r) => reservationToApplication(r, printerMap, {}))
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+      return json({ applications, from, to });
     }
 
     // POST /api/3dprint/admin/reservations/:id/accept

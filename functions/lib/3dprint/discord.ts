@@ -236,28 +236,44 @@ export async function notifyReservationModified(
   }
 }
 
+export type DiscordApplicationNotice = {
+  title: string;
+  desired_date: string;
+  print_scale: PrintScale;
+  applicationFormText?: string;
+  adminDeepLink: string;
+};
+
 /** Sends a Discord webhook notification for a new reservation application. */
 export async function notifyReservationApplication(
   webhookUrl: string | undefined,
-  adminUrl: string,
-  reservation: { title: string; desired_date: string; print_scale: PrintScale }
+  adminUrlOrNotice: string | DiscordApplicationNotice,
+  legacy?: { title: string; desired_date: string; print_scale: PrintScale }
 ): Promise<void> {
   if (!webhookUrl) return;
 
-  const scaleLabel = SCALE_LABELS[reservation.print_scale] ?? reservation.print_scale;
+  const notice: DiscordApplicationNotice =
+    typeof adminUrlOrNotice === 'string' && legacy
+      ? { ...legacy, adminDeepLink: adminUrlOrNotice }
+      : (adminUrlOrNotice as DiscordApplicationNotice);
+
+  const scaleLabel = SCALE_LABELS[notice.print_scale] ?? notice.print_scale;
+  const formSnippet = notice.applicationFormText?.trim()
+    ? `\n\`\`\`\n${notice.applicationFormText.trim().slice(0, 1800)}\n\`\`\``
+    : '';
 
   const payload = {
-    content: `新しい予約申請があります。\n${adminUrl}`,
+    content: `新しい予約申請があります。\n${notice.adminDeepLink}${formSnippet}`,
     embeds: [
       {
         title: '3D印刷 予約申請',
         color: 0xf6821f,
         fields: [
-          { name: 'タイトル', value: reservation.title, inline: true },
-          { name: '希望印刷日', value: reservation.desired_date, inline: true },
+          { name: 'タイトル', value: notice.title, inline: true },
+          { name: '希望印刷日', value: notice.desired_date, inline: true },
           { name: '印刷規模', value: scaleLabel, inline: true },
         ],
-        footer: { text: '管理画面で印刷担当を選び「予約を受領」してください' },
+        footer: { text: 'リンク先で該当日付が選択されます。担当者を選び「予約を受領」してください' },
       },
     ],
   };

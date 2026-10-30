@@ -21,6 +21,8 @@ import {
 } from '@shared/domain';
 import {
   fetchApplications,
+  fetchCancelledApplications,
+  restoreReservation,
   fetchPrinters,
   createTimeSlotReservation,
   cancelReservation,
@@ -31,7 +33,7 @@ import { SiteHeader, SiteFooter, Toast } from '@components/Chrome';
 import { Calendar } from '@components/Calendar';
 import { DayPanel } from '@components/Timetable';
 import { ApplicationPopover } from '@components/Popover';
-import { DetailSheet, MineSheet } from '@components/Sheets';
+import { DetailSheet, MineSheet, CancelledSheet } from '@components/Sheets';
 
 type Selection = { machine: 'ke' | 'cc'; start: number; end: number } | null;
 type Draft = {
@@ -62,6 +64,8 @@ export function ReservationApp() {
   });
   const [detail, setDetail] = React.useState<Application | null>(null);
   const [mineOpen, setMineOpen] = React.useState(false);
+  const [cancelledOpen, setCancelledOpen] = React.useState(false);
+  const [cancelledApps, setCancelledApps] = React.useState<Application[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   const showToast = React.useCallback((text: string, mark?: string) => {
@@ -78,8 +82,12 @@ export function ReservationApp() {
 
   const reloadApps = React.useCallback(async () => {
     const { from, to } = rangeForSelected;
-    const data = await fetchApplications(from, to);
+    const [data, cancelled] = await Promise.all([
+      fetchApplications(from, to),
+      fetchCancelledApplications(from, to),
+    ]);
     setApps(data.applications);
+    setCancelledApps(cancelled.applications);
     setStaffDates(data.staff_dates);
   }, [rangeForSelected]);
 
@@ -128,6 +136,7 @@ export function ReservationApp() {
   const mineCount = apps.filter(
     (a) => a.mine && (a.status === 'pending' || a.status === 'approved')
   ).length;
+  const cancelledCount = cancelledApps.filter((a) => a.mine).length;
 
   const pickDate = (ds: string) => {
     setSelected(ds);
@@ -253,9 +262,26 @@ export function ReservationApp() {
     }
   };
 
+  const restoreApp = async (id: string) => {
+    try {
+      await restoreReservation(id);
+      setDetail(null);
+      await reloadApps();
+      showToast('取り消しを取消しました', '復元');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '復元に失敗しました', 'エラー');
+    }
+  };
+
   return (
     <>
-      <SiteHeader mineCount={mineCount} onOpenMine={() => setMineOpen(true)} onNew={openNew} />
+      <SiteHeader
+        mineCount={mineCount}
+        cancelledCount={cancelledCount}
+        onOpenMine={() => setMineOpen(true)}
+        onOpenCancelled={() => setCancelledOpen(true)}
+        onNew={openNew}
+      />
       <div className="main-content" data-testid="reservation-app">
         {loading && <p data-testid="reservation-loading">読み込み中…</p>}
         <div className="page-head">
@@ -303,8 +329,21 @@ export function ReservationApp() {
         </div>
       </div>
       <SiteFooter />
-      <DetailSheet open={!!detail} app={detail} onClose={() => setDetail(null)} onCancel={cancelApp} />
+      <DetailSheet
+        open={!!detail}
+        app={detail}
+        onClose={() => setDetail(null)}
+        onCancel={cancelApp}
+        onRestore={restoreApp}
+      />
       <MineSheet open={mineOpen} apps={apps} onClose={() => setMineOpen(false)} onOpenApp={(app) => setDetail(app)} />
+      <CancelledSheet
+        open={cancelledOpen}
+        apps={cancelledApps}
+        onClose={() => setCancelledOpen(false)}
+        onOpenApp={(app) => setDetail(app)}
+        onRestore={restoreApp}
+      />
       <Toast toast={toast} />
     </>
   );
