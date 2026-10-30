@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 /** JST の今日 (YYYY-MM-DD) */
 export function todayJst(): string {
@@ -71,6 +71,9 @@ export async function ensureAdminPrintProfile(request: APIRequestContext) {
 export async function openReservationApp(page: Page) {
   await page.goto("/apps/3dprint-reservation/?e2e=1");
   await page.getByTestId("reservation-app").waitFor({ state: "visible", timeout: 60_000 });
+  await expect(page.getByTestId("reservation-app")).toHaveAttribute("data-range-live", "true", {
+    timeout: 60_000,
+  });
 }
 
 export async function goToCalendarMonth(_page: Page, _date: string) {

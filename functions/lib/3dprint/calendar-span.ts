@@ -1,4 +1,4 @@
-import { addDays, type PrintScale } from './slots';
+import { addDays } from './slots';
 
 export const MAX_PART_COUNT = 99;
 
@@ -29,13 +29,6 @@ export function computeCalendarEndDate(desiredDate: string, partCount: number): 
   return addDays(desiredDate, span - 1);
 }
 
-export function derivePrintScaleFromPartCount(partCount: number): PrintScale {
-  const parts = normalizePartCount(partCount);
-  if (parts >= 10) return 'large';
-  if (parts >= 4) return 'medium';
-  return 'small';
-}
-
 export function getCalendarScalePrintLabel(partCount: number): string | null {
   const parts = normalizePartCount(partCount);
   if (parts >= 10) return 'Large Scale Print';
@@ -57,26 +50,16 @@ export function listDatesInclusive(startDate: string, endDate: string): string[]
 
 export interface SyncedReservationSpanFields {
   part_count: number;
-  print_scale: PrintScale;
   calendar_end_date: string;
 }
 
 export function syncReservationSpanFields(
   desiredDate: string,
-  partCountInput: unknown,
-  printScaleInput?: PrintScale | null
+  partCountInput: unknown
 ): SyncedReservationSpanFields {
   const part_count = normalizePartCount(partCountInput);
-  const print_scale = derivePrintScaleFromPartCount(part_count);
   const calendar_end_date = computeCalendarEndDate(desiredDate, part_count);
-  if (part_count < 4 && printScaleInput && ['small', 'medium', 'large'].includes(printScaleInput)) {
-    return {
-      part_count,
-      print_scale: printScaleInput,
-      calendar_end_date,
-    };
-  }
-  return { part_count, print_scale, calendar_end_date };
+  return { part_count, calendar_end_date };
 }
 
 export function resolveReservationCalendarEndDate(r: {

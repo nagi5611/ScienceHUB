@@ -326,7 +326,6 @@ export async function submitContestEntry(
     purpose_other: '印刷依頼',
     summary: application.impressions,
     print_notes: printNotes,
-    print_scale: span.print_scale,
     printer_id: slot.printer_id,
     desired_date: slot.desired_date,
     part_count: span.part_count,
@@ -394,10 +393,8 @@ export async function submitContestEntry(
 
   const baseUrl = getOAuthRedirectBase(request, env);
   const adminUrl = buildContestManagementAdminUrl(baseUrl);
-  await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, adminUrl, {
-    title: reservation.title,
-    desired_date: reservation.desired_date,
-    print_scale: reservation.print_scale,
+  await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
+    adminDeepLink: adminUrl,
   });
 
   const entryUrl = buildContestEntryAppUrl(baseUrl);

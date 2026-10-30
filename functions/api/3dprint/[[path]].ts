@@ -13,7 +13,6 @@ import {
   addDays,
   isDateBookable,
   isAdminDateBookable,
-  type PrintScale,
 } from "../../lib/3dprint/slots";
 import {
   acceptReservation,
@@ -305,7 +304,6 @@ function publicCalendarReservation(
 ) {
   return {
     id: r.id,
-    print_scale: r.print_scale,
     printer_id: r.printer_id,
     printer_name: resolvePrinterLabel(r, printerMap),
     desired_date: r.desired_date,
@@ -327,7 +325,6 @@ function userReservationDetail(
   return {
     id: r.id,
     title: r.title,
-    print_scale: r.print_scale,
     printer_id: r.printer_id,
     printer_name: resolvePrinterLabel(r, printerMap),
     printer_capabilities: resolvePrinterCapabilities(r, printerMap),
@@ -411,7 +408,6 @@ async function sendApplicantAppliedEmail(
       id: reservation.id,
       title: reservation.title,
       desired_date: reservation.desired_date,
-      print_scale: reservation.print_scale,
     },
     printerName: resolvePrinterLabel(reservation, printerMap),
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
@@ -438,9 +434,6 @@ async function notifyNewApplicationDiscordAndEmail(
     ? `${applicant.display_name} (@${applicant.username})`
     : null;
   await notifyReservationApplication(env.DISCORD_WEBHOOK_URL, {
-    title: reservation.title,
-    desired_date: reservation.desired_date,
-    print_scale: reservation.print_scale,
     applicationFormText,
     adminDeepLink,
     applicantLabel,
@@ -469,9 +462,6 @@ async function notifyAutoConfirmedTimeSlotReserve(
     ? `${applicant.display_name} (@${applicant.username})`
     : null;
   await notifyReservationBooked(env.DISCORD_WEBHOOK_URL, {
-    title: reservation.title,
-    desired_date: reservation.desired_date,
-    print_scale: reservation.print_scale,
     applicationFormText,
     adminDeepLink,
     applicantLabel,
@@ -518,7 +508,6 @@ async function sendApplicantRescheduledEmail(
       id: reservation.id,
       title: reservation.title,
       desired_date: reservation.desired_date,
-      print_scale: reservation.print_scale,
     },
     printerName: resolvePrinterLabel(reservation, printerMap),
     previousDate,
@@ -545,7 +534,6 @@ async function sendApplicantAcceptedEmail(
       id: reservation.id,
       title: reservation.title,
       desired_date: reservation.desired_date,
-      print_scale: reservation.print_scale,
     },
     printerName: resolvePrinterLabel(reservation, printerMap),
     printStaffLabel,
@@ -587,9 +575,8 @@ function mapAvailabilityResponse(result: Awaited<ReturnType<typeof getDateAvaila
     isFull: result.is_full,
     staffAvailable: result.staff_available,
     printerAvailable: result.printer_available,
-    availableScales: result.available_scales,
     count: result.count,
-    scales: result.scales,
+    capacity: result.capacity,
     printers: result.printers,
   };
 }
@@ -597,7 +584,7 @@ function mapAvailabilityResponse(result: Awaited<ReturnType<typeof getDateAvaila
 /** Returns 409 when printer shift removal is blocked by reservations. */
 function printerShiftBlockError(
   date: string,
-  reservations: { id: string; title: string; print_scale: string; desired_date: string; status: string }[]
+  reservations: { id: string; title: string; desired_date: string; status: string }[]
 ): Response {
   return error("この日のプリンター稼働を外すには、紐づく予約をリスケしてください", 409, {
     code: "RESERVATIONS_ON_PRINTER_DATE",
@@ -659,7 +646,6 @@ async function applyReservationContentEdit(
   const slotError = await validateReservationSlot(
     db,
     body.desired_date,
-    body.print_scale,
     reservation.id,
     printerId,
     { isAdmin: !options.isUser, partCount }
@@ -710,7 +696,6 @@ async function applyReservationContentEdit(
     purpose_other: body.purpose === "other" ? body.purpose_other?.trim() ?? null : null,
     summary: body.summary?.trim() || null,
     print_notes: body.print_notes?.trim() || null,
-    print_scale: body.print_scale,
     printer_id: printerId,
     desired_date: body.desired_date,
     part_count: partCount,
@@ -729,7 +714,6 @@ async function applyReservationContentEdit(
         {
           title: String(body.title).trim(),
           desired_date: body.desired_date,
-          print_scale: body.print_scale,
         },
         actor,
         { action_label: "予約内容の修正（管理）" }
@@ -743,7 +727,6 @@ async function applyReservationContentEdit(
         {
           title: String(body.title).trim(),
           desired_date: body.desired_date,
-          print_scale: body.print_scale,
         }
       )
     );
@@ -926,7 +909,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         summary?: string;
         print_notes?: string;
         request_print_video?: boolean;
-        print_scale?: PrintScale;
         printer_id: string;
         desired_date: string;
         stl_r2_key: string;
@@ -945,7 +927,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         : ([
             "title",
             "purpose",
-            "print_scale",
             "printer_id",
             "desired_date",
             "stl_r2_key",
@@ -967,11 +948,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (printerError) return error(printerError);
 
       const purpose = body.purpose ?? "club";
-      const printScale: PrintScale = body.print_scale ?? "small";
-
-      if (!["small", "medium", "large"].includes(printScale)) {
-        return error("印刷規模が不正です");
-      }
 
       if (!["ss_s_tan", "club", "other"].includes(purpose)) {
         return error("目的が不正です");
@@ -1002,14 +978,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const partCount = normalizePartCount(body.part_count ?? 1);
-      const span = syncReservationSpanFields(body.desired_date, partCount, printScale);
+      const span = syncReservationSpanFields(body.desired_date, partCount);
 
       if (!timeSlotMode) {
         const slotError = await validatePrinterReservationSpan(
           db,
           body.desired_date,
           body.printer_id,
-          span.print_scale,
           span.part_count,
           "",
           { isAdmin: false }
@@ -1077,7 +1052,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other: body.purpose_other ?? null,
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
-        print_scale: span.print_scale,
         printer_id: body.printer_id,
         desired_date: body.desired_date,
         part_count: span.part_count,
@@ -1447,7 +1421,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other?: string | null;
         summary?: string | null;
         print_notes?: string | null;
-        print_scale: Reservation["print_scale"];
         stl_r2_key?: string;
         stl_filename?: string;
         stl_size_bytes?: number;
@@ -1530,14 +1503,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // GET /api/3dprint/calendar/availability
     if (method === "GET" && segments[0] === "calendar" && segments[1] === "availability") {
       const date = url.searchParams.get("date");
-      const scale = url.searchParams.get("scale") as PrintScale | null;
       const printerId = url.searchParams.get("printer_id");
       const excludeId = url.searchParams.get("exclude_reservation_id");
       if (!date) return error("date が必要です");
 
       const result = await getDateAvailability(db, date, {
         printerId,
-        scale,
         excludeReservationId: excludeId,
         isAdmin: false,
       });
@@ -1555,14 +1526,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[2] === "availability"
     ) {
       const date = url.searchParams.get("date");
-      const scale = url.searchParams.get("scale") as PrintScale | null;
       const printerId = url.searchParams.get("printer_id");
       const excludeId = url.searchParams.get("exclude_reservation_id");
       if (!date) return error("date が必要です");
 
       const result = await getDateAvailability(db, date, {
         printerId,
-        scale,
         excludeReservationId: excludeId,
         isAdmin: true,
       });
@@ -1598,7 +1567,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other?: string | null;
         summary?: string | null;
         print_notes?: string | null;
-        print_scale: PrintScale;
         printer_id: string;
         desired_date: string;
         stl_r2_key: string;
@@ -1614,7 +1582,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         "student_name",
         "title",
         "purpose",
-        "print_scale",
         "printer_id",
         "desired_date",
         "stl_r2_key",
@@ -1642,17 +1609,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const adminPartCount = normalizePartCount(body.part_count ?? 1);
-      const adminSpan = syncReservationSpanFields(
-        body.desired_date,
-        adminPartCount,
-        body.print_scale
-      );
+      const adminSpan = syncReservationSpanFields(body.desired_date, adminPartCount);
 
       const slotError = await validatePrinterReservationSpan(
         db,
         body.desired_date,
         body.printer_id,
-        adminSpan.print_scale,
         adminSpan.part_count,
         "",
         { isAdmin: true }
@@ -1684,7 +1646,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         purpose_other: body.purpose_other ?? null,
         summary: body.summary?.trim() || null,
         print_notes: body.print_notes?.trim() || null,
-        print_scale: adminSpan.print_scale,
         printer_id: body.printer_id,
         desired_date: body.desired_date,
         part_count: adminSpan.part_count,
@@ -1965,7 +1926,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             id: updated.id,
             title: updated.title,
             desired_date: updated.desired_date,
-            print_scale: updated.print_scale,
           },
           printerName: resolvePrinterLabel(updated, printerMapForMail),
           statusComment: updated.status_comment,

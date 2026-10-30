@@ -3,7 +3,7 @@ import {
   getDateAvailability,
   validatePrinterReservationSpan,
 } from '../3dprint/availability';
-import { derivePrintScaleFromPartCount, normalizePartCount } from '../3dprint/calendar-span';
+import { normalizePartCount } from '../3dprint/calendar-span';
 import { getAllPrinters } from '../3dprint/printers';
 import { getAvailableMemberIdsOnDate } from '../3dprint/reservations';
 import { addDays, getEarliestBookableDate } from '../3dprint/slots';
@@ -21,7 +21,6 @@ export async function findAutoScheduleSlot(
   partCountInput = 1
 ): Promise<AutoScheduleResult | null> {
   const partCount = normalizePartCount(partCountInput);
-  const printScale = derivePrintScaleFromPartCount(partCount);
   const startDate = getEarliestBookableDate();
   const printers = await getAllPrinters(db);
   const sortedPrinters = [...printers].sort((a, b) => a.position - b.position);
@@ -32,20 +31,18 @@ export async function findAutoScheduleSlot(
     if (!staffIds.length) continue;
 
     const dayAvailability = await getDateAvailability(db, date, {
-      scale: printScale,
       isAdmin: false,
     });
     if (!dayAvailability.can_book) continue;
 
     for (const printer of sortedPrinters) {
       const printerDay = dayAvailability.printers.find((p) => p.printer_id === printer.id);
-      if (!printerDay?.available_scales.includes(printScale)) continue;
+      if (!printerDay || printerDay.is_full) continue;
 
       const slotError = await validatePrinterReservationSpan(
         db,
         date,
         printer.id,
-        printScale,
         partCount,
         '',
         { isAdmin: false }

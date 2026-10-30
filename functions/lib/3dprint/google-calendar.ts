@@ -2,8 +2,6 @@
 import type { Member, Reservation } from './reservations';
 import { formatMemberLabel } from './reservations';
 import { resolveReservationCalendarEndDate } from './calendar-span';
-import type { PrintScale } from './slots';
-
 export interface GoogleCalendarEnv {
   GOOGLE_3DPRINT_CALENDAR_ID?: string;
   GOOGLE_3DPRINT_SERVICE_ACCOUNT_EMAIL?: string;
@@ -22,18 +20,6 @@ export interface CalendarStatusResult {
   error?: string;
   calendarId?: string;
 }
-
-const SCALE_SHORT: Record<PrintScale, string> = {
-  small: 'S',
-  medium: 'M',
-  large: 'L',
-};
-
-const SCALE_LABELS: Record<PrintScale, string> = {
-  small: 'スモール',
-  medium: 'ミディアム',
-  large: 'ラージ',
-};
 
 /** Returns true when Google Calendar integration secrets are configured. */
 export function isGoogleCalendarConfigured(env: GoogleCalendarEnv): boolean {
@@ -97,10 +83,13 @@ export async function createCalendarEventForReservation(
     : null;
   const staffText = staffLabel ? formatMemberLabel(staffLabel) : '未割り当て';
 
-  const summary = `${SCALE_SHORT[reservation.print_scale]} ${reservation.title}`;
+  const partCount = reservation.part_count ?? 1;
+  const partLine =
+    partCount > 1 ? `パーツ数: ${partCount}\n` : '';
+  const summary = reservation.title;
   const description = [
     `依頼者: ${reservation.homeroom} ${reservation.student_number}番 ${reservation.student_name}`,
-    `印刷規模: ${SCALE_LABELS[reservation.print_scale]}`,
+    partLine.trim() || null,
     `印刷担当: ${staffText}`,
     reservation.print_notes ? `注意点:\n${reservation.print_notes}` : null,
     reservation.summary ? `概要:\n${reservation.summary}` : null,

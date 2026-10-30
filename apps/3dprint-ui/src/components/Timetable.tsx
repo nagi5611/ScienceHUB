@@ -109,7 +109,7 @@ function Lane({ machineId, info, selection, onSelect, closed, onOpenApp, kind })
   );
 }
 
-function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onClearSel, onNew, onOpenApp, onJumpNext, nextOpen }) {
+function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onClearSel, onNew, onOpenApp, onJumpNext, nextOpen, bookingLive = true }) {
   const d = parseYmd(dateStr);
   const wd = d.getDay();
   const todayStr = ymd(startOfDay(new Date()));
@@ -190,7 +190,7 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
           </div>
           {MACHINE_IDS.map(id => (
             <Lane key={id} machineId={id} info={info.machines[id]} selection={selection}
-              onSelect={onPickRange} closed={!info.shift} onOpenApp={onOpenApp} />
+              onSelect={onPickRange} closed={!info.shift || !bookingLive} onOpenApp={onOpenApp} />
           ))}
         </div>
       </div>
@@ -233,10 +233,10 @@ function DayPanel({ dateStr, info, apps, selection, onSelect, onPickRange, onCle
                 })}
               </div>
               <button type="button" className="btn btn-ghost" onClick={onClearSel}>解除</button>
-              <button type="button" className="btn btn-primary" disabled={!selOk} onClick={onNew}>申請へ進む</button>
+              <button type="button" className="btn btn-primary" disabled={!selOk || !bookingLive} onClick={onNew}>申請へ進む</button>
             </>
           ) : (
-            <button type="button" className="btn btn-primary" disabled={!info.shift || info.full} onClick={onNew}>申請へ進む</button>
+            <button type="button" className="btn btn-primary" disabled={!info.shift || info.full || !bookingLive} onClick={onNew}>申請へ進む</button>
           )}
         </div>
       </div>

@@ -5,8 +5,6 @@ import {
   resolveReservationCalendarEndDate,
   syncReservationSpanFields,
 } from './calendar-span';
-import type { PrintScale } from './slots';
-
 export interface Reservation {
   id: string;
   grade: number;
@@ -18,7 +16,6 @@ export interface Reservation {
   purpose_other: string | null;
   summary: string | null;
   print_notes: string | null;
-  print_scale: PrintScale;
   printer_id: string | null;
   desired_date: string;
   part_count?: number;
@@ -341,23 +338,19 @@ export async function getAllReservations(
 
 /** Inserts a new reservation. */
 export async function createReservation(db: D1Database, data: Reservation): Promise<void> {
-  const span = syncReservationSpanFields(
-    data.desired_date,
-    data.part_count ?? 1,
-    data.print_scale
-  );
+  const span = syncReservationSpanFields(data.desired_date, data.part_count ?? 1);
   await db
     .prepare(
       `INSERT INTO print_reservations (
         id, grade, homeroom, student_number, student_name, title,
-        purpose, purpose_other, summary, print_notes, print_scale, printer_id, desired_date,
+        purpose, purpose_other, summary, print_notes, printer_id, desired_date,
         part_count, calendar_end_date,
         stl_r2_key, stl_filename, stl_size_bytes, status,
         print_staff_member_id,
         request_print_video, print_video_storage_path, print_video_filename, print_video_size_bytes,
         user_id, source, schedule_type, contest_storage_path, contest_storage_filename,
         contest_application_id, booking_kind, start_minute, end_minute, slot_group_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       data.id,
@@ -370,7 +363,6 @@ export async function createReservation(db: D1Database, data: Reservation): Prom
       data.purpose_other,
       data.summary ?? '',
       data.print_notes ?? '',
-      span.print_scale,
       data.printer_id,
       data.desired_date,
       span.part_count,
@@ -478,7 +470,6 @@ export async function updateReservationContent(
     purpose_other: string | null;
     summary: string | null;
     print_notes: string | null;
-    print_scale: PrintScale;
     printer_id: string | null;
     desired_date: string;
     part_count?: number;
@@ -488,17 +479,13 @@ export async function updateReservationContent(
     stl_size_bytes: number;
   }
 ): Promise<void> {
-  const span = syncReservationSpanFields(
-    data.desired_date,
-    data.part_count ?? 1,
-    data.print_scale
-  );
+  const span = syncReservationSpanFields(data.desired_date, data.part_count ?? 1);
   await db
     .prepare(
       `UPDATE print_reservations SET
         grade = ?, homeroom = ?, student_number = ?, student_name = ?,
         title = ?, purpose = ?, purpose_other = ?, summary = ?, print_notes = ?,
-        print_scale = ?, printer_id = ?, desired_date = ?,
+        printer_id = ?, desired_date = ?,
         part_count = ?, calendar_end_date = ?,
         request_print_video = ?,
         stl_r2_key = ?, stl_filename = ?, stl_size_bytes = ?,
@@ -516,7 +503,6 @@ export async function updateReservationContent(
       data.purpose_other,
       data.summary ?? '',
       data.print_notes ?? '',
-      span.print_scale,
       data.printer_id,
       data.desired_date,
       span.part_count,

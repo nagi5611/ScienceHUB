@@ -1,19 +1,12 @@
 // functions/lib/contest/contest-email.ts
 import type { Reservation } from '../3dprint/reservations';
 import { getMemberById } from '../3dprint/reservations';
-import type { PrintScale } from '../3dprint/slots';
 import type { Env } from '../types';
 import { isEmailSendingConfigured, sendTransactionalEmail } from '../email/cloudflare-email';
 import { getUserEmailById } from '../3dprint/reservation-email';
 
 const DEFAULT_FROM_NAME = 'ScienceHUB 造形物コンテスト';
 const DEFAULT_STAFF_NAME = '担当者';
-
-const SCALE_LABELS: Record<PrintScale, string> = {
-  small: 'スモール',
-  medium: 'ミディアム',
-  large: 'ラージ',
-};
 
 export type ContestEmailKind =
   | 'submitted'
@@ -53,7 +46,7 @@ const STATUS_BADGE_STYLES: Record<
 export interface ContestEmailContext {
   reservation: Pick<
     Reservation,
-    'id' | 'title' | 'desired_date' | 'print_scale' | 'print_staff_member_id'
+    'id' | 'title' | 'desired_date' | 'print_staff_member_id'
   >;
   printerName?: string | null;
   printStaffLabel?: string | null;
@@ -117,10 +110,6 @@ function statusLabel(status: ContestReservationStatus | undefined): string {
   return STATUS_LABELS[status] ?? status;
 }
 
-function scaleLabel(scale: PrintScale): string {
-  return SCALE_LABELS[scale] ?? scale;
-}
-
 function statusBadgeHtml(status: ContestReservationStatus): string {
   const label = statusLabel(status);
   const style = STATUS_BADGE_STYLES[status] ?? STATUS_BADGE_STYLES.applied;
@@ -131,7 +120,6 @@ function reservationFactsText(ctx: ContestEmailContext): string {
   const lines = [
     `作品: ${ctx.reservation.title}`,
     `印刷予定日: ${ctx.reservation.desired_date}`,
-    `印刷規模: ${scaleLabel(ctx.reservation.print_scale)}`,
   ];
   if (ctx.printerName) lines.push(`プリンター: ${ctx.printerName}`);
   if (ctx.printStaffLabel) lines.push(`印刷担当: ${ctx.printStaffLabel}`);
@@ -143,7 +131,6 @@ function reservationFactsHtml(ctx: ContestEmailContext): string {
   const rows = [
     ['作品', ctx.reservation.title],
     ['印刷予定日', ctx.reservation.desired_date],
-    ['印刷規模', scaleLabel(ctx.reservation.print_scale)],
   ];
   if (ctx.printerName) rows.push(['プリンター', ctx.printerName]);
   if (ctx.printStaffLabel) rows.push(['印刷担当', ctx.printStaffLabel]);
@@ -521,7 +508,7 @@ export async function notifyContestStaffMessageEmail(
     entryAppUrl: string;
     reservation: Pick<
       Reservation,
-      'id' | 'title' | 'desired_date' | 'print_scale' | 'print_staff_member_id'
+      'id' | 'title' | 'desired_date' | 'print_staff_member_id'
     >;
   }
 ): Promise<void> {
@@ -626,7 +613,6 @@ export async function sendContestAdminTestEmail(
           id: 'test',
           title: 'サンプル作品',
           desired_date: '2099-01-01',
-          print_scale: 'small',
           print_staff_member_id: null,
         },
         entryAppUrl: 'https://example.com/apps/contest-entry/',

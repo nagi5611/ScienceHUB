@@ -10,7 +10,6 @@ import {
 export interface ShiftBlockReservation {
   id: string;
   title: string;
-  print_scale: string;
   desired_date: string;
   status: string;
   print_staff_member_id: string | null;
@@ -77,7 +76,6 @@ function toShiftBlockReservation(r: Reservation): ShiftBlockReservation {
   return {
     id: r.id,
     title: r.title,
-    print_scale: r.print_scale,
     desired_date: r.desired_date,
     status: r.status,
     print_staff_member_id: r.print_staff_member_id,

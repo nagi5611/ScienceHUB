@@ -31,7 +31,6 @@ export async function adminRescheduleReservation(
     const slotError = await validateReservationSlot(
       env.DB,
       desiredDate,
-      reservation.print_scale,
       reservation.id,
       reservation.printer_id ?? undefined,
       {

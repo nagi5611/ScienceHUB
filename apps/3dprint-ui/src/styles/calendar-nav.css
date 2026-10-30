@@ -1,0 +1,35 @@
+/* Shared calendar period transition — reservation + management */
+.cal-period-shell{
+  overflow:hidden;
+  min-width:0;
+}
+.cal-period-enter{
+  animation:calPeriodIn .34s var(--ease-out) both;
+}
+.cal-period-enter--next{
+  animation-name:calPeriodInNext;
+}
+.cal-period-enter--prev{
+  animation-name:calPeriodInPrev;
+}
+.cal-month.cal-period-enter,
+.cal-month .cal-period-enter{
+  animation-duration:.28s;
+}
+@keyframes calPeriodIn{
+  from{opacity:0}
+  to{opacity:1}
+}
+@keyframes calPeriodInNext{
+  from{opacity:0;transform:translateX(14px)}
+  to{opacity:1;transform:none}
+}
+@keyframes calPeriodInPrev{
+  from{opacity:0;transform:translateX(-14px)}
+  to{opacity:1;transform:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .cal-period-enter{
+    animation:none;
+  }
+}

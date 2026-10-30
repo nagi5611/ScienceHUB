@@ -1,6 +1,6 @@
 import { getDateAvailability, validatePrinterReservationSlot } from './availability';
 import { gradeFromHomeroom, isValidHomeroom } from './homeroom';
-import { isAdminDateBookable, type PrintScale } from './slots';
+import { isAdminDateBookable } from './slots';
 import { getPrinterById } from './printers';
 import { createReservation, type Reservation, type ReservationSource } from './reservations';
 import { verifyR2Key } from './upload';
@@ -18,23 +18,11 @@ export interface AdminForceReservationInput {
   purpose_other?: string | null;
   summary?: string | null;
   print_notes?: string | null;
-  print_scale?: PrintScale | null;
   printer_id?: string | null;
   stl_r2_key?: string | null;
   stl_filename?: string | null;
   stl_size_bytes?: number | null;
   user_id?: string | null;
-}
-
-function pickScale(
-  requested: PrintScale | null | undefined,
-  available: PrintScale[]
-): PrintScale | null {
-  if (requested && available.includes(requested)) return requested;
-  for (const scale of ['small', 'medium', 'large'] as PrintScale[]) {
-    if (available.includes(scale)) return scale;
-  }
-  return available[0] ?? null;
 }
 
 export async function createAdminForcePrintReservation(
@@ -49,15 +37,15 @@ export async function createAdminForcePrintReservation(
   if (!isAdminDateBookable(desiredDate)) return { error: '希望印刷日が不正です' };
 
   const availability = await getDateAvailability(db, desiredDate, { isAdmin: true });
-  if (availability.is_full || availability.available_scales.length === 0) {
+  if (availability.is_full) {
     return { error: 'この日はもう満杯です' };
   }
 
   let printerId = input.printer_id?.trim() || '';
   let printerAvailability = availability.printers.find((p) => p.printer_id === printerId);
-  if (!printerId || !printerAvailability) {
+  if (!printerId || !printerAvailability || printerAvailability.is_full) {
     printerAvailability = availability.printers.find(
-      (p) => !p.is_full && p.available_scales.length > 0
+      (p) => !p.is_full && p.printer_available && p.printer_bookable
     );
     printerId = printerAvailability?.printer_id ?? '';
   }
@@ -65,8 +53,6 @@ export async function createAdminForcePrintReservation(
     return { error: 'この日付で予約可能なプリンターがありません' };
   }
 
-  const printScale = pickScale(input.print_scale ?? null, printerAvailability.available_scales);
-  if (!printScale) return { error: 'この日は選択可能な印刷規模がありません' };
   if (!(await getPrinterById(db, printerId))) {
     return { error: '指定されたプリンターが見つかりません' };
   }
@@ -75,7 +61,6 @@ export async function createAdminForcePrintReservation(
     db,
     desiredDate,
     printerId,
-    printScale,
     '',
     { isAdmin: true }
   );
@@ -122,7 +107,6 @@ export async function createAdminForcePrintReservation(
       purpose === 'other' ? String(input.purpose_other ?? '').trim() || null : null,
     summary: String(input.summary ?? '').trim() || null,
     print_notes: String(input.print_notes ?? '').trim() || null,
-    print_scale: printScale,
     printer_id: printerId,
     desired_date: desiredDate,
     stl_r2_key,

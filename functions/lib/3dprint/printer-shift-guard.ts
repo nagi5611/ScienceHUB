@@ -5,7 +5,6 @@ import { isPrinterAvailableOnDate } from './printer-availability';
 export interface PrinterShiftBlockReservation {
   id: string;
   title: string;
-  print_scale: string;
   desired_date: string;
   status: string;
   printer_id: string | null;
@@ -52,7 +51,6 @@ function toPrinterShiftBlockReservation(r: Reservation): PrinterShiftBlockReserv
   return {
     id: r.id,
     title: r.title,
-    print_scale: r.print_scale,
     desired_date: r.desired_date,
     status: r.status,
     printer_id: r.printer_id,

@@ -8,6 +8,7 @@ import {
   STATUS, KIND, MACHINE_IDS, MACHINE_MAP, MACHINES, SLOT_COUNT, ROW_H, SHIFT_START, SHIFT_END,
   SHIFT_SLOT_START, SHIFT_SLOT_END, SHIFT_SLOTS, DAY_START, DAY_END, SLOT_MIN,
 } from '@shared/domain';
+import { useCalPeriodNav } from '../hooks/useCalPeriodNav';
 
 const CELL_EVENTS = 2;
 
@@ -50,8 +51,10 @@ function DayCell({ date, dateStr, info, selected, today, dim, onPick }) {
 }
 
 function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDates }) {
+  const { run, enterClass } = useCalPeriodNav();
   /* 選択日を含む週（日曜始まり）を第1週として4週分 */
   const firstWeek = weekStart(parseYmd(selected));
+  const periodKey = ymd(firstWeek);
   const weeks = [];
   for (let i = 0; i < 4; i++) {
     const row = [];
@@ -72,17 +75,21 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDa
   const pending = rangeApps.filter(a => a.status === 'pending').length;
   const anchorMonth = parseYmd(selected).getMonth();
 
-  const shift = n => {
-    const x = addDays(parseYmd(selected), n * 28);
-    onPick(ymd(x));
+  const shift = (n: number) => {
+    run(n, () => {
+      const x = addDays(parseYmd(selected), n * 28);
+      onPick(ymd(x));
+    });
   };
 
   return (
     <div className="card cal">
       <div className="cal-top">
         <div>
-          <div className="cal-month">
-            <span>{monthLabel}</span>
+          <div className={enterClass} key={`label-${periodKey}`}>
+            <div className="cal-month">
+              <span>{monthLabel}</span>
+            </div>
           </div>
           <div className="cal-sub num">
             期間 {mdLabel(flat[0])}〜{mdLabel(lastDay)} ／ 稼働 {shiftDays}日 ／ 申請 {rangeApps.length}件（申請中 {pending}）
@@ -100,23 +107,34 @@ function Calendar({ anchor, setAnchor, selected, onPick, apps, todayStr, staffDa
         </button>
 
         <div className="cal-main">
-          <div className="cal-wdays">
-            {WD.map((w, i) => (
-              <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
-            ))}
-          </div>
+          <div className="cal-period-shell">
+            <div className={enterClass} key={periodKey}>
+              <div className="cal-wdays">
+                {WD.map((w, i) => (
+                  <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
+                ))}
+              </div>
 
-          <div className="cal-grid">
-            {weeks.map((row) =>
-              row.map(d => {
-                const ds = ymd(d);
-                return (
-              <DayCell key={ds} date={d} dateStr={ds} info={computeDay(apps, ds, staffDates)}
-                selected={ds === selected} today={ds === todayStr}
-                dim={d.getMonth() !== anchorMonth} onPick={onPick} />
-                );
-              })
-            )}
+              <div className="cal-grid">
+                {weeks.map((row) =>
+                  row.map(d => {
+                    const ds = ymd(d);
+                    return (
+                      <DayCell
+                        key={ds}
+                        date={d}
+                        dateStr={ds}
+                        info={computeDay(apps, ds, staffDates)}
+                        selected={ds === selected}
+                        today={ds === todayStr}
+                        dim={d.getMonth() !== anchorMonth}
+                        onPick={onPick}
+                      />
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

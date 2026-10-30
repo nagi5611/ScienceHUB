@@ -201,3 +201,37 @@ function clampInt(
   if (!Number.isFinite(num)) return fallback;
   return Math.min(max, Math.max(min, Math.round(num)));
 }
+
+/** Total reservation slots per printer day (legacy S/M/L capacity fields summed). */
+export function getPrinterDailySlotTotal(config: PrinterDailyCapacity): number {
+  return config.max_small + config.max_medium + config.max_large;
+}
+
+/** Remaining slots on a printer day given the current reservation count. */
+export function getRemainingPrinterDaySlots(
+  reservationCount: number,
+  config: PrinterDailyCapacity
+): number {
+  return Math.max(0, getPrinterDailySlotTotal(config) - reservationCount);
+}
+
+/** Whether another reservation can be booked on this printer day. */
+export function canBookPrinterDayByCount(
+  reservationCount: number,
+  config: PrinterDailyCapacity
+): boolean {
+  return reservationCount < getPrinterDailySlotTotal(config);
+}
+
+/** Whether the printer day has no remaining reservation slots. */
+export function isPrinterDayFullByCount(
+  reservationCount: number,
+  config: PrinterDailyCapacity
+): boolean {
+  return !canBookPrinterDayByCount(reservationCount, config);
+}
+
+/** User-facing message when the printer day is full. */
+export function getPrinterDayFullMessage(): string {
+  return 'このプリンターはこの日もう満杯です。別の日付または機種を選んでください';
+}

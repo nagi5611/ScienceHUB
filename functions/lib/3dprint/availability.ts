@@ -1,11 +1,11 @@
 // functions/lib/3dprint/availability.ts
 import {
-  getAvailableScalesWithCapacity,
-  canBookSlotWithCapacity,
-  getScaleBookingConflictMessage,
-  isPrinterDayFull,
+  canBookPrinterDayByCount,
+  getPrinterDailySlotTotal,
+  getRemainingPrinterDaySlots,
+  getPrinterDayFullMessage,
+  isPrinterDayFullByCount,
   parsePrinterDailyCapacity,
-  type PrinterDailyCapacity,
 } from './printer-daily-capacity';
 import { isPrinterAvailableOnDate } from './printer-availability';
 import { getAllPrinters, getPrinterById, type Printer } from './printers';
@@ -14,14 +14,7 @@ import {
   getReservationsByDateAndPrinter,
   hasStaffOnDate,
 } from './reservations';
-import {
-  canBookSlot,
-  getRemainingCapacity,
-  isDayFull,
-  isDateBookable,
-  isAdminDateBookable,
-  type PrintScale,
-} from './slots';
+import { isDateBookable, isAdminDateBookable } from './slots';
 import {
   computeCalendarEndDate,
   listDatesInclusive,
@@ -35,8 +28,10 @@ export interface PrinterDateAvailability {
   printer_name: string;
   printer_available: boolean;
   printer_bookable: boolean;
-  available_scales: PrintScale[];
   is_full: boolean;
+  remaining: number;
+  capacity: number;
+  count: number;
 }
 
 export interface DateAvailabilityResult {
@@ -46,9 +41,8 @@ export interface DateAvailabilityResult {
   printer_available: boolean;
   can_book: boolean;
   is_full: boolean;
-  available_scales: PrintScale[];
-  scales: PrintScale[];
   remaining: number;
+  capacity: number;
   count: number;
   printers: PrinterDateAvailability[];
 }
@@ -65,7 +59,8 @@ export async function getPrinterDateAvailability(
 ): Promise<PrinterDateAvailability> {
   const requireShift = options.requireShift !== false;
   const status = normalizePrinterStatus(printer.status);
-  const capacity = parsePrinterDailyCapacity(printer.daily_capacity_json);
+  const capacityConfig = parsePrinterDailyCapacity(printer.daily_capacity_json);
+  const capacity = getPrinterDailySlotTotal(capacityConfig);
   const shiftOk =
     !requireShift || (await isPrinterAvailableOnDate(db, printer.id, date));
   const statusOk = isPrinterBookable(status);
@@ -74,19 +69,20 @@ export async function getPrinterDateAvailability(
   const filtered = options.excludeReservationId
     ? reservations.filter((r) => r.id !== options.excludeReservationId)
     : reservations;
-  const existingScales = filtered.map((r) => r.print_scale);
-  const availableScales =
-    shiftOk && statusOk
-      ? getAvailableScalesWithCapacity(existingScales, capacity)
-      : [];
+  const count = filtered.length;
+  const operational = shiftOk && statusOk;
+  const remaining = operational ? getRemainingPrinterDaySlots(count, capacityConfig) : 0;
+  const isFull = !operational || isPrinterDayFullByCount(count, capacityConfig);
 
   return {
     printer_id: printer.id,
     printer_name: printer.name,
     printer_available: shiftOk,
     printer_bookable: statusOk,
-    available_scales: availableScales,
-    is_full: shiftOk && statusOk ? isPrinterDayFull(existingScales, capacity) : true,
+    is_full: isFull,
+    remaining,
+    capacity,
+    count,
   };
 }
 
@@ -96,7 +92,6 @@ export async function getDateAvailability(
   date: string,
   options: {
     printerId?: string | null;
-    scale?: PrintScale | null;
     excludeReservationId?: string | null;
     isAdmin?: boolean;
   } = {}
@@ -117,15 +112,7 @@ export async function getDateAvailability(
       requireShift,
     });
 
-    const reservations = await getReservationsByDateAndPrinter(db, date, printer.id);
-    const filtered = options.excludeReservationId
-      ? reservations.filter((r) => r.id !== options.excludeReservationId)
-      : reservations;
-    const existingScales = filtered.map((r) => r.print_scale);
-    const capacity = parsePrinterDailyCapacity(printer.daily_capacity_json);
-    const slotOk = options.scale
-      ? canBookSlotWithCapacity(existingScales, options.scale, capacity)
-      : printerAvailability.available_scales.length > 0;
+    const slotOk = !printerAvailability.is_full;
 
     return {
       date,
@@ -139,10 +126,9 @@ export async function getDateAvailability(
         printerAvailability.printer_bookable &&
         slotOk,
       is_full: printerAvailability.is_full,
-      available_scales: printerAvailability.available_scales,
-      scales: existingScales,
-      remaining: getRemainingCapacity(existingScales),
-      count: filtered.length,
+      remaining: printerAvailability.remaining,
+      capacity: printerAvailability.capacity,
+      count: printerAvailability.count,
       printers: [printerAvailability],
     };
   }
@@ -157,30 +143,21 @@ export async function getDateAvailability(
     requireShift,
   });
 
-  const unionScales = new Set<PrintScale>();
-  for (const printer of printers) {
-    for (const scale of printer.available_scales) {
-      unionScales.add(scale);
-    }
-  }
-  const availableScales = [...unionScales];
   const anyPrinterOperational = printers.some(
-    (p) => p.printer_available && p.printer_bookable && p.available_scales.length > 0
+    (p) => p.printer_available && p.printer_bookable && !p.is_full
   );
-  const slotOk = options.scale
-    ? availableScales.includes(options.scale)
-    : anyPrinterOperational;
+  const totalCapacity = printers.reduce((sum, p) => sum + p.capacity, 0);
+  const totalRemaining = printers.reduce((sum, p) => sum + p.remaining, 0);
 
   return {
     date,
     bookable,
     staff_available: staffAvailable,
     printer_available: printers.some((p) => p.printer_available && p.printer_bookable),
-    can_book: bookable && staffAvailable && anyPrinterOperational && slotOk,
+    can_book: bookable && staffAvailable && anyPrinterOperational,
     is_full: !anyPrinterOperational,
-    available_scales: availableScales,
-    scales: filteredAll.map((r) => r.print_scale),
-    remaining: getRemainingCapacity(filteredAll.map((r) => r.print_scale)),
+    remaining: totalRemaining,
+    capacity: totalCapacity,
     count: filteredAll.length,
     printers,
   };
@@ -191,7 +168,6 @@ export async function validatePrinterReservationSlot(
   db: D1Database,
   desiredDate: string,
   printerId: string,
-  printScale: PrintScale,
   excludeReservationId: string,
   options: { isAdmin?: boolean } = {}
 ): Promise<string | null> {
@@ -216,17 +192,19 @@ export async function validatePrinterReservationSlot(
     }
   }
 
-  const capacity = parsePrinterDailyCapacity(printer.daily_capacity_json);
+  const capacityConfig = parsePrinterDailyCapacity(printer.daily_capacity_json);
   const reservations = await getReservationsByDateAndPrinter(db, desiredDate, printerId);
-  const existingScales = reservations
-    .filter((r) => r.id !== excludeReservationId)
-    .map((r) => r.print_scale);
+  const count = reservations.filter((r) => r.id !== excludeReservationId).length;
 
-  if (isPrinterDayFull(existingScales, capacity)) {
-    return 'このプリンターはこの日もう満杯です。別の日付または機種を選んでください';
+  if (isPrinterDayFullByCount(count, capacityConfig)) {
+    return getPrinterDayFullMessage();
   }
 
-  return getScaleBookingConflictMessage(existingScales, printScale, capacity);
+  if (!canBookPrinterDayByCount(count, capacityConfig)) {
+    return '選択した日付の予約枠がいっぱいです。別の日付を選んでください';
+  }
+
+  return null;
 }
 
 /** Validates each day in a multi-part / multi-day reservation span. */
@@ -234,7 +212,6 @@ export async function validatePrinterReservationSpan(
   db: D1Database,
   startDate: string,
   printerId: string,
-  printScale: PrintScale,
   partCountInput: unknown,
   excludeReservationId: string,
   options: { isAdmin?: boolean } = {}
@@ -248,7 +225,6 @@ export async function validatePrinterReservationSpan(
       db,
       date,
       printerId,
-      printScale,
       excludeReservationId,
       options
     );
@@ -299,31 +275,9 @@ function emptyAvailability(
     printer_available: false,
     can_book: false,
     is_full: true,
-    available_scales: [],
-    scales: [],
     remaining: 0,
+    capacity: 0,
     count: 0,
     printers: [],
   };
-}
-
-/** Legacy day-level slot validation using global default capacity. */
-export function validateLegacyDaySlot(
-  existingScales: PrintScale[],
-  printScale: PrintScale,
-  capacity?: PrinterDailyCapacity
-): string | null {
-  if (isDayFull(existingScales, capacity)) {
-    return 'この日はもう満杯です。別の日付を選んでください';
-  }
-  if (!canBookSlot(existingScales, printScale, capacity)) {
-    if (
-      existingScales.includes('small') &&
-      (printScale === 'medium' || printScale === 'large')
-    ) {
-      return 'この日はスモール印刷が入っているため、ミディアム・ラージは選択できません';
-    }
-    return '選択した日付の予約枠がいっぱいです。別の日付を選んでください';
-  }
-  return null;
 }

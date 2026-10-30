@@ -1,10 +1,8 @@
 ﻿// functions/lib/3dprint/reservation-edit.ts
 import {
-  getDateAvailability,
   validatePrinterReservationSlot,
   validatePrinterReservationSpan,
 } from './availability';
-import { type PrintScale } from './slots';
 import { hasStaffOnDate, type Reservation } from './reservations';
 import { isPrinterAvailableOnDate } from './printer-availability';
 import { getPrinterById } from './printers';
@@ -20,7 +18,6 @@ export interface ReservationContentInput {
   summary?: string | null;
   print_notes?: string | null;
   request_print_video?: boolean;
-  print_scale: PrintScale;
   printer_id?: string | null;
   desired_date: string;
   stl_r2_key?: string;
@@ -30,7 +27,6 @@ export interface ReservationContentInput {
 }
 
 const PURPOSES = ['ss_s_tan', 'club', 'other'] as const;
-const SCALES = ['small', 'medium', 'large'] as const;
 
 /** Validates reservation content fields. Returns error message or null. */
 export function validateReservationContentFields(
@@ -42,7 +38,6 @@ export function validateReservationContentFields(
     'student_name',
     'title',
     'purpose',
-    'print_scale',
     'desired_date',
   ] as const;
 
@@ -54,10 +49,6 @@ export function validateReservationContentFields(
 
   if (!body.printer_id?.trim()) {
     return '印刷機種を選択してください';
-  }
-
-  if (!SCALES.includes(body.print_scale as PrintScale)) {
-    return '印刷規模が不正です';
   }
 
   if (!PURPOSES.includes(body.purpose as (typeof PURPOSES)[number])) {
@@ -79,7 +70,6 @@ export function validateReservationContentFields(
 export async function validateReservationSlot(
   db: D1Database,
   desiredDate: string,
-  printScale: PrintScale,
   excludeReservationId: string,
   printerId?: string | null,
   options: { isAdmin?: boolean; partCount?: number } = {}
@@ -94,7 +84,6 @@ export async function validateReservationSlot(
       db,
       desiredDate,
       printerId,
-      printScale,
       partCount,
       excludeReservationId,
       options
@@ -105,7 +94,6 @@ export async function validateReservationSlot(
     db,
     desiredDate,
     printerId,
-    printScale,
     excludeReservationId,
     options
   );
@@ -114,24 +102,6 @@ export async function validateReservationSlot(
 /** Returns whether a reservation can be edited. */
 export function canEditReservation(reservation: Reservation): boolean {
   return reservation.status !== 'cancelled';
-}
-
-/** Returns available scales for edit form on a given date and printer. */
-export async function getEditAvailableScales(
-  db: D1Database,
-  desiredDate: string,
-  excludeReservationId: string,
-  printerId?: string | null,
-  options: { isAdmin?: boolean } = {}
-): Promise<PrintScale[]> {
-  if (!printerId?.trim()) return [];
-
-  const availability = await getDateAvailability(db, desiredDate, {
-    printerId,
-    excludeReservationId,
-    isAdmin: options.isAdmin,
-  });
-  return availability.available_scales;
 }
 
 /** Validates staff availability for guest edits. */

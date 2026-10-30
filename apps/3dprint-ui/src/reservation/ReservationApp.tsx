@@ -31,6 +31,7 @@ import {
 import { uploadPrintFile } from '@shared/upload';
 import { SiteHeader, SiteFooter, Toast } from '@components/Chrome';
 import { Calendar } from '@components/Calendar';
+import { readReservationRangeCache, writeReservationRangeCache } from './reservation-cache';
 import { DayPanel } from '@components/Timetable';
 import { ApplicationPopover } from '@components/Popover';
 import { DetailSheet, MineSheet, CancelledSheet } from '@components/Sheets';
@@ -44,12 +45,20 @@ type Draft = {
   kind: 'reserve' | 'request';
 };
 
+function initialRange(selected: string) {
+  const firstWeek = weekStart(parseYmd(selected));
+  return { from: ymd(firstWeek), to: ymd(addDays(firstWeek, 27)) };
+}
+
 export function ReservationApp() {
   const todayStr = ymd(startOfDay(new Date()));
   const prefs = loadPrefs();
+  const initialSelected = prefs.selected || todayStr;
+  const bootRange = initialRange(initialSelected);
+  const bootCache = readReservationRangeCache(bootRange.from, bootRange.to);
 
-  const [apps, setApps] = React.useState<Application[]>([]);
-  const [staffDates, setStaffDates] = React.useState<Record<string, boolean>>({});
+  const [apps, setApps] = React.useState<Application[]>(() => bootCache?.applications ?? []);
+  const [staffDates, setStaffDates] = React.useState<Record<string, boolean>>(() => bootCache?.staff_dates ?? {});
   const [printerByMachine, setPrinterByMachine] = React.useState<Record<'ke' | 'cc', string>>({
     ke: '',
     cc: '',
@@ -65,8 +74,10 @@ export function ReservationApp() {
   const [detail, setDetail] = React.useState<Application | null>(null);
   const [mineOpen, setMineOpen] = React.useState(false);
   const [cancelledOpen, setCancelledOpen] = React.useState(false);
-  const [cancelledApps, setCancelledApps] = React.useState<Application[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [cancelledApps, setCancelledApps] = React.useState<Application[]>(() => bootCache?.cancelled ?? []);
+  /** True once D1 data for the current 4-week range has been fetched successfully. */
+  const [rangeLive, setRangeLive] = React.useState(false);
+  const rangeFetchGen = React.useRef(0);
 
   const showToast = React.useCallback((text: string, mark?: string) => {
     setToast({ text, mark });
@@ -80,16 +91,45 @@ export function ReservationApp() {
     return { from, to };
   }, [selected]);
 
-  const reloadApps = React.useCallback(async () => {
+  const applyRangeCache = React.useCallback((from: string, to: string) => {
+    const cached = readReservationRangeCache(from, to);
+    if (cached) {
+      setApps(cached.applications);
+      setStaffDates(cached.staff_dates);
+      setCancelledApps(cached.cancelled);
+    } else {
+      setApps([]);
+      setStaffDates({});
+      setCancelledApps([]);
+    }
+  }, []);
+
+  const refreshRangeFromServer = React.useCallback(async () => {
     const { from, to } = rangeForSelected;
-    const [data, cancelled] = await Promise.all([
-      fetchApplications(from, to),
-      fetchCancelledApplications(from, to),
-    ]);
-    setApps(data.applications);
-    setCancelledApps(cancelled.applications);
-    setStaffDates(data.staff_dates);
-  }, [rangeForSelected]);
+    const gen = ++rangeFetchGen.current;
+    setRangeLive(false);
+    try {
+      const [data, cancelled] = await Promise.all([
+        fetchApplications(from, to),
+        fetchCancelledApplications(from, to),
+      ]);
+      if (rangeFetchGen.current !== gen) return;
+      setApps(data.applications);
+      setCancelledApps(cancelled.applications);
+      setStaffDates(data.staff_dates);
+      writeReservationRangeCache({
+        from,
+        to,
+        applications: data.applications,
+        staff_dates: data.staff_dates,
+        cancelled: cancelled.applications,
+      });
+      setRangeLive(true);
+    } catch (e) {
+      if (rangeFetchGen.current !== gen) return;
+      showToast(e instanceof Error ? e.message : '読み込みに失敗しました', 'エラー');
+    }
+  }, [rangeForSelected, showToast]);
 
   React.useEffect(() => {
     void (async () => {
@@ -111,18 +151,24 @@ export function ReservationApp() {
             name: auth.student_name,
           });
         }
-        await reloadApps();
       } catch (e) {
         showToast(e instanceof Error ? e.message : '読み込みに失敗しました', 'エラー');
-      } finally {
-        setLoading(false);
       }
     })();
-  }, [reloadApps, showToast]);
+  }, [showToast]);
 
   React.useEffect(() => {
-    if (!loading) void reloadApps();
-  }, [selected, loading, reloadApps]);
+    const { from, to } = rangeForSelected;
+    applyRangeCache(from, to);
+    void refreshRangeFromServer();
+  }, [rangeForSelected.from, rangeForSelected.to, applyRangeCache, refreshRangeFromServer]);
+
+  React.useEffect(() => {
+    if (!rangeLive && form.open) {
+      setForm({ open: false, draft: null });
+      setSelection(null);
+    }
+  }, [rangeLive, form.open]);
 
   React.useEffect(() => {
     savePrefs({ selected });
@@ -144,7 +190,14 @@ export function ReservationApp() {
     setForm({ open: false, draft: null });
   };
 
+  const ensureBookingLive = () => {
+    if (rangeLive) return true;
+    showToast('担当情報をサーバーで確認中です。少し待ってから再度お試しください', '確認中');
+    return false;
+  };
+
   const pickRange = (range: { machine: 'ke' | 'cc'; start: number; end: number }) => {
+    if (!ensureBookingLive()) return;
     setSelection(range);
     if (!hasShift(selected, staffDates)) {
       showToast('この日は担当者がいません', '休み');
@@ -171,6 +224,7 @@ export function ReservationApp() {
   };
 
   const openNew = () => {
+    if (!ensureBookingLive()) return;
     if (!hasShift(selected, staffDates)) {
       showToast('この日は担当者がいません', '休み');
       return;
@@ -241,7 +295,7 @@ export function ReservationApp() {
       });
       setForm({ open: false, draft: null });
       setSelection(null);
-      await reloadApps();
+      await refreshRangeFromServer();
       const toastMsg =
         created.auto_confirmed && payload.kind === 'reserve'
           ? '予約が確定しました'
@@ -258,7 +312,7 @@ export function ReservationApp() {
     try {
       await cancelReservation(id);
       setDetail(null);
-      await reloadApps();
+      await refreshRangeFromServer();
       showToast('申請を取り消しました');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '取消に失敗しました', 'エラー');
@@ -269,7 +323,7 @@ export function ReservationApp() {
     try {
       await restoreReservation(id);
       setDetail(null);
-      await reloadApps();
+      await refreshRangeFromServer();
       showToast('取り消しを取消しました', '復元');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '復元に失敗しました', 'エラー');
@@ -285,32 +339,48 @@ export function ReservationApp() {
         onOpenCancelled={() => setCancelledOpen(true)}
         onNew={openNew}
       />
-      <div className="main-content" data-testid="reservation-app">
-        {loading && <p data-testid="reservation-loading">読み込み中…</p>}
+      <div
+        className="main-content"
+        data-testid="reservation-app"
+        data-range-live={rangeLive ? 'true' : 'false'}
+      >
         <div className="page-head">
           <div style={{ minWidth: 0 }}>
             <span className="badge">自然科学部 3Dモデル班</span>
             <h1 className="page-heading">3Dプリントの依頼・予約</h1>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary btn-lg" data-testid="btn-new-application" onClick={openNew}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-lg"
+              data-testid="btn-new-application"
+              disabled={!rangeLive}
+              onClick={openNew}
+            >
               新規申請
             </button>
           </div>
         </div>
+        {!rangeLive && (
+          <p className="res-sync-banner" data-testid="reservation-sync-banner" role="status">
+            カレンダーは前回の表示です。担当の最新情報を確認しています…
+          </p>
+        )}
         <div className="workspace">
           <div className="cal-col">
             <Calendar selected={selected} onPick={pickDate} apps={apps} todayStr={todayStr} staffDates={staffDates} />
-            <ApplicationPopover
-              open={form.open}
-              draft={form.draft}
-              apps={apps}
-              profile={profile}
-              setProfile={setProfileState}
-              onChangeRange={syncRange}
-              onClose={() => setForm({ open: false, draft: null })}
-              onSubmit={submitApp}
-            />
+            {rangeLive && (
+              <ApplicationPopover
+                open={form.open}
+                draft={form.draft}
+                apps={apps}
+                profile={profile}
+                setProfile={setProfileState}
+                onChangeRange={syncRange}
+                onClose={() => setForm({ open: false, draft: null })}
+                onSubmit={submitApp}
+              />
+            )}
           </div>
           <DayPanel
             dateStr={selected}
@@ -324,6 +394,7 @@ export function ReservationApp() {
             onOpenApp={(app) => setDetail(app)}
             onJumpNext={pickDate}
             nextOpen={nextOpen}
+            bookingLive={rangeLive}
           />
         </div>
       </div>

@@ -19,10 +19,9 @@ export function ForceReservationModal({
   const [studentNumber, setStudentNumber] = React.useState('');
   const [studentName, setStudentName] = React.useState('');
   const [title, setTitle] = React.useState('');
-  const [printScale, setPrintScale] = React.useState('small');
   const [printerId, setPrinterId] = React.useState('');
-  const [scales, setScales] = React.useState<string[]>(['small', 'medium', 'large']);
   const [printers, setPrinters] = React.useState<{ id: string; name: string }[]>([]);
+  const [dayFull, setDayFull] = React.useState(false);
   const [file, setFile] = React.useState<File | null>(null);
   const [force, setForce] = React.useState(true);
   const [purpose, setPurpose] = React.useState('club');
@@ -33,10 +32,7 @@ export function ForceReservationModal({
     void (async () => {
       try {
         const [av, pr] = await Promise.all([fetchDayAvailability(date), fetchAdminPrinters()]);
-        if (av.availableScales?.length) {
-          setScales(av.availableScales);
-          setPrintScale(av.availableScales[0]);
-        }
+        setDayFull(Boolean(av.isFull));
         setPrinters(pr.printers.map((p) => ({ id: p.id, name: p.name })));
         if (pr.printers[0]) setPrinterId(pr.printers[0].id);
       } catch (e) {
@@ -60,7 +56,6 @@ export function ForceReservationModal({
           student_name: studentName.trim() || null,
           title: title.trim() || null,
           purpose,
-          print_scale: printScale || null,
           printer_id: printerId || null,
           ...(upload
             ? {
@@ -80,7 +75,6 @@ export function ForceReservationModal({
           student_name: studentName.trim(),
           title: title.trim(),
           purpose,
-          print_scale: printScale,
           printer_id: printerId,
           stl_r2_key: upload.r2_key,
           stl_filename: upload.filename,
@@ -102,6 +96,11 @@ export function ForceReservationModal({
       <div className="legacy-modal-scrim" onClick={onClose} />
       <div className="legacy-modal-body card">
         <h2>{force ? '仮予約（管理者）' : '通常予約'} — {date}</h2>
+        {dayFull && !force ? (
+          <p className="hint" style={{ color: 'var(--danger, #b91c1c)' }}>
+            この日は空き枠がありません。仮予約（force）を検討してください。
+          </p>
+        ) : null}
         <label className="chk">
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
           必須を緩めて仮予約（legacy force）
@@ -122,16 +121,6 @@ export function ForceReservationModal({
           <label>
             タイトル
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label>
-            規模
-            <select className="input" value={printScale} onChange={(e) => setPrintScale(e.target.value)}>
-              {scales.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
           </label>
           <label>
             プリンター

@@ -99,14 +99,11 @@ export function MonthCalendarPanel({
       <div className="calendar-grid" id="calendar-grid">
         {days.map(({ dayNum, otherMonth, dateStr }) => {
           const list = byDate[dateStr] ?? [];
-          const hasMain = list.some((r) => r.print_scale === 'medium' || r.print_scale === 'large');
-          const smallCount = list.filter((r) => r.print_scale === 'small').length;
-          const isFull = hasMain || smallCount >= 2;
+          const isFull = false;
           const cls = ['calendar-day'];
           if (otherMonth) cls.push('other-month');
           if (dateStr === today) cls.push('today');
-          if (dateStr >= today && !isFull) cls.push('clickable');
-          if (isFull) cls.push('full');
+          if (dateStr >= today) cls.push('clickable');
           return (
             <div
               key={dateStr}
@@ -124,7 +121,7 @@ export function MonthCalendarPanel({
                     <button
                       key={r.id}
                       type="button"
-                      className={`calendar-slot scale-${r.print_scale}`}
+                      className="calendar-slot"
                       onClick={(e) => {
                         e.stopPropagation();
                         onOpenReservation(r);

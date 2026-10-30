@@ -15,6 +15,7 @@ import {
   loadPrinters, savePrinters, exportCSV,
   slotListOf, splitOffSlots, splitWithStatus,
 } from '../admin-design-domain';;
+import { useCalPeriodNav } from '../../hooks/useCalPeriodNav';
 
 const LOGO = '/apps/3dprint-management/assets/icon-192.png';
 
@@ -242,7 +243,9 @@ function CalDay({ d, ds, apps, staffIds, selected, onPick, dense }) {
 }
 
 function Calendar({ apps, avail, selected, onPick }) {
+  const { run, enterClass } = useCalPeriodNav();
   const first = weekStart(parseYmd(selected));
+  const periodKey = ymd(first);
   const weeks = [];
   for (let i = 0; i < 4; i++) {
     const row = [];
@@ -258,13 +261,15 @@ function Calendar({ apps, avail, selected, onPick }) {
 
   const keys = flat.map(ymd);
   const range = apps.filter(a => keys.indexOf(a.date) >= 0 && a.status !== 'cancelled');
-  const step = n => onPick(ymd(addDays(parseYmd(selected), n * 28)));
+  const step = (n: number) => run(n, () => onPick(ymd(addDays(parseYmd(selected), n * 28))));
 
   return (
     <div className="card cal-card">
       <div className="cal-head">
-        <div className="cal-month">
-          <span>{monthLabel}</span>
+        <div className={enterClass} key={`label-${periodKey}`}>
+          <div className="cal-month">
+            <span>{monthLabel}</span>
+          </div>
         </div>
         <div className="cal-nav">
           <button type="button" className="cal-today" onClick={() => onPick(TODAY)}>今日</button>
@@ -278,19 +283,23 @@ function Calendar({ apps, avail, selected, onPick }) {
         </button>
 
         <div className="cal-main">
-          <div className="cal-wds">
-            {WD.map((w, i) => (
-              <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
-            ))}
-          </div>
-          <div className="cal-grid">
-            {weeks.map(row => row.map(d => {
-              const ds = ymd(d);
-              return (
-                <CalDay key={ds} d={d} ds={ds} apps={apps} staffIds={staffIdsOn(ds)}
-                  selected={ds === selected} onPick={onPick} />
-              );
-            }))}
+          <div className="cal-period-shell">
+            <div className={enterClass} key={periodKey}>
+              <div className="cal-wds">
+                {WD.map((w, i) => (
+                  <div key={w} className={'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
+                ))}
+              </div>
+              <div className="cal-grid">
+                {weeks.map(row => row.map(d => {
+                  const ds = ymd(d);
+                  return (
+                    <CalDay key={ds} d={d} ds={ds} apps={apps} staffIds={staffIdsOn(ds)}
+                      selected={ds === selected} onPick={onPick} />
+                  );
+                }))}
+              </div>
+            </div>
           </div>
         </div>
 

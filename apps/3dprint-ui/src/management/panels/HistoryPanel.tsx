@@ -11,8 +11,6 @@ const STATUS: Record<string, string> = {
   cancelled: 'キャンセル',
 };
 
-const SCALE: Record<string, string> = { small: 'S', medium: 'M', large: 'L' };
-
 export function HistoryPanel({
   reservations,
   onOpen,
@@ -51,7 +49,7 @@ export function HistoryPanel({
               <th>希望日</th>
               <th>HR</th>
               <th>タイトル</th>
-              <th>規模</th>
+              <th>パーツ</th>
               <th>ステータス</th>
               <th>担当</th>
               <th />
@@ -63,7 +61,7 @@ export function HistoryPanel({
                 <td>{r.desired_date}</td>
                 <td>{r.homeroom}</td>
                 <td>{r.title}</td>
-                <td>{SCALE[r.print_scale] ?? r.print_scale}</td>
+                <td>{r.part_count && r.part_count > 1 ? r.part_count : '—'}</td>
                 <td>
                   <span className={`status-badge status-${r.status}`}>{STATUS[r.status] ?? r.status}</span>
                 </td>

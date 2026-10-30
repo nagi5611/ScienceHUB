@@ -1,14 +1,7 @@
 // functions/lib/3dprint/reservation-email.ts
-import type { PrintScale } from "./slots";
 import type { Reservation } from "./reservations";
 import type { Env } from "../types";
 import { isEmailSendingConfigured, sendTransactionalEmail } from "../email/cloudflare-email";
-
-const SCALE_LABELS: Record<PrintScale, string> = {
-  small: "スモール",
-  medium: "ミディアム",
-  large: "ラージ",
-};
 
 const DEFAULT_FROM_NAME = "ScienceHUB 3D印刷";
 
@@ -22,7 +15,7 @@ interface ApplicantEmailPayload {
   kind: PrintReservationEmailKind;
   reservation: Pick<
     Reservation,
-    "id" | "title" | "desired_date" | "print_scale"
+    "id" | "title" | "desired_date"
   >;
   printerName?: string | null;
   printStaffLabel?: string | null;
@@ -61,15 +54,11 @@ function buildApplicantMessage(payload: ApplicantEmailPayload): {
   html: string;
   text: string;
 } {
-  const scale =
-    SCALE_LABELS[payload.reservation.print_scale] ??
-    payload.reservation.print_scale;
   const printerLine = payload.printerName
     ? `プリンター: ${payload.printerName}\n`
     : "";
   const common = `タイトル: ${payload.reservation.title}
 希望印刷日: ${payload.reservation.desired_date}
-印刷規模: ${scale}
 ${printerLine}予約ID: ${payload.reservation.id}
 `;
 
@@ -138,7 +127,6 @@ ${common}${formBlock}
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
 <li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
-<li>印刷規模: ${escapeHtml(scale)}</li>
 ${payload.printerName ? `<li>プリンター: ${escapeHtml(payload.printerName)}</li>` : ""}
 <li>予約ID: ${escapeHtml(payload.reservation.id)}</li>
 </ul>
@@ -161,7 +149,6 @@ ${common}印刷担当: ${staff}
 <ul>
 <li>タイトル: ${escapeHtml(payload.reservation.title)}</li>
 <li>希望印刷日: ${escapeHtml(payload.reservation.desired_date)}</li>
-<li>印刷規模: ${escapeHtml(scale)}</li>
 ${payload.printerName ? `<li>プリンター: ${escapeHtml(payload.printerName)}</li>` : ""}
 <li>印刷担当: ${escapeHtml(staff)}</li>
 <li>予約ID: ${escapeHtml(payload.reservation.id)}</li>

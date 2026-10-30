@@ -20,45 +20,54 @@ import {
   Header, Calendar, CalDay, dayHint, Drawer, Modal, Toast,
   DLIcon, downloadAppFile, downloadDay, saveText,
 } from './AdminDesignUi';;
+import { useCalPeriodNav } from '../../hooks/useCalPeriodNav';
 
 function MoveMonth({ year, month, app, apps, onChangeMonth, onJumpToday }) {
+  const { run, enterClass } = useCalPeriodNav();
+  const periodKey = `${year}-${pad2(month)}`;
   const cells = monthGrid(year, month);
   return (
     <div className="mm">
       <div className="mm-h">
-        <button type="button" onClick={() => onChangeMonth(-1)} aria-label="前の月">‹</button>
-        <b className="num">{year}年 {month}月</b>
-        <button type="button" onClick={() => onChangeMonth(1)} aria-label="次の月">›</button>
+        <button type="button" onClick={() => run(-1, () => onChangeMonth(-1))} aria-label="前の月">‹</button>
+        <div className={enterClass} key={`label-${periodKey}`}>
+          <b className="num">{year}年 {month}月</b>
+        </div>
+        <button type="button" onClick={() => run(1, () => onChangeMonth(1))} aria-label="次の月">›</button>
         <button type="button" className="mini" onClick={onJumpToday}>今月</button>
       </div>
-      <div className="mm-wds">
-        {WD.map((w, i) => (
-          <span key={w} className={'mm-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</span>
-        ))}
-      </div>
-      <div className="mm-grid">
-        {cells.map((d, i) => {
-          if (!d) return <span className="mm-cell pad" key={'p' + i} />;
-          const ds = ymd(d);
-          const c = moveCheck(apps, app, ds);
-          const tone = c.sameDay ? 'current' : c.past ? 'past' : c.full ? 'full' : c.noStaff ? 'nostaff' : 'ok';
-          return (
-            <button type="button" key={ds} data-date={ds}
-              className={'mm-cell ' + tone}
-              onClick={() => !c.past && !c.sameDay && onChangeMonth(0, ds)}
-              aria-label={`${d.getMonth() + 1}月${d.getDate()}日 ${c.full ? '埋まり' : c.noStaff ? '担当なし' : '空き'}`}>
-              <span className="num mm-d">{d.getDate()}</span>
-              <span className="mm-meta">
-                {c.sameDay ? '現在'
-                  : c.past ? '—'
-                    : c.noStaff ? '担当なし'
-                      : c.full ? '満枠'
-                        : `空き ${c.free}枠`}
-              </span>
-              {c.liveCount > 0 && !c.past && <span className="mm-count num">{c.liveCount}</span>}
-            </button>
-          );
-        })}
+      <div className="cal-period-shell">
+        <div className={enterClass} key={periodKey}>
+          <div className="mm-wds">
+            {WD.map((w, i) => (
+              <span key={w} className={'mm-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</span>
+            ))}
+          </div>
+          <div className="mm-grid">
+            {cells.map((d, i) => {
+              if (!d) return <span className="mm-cell pad" key={'p' + i} />;
+              const ds = ymd(d);
+              const c = moveCheck(apps, app, ds);
+              const tone = c.sameDay ? 'current' : c.past ? 'past' : c.full ? 'full' : c.noStaff ? 'nostaff' : 'ok';
+              return (
+                <button type="button" key={ds} data-date={ds}
+                  className={'mm-cell ' + tone}
+                  onClick={() => !c.past && !c.sameDay && onChangeMonth(0, ds)}
+                  aria-label={`${d.getMonth() + 1}月${d.getDate()}日 ${c.full ? '埋まり' : c.noStaff ? '担当なし' : '空き'}`}>
+                  <span className="num mm-d">{d.getDate()}</span>
+                  <span className="mm-meta">
+                    {c.sameDay ? '現在'
+                      : c.past ? '—'
+                        : c.noStaff ? '担当なし'
+                          : c.full ? '満枠'
+                            : `空き ${c.free}枠`}
+                  </span>
+                  {c.liveCount > 0 && !c.past && <span className="mm-count num">{c.liveCount}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

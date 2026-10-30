@@ -1,4 +1,5 @@
 import React from 'react';
+import { PageLoading } from '@components/PageLoading';
 import { checkAppAccess } from '@shared/api';
 
 export function AccessGate({ children }: { children: React.ReactNode }) {
@@ -20,7 +21,11 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (state === 'loading') {
-    return <div className="main-content" data-testid="access-loading">読み込み中…</div>;
+    return (
+      <div className="main-content" data-testid="access-loading">
+        <PageLoading testId="access-loading-spinner" />
+      </div>
+    );
   }
   if (state === 'denied') {
     return (

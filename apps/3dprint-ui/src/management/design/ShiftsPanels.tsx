@@ -21,11 +21,14 @@ import {
   DLIcon, downloadAppFile, downloadDay, saveText,
 } from './AdminDesignUi';;
 import { fetchManagementAccessUsers, type ManagementAccessUser } from '../admin-api';
+import { useCalPeriodNav } from '../../hooks/useCalPeriodNav';
 
 /* 月カレンダー（シフト塗り用）。
    - 日付をドラッグでなぞる：触れた日をまとめて追加／削除
    - 曜日見出しをクリック：その月の同じ曜日を一括トグル */
 function ShiftCalendar({ year, month, avail, memberId, onPaint, onChangeMonth }) {
+  const { run, enterClass } = useCalPeriodNav();
+  const periodKey = `${year}-${pad2(month)}`;
   const first = new Date(year, month - 1, 1);
   const lead = first.getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -119,64 +122,70 @@ function ShiftCalendar({ year, month, avail, memberId, onPaint, onChangeMonth })
   return (
     <div className="scal" ref={gridRef}>
       <div className="scal-h">
-        <b className="num">{year}年 {month}月</b>
+        <div className={enterClass} key={`label-${periodKey}`}>
+          <b className="num">{year}年 {month}月</b>
+        </div>
         <button type="button" className="mini" onClick={() => onChangeMonth(0)}>今月</button>
       </div>
 
       <div className="scal-body">
-        <button type="button" className="scal-side prev" onClick={() => onChangeMonth(-1)} aria-label="前の月">
+        <button type="button" className="scal-side prev" onClick={() => run(-1, () => onChangeMonth(-1))} aria-label="前の月">
           <span aria-hidden="true">‹</span>
           <span className="scal-side-lbl">前へ</span>
         </button>
 
         <div className="scal-main">
-          <div className="scal-wds">
-            {WD.map((w, i) => {
-              const st = weekdayState(i);
-              return (
-                <button type="button" key={w} data-wd={i}
-                  className={'scal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '') + (st === 'all' ? ' all' : st === 'some' ? ' some' : '')}
-                  onClick={() => toggleWeekday(i)}
-                  title={`${w}曜日をこの月すべて${st === 'all' ? '削除' : '追加'}`}
-                  aria-label={`${w}曜日をこの月すべて${st === 'all' ? '削除' : '追加'}`}>
-                  {w}
-                </button>
-              );
-            })}
-          </div>
+          <div className="cal-period-shell">
+            <div className={enterClass} key={periodKey}>
+              <div className="scal-wds">
+                {WD.map((w, i) => {
+                  const st = weekdayState(i);
+                  return (
+                    <button type="button" key={w} data-wd={i}
+                      className={'scal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '') + (st === 'all' ? ' all' : st === 'some' ? ' some' : '')}
+                      onClick={() => toggleWeekday(i)}
+                      title={`${w}曜日をこの月すべて${st === 'all' ? '削除' : '追加'}`}
+                      aria-label={`${w}曜日をこの月すべて${st === 'all' ? '削除' : '追加'}`}>
+                      {w}
+                    </button>
+                  );
+                })}
+              </div>
 
-          <div className={'scal-grid' + (preview ? ' painting' : '')}>
-            {Array.from({ length: Math.ceil(cells.length / 7) * 7 }).map((_, i) => {
-              const d = cells[i];
-              if (!d) return <span className="scal-cell pad" key={'p' + i} />;
-              const ds = ymd(d);
-              const on = onOf(ds);
-              const pv = paintOf(ds);
-              const wd = d.getDay();
-              const past = !editable(ds);
-              const ids = staffIdsOf(ds);
-              const mine = memberId ? ids.indexOf(memberId) >= 0 : false;
-              return (
-                <button type="button" key={ds} data-date={ds}
-                  className={'scal-cell' + (on ? ' on' : '') + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : '')
-                    + (ds === TODAY ? ' today' : '') + (past ? ' past' : '')
-                    + (pv === true ? ' pv-on' : pv === false ? ' pv-off' : '') + (mine ? ' mine' : '')}
-                  style={mine || (pv === true && memberId) ? { background: curColor + '1f', borderColor: curColor } : undefined}
-                  onPointerDown={e => begin(ds, e)}
-                  aria-pressed={on}
-                  aria-label={`${d.getMonth() + 1}月${d.getDate()}日 ${ids.length ? ids.map(memberName).join('・') : '担当なし'}`}>
-                  <span className="scal-dots">
-                    {ids.slice(0, 4).map(id => (
-                      <span key={id} className="scal-dot" style={{ background: memberColor(id) }} />
-                    ))}
-                  </span>
-                </button>
-              );
-            })}
+              <div className={'scal-grid' + (preview ? ' painting' : '')}>
+                {Array.from({ length: Math.ceil(cells.length / 7) * 7 }).map((_, i) => {
+                  const d = cells[i];
+                  if (!d) return <span className="scal-cell pad" key={'p' + i} />;
+                  const ds = ymd(d);
+                  const on = onOf(ds);
+                  const pv = paintOf(ds);
+                  const wd = d.getDay();
+                  const past = !editable(ds);
+                  const ids = staffIdsOf(ds);
+                  const mine = memberId ? ids.indexOf(memberId) >= 0 : false;
+                  return (
+                    <button type="button" key={ds} data-date={ds}
+                      className={'scal-cell' + (on ? ' on' : '') + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : '')
+                        + (ds === TODAY ? ' today' : '') + (past ? ' past' : '')
+                        + (pv === true ? ' pv-on' : pv === false ? ' pv-off' : '') + (mine ? ' mine' : '')}
+                      style={mine || (pv === true && memberId) ? { background: curColor + '1f', borderColor: curColor } : undefined}
+                      onPointerDown={e => begin(ds, e)}
+                      aria-pressed={on}
+                      aria-label={`${d.getMonth() + 1}月${d.getDate()}日 ${ids.length ? ids.map(memberName).join('・') : '担当なし'}`}>
+                      <span className="scal-dots">
+                        {ids.slice(0, 4).map(id => (
+                          <span key={id} className="scal-dot" style={{ background: memberColor(id) }} />
+                        ))}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
-        <button type="button" className="scal-side next" onClick={() => onChangeMonth(1)} aria-label="次の月">
+        <button type="button" className="scal-side next" onClick={() => run(1, () => onChangeMonth(1))} aria-label="次の月">
           <span aria-hidden="true">›</span>
           <span className="scal-side-lbl">次へ</span>
         </button>

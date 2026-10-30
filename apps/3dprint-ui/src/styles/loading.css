@@ -1,0 +1,35 @@
+/* Shared loading indicator — reservation + management */
+.print3d-loading{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:min(50vh,420px);
+  padding:2rem 1rem;
+}
+.print3d-loading--inline{
+  min-height:0;
+  padding:12px 0;
+  justify-content:flex-start;
+}
+.print3d-loading-spinner{
+  width:2.25rem;
+  height:2.25rem;
+  border:3px solid color-mix(in srgb, var(--color-primary) 16%, var(--color-border));
+  border-top-color:var(--color-primary);
+  border-radius:50%;
+  animation:print3d-loading-spin .75s linear infinite;
+}
+.print3d-loading--inline .print3d-loading-spinner{
+  width:1.35rem;
+  height:1.35rem;
+  border-width:2px;
+}
+@keyframes print3d-loading-spin{
+  to{transform:rotate(360deg)}
+}
+@media (prefers-reduced-motion:reduce){
+  .print3d-loading-spinner{
+    animation:none;
+    border-top-color:var(--color-primary);
+  }
+}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { PageLoading } from '@components/PageLoading';
 import {
   WD,
   ymd,
@@ -521,8 +522,8 @@ export function AdminDesignApp() {
 
   if (loading) {
     return (
-      <main className="main-content" style={{ padding: '2rem' }}>
-        <p>読み込み中…</p>
+      <main className="main-content" data-testid="management-loading">
+        <PageLoading testId="management-app-loading" />
       </main>
     );
   }

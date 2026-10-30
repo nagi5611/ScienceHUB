@@ -31,7 +31,6 @@ interface RetryReservationInput {
   purpose_other?: string | null;
   summary?: string | null;
   print_notes?: string | null;
-  print_scale: Reservation['print_scale'];
   printer_id?: string | null;
   stl_r2_key?: string;
   stl_filename?: string;
@@ -67,7 +66,6 @@ export async function retryFailedReservation(
     purpose_other: body.purpose_other ?? null,
     summary: body.summary ?? null,
     print_notes: body.print_notes ?? null,
-    print_scale: body.print_scale,
     printer_id: body.printer_id ?? failedReservation.printer_id,
     desired_date: body.desired_date,
     stl_r2_key: body.stl_r2_key,
@@ -90,7 +88,6 @@ export async function retryFailedReservation(
   const slotError = await validateReservationSlot(
     env.DB,
     body.desired_date,
-    body.print_scale,
     failedReservation.id,
     content.printer_id ?? undefined,
     { isAdmin: false, partCount }
@@ -155,7 +152,6 @@ export async function retryFailedReservation(
     purpose_other: body.purpose === 'other' ? body.purpose_other?.trim() || null : null,
     summary: body.summary?.trim() || null,
     print_notes: body.print_notes?.trim() || null,
-    print_scale: body.print_scale,
     printer_id: body.printer_id ?? failedReservation.printer_id,
     desired_date: body.desired_date,
     part_count: partCount,

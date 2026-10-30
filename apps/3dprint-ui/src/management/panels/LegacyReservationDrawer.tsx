@@ -85,10 +85,12 @@ export function LegacyReservationDrawer({
           <dt>担当</dt>
           <dd>{reservation.print_staff_label ?? '—'}</dd>
         </div>
-        <div>
-          <dt>規模</dt>
-          <dd>{reservation.print_scale}</dd>
-        </div>
+        {(reservation.part_count ?? 1) > 1 ? (
+          <div>
+            <dt>パーツ数</dt>
+            <dd>{reservation.part_count}</dd>
+          </div>
+        ) : null}
       </dl>
 
       <div className="ftitle">印刷動画</div>

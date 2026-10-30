@@ -379,7 +379,7 @@ export type AdminReservation = {
   student_number: number;
   student_name: string;
   title: string;
-  print_scale: string;
+  part_count?: number;
   status: string;
   purpose?: string;
   print_staff_label?: string | null;
@@ -449,12 +449,13 @@ export type DayAvailability = {
   date: string;
   isFull?: boolean;
   canBook?: boolean;
-  availableScales?: string[];
+  remaining?: number;
+  capacity?: number;
+  count?: number;
 };
 
-export async function fetchDayAvailability(date: string, scale?: string) {
-  const q = scale ? `&scale=${scale}` : '';
-  return apiFetch<DayAvailability>(`admin/calendar/availability?date=${date}${q}`);
+export async function fetchDayAvailability(date: string) {
+  return apiFetch<DayAvailability>(`admin/calendar/availability?date=${date}`);
 }
 
 export async function forceAdminReservation(body: Record<string, unknown>) {

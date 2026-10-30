@@ -1,5 +1,6 @@
 import React from 'react';
 import { checkManagementAccess } from './admin-api';
+import { PageLoading } from '@components/PageLoading';
 import { AdminDesignApp } from './design/AdminDesignApp';
 
 export function AdminApp() {
@@ -36,8 +37,8 @@ export function AdminApp() {
 
   if (!ready) {
     return (
-      <main className="main-content" style={{ padding: '2rem' }}>
-        <p>読み込み中…</p>
+      <main className="main-content" data-testid="management-access-loading">
+        <PageLoading />
       </main>
     );
   }

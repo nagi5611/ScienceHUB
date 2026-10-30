@@ -214,7 +214,7 @@ export interface ContestApplicationAdminReservationRow {
   desired_date: string;
   stl_filename: string;
   stl_size_bytes: number;
-  print_scale: PrintReservation['print_scale'];
+  part_count?: number;
   print_notes: string | null;
   created_at: string;
 }
@@ -225,7 +225,7 @@ async function fetchContestReservationsForApplicationAdmin(
 ): Promise<ContestApplicationAdminReservationRow[]> {
   const result = await db
     .prepare(
-      `SELECT id, status, desired_date, stl_filename, stl_size_bytes, print_scale, print_notes, created_at
+      `SELECT id, status, desired_date, stl_filename, stl_size_bytes, part_count, print_notes, created_at
        FROM print_reservations
        WHERE contest_application_id = ? AND source = 'contest'
        ORDER BY created_at DESC`

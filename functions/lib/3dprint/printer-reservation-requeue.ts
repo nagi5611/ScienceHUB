@@ -11,7 +11,7 @@ import {
   updateReservationSchedule,
   type Reservation,
 } from './reservations';
-import { addDays, getTodayJst, type PrintScale } from './slots';
+import { addDays, getTodayJst } from './slots';
 
 const MAX_LOOKAHEAD_DAYS = 120;
 
@@ -42,7 +42,6 @@ export async function requeuePrinterReservationsAfterChange(
       targetDate = await findEarliestDateOnPrinter(
         env.DB,
         printerId,
-        reservation.print_scale,
         partCount,
         startDate,
         reservation.id
@@ -57,7 +56,6 @@ export async function requeuePrinterReservationsAfterChange(
       const slot = await findEarliestSlotOnAnyPrinter(
         env.DB,
         partCount,
-        reservation.print_scale,
         startDate,
         reservation.id,
         printerId
@@ -92,7 +90,6 @@ export async function requeuePrinterReservationsAfterChange(
 async function findEarliestDateOnPrinter(
   db: D1Database,
   printerId: string,
-  printScale: PrintScale,
   partCount: number,
   startDate: string,
   excludeReservationId: string
@@ -103,7 +100,6 @@ async function findEarliestDateOnPrinter(
       db,
       date,
       printerId,
-      printScale,
       partCount,
       excludeReservationId,
       { isAdmin: true }
@@ -116,7 +112,6 @@ async function findEarliestDateOnPrinter(
 async function findEarliestSlotOnAnyPrinter(
   db: D1Database,
   partCount: number,
-  printScale: PrintScale,
   startDate: string,
   excludeReservationId: string,
   excludePrinterId: string
@@ -136,7 +131,6 @@ async function findEarliestSlotOnAnyPrinter(
         db,
         date,
         printer.id,
-        printScale,
         partCount,
         excludeReservationId,
         { isAdmin: true }
