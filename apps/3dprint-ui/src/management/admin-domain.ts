@@ -169,6 +169,77 @@ export function daySummary(apps: AdminApplication[], ds: string) {
   };
 }
 
+/** One row for admin CSV / Excel export (column order tuned for spreadsheets). */
+export type ApplicationExportRow = {
+  date: string;
+  weekday: string;
+  title: string;
+  machine: string;
+  kind: string;
+  status: string;
+  applicant: string;
+  homeroom: string;
+  studentNumber: string;
+  start: string;
+  end: string;
+  printFile: string;
+  fileSizeMb: string;
+  note: string;
+  staff: string;
+};
+
+export const APPLICATION_EXPORT_HEADERS: { key: keyof ApplicationExportRow; label: string }[] = [
+  { key: 'date', label: '日付' },
+  { key: 'weekday', label: '曜日' },
+  { key: 'title', label: '作品名' },
+  { key: 'machine', label: '機種' },
+  { key: 'kind', label: '種別' },
+  { key: 'status', label: '状態' },
+  { key: 'applicant', label: '申請者' },
+  { key: 'homeroom', label: '学年HR' },
+  { key: 'studentNumber', label: '番号' },
+  { key: 'start', label: '開始' },
+  { key: 'end', label: '終了' },
+  { key: 'printFile', label: '印刷データ' },
+  { key: 'fileSizeMb', label: 'サイズ(MB)' },
+  { key: 'note', label: '備考' },
+  { key: 'staff', label: '担当' },
+];
+
+export function buildApplicationExportRows(
+  apps: AdminApplication[],
+  fromStr: string,
+  toStr: string,
+  members: AdminMember[],
+  shiftMap: Record<string, string | null> = {}
+): ApplicationExportRow[] {
+  return apps
+    .filter((a) => a.date >= fromStr && a.date <= toStr)
+    .sort((a, b) => (a.date + String(a.start)).localeCompare(b.date + String(b.start)))
+    .map((a) => {
+      const sp = spanOf(a);
+      const d = parseYmd(a.date);
+      const staffId = shiftMap[a.date];
+      return {
+        date: a.date,
+        weekday: WD[d.getDay()],
+        title: a.title,
+        machine: MACHINE_MAP[a.machine]?.name ?? a.machine,
+        kind: KIND[a.kind],
+        status: STATUS[a.status],
+        applicant: a.who.name,
+        homeroom: a.who.hr,
+        studentNumber: String(a.who.num),
+        start: minsLabel(sp.start),
+        end: minsLabel(sp.end),
+        printFile: a.file,
+        fileSizeMb: a.fileSize ? (a.fileSize / 1048576).toFixed(2) : '',
+        note: a.note,
+        staff: staffId ? memberName(members, staffId) || '' : '',
+      };
+    });
+}
+
 export function exportCSV(
   apps: AdminApplication[],
   fromStr: string,
@@ -176,57 +247,18 @@ export function exportCSV(
   members: AdminMember[],
   shiftMap: Record<string, string | null> = {}
 ) {
-  const rows = apps
-    .filter((a) => a.date >= fromStr && a.date <= toStr)
-    .sort((a, b) => (a.date + String(a.start)).localeCompare(b.date + String(b.start)));
-  const head = [
-    '日付',
-    '曜日',
-    '開始',
-    '終了',
-    '機種',
-    '種別',
-    '作品名',
-    '申請者',
-    '学年HR',
-    '番号',
-    '状態',
-    '印刷データ',
-    'サイズ(MB)',
-    '備考',
-    '担当',
-  ];
+  const rows = buildApplicationExportRows(apps, fromStr, toStr, members, shiftMap);
   const esc = (v: unknown) => {
     const s = String(v == null ? '' : v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const lines = [head.join(',')];
-  rows.forEach((a) => {
-    const sp = spanOf(a);
-    const d = parseYmd(a.date);
-    const staffId = shiftMap[a.date];
+  const lines = [APPLICATION_EXPORT_HEADERS.map((h) => h.label).join(',')];
+  for (const row of rows) {
     lines.push(
-      [
-        a.date,
-        WD[d.getDay()],
-        minsLabel(sp.start),
-        minsLabel(sp.end),
-        MACHINE_MAP[a.machine]?.name ?? a.machine,
-        KIND[a.kind],
-        a.title,
-        a.who.name,
-        a.who.hr,
-        a.who.num,
-        STATUS[a.status],
-        a.file,
-        a.fileSize ? (a.fileSize / 1048576).toFixed(2) : '',
-        a.note,
-        staffId ? memberName(members, staffId) || '' : '',
-      ]
-        .map(esc)
+      APPLICATION_EXPORT_HEADERS.map((h) => esc(row[h.key]))
         .join(',')
     );
-  });
+  }
   return '\uFEFF' + lines.join('\r\n');
 }
 

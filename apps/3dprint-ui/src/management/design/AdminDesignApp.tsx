@@ -27,6 +27,7 @@ import {
   saveIntegrations,
 } from '../admin-design-domain';
 import { availabilityToShiftMap, dateLabel, dateLabelW } from '../admin-domain';
+import { downloadBlob } from '../application-download';
 import {
   mapAdminAppToDesign,
   designStatusToDbStatus,
@@ -38,7 +39,9 @@ import {
   toDesignMembers,
   colorIndexFromDesign,
   applicationsToCsv,
+  applicationsToXlsxBuffer,
   monthRangeForSelected,
+  type ApplicationExportFormat,
   defaultIntegrationsState,
   type DesignApplication,
   type DesignMember,
@@ -549,25 +552,27 @@ export function AdminDesignApp() {
     return result;
   };
 
-  const csv = () => {
+  const exportApplications = async (format: ApplicationExportFormat) => {
     try {
       const { from, to } = monthRangeForSelected(selected);
       const shiftMap = availabilityToShiftMap(memberAvailToRows(avail));
       const memberRows = members.map((m) => ({ id: m.id, name: m.name }));
-      const text = applicationsToCsv(apps, from, to, memberRows, shiftMap);
-      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `3dprint_${from}_${to}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      const rowCount = Math.max(0, text.split(/\r?\n/).length - 1);
-      showToast('CSVを書き出しました', `${from}–${to}（${rowCount}行）`);
+      if (format === 'csv') {
+        const text = applicationsToCsv(apps, from, to, memberRows, shiftMap);
+        downloadBlob(`3dprint_${from}_${to}.csv`, text, 'text/csv;charset=utf-8');
+        const rowCount = Math.max(0, text.split(/\r?\n/).length - 1);
+        showToast('CSVを書き出しました', `${from}–${to}（${rowCount}行）`);
+        return;
+      }
+      const buffer = await applicationsToXlsxBuffer(apps, from, to, memberRows, shiftMap);
+      downloadBlob(
+        `3dprint_${from}_${to}.xlsx`,
+        buffer,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      showToast('Excelを書き出しました', `${from}–${to}`);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'CSVの書き出しに失敗しました', 'エラー');
+      showToast(e instanceof Error ? e.message : 'エクスポートに失敗しました', 'エラー');
     }
   };
 
@@ -588,7 +593,7 @@ export function AdminDesignApp() {
         setScreen={setScreen}
         operatorSession={operatorSession}
         pendingCount={pending.length}
-        onCsv={csv}
+        onExport={exportApplications}
       />
 
       <main className="main-content" data-testid="management-app">
