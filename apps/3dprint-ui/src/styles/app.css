@@ -359,6 +359,7 @@ textarea.input{min-height:64px;resize:vertical;line-height:1.6}
 .alertbox{display:flex;gap:8px;font-size:12px;line-height:1.6;padding:9px 11px;border-radius:var(--radius-sm);border:1px solid}
 .alertbox.warn{background:var(--color-warn-bg);border-color:var(--color-warn-line);color:var(--color-warn-text)}
 .alertbox.tip{background:var(--color-tip-bg);border-color:var(--color-tip-line);color:var(--color-tip-text)}
+.alertbox.info{background:var(--color-surface-muted);border-color:var(--color-border);color:var(--color-text)}
 .alertbox b{font-weight:700}
 
 .mine-item{border:1px solid var(--color-border);border-radius:var(--radius-md);padding:11px 12px;display:grid;gap:6px}

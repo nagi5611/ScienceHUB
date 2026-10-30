@@ -250,7 +250,10 @@ export function ReservationApp() {
     });
   };
 
+  const [submitting, setSubmitting] = React.useState(false);
+
   const submitApp = async (payload: Application & { fileRaw?: File; fileRaws?: File[] }) => {
+    if (submitting) return;
     const cand = {
       id: 'new',
       date: payload.date,
@@ -282,33 +285,41 @@ export function ReservationApp() {
       showToast('印刷データを選択してください', 'エラー');
       return;
     }
+    const idempotencyKey = crypto.randomUUID();
+    setSubmitting(true);
     try {
       saveProfile(payload.who);
       const uploaded = await uploadPrintFiles(rawFiles);
       const primary = uploaded[0]!;
-      const created = await createTimeSlotReservation({
-        title: payload.title,
-        printer_id: printerId,
-        desired_date: payload.date,
-        booking_kind: payload.kind,
-        start_minute: payload.kind === 'reserve' ? payload.start : undefined,
-        end_minute: payload.kind === 'reserve' ? payload.end : undefined,
-        stl_r2_key: primary.r2_key,
-        stl_filename: primary.filename,
-        stl_size_bytes: primary.size_bytes,
-        print_files: uploaded,
-        print_notes: payload.note,
-      });
+      const created = await createTimeSlotReservation(
+        {
+          title: payload.title,
+          printer_id: printerId,
+          desired_date: payload.date,
+          booking_kind: payload.kind,
+          start_minute: payload.kind === 'reserve' ? payload.start : undefined,
+          end_minute: payload.kind === 'reserve' ? payload.end : undefined,
+          stl_r2_key: primary.r2_key,
+          stl_filename: primary.filename,
+          stl_size_bytes: primary.size_bytes,
+          print_files: uploaded,
+          print_notes: payload.note,
+        },
+        idempotencyKey
+      );
       setForm({ open: false, draft: null });
       setSelection(null);
       await refreshRangeFromServer();
       const toastMsg =
-        payload.kind === 'reserve'
+        created.message ??
+        (payload.kind === 'reserve'
           ? '予約が確定しました'
-          : '依頼を受け付けました（担当者の受領待ち）';
+          : '依頼を受け付けました（担当者の受領待ち）');
       showToast(toastMsg, payload.title);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '申請に失敗しました', 'エラー');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -388,8 +399,11 @@ export function ReservationApp() {
                 apps={apps}
                 profile={profile}
                 setProfile={setProfileState}
+                submitting={submitting}
                 onChangeRange={syncRange}
-                onClose={() => setForm({ open: false, draft: null })}
+                onClose={() => {
+                  if (!submitting) setForm({ open: false, draft: null });
+                }}
                 onSubmit={submitApp}
               />
             )}

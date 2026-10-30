@@ -171,7 +171,7 @@ function FileDrop({ files, setFiles, error }) {
 }
 
 /* ── 申請ポップ ── */
-function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, onSubmit, onChangeRange }) {
+function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, onSubmit, onChangeRange, submitting = false }) {
   const [kind, setKind] = React.useState('reserve');
   const [machine, setMachine] = React.useState('ke');
   const [startMin, setStartMin] = React.useState(DAY_START + 60);
@@ -253,8 +253,8 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
 
   const submit = () => {
     setTouched(true);
-    if (!canSubmit) return;
-    onSubmit({
+    if (!canSubmit || submitting) return;
+    void onSubmit({
       date, machine, kind,
       start: isReserve ? startMin : SHIFT_START,
       end: isReserve ? endMin : SHIFT_END,
@@ -398,7 +398,12 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
             <div><dt>申請者</dt><dd>{whoLabel({ name: name || '—', hr, num }, true)}</dd></div>
           </dl>
 
-          {touched && !canSubmit && (
+          {submitting && (
+            <div className="alertbox info" role="status" aria-live="polite">
+              <div><b>申請処理中です。</b>アップロードと登録が完了するまでお待ちください。</div>
+            </div>
+          )}
+          {touched && !canSubmit && !submitting && (
             <div className="alertbox warn">
               <div><b>入力内容を確認してください。</b><br />
                 {dateErr && '日付が稼働日ではありません。 '}
@@ -412,8 +417,10 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
         </div>
 
         <div className="pop-f">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>キャンセル</button>
-          <button type="button" className="btn btn-primary" data-testid="btn-submit-application" onClick={submit} disabled={!canSubmit}>申請する</button>
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting}>キャンセル</button>
+          <button type="button" className="btn btn-primary" data-testid="btn-submit-application" onClick={submit} disabled={!canSubmit || submitting}>
+            {submitting ? '申請処理中…' : '申請する'}
+          </button>
         </div>
       </div>
     </div>

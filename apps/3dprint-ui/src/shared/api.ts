@@ -4,10 +4,12 @@ const API_BASE = '/api/3dprint';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -17,9 +19,13 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
     headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) },
     ...options,
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
+  const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status, data.code);
   return data as T;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface PrinterRow {
@@ -46,20 +52,50 @@ export async function fetchApplications(from: string, to: string): Promise<{
   return data;
 }
 
-export async function createTimeSlotReservation(body: {
-  title: string;
-  printer_id: string;
-  desired_date: string;
-  booking_kind: 'reserve' | 'request';
-  start_minute?: number;
-  end_minute?: number;
-  stl_r2_key: string;
-  stl_filename: string;
-  stl_size_bytes: number;
-  print_files?: Array<{ r2_key: string; filename: string; size_bytes: number }>;
-  print_notes?: string;
-}): Promise<{ id: string; message?: string; auto_confirmed?: boolean; booking_kind?: string }> {
-  return apiRequest('reservations', { method: 'POST', body: JSON.stringify(body) });
+export async function createTimeSlotReservation(
+  body: {
+    title: string;
+    printer_id: string;
+    desired_date: string;
+    booking_kind: 'reserve' | 'request';
+    start_minute?: number;
+    end_minute?: number;
+    stl_r2_key: string;
+    stl_filename: string;
+    stl_size_bytes: number;
+    print_files?: Array<{ r2_key: string; filename: string; size_bytes: number }>;
+    print_notes?: string;
+  },
+  idempotencyKey: string
+): Promise<{ id: string; message?: string; auto_confirmed?: boolean; booking_kind?: string }> {
+  const headers: Record<string, string> = { 'Idempotency-Key': idempotencyKey };
+  const deadline = Date.now() + 120_000;
+  while (true) {
+    const res = await fetch(`${API_BASE}/reservations`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      code?: string;
+      id?: string;
+      message?: string;
+      auto_confirmed?: boolean;
+      booking_kind?: string;
+    };
+    if (res.ok) return data as { id: string; message?: string; auto_confirmed?: boolean; booking_kind?: string };
+    if (
+      res.status === 409 &&
+      data.code === 'idempotency_in_progress' &&
+      Date.now() < deadline
+    ) {
+      await sleep(400);
+      continue;
+    }
+    throw new ApiError(data.error || `HTTP ${res.status}`, res.status, data.code);
+  }
 }
 
 export async function cancelReservation(id: string): Promise<void> {

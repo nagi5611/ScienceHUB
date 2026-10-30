@@ -96,6 +96,12 @@ import {
 } from "../../lib/3dprint/print-reservation-files";
 import { softCancelReservation, restoreCancelledReservation } from "../../lib/3dprint/cancel-restore";
 import {
+  claimReservationIdempotencyKey,
+  completeReservationIdempotencyKey,
+  releaseReservationIdempotencyKey,
+  type CompletedReservationResponse,
+} from "../../lib/3dprint/reservation-idempotency";
+import {
   build3dPrintReservationAppUrl,
   notifyApplicantPrintReservationEmail,
   sendPrintReservationAdminTestEmail,
@@ -525,15 +531,18 @@ async function notifyNewApplicationDiscordAndEmail(
     applicantLabel,
   });
   if (!discord.ok) {
-    throw new Error(
-      `Discord通知の送信に失敗しました（${discord.attempts}回試行）。時間をおいて再度お試しください。`
+    console.error(
+      "Discord application webhook failed after retries:",
+      discord.status,
+      discord.error,
+      `(attempts=${discord.attempts}, reservation=${reservation.id})`
     );
   }
   await sendApplicantAppliedEmail(env, db, request, applicantUserId, reservation);
 }
 
-/** Discord must succeed before the application is considered submitted; rolls back on failure. */
-async function deliverNewApplicationNotifications(
+/** Sends applicant Discord + email after HTTP response (retries inside webhook helper). */
+async function runNewApplicationNotifications(
   env: Env,
   db: D1Database,
   request: Request,
@@ -543,13 +552,21 @@ async function deliverNewApplicationNotifications(
   try {
     await notifyNewApplicationDiscordAndEmail(env, db, request, reservation, applicantUserId);
   } catch (err) {
-    await softCancelReservation(env, db, reservation.id, {
-      statusComment: "Discord通知送信失敗のため申請を取り消しました",
-    }).catch((cancelErr) =>
-      console.error("discord notify rollback cancel failed", cancelErr)
-    );
-    throw err;
+    console.error("new application notifications failed", reservation.id, err);
   }
+}
+
+function scheduleNewApplicationNotifications(
+  context: { waitUntil: (promise: Promise<unknown>) => void },
+  env: Env,
+  db: D1Database,
+  request: Request,
+  reservation: Reservation,
+  applicantUserId: string
+): void {
+  context.waitUntil(
+    runNewApplicationNotifications(env, db, request, reservation, applicantUserId)
+  );
 }
 
 /** Auto-confirmed time-slot「予約のみ」: applicant email + Discord「予約されました」. */
@@ -1041,6 +1058,42 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const profile = await requireCompletePrintProfile(db, userId);
       if (profile instanceof Response) return profile;
 
+      const idempotencyKey = request.headers.get("Idempotency-Key")?.trim() ?? "";
+      let idempotencyClaimed = false;
+      if (idempotencyKey) {
+        try {
+          const claim = await claimReservationIdempotencyKey(db, userId, idempotencyKey);
+          if (claim.kind === "completed") {
+            return json(claim.response, 201);
+          }
+          if (claim.kind === "processing") {
+            return error("同じ申請を処理しています。しばらくお待ちください", 409, {
+              code: "idempotency_in_progress",
+            });
+          }
+          idempotencyClaimed = true;
+        } catch (err) {
+          return error(err instanceof Error ? err.message : "Idempotency-Key が不正です");
+        }
+      }
+
+      const releaseIdempotency = async () => {
+        if (idempotencyClaimed && idempotencyKey) {
+          await releaseReservationIdempotencyKey(db, idempotencyKey);
+        }
+      };
+
+      const fail = async (message: string, status = 400, extra: Record<string, unknown> = {}) => {
+        await releaseIdempotency();
+        return error(message, status, extra);
+      };
+
+      const completeIdempotency = async (payload: CompletedReservationResponse) => {
+        if (idempotencyClaimed && idempotencyKey) {
+          await completeReservationIdempotencyKey(db, idempotencyKey, payload.id, payload);
+        }
+      };
+
       const body = await request.json<{
         title: string;
         purpose?: "ss_s_tan" | "club" | "other";
@@ -1076,45 +1129,45 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       for (const field of required) {
         if (body[field] === undefined || body[field] === null || body[field] === "") {
-          return error(`${field} は必須です`);
+          return fail(`${field} は必須です`);
         }
       }
 
       if (timeSlotMode && !body.booking_kind) {
-        return error("booking_kind は必須です");
+        return fail("booking_kind は必須です");
       }
 
       const printerError = await validatePrinterId(db, body.printer_id);
-      if (printerError) return error(printerError);
+      if (printerError) return fail(printerError);
 
       const purpose = body.purpose ?? "club";
 
       if (!["ss_s_tan", "club", "other"].includes(purpose)) {
-        return error("目的が不正です");
+        return fail("目的が不正です");
       }
 
       if (purpose === "other" && !body.purpose_other?.trim()) {
-        return error("目的が「その他」の場合は内容を入力してください");
+        return fail("目的が「その他」の場合は内容を入力してください");
       }
 
       if (timeSlotMode) {
         if (!isWeekdayYmd(body.desired_date)) {
-          return error("土日は予約・依頼を受け付けていません");
+          return fail("土日は予約・依頼を受け付けていません");
         }
         if (body.booking_kind === "reserve" && !isReserveDateBookable(body.desired_date)) {
-          return error("過ぎた日には予約できません");
+          return fail("過ぎた日には予約できません");
         }
         if (body.booking_kind === "request" && !isRequestDateBookable(body.desired_date)) {
-          return error("依頼は前日までです（当日の依頼は不可）");
+          return fail("依頼は前日までです（当日の依頼は不可）");
         }
         const slotInputError = validateTimeSlotInput({
           booking_kind: body.booking_kind!,
           start_minute: body.start_minute,
           end_minute: body.end_minute,
         });
-        if (slotInputError) return error(slotInputError);
+        if (slotInputError) return fail(slotInputError);
       } else if (!isDateBookable(body.desired_date)) {
-        return error(`希望印刷日は ${getEarliestBookableDate()} 以降を選択してください`);
+        return fail(`希望印刷日は ${getEarliestBookableDate()} 以降を選択してください`);
       }
 
       const partCount = normalizePartCount(body.part_count ?? 1);
@@ -1129,16 +1182,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "",
           { isAdmin: false }
         );
-        if (slotError) return error(slotError);
+        if (slotError) return fail(slotError);
       }
 
       const staffAvailable = await hasStaffOnDate(db, body.desired_date);
       if (!staffAvailable) {
-        return error("この日は対応可能な印刷担当者がいないため予約できません");
+        return fail("この日は対応可能な印刷担当者がいないため予約できません");
       }
 
       const printFilesResult = await normalizeAndValidatePrintFiles(env, body);
-      if (printFilesResult instanceof Response) return printFilesResult;
+      if (printFilesResult instanceof Response) {
+        await releaseIdempotency();
+        return printFilesResult;
+      }
       const printFiles = printFilesResult;
 
       const videoResolved = await resolveRequestPrintVideo(
@@ -1146,7 +1202,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         body.printer_id,
         body.request_print_video
       );
-      if (!videoResolved.ok) return error(videoResolved.error);
+      if (!videoResolved.ok) return fail(videoResolved.error);
 
       const reservationId = crypto.randomUUID();
 
@@ -1162,7 +1218,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           status: "applied",
         };
         if (hasTimeSlotOverlap(sameDay, candidate)) {
-          return error("同じ時間帯にすでに申請があります", 409);
+          return fail("同じ時間帯にすでに申請があります", 409);
         }
       }
 
@@ -1213,7 +1269,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         created_at: new Date().toISOString(),
       };
 
-      await createReservation(db, reservation);
+      try {
+        await createReservation(db, reservation);
+      } catch (err) {
+        await releaseIdempotency();
+        console.error("createReservation failed", err);
+        return error("予約の保存に失敗しました", 500);
+      }
 
       let submittedReservation = reservation;
       try {
@@ -1251,45 +1313,37 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             staffLabel
           ).catch((err) => console.error("auto-confirm notify failed", err))
         );
-        return json(
-          {
-            id: reservation.id,
-            message: "予約が確定しました",
-            auto_confirmed: true,
-            booking_kind: body.booking_kind,
-          },
-          201
-        );
+        const autoPayload: CompletedReservationResponse = {
+          id: reservation.id,
+          message: "予約が確定しました",
+          auto_confirmed: true,
+          booking_kind: body.booking_kind ?? null,
+        };
+        await completeIdempotency(autoPayload);
+        return json(autoPayload, 201);
       }
 
-      try {
-        await deliverNewApplicationNotifications(
-          env,
-          db,
-          context.request,
-          submittedReservation,
-          userId
-        );
-      } catch (err) {
-        return error(
-          err instanceof Error ? err.message : "Discord通知の送信に失敗しました",
-          503
-        );
-      }
+      scheduleNewApplicationNotifications(
+        context,
+        env,
+        db,
+        context.request,
+        submittedReservation,
+        userId
+      );
 
       const pendingMessage =
         timeSlotMode && body.booking_kind === "request"
           ? "印刷依頼を受け付けました（担当者の受領待ち）"
           : "予約申請を受け付けました";
-      return json(
-        {
-          id: reservation.id,
-          message: pendingMessage,
-          auto_confirmed: false,
-          booking_kind: body.booking_kind ?? null,
-        },
-        201
-      );
+      const pendingPayload: CompletedReservationResponse = {
+        id: reservation.id,
+        message: pendingMessage,
+        auto_confirmed: false,
+        booking_kind: body.booking_kind ?? null,
+      };
+      await completeIdempotency(pendingPayload);
+      return json(pendingPayload, 201);
     }
 
     const RECENT_PAST_DAYS = 7;
@@ -1590,20 +1644,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const memberMap = await buildMemberMap(db);
         const printerMap = await buildPrinterMap(db);
 
-        try {
-          await deliverNewApplicationNotifications(
-            env,
-            db,
-            context.request,
-            created,
-            userId
-          );
-        } catch (err) {
-          return error(
-            err instanceof Error ? err.message : "Discord通知の送信に失敗しました",
-            503
-          );
-        }
+        scheduleNewApplicationNotifications(
+          context,
+          env,
+          db,
+          context.request,
+          created,
+          userId
+        );
 
         return json({
           reservation: userReservationDetail(created, memberMap, printerMap),
@@ -1871,20 +1919,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       await createReservation(db, reservation);
 
-      try {
-        await deliverNewApplicationNotifications(
-          env,
-          db,
-          context.request,
-          reservation,
-          targetUserId
-        );
-      } catch (err) {
-        return error(
-          err instanceof Error ? err.message : "Discord通知の送信に失敗しました",
-          503
-        );
-      }
+      scheduleNewApplicationNotifications(
+        context,
+        env,
+        db,
+        context.request,
+        reservation,
+        targetUserId
+      );
 
       const memberMap = await buildMemberMap(db);
       const printerMap = await buildPrinterMap(db);
