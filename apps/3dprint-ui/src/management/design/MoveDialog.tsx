@@ -81,6 +81,7 @@ function MoveDialog({ open, app, apps, onClose, onMove }) {
   });
   const [picked, setPicked] = React.useState(null);
   const [force, setForce] = React.useState(false);
+  const [notifyReason, setNotifyReason] = React.useState('');
 
   React.useEffect(() => {
     if (!app) return;
@@ -88,6 +89,7 @@ function MoveDialog({ open, app, apps, onClose, onMove }) {
     setYm({ y: d.getFullYear(), m: d.getMonth() + 1 });
     setPicked(null);
     setForce(false);
+    setNotifyReason('');
   }, [app && app.id, open]);
 
   if (!open || !app) return null;
@@ -113,9 +115,14 @@ function MoveDialog({ open, app, apps, onClose, onMove }) {
   const sp = spanOf(app);
 
   const done = () => {
-    onMove(app, picked, { forced: needForce && force, info });
+    onMove(app, picked, {
+      forced: needForce && force,
+      info,
+      notifyReason: notifyReason.trim() || undefined,
+    });
     setPicked(null);
     setForce(false);
+    setNotifyReason('');
   };
 
   return (
@@ -150,6 +157,17 @@ function MoveDialog({ open, app, apps, onClose, onMove }) {
           <span className="mv-lg full">満枠</span>
           <span className="mv-lg past">過ぎた日</span>
         </div>
+
+        <label className="mv-reason">
+          <span>変更理由（利用者メールに記載・任意）</span>
+          <textarea
+            rows={2}
+            maxLength={500}
+            value={notifyReason}
+            onChange={(e) => setNotifyReason(e.target.value)}
+            placeholder="例: 担当者都合により日付を変更しました"
+          />
+        </label>
 
         {picked && info && (
           <div className={'mv-picked ' + (info.full ? 'full' : info.noStaff ? 'nostaff' : 'ok')}>

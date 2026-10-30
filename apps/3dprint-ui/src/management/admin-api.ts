@@ -341,7 +341,12 @@ export async function acceptReservation(id: string, printStaffMemberId: string) 
 
 export async function patchReservation(
   id: string,
-  body: { status?: string; status_comment?: string | null; print_staff_member_id?: string }
+  body: {
+    status?: string;
+    status_comment?: string | null;
+    notify_reason?: string | null;
+    print_staff_member_id?: string;
+  }
 ) {
   return apiFetch<{ reservation: unknown; calendar?: { ok: boolean; error?: string } }>(
     `admin/reservations/${id}`,
@@ -500,10 +505,19 @@ export async function setPrinterDatesAvailability(printerId: string, dates: stri
   });
 }
 
-export async function rescheduleReservation(id: string, desired_date: string, force = false) {
+export async function rescheduleReservation(
+  id: string,
+  desired_date: string,
+  force = false,
+  notify_reason?: string | null
+) {
   return apiFetch(`admin/reservations/${id}/reschedule`, {
     method: 'PATCH',
-    body: JSON.stringify({ desired_date, force }),
+    body: JSON.stringify({
+      desired_date,
+      force,
+      ...(notify_reason?.trim() ? { notify_reason: notify_reason.trim() } : {}),
+    }),
   });
 }
 

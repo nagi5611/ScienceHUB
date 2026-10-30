@@ -42,6 +42,30 @@ export function formatPrintActorShort(ctx: PrintActorContext): string {
   return `${ctx.user_display_name}（印刷担当未紐づけ）`;
 }
 
+/** Single-line operator label for applicant emails (name + email when available). */
+export function formatPrintActorEmailLine(
+  ctx: PrintActorContext,
+  userEmail?: string | null
+): string {
+  const email = userEmail?.trim();
+  if (email && email.includes("@")) {
+    return `${ctx.user_display_name}（${email}）`;
+  }
+  return `${ctx.user_display_name}（@${ctx.user_username}）`;
+}
+
+/** Applicant self-service operator line for user-initiated emails. */
+export function formatApplicantSelfOperatorLine(
+  displayName: string,
+  email: string | null | undefined
+): string {
+  const trimmed = email?.trim();
+  if (trimmed && trimmed.includes("@")) {
+    return `利用者本人 — ${displayName}（${trimmed}）`;
+  }
+  return `利用者本人 — ${displayName}`;
+}
+
 export function formatPrintActorLogLabel(ctx: PrintActorContext): string {
   return formatPrintActorShort(ctx);
 }

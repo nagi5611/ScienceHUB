@@ -24,6 +24,8 @@ export interface ReservationContentInput {
   stl_filename?: string;
   stl_size_bytes?: number;
   part_count?: number;
+  /** Optional message included in applicant notification email (admin edits). */
+  notify_reason?: string | null;
 }
 
 const PURPOSES = ['ss_s_tan', 'club', 'other'] as const;

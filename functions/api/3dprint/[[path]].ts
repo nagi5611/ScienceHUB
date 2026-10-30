@@ -74,6 +74,8 @@ import {
 import {
   formatPrintActorLogLabel,
   formatPrintActorNoticeLines,
+  formatApplicantSelfOperatorLine,
+  formatPrintActorEmailLine,
   memberDisplayName,
   resolvePrintActorContext,
   hasLinkedPrintStaffMember,
@@ -108,6 +110,7 @@ import {
 import {
   build3dPrintReservationAppUrl,
   buildReservationContentChangeSummary,
+  buildReservationEmailDetailSnapshot,
   notifyApplicantPrintReservationEmail,
   sendPrintReservationAdminTestEmail,
 } from "../../lib/3dprint/reservation-email";
@@ -532,6 +535,7 @@ async function sendApplicantAppliedEmail(
   reservation: Reservation
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
+  const printerName = resolvePrinterLabel(reservation, printerMap);
   const applicationFormText = await applicationFormTextFor(db, reservation, printerMap);
   await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
     kind: "applied",
@@ -540,10 +544,11 @@ async function sendApplicantAppliedEmail(
       title: reservation.title,
       desired_date: reservation.desired_date,
     },
-    printerName: resolvePrinterLabel(reservation, printerMap),
+    printerName,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
     applicationFormText,
     applicationFormPdfUrl: buildAdminApplicationFormPdfUrl(request, env, reservation.id),
+    details: buildReservationEmailDetailSnapshot(reservation, printerName),
   });
 }
 
@@ -622,6 +627,29 @@ function operatorEmailSummary(ctx: PrintActorContext, extra?: Parameters<typeof 
   return formatPrintActorNoticeLines(ctx, extra).join("\n");
 }
 
+function parseNotifyReasonField(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  return trimmed || null;
+}
+
+function notifyReasonValidationError(reason: string | null | undefined): string | null {
+  if (reason && reason.length > 500) {
+    return "通知理由は500文字以内で入力してください";
+  }
+  return null;
+}
+
+async function operatorDisplayForActor(
+  env: Env,
+  db: D1Database,
+  actor: PrintActorContext | null
+): Promise<string | null> {
+  if (!actor) return null;
+  const user = await getSessionUserById(env, db, actor.user_id);
+  return formatPrintActorEmailLine(actor, user?.email);
+}
+
 async function sendApplicantRescheduledEmail(
   env: Env,
   db: D1Database,
@@ -629,9 +657,14 @@ async function sendApplicantRescheduledEmail(
   applicantUserId: string,
   reservation: Reservation,
   previousDate: string,
-  operatorSummary?: string | null
+  options: {
+    operatorSummary?: string | null;
+    operatorDisplay?: string | null;
+    notifyReason?: string | null;
+  } = {}
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
+  const printerName = resolvePrinterLabel(reservation, printerMap);
   const applicationFormText = await applicationFormTextFor(db, reservation, printerMap);
   await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
     kind: "rescheduled",
@@ -640,11 +673,14 @@ async function sendApplicantRescheduledEmail(
       title: reservation.title,
       desired_date: reservation.desired_date,
     },
-    printerName: resolvePrinterLabel(reservation, printerMap),
+    printerName,
     previousDate,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
     applicationFormText,
-    operatorSummary,
+    operatorSummary: options.operatorSummary,
+    operatorDisplay: options.operatorDisplay,
+    notifyReason: options.notifyReason,
+    details: buildReservationEmailDetailSnapshot(reservation, printerName),
   });
 }
 
@@ -660,9 +696,12 @@ async function sendApplicantCancelledEmail(
     cancelledBy: "admin" | "user";
     statusComment?: string | null;
     operatorSummary?: string | null;
+    operatorDisplay?: string | null;
+    notifyReason?: string | null;
   }
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
+  const printerName = resolvePrinterLabel(reservation, printerMap);
   await notifyApplicantPrintReservationEmail(env, db, applicantUserId, {
     kind: "cancelled",
     cancelledBy: options.cancelledBy,
@@ -671,10 +710,13 @@ async function sendApplicantCancelledEmail(
       title: reservation.title,
       desired_date: reservation.desired_date,
     },
-    printerName: resolvePrinterLabel(reservation, printerMap),
+    printerName,
     statusComment: options.statusComment,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
     operatorSummary: options.operatorSummary,
+    operatorDisplay: options.operatorDisplay,
+    notifyReason: options.notifyReason,
+    details: buildReservationEmailDetailSnapshot(reservation, printerName),
   });
 }
 
@@ -686,14 +728,19 @@ async function sendApplicantContentModifiedEmail(
   applicantUserId: string,
   before: Reservation,
   after: Reservation,
-  operatorSummary?: string | null
+  options: {
+    operatorSummary?: string | null;
+    operatorDisplay?: string | null;
+    notifyReason?: string | null;
+  } = {}
 ): Promise<void> {
   const printerMap = await buildPrinterMap(db);
+  const printerAfter = resolvePrinterLabel(after, printerMap);
   const modificationLines = buildReservationContentChangeSummary(
     before,
     after,
     resolvePrinterLabel(before, printerMap),
-    resolvePrinterLabel(after, printerMap)
+    printerAfter
   );
   if (!modificationLines.length) return;
 
@@ -704,10 +751,13 @@ async function sendApplicantContentModifiedEmail(
       title: after.title,
       desired_date: after.desired_date,
     },
-    printerName: resolvePrinterLabel(after, printerMap),
+    printerName: printerAfter,
     modificationLines,
     reservationAppUrl: build3dPrintReservationAppUrl(getOAuthRedirectBase(request, env)),
-    operatorSummary,
+    operatorSummary: options.operatorSummary,
+    operatorDisplay: options.operatorDisplay,
+    notifyReason: options.notifyReason,
+    details: buildReservationEmailDetailSnapshot(after, printerAfter),
   });
 }
 
@@ -822,6 +872,12 @@ async function applyReservationContentEdit(
   const validationError = validateReservationContentFields(body);
   if (validationError) return error(validationError);
 
+  const notifyReason = !options.isUser ? parseNotifyReasonField(body.notify_reason) : undefined;
+  if (!options.isUser && notifyReason !== undefined) {
+    const reasonErr = notifyReasonValidationError(notifyReason);
+    if (reasonErr) return error(reasonErr);
+  }
+
   const dateOk = options.isUser
     ? isDateBookable(body.desired_date)
     : isAdminDateBookable(body.desired_date);
@@ -934,6 +990,7 @@ async function applyReservationContentEdit(
             }
           );
         }
+        const opDisplay = actor ? await operatorDisplayForActor(env, db, actor) : null;
         await sendApplicantContentModifiedEmail(
           env,
           db,
@@ -941,7 +998,11 @@ async function applyReservationContentEdit(
           updated.user_id!,
           reservation,
           updated,
-          opSummary
+          {
+            operatorSummary: opSummary,
+            operatorDisplay: opDisplay,
+            notifyReason: notifyReason ?? null,
+          }
         );
       })().catch((err) => console.error("content modify notify failed", err))
     );
@@ -1798,6 +1859,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             await sendApplicantCancelledEmail(env, db, context.request, userId, updated, {
               cancelledBy: "user",
               statusComment: updated.status_comment,
+              operatorDisplay: applicant
+                ? formatApplicantSelfOperatorLine(applicant.display_name, applicant.email)
+                : null,
             });
           })().catch((err) => console.error("user cancel notify failed", err))
         );
@@ -2192,6 +2256,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         print_staff_member_id?: string | null;
         status?: string;
         status_comment?: string | null;
+        notify_reason?: string | null;
       }>();
 
       const validStatuses = [
@@ -2213,6 +2278,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return error("ステータスコメントは500文字以内で入力してください");
         }
         statusComment = trimmed || null;
+      }
+
+      const notifyReason = parseNotifyReasonField(body.notify_reason);
+      if (body.notify_reason !== undefined) {
+        const reasonErr = notifyReasonValidationError(notifyReason ?? null);
+        if (reasonErr) return error(reasonErr);
       }
 
       const existing = await getReservationById(db, segments[2]);
@@ -2293,11 +2364,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           appId: updated.id,
         });
         context.waitUntil(
-          sendApplicantCancelledEmail(env, db, request, updated.user_id, updated, {
-            cancelledBy: "admin",
-            statusComment: updated.status_comment,
-            operatorSummary: opSummary,
-          }).catch((err) => console.error("cancel email failed", err))
+          (async () => {
+            const opDisplay = actor ? await operatorDisplayForActor(env, db, actor) : null;
+            await sendApplicantCancelledEmail(env, db, request, updated.user_id, updated, {
+              cancelledBy: "admin",
+              statusComment: updated.status_comment,
+              operatorSummary: opSummary,
+              operatorDisplay: opDisplay,
+              notifyReason: notifyReason ?? updated.status_comment,
+            });
+          })().catch((err) => console.error("cancel email failed", err))
         );
         if (actor) {
           context.waitUntil(
@@ -2356,9 +2432,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       segments[3] === "reschedule" &&
       segments.length === 4
     ) {
-      const body = await request.json<{ desired_date: string; force?: boolean }>();
+      const body = await request.json<{
+        desired_date: string;
+        force?: boolean;
+        notify_reason?: string | null;
+      }>();
       if (!body.desired_date || !/^\d{4}-\d{2}-\d{2}$/.test(body.desired_date)) {
         return error("desired_date が不正です");
+      }
+
+      const notifyReason = parseNotifyReasonField(body.notify_reason);
+      if (body.notify_reason !== undefined) {
+        const reasonErr = notifyReasonValidationError(notifyReason ?? null);
+        if (reasonErr) return error(reasonErr);
       }
 
       const existing = await getReservationById(db, segments[2]);
@@ -2375,15 +2461,22 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             ? operatorEmailSummary(actor, { action_label: "予約日の変更（管理）" })
             : null;
           context.waitUntil(
-            sendApplicantRescheduledEmail(
-              env,
-              db,
-              request,
-              updated.user_id,
-              updated,
-              previousDate,
-              opSummary
-            ).catch((err) => console.error("reschedule email failed", err))
+            (async () => {
+              const opDisplay = actor ? await operatorDisplayForActor(env, db, actor) : null;
+              await sendApplicantRescheduledEmail(
+                env,
+                db,
+                request,
+                updated.user_id,
+                updated,
+                previousDate,
+                {
+                  operatorSummary: opSummary,
+                  operatorDisplay: opDisplay,
+                  notifyReason: notifyReason ?? null,
+                }
+              );
+            })().catch((err) => console.error("reschedule email failed", err))
           );
           if (actor) {
             const deepLink = build3dPrintAdminDeepLink(getOAuthRedirectBase(request, env), {
