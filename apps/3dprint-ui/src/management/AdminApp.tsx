@@ -3,6 +3,7 @@ import {
   Header,
   DayStrip,
   CalAdmin,
+  Drawer,
   Toast,
 } from './components/AdminUi';
 import { AdminSectionNav, type AdminSection } from './panels/AdminSectionNav';
