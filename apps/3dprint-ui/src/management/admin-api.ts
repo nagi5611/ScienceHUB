@@ -141,6 +141,93 @@ export async function deleteMember(id: string) {
 }
 
 export type ShiftAvailabilityRow = { member_id: string; date: string };
+export type PrinterAvailabilityRow = { printer_id: string; date: string };
+
+function memberAvailKey(row: ShiftAvailabilityRow): string {
+  return `${row.member_id}\0${row.date}`;
+}
+
+function printerAvailKey(row: PrinterAvailabilityRow): string {
+  return `${row.printer_id}\0${row.date}`;
+}
+
+/** Groups availability rows by entity id for batch API calls. */
+function groupMemberDates(rows: ShiftAvailabilityRow[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    const list = map.get(row.member_id) ?? [];
+    list.push(row.date);
+    map.set(row.member_id, list);
+  }
+  return map;
+}
+
+function groupPrinterDates(rows: PrinterAvailabilityRow[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    const list = map.get(row.printer_id) ?? [];
+    list.push(row.date);
+    map.set(row.printer_id, list);
+  }
+  return map;
+}
+
+export function memberAvailabilityDiff(
+  before: ShiftAvailabilityRow[],
+  after: ShiftAvailabilityRow[]
+): { added: ShiftAvailabilityRow[]; removed: ShiftAvailabilityRow[] } {
+  const beforeKeys = new Set(before.map(memberAvailKey));
+  const afterKeys = new Set(after.map(memberAvailKey));
+  const added = after.filter((row) => !beforeKeys.has(memberAvailKey(row)));
+  const removed = before.filter((row) => !afterKeys.has(memberAvailKey(row)));
+  return { added, removed };
+}
+
+export function printerAvailabilityDiff(
+  before: PrinterAvailabilityRow[],
+  after: PrinterAvailabilityRow[]
+): { added: PrinterAvailabilityRow[]; removed: PrinterAvailabilityRow[] } {
+  const beforeKeys = new Set(before.map(printerAvailKey));
+  const afterKeys = new Set(after.map(printerAvailKey));
+  const added = after.filter((row) => !beforeKeys.has(printerAvailKey(row)));
+  const removed = before.filter((row) => !afterKeys.has(printerAvailKey(row)));
+  return { added, removed };
+}
+
+export function hasShiftDraftChanges(
+  savedMembers: ShiftAvailabilityRow[],
+  draftMembers: ShiftAvailabilityRow[],
+  savedPrinters: PrinterAvailabilityRow[],
+  draftPrinters: PrinterAvailabilityRow[]
+): boolean {
+  const m = memberAvailabilityDiff(savedMembers, draftMembers);
+  const p = printerAvailabilityDiff(savedPrinters, draftPrinters);
+  return m.added.length + m.removed.length + p.added.length + p.removed.length > 0;
+}
+
+/** Persists member/printer shift draft vs last saved snapshot (removals first). */
+export async function applyShiftAvailabilityDraft(
+  savedMembers: ShiftAvailabilityRow[],
+  draftMembers: ShiftAvailabilityRow[],
+  savedPrinters: PrinterAvailabilityRow[],
+  draftPrinters: PrinterAvailabilityRow[]
+): Promise<void> {
+  const memberDiff = memberAvailabilityDiff(savedMembers, draftMembers);
+  const printerDiff = printerAvailabilityDiff(savedPrinters, draftPrinters);
+
+  for (const [memberId, dates] of groupMemberDates(memberDiff.removed)) {
+    await setMemberDatesAvailability(memberId, dates, false);
+  }
+  for (const [printerId, dates] of groupPrinterDates(printerDiff.removed)) {
+    await setPrinterDatesAvailability(printerId, dates, false);
+  }
+  for (const [memberId, dates] of groupMemberDates(memberDiff.added)) {
+    await setMemberDatesAvailability(memberId, dates, true);
+  }
+  for (const [printerId, dates] of groupPrinterDates(printerDiff.added)) {
+    await setPrinterDatesAvailability(printerId, dates, true);
+  }
+}
 
 export async function fetchShifts(year: number, month: number) {
   return apiFetch<{
