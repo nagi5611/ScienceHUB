@@ -10,6 +10,12 @@ export function applicationFormPdfR2Key(reservationId: string): string {
   return `print/applications/${reservationId}/application-form.pdf`;
 }
 
+/** Discord attachment filename for the application-form PDF. */
+export function applicationFormPdfDiscordFilename(reservationId: string): string {
+  const safe = reservationId.replace(/[^\w.-]/g, '_');
+  return `application-form-${safe || 'reservation'}.pdf`;
+}
+
 function logPersistFailure(
   stage: string,
   reservationId: string,
