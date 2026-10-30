@@ -23,7 +23,8 @@ import {
 import { ShiftCalendar, MemberForm, Integrations } from './ShiftsPanels';
 
 function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveMember, onSetAvail, onPaintAvail,
-  integrations, setIntegrations, onTestDiscord, onTestGcal, onTestEmail, emailConfigured, log, pendingPre }) {
+  integrations, setIntegrations, onTestDiscord, onTestDiscordMention, onTestGcal, onTestEmail, emailConfigured,
+  discordConfigured, log, pendingPre }) {
   const [tab, setTab] = React.useState(pendingPre || 'shift');
   const [memberId, setMemberId] = React.useState(members[0] ? members[0].id : null);
   const [month, setMonth] = React.useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
@@ -119,8 +120,10 @@ function SettingsScreen({ members, avail, onAddMember, onUpdateMember, onRemoveM
 
       {tab === 'integ' && (
         <Integrations value={integrations} onChange={setIntegrations}
-          onTestDiscord={onTestDiscord} onTestGcal={onTestGcal} onTestEmail={onTestEmail}
-          emailConfigured={emailConfigured} />
+          onTestDiscord={onTestDiscord} onTestDiscordMention={onTestDiscordMention}
+          onTestGcal={onTestGcal} onTestEmail={onTestEmail}
+          emailConfigured={emailConfigured} discordConfigured={discordConfigured}
+          members={members} />
       )}
     </div>
   );

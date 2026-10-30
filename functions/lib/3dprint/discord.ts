@@ -15,6 +15,118 @@ export function build3dPrintAdminUrl(baseUrl: string): string {
   return `${base}${ADMIN_PATH}`;
 }
 
+export type DiscordMentionTestMember = {
+  member_id: string;
+  name: string;
+  homeroom: string;
+  discord_user_id: string;
+};
+
+export type DiscordMentionTestSkip = {
+  member_id: string;
+  name: string;
+  reason: string;
+};
+
+/** Sends a test Discord mention to selected print staff (management UI). */
+export async function sendDiscordStaffMentionTest(
+  webhookUrl: string | undefined,
+  members: { id: string; name: string; homeroom: string; discord_user_id: string | null }[],
+  memberIds: string[]
+): Promise<
+  | { ok: true; sent: DiscordMentionTestMember[]; skipped: DiscordMentionTestSkip[]; content: string }
+  | { ok: false; error: string; status?: number }
+> {
+  if (!webhookUrl?.trim()) {
+    return { ok: false, error: 'Discord Webhook がサーバーに設定されていません' };
+  }
+
+  const byId = new Map(members.map((m) => [m.id, m]));
+  const uniqueIds = [...new Set(memberIds.map((id) => id.trim()).filter(Boolean))];
+  if (!uniqueIds.length) {
+    return { ok: false, error: 'メンションする担当者を1人以上選んでください' };
+  }
+
+  const sent: DiscordMentionTestMember[] = [];
+  const skipped: DiscordMentionTestSkip[] = [];
+
+  for (const memberId of uniqueIds) {
+    const member = byId.get(memberId);
+    if (!member) {
+      skipped.push({ member_id: memberId, name: memberId, reason: '担当者が見つかりません' });
+      continue;
+    }
+    const discordId = member.discord_user_id?.trim() ?? '';
+    if (!discordId) {
+      skipped.push({ member_id: memberId, name: member.name, reason: 'Discord ユーザーIDが未設定です' });
+      continue;
+    }
+    if (!/^\d{15,25}$/.test(discordId)) {
+      skipped.push({
+        member_id: memberId,
+        name: member.name,
+        reason: 'Discord ユーザーIDの形式が不正です',
+      });
+      continue;
+    }
+    sent.push({
+      member_id: memberId,
+      name: member.name,
+      homeroom: member.homeroom,
+      discord_user_id: discordId,
+    });
+  }
+
+  if (!sent.length) {
+    return {
+      ok: false,
+      error: skipped.length
+        ? '選択した担当者にメンション可能な Discord ID がありません'
+        : 'メンションする担当者を1人以上選んでください',
+    };
+  }
+
+  const mentionParts = sent.map((m) => `<@${m.discord_user_id}>`);
+  const mentionUserIds = sent.map((m) => m.discord_user_id);
+  const lines = [
+    '**ScienceHUB 3Dプリント — Discord メンションのテスト**',
+    '担当者設定の確認用です。通知が届き、名前が青くメンション表示されていれば成功です。',
+    '',
+    ...sent.map(
+      (m) => `• ${m.name}（${m.homeroom}） — ID \`${m.discord_user_id}\``
+    ),
+  ];
+  const content = [...mentionParts, ...lines].join('\n');
+
+  const payload = {
+    content,
+    username: 'ScienceHUB 3Dプリント',
+    allowed_mentions: { users: mentionUserIds },
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return {
+        ok: false,
+        error: `Discord 送信に失敗しました（HTTP ${res.status}）${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+        status: res.status,
+      };
+    }
+    return { ok: true, sent, skipped, content };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Discord 送信に失敗しました',
+    };
+  }
+}
+
 /** Sends daily Discord mentions to assigned print staff (6:00 JST). */
 export async function sendDailyStaffMentions(
   webhookUrl: string | undefined,

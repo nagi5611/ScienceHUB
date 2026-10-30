@@ -54,6 +54,7 @@ import {
   patchMemberDiscord,
   fetchIntegrationsStatus,
   testDiscordIntegration,
+  testDiscordMention,
   testGoogleCalendar,
   testAdminEmail,
   appendAdminLog,
@@ -82,6 +83,7 @@ export function AdminDesignApp() {
   const [settingsPre, setSettingsPre] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<{ text: string; mark?: string } | null>(null);
   const [emailConfigured, setEmailConfigured] = React.useState(false);
+  const [discordConfigured, setDiscordConfigured] = React.useState(false);
 
   const syncGlobals = React.useCallback((m: DesignMember[], a: Record<string, string[]>) => {
     setMembers(m);
@@ -108,6 +110,7 @@ export function AdminDesignApp() {
     try {
       const status = await fetchIntegrationsStatus();
       setEmailConfigured(Boolean(status.email.configured));
+      setDiscordConfigured(Boolean(status.discord.configured));
       setIntegrations((prev) => ({
         ...prev,
         discord: { ...prev.discord, webhook: status.discord.configured ? '(サーバー設定)' : '' },
@@ -375,6 +378,13 @@ export function AdminDesignApp() {
     }
   };
 
+  const testDiscordMentionFor = async (memberIds: string[]) => {
+    const result = await testDiscordMention(memberIds);
+    const names = result.sent.map((m) => m.name).join('・');
+    pushLog('integ', `Discordメンションテスト: ${names}`, null);
+    return result;
+  };
+
   const testGcal = async () => {
     try {
       const res = await testGoogleCalendar();
@@ -491,9 +501,11 @@ export function AdminDesignApp() {
             integrations={integrations}
             setIntegrations={setIntegrations}
             onTestDiscord={() => void testDiscord()}
+            onTestDiscordMention={testDiscordMentionFor}
             onTestGcal={() => void testGcal()}
             onTestEmail={testEmail}
             emailConfigured={emailConfigured}
+            discordConfigured={discordConfigured}
             log={log}
             pendingPre={settingsPre}
           />

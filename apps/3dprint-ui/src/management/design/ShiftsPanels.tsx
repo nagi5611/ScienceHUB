@@ -399,7 +399,143 @@ function EmailTestSection({ configured, onSend }) {
   );
 }
 
-function Integrations({ value, onChange, onTestDiscord, onTestGcal, onTestEmail, emailConfigured }) {
+function DiscordMentionTestSection({ configured, members, onSend }) {
+  const [selected, setSelected] = React.useState(() => new Set());
+  const [status, setStatus] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const send = async () => {
+    const ids = [...selected];
+    if (!ids.length) {
+      setStatus({ ok: false, text: 'メンションする担当者を1人以上選んでください' });
+      return;
+    }
+    setBusy(true);
+    setStatus({ ok: null, text: 'Discord へ送信中…' });
+    try {
+      const data = await onSend(ids);
+      const sentNames = (data.sent || []).map(m => m.name).join('・');
+      const skipNote =
+        data.skipped?.length > 0
+          ? `（スキップ: ${data.skipped.map(s => `${s.name}: ${s.reason}`).join(' / ')}）`
+          : '';
+      setStatus({
+        ok: true,
+        text: `送信しました。Discord で ${sentNames} へのメンション（青字）を確認してください。${skipNote}`,
+        detail: data.content,
+        sent: data.sent,
+      });
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof Error ? e.message : '送信に失敗しました' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectable = members.filter(m => (m.discord || '').trim());
+  const hasAnyDiscord = members.some(m => (m.discord || '').trim());
+
+  return (
+    <section className="intg" data-testid="discord-mention-test-section">
+      <div className="intg-h">
+        <b>Discord メンションのテスト</b>
+        <span className={'intg-state ' + (configured ? 'ok' : 'warn')}>{configured ? 'Webhook設定済み' : 'Webhook未設定'}</span>
+      </div>
+      <p className="fl-h">
+        朝6時の担当者メンションと同じ形式で、選んだ担当者に <code>&lt;@ユーザーID&gt;</code> を送ります。
+        チャンネルで名前が青く通知されれば、その Discord ID は正しく設定されています。
+      </p>
+      {!configured && (
+        <div className="note warn">
+          <span>サーバーに Discord Webhook（DISCORD_WEBHOOK_URL）が未設定です。Wrangler / Pages の環境変数を確認してください。</span>
+        </div>
+      )}
+      {!hasAnyDiscord && (
+        <div className="note warn">
+          <span>担当者タブで Discord ユーザーID（数字）を登録してからテストしてください。</span>
+        </div>
+      )}
+      <div className="fl">
+        <span className="fl-l">メンションする担当者</span>
+        <div className="mp-list" style={{ marginTop: 8 }}>
+          {members.map(m => {
+            const discord = (m.discord || '').trim();
+            const canPick = Boolean(discord);
+            const on = selected.has(m.id);
+            return (
+              <button
+                type="button"
+                key={m.id}
+                className={'mp' + (on ? ' on' : '') + (!canPick ? ' disabled' : '')}
+                style={on ? { borderColor: m.color, background: m.color + '14' } : undefined}
+                disabled={!configured || busy || !canPick}
+                data-testid={`discord-mention-member-${m.id}`}
+                onClick={() => canPick && toggle(m.id)}
+                aria-pressed={on}
+              >
+                <span className="mp-av" style={{ background: m.color }}>{m.name.slice(0, 1)}</span>
+                <span className="mp-tx">
+                  <b>{m.name}</b>
+                  <span className="num">{hrLabel(m.hr)}・{m.num}番</span>
+                </span>
+                <span className="num mtd-discord">{discord || 'ID未設定'}</span>
+              </button>
+            );
+          })}
+        </div>
+        {selectable.length > 0 && (
+          <span className="fl-h">ID未設定の担当者は選択できません（担当者タブで編集）。</span>
+        )}
+      </div>
+      <div className="intg-f">
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          data-testid="discord-mention-test-send"
+          disabled={!configured || busy || selected.size === 0}
+          onClick={() => void send()}
+        >
+          メンションをテスト送信
+        </button>
+      </div>
+      {status && (
+        <p
+          className={'fl-h' + (status.ok === true ? '' : status.ok === false ? ' warn' : '')}
+          role="status"
+          data-testid="discord-mention-test-result"
+        >
+          {status.text}
+        </p>
+      )}
+      {status?.ok === true && status.sent?.length > 0 && (
+        <ul className="fl-h" data-testid="discord-mention-test-sent-list" style={{ marginTop: 4, paddingLeft: '1.2rem' }}>
+          {status.sent.map(m => (
+            <li key={m.member_id}>
+              <b>{m.name}</b> — メンション ID: <span className="num">{m.discord_user_id}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {status?.detail && (
+        <details className="fl-h" style={{ marginTop: 8 }}>
+          <summary>送信したメッセージ本文</summary>
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap', fontSize: '0.85em', marginTop: 6 }}>{status.detail}</pre>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function Integrations({ value, onChange, onTestDiscord, onTestDiscordMention, onTestGcal, onTestEmail, emailConfigured, discordConfigured, members }) {
   const d = value.discord || {};
   const g = value.gcal || {};
   const setD = patch => onChange({ ...value, discord: { ...d, ...patch } });
@@ -461,6 +597,14 @@ function Integrations({ value, onChange, onTestDiscord, onTestGcal, onTestEmail,
           <span className="fl-h">保存は自動です。</span>
         </div>
       </section>
+
+      {onTestDiscordMention && members?.length > 0 && (
+        <DiscordMentionTestSection
+          configured={Boolean(discordConfigured)}
+          members={members}
+          onSend={onTestDiscordMention}
+        />
+      )}
 
       <section className="intg">
         <div className="intg-h">
