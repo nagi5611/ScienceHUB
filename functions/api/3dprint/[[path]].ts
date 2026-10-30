@@ -76,6 +76,7 @@ import {
   formatPrintActorNoticeLines,
   memberDisplayName,
   resolvePrintActorContext,
+  hasLinkedPrintStaffMember,
   type PrintActorContext,
 } from "../../lib/3dprint/print-actor";
 import { getSessionUserById } from "../../lib/auth";
@@ -485,6 +486,30 @@ async function requireAdminActor(
 ): Promise<PrintActorContext | Response> {
   const ctx = await resolvePrintActorContext(env, db, userId);
   if (!ctx) return error("ユーザーが見つかりません", 401);
+  return ctx;
+}
+
+function isAdminReservationManagementWrite(
+  segments: string[],
+  method: string
+): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return false;
+  return segments[1] === "reservations" || segments[1] === "applications";
+}
+
+async function requireLinkedPrintStaffForReservationMgmt(
+  env: Env,
+  db: D1Database,
+  userId: string
+): Promise<PrintActorContext | Response> {
+  const ctx = await requireAdminActor(env, db, userId);
+  if (ctx instanceof Response) return ctx;
+  if (!hasLinkedPrintStaffMember(ctx)) {
+    return error(
+      "印刷担当者と ScienceHUB アカウントを紐づけてから、申請の承認・変更を行ってください",
+      403
+    );
+  }
   return ctx;
 }
 
@@ -1041,8 +1066,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const staffIds = await getAvailableMemberIdsOnDate(db, body.desired_date);
         autoStaffMemberId = staffIds[0] ?? null;
       }
-      const initialStatus =
-        autoConfirmReserve && autoStaffMemberId ? "accepted" : "applied";
+      // 予約（reserve）は承認待ちにせず即確定。依頼（request）のみ applied。
+      const initialStatus = autoConfirmReserve ? "accepted" : "applied";
 
       const reservation: Reservation = {
         id: reservationId,
@@ -1083,8 +1108,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       await createReservation(db, reservation);
 
-      if (initialStatus === "accepted" && autoStaffMemberId) {
-        const member = await getMemberById(db, autoStaffMemberId);
+      if (autoConfirmReserve) {
+        const member = autoStaffMemberId
+          ? await getMemberById(db, autoStaffMemberId)
+          : null;
         const memberMap = await buildMemberMap(db);
         let saved = await getReservationById(db, reservationId);
         if (saved) {
@@ -1094,7 +1121,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             saved = await getReservationById(db, reservationId);
           }
         }
-        const staffLabel = member ? formatMemberLabel(member) : "担当者";
+        const staffLabel = member ? formatMemberLabel(member) : "担当者（未割当）";
         context.waitUntil(
           notifyAutoConfirmedTimeSlotReserve(
             env,
@@ -1521,6 +1548,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // --- Admin routes (management app access already verified) ---
     if (!isAdminRoute) {
       return error("Not Found", 404);
+    }
+
+    if (isAdminReservationManagementWrite(segments, method)) {
+      const linked = await requireLinkedPrintStaffForReservationMgmt(env, db, userId);
+      if (linked instanceof Response) return linked;
     }
 
     if (

@@ -297,11 +297,9 @@ export function ReservationApp() {
       setSelection(null);
       await refreshRangeFromServer();
       const toastMsg =
-        created.auto_confirmed && payload.kind === 'reserve'
+        payload.kind === 'reserve'
           ? '予約が確定しました'
-          : payload.kind === 'request'
-            ? '依頼を受け付けました（担当者の受領待ち）'
-            : '予約を申請しました（申請中）';
+          : '依頼を受け付けました（担当者の受領待ち）';
       showToast(toastMsg, payload.title);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '申請に失敗しました', 'エラー');

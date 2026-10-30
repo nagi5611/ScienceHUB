@@ -12,6 +12,10 @@ export type PrintActorContext = {
 };
 
 /** Resolve the logged-in ScienceHUB user and optional linked print staff member. */
+export function hasLinkedPrintStaffMember(ctx: PrintActorContext): boolean {
+  return Boolean(ctx.member_id);
+}
+
 export async function resolvePrintActorContext(
   env: Env,
   db: D1Database,
