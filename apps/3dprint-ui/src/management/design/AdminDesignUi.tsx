@@ -234,7 +234,9 @@ function CalDay({ d, ds, apps, staffIds, selected, onPick, dense }) {
         <span className={'c-k res' + (h.res ? '' : ' zero')}><i />予約<b className="num">{h.res}</b></span>
       </span>
 
-      {h.pending > 0 && <span className="c-pend"><span className="pend num">申請中 {h.pending}</span></span>}
+      <span className="c-pend">
+        {h.pending > 0 ? <span className="pend num">申請中 {h.pending}</span> : null}
+      </span>
     </button>
   );
 }
