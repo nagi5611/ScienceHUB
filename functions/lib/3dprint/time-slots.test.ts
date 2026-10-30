@@ -5,9 +5,11 @@ import {
   hasTimeSlotOverlap,
   isRequestDateBookable,
   validateTimeSlotInput,
+  canUserRestoreCancelledReservation,
   SHIFT_START,
   SHIFT_END,
 } from './time-slots';
+import { addDays } from './slots';
 
 describe('time-slots', () => {
   it('spanOfReservation request uses shift band', () => {
@@ -49,5 +51,23 @@ describe('time-slots', () => {
       new Date()
     );
     assert.equal(isRequestDateBookable(today), false);
+  });
+
+  it('canUserRestoreCancelledReservation request allows through day after print date', () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(
+      new Date()
+    );
+    const printDate = addDays(today, -1);
+    assert.equal(canUserRestoreCancelledReservation('request', printDate), true);
+    const twoDaysAgo = addDays(today, -2);
+    assert.equal(canUserRestoreCancelledReservation('request', twoDaysAgo), false);
+  });
+
+  it('canUserRestoreCancelledReservation reserve requires future print date', () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(
+      new Date()
+    );
+    assert.equal(canUserRestoreCancelledReservation('reserve', today), false);
+    assert.equal(canUserRestoreCancelledReservation('reserve', addDays(today, 1)), true);
   });
 });

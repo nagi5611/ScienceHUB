@@ -1,5 +1,7 @@
 /** Time-slot domain logic (handoff core.js), JST date strings YYYY-MM-DD. */
 
+import { addDays } from './slots';
+
 export type BookingKind = 'reserve' | 'request';
 export type MachineLane = 'ke' | 'cc';
 
@@ -55,6 +57,23 @@ export function isPastDate(dateStr: string): boolean {
 /** True when the print date is strictly after today (JST). */
 export function isFuturePrintDate(dateStr: string): boolean {
   return dateStr > getTodayJstDate();
+}
+
+/**
+ * User restore of a cancelled application (reservation site).
+ * - reserve: print date must be strictly after today (JST).
+ * - request: allowed through the day after the print date (inclusive).
+ */
+export function canUserRestoreCancelledReservation(
+  bookingKind: BookingKind | null | undefined,
+  desiredDate: string,
+): boolean {
+  const kind: BookingKind = bookingKind === 'request' ? 'request' : 'reserve';
+  const today = getTodayJstDate();
+  if (kind === 'request') {
+    return today <= addDays(desiredDate, 1);
+  }
+  return isFuturePrintDate(desiredDate);
 }
 
 export function slotIndexFromMinute(mins: number): number {
