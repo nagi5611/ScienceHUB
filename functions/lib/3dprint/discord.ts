@@ -581,46 +581,91 @@ export type PrintAdminDiscordNotice = {
 
 export type DiscordStaffAssignedNotice = {
   staffMember: { name: string; homeroom: string; discord_user_id?: string | null };
-  applicationFormText?: string;
-  adminDeepLink?: string;
+  /** Application-form PDF bytes (Discord multipart files[0]). */
+  pdfBytes?: Uint8Array;
+  pdfFilename?: string;
 };
+
+function buildStaffAssignedDiscordPayload(
+  notice: DiscordStaffAssignedNotice,
+  hasPdf: boolean
+): { content: string; allowed_mentions?: { users: string[] }; embeds?: { title: string; color: number; description: string }[] } {
+  const discordId = notice.staffMember.discord_user_id?.trim();
+  const staffLabel = `${notice.staffMember.name}（${notice.staffMember.homeroom}）`;
+  const mentionLine = discordId ? `<@${discordId}>` : `担当者: ${staffLabel}`;
+  const pdfLine = hasPdf
+    ? '申請PDF: このメッセージに添付しています。'
+    : '申請PDF: 添付できませんでした（生成に失敗しました）。';
+
+  const payload: {
+    content: string;
+    allowed_mentions?: { users: string[] };
+    embeds?: { title: string; color: number; description: string }[];
+  } = {
+    content: ['担当者が確定しました。', mentionLine, pdfLine].join('\n'),
+    embeds: [
+      {
+        title: '3D印刷 担当者確定',
+        color: 0x22c55e,
+        description: hasPdf
+          ? '申請書PDFを添付しました。'
+          : '申請書PDFの添付に失敗しました。管理画面から再確認してください。',
+      },
+    ],
+  };
+  if (discordId) {
+    payload.allowed_mentions = { users: [discordId] };
+  }
+  return payload;
+}
 
 /** Discord notice when print staff is assigned on approval (with mention when configured). */
 export async function notifyReservationStaffAssigned(
   webhookUrl: string | undefined,
   notice: DiscordStaffAssignedNotice
-): Promise<void> {
-  if (!webhookUrl) return;
-
-  const discordId = notice.staffMember.discord_user_id?.trim();
-  const staffLabel = `${notice.staffMember.name}（${notice.staffMember.homeroom}）`;
-  const mentionLine = discordId ? `<@${discordId}>` : staffLabel;
-  const formText = notice.applicationFormText?.trim().slice(0, 1800) ?? '';
-  const formBlock = formText ? `\n\n${formText}` : '';
-  const link = notice.adminDeepLink ? `\n${notice.adminDeepLink}` : '';
-
-  const payload: {
-    content: string;
-    allowed_mentions?: { users: string[] };
-  } = {
-    content: `担当者が確定しました。\n${mentionLine}${link}${formBlock}`,
-  };
-  if (discordId) {
-    payload.allowed_mentions = { users: [discordId] };
+): Promise<DiscordWebhookDeliveryResult> {
+  if (!webhookUrl?.trim()) {
+    return { ok: true, attempts: 0 };
   }
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+  const pdfBytes = notice.pdfBytes;
+  const hasPdf = !!pdfBytes && pdfBytes.byteLength > 0;
+  const payload = buildStaffAssignedDiscordPayload(notice, hasPdf);
+
+  if (hasPdf && pdfBytes) {
+    const filename =
+      notice.pdfFilename?.trim().replace(/[^\w.\-]/g, '_') || 'application-form.pdf';
+    const delivered = await postDiscordWebhookMultipartWithRetry(webhookUrl, () => {
+      const formData = new FormData();
+      formData.set('payload_json', JSON.stringify(payload));
+      formData.set(
+        'files[0]',
+        new Blob([pdfBytes.slice()], { type: 'application/pdf' }),
+        filename
+      );
+      return formData;
     });
-    if (!res.ok) {
-      console.error('Discord staff-assigned webhook failed:', res.status, await res.text());
+    if (!delivered.ok) {
+      console.error(
+        'Discord staff-assigned webhook failed:',
+        delivered.status,
+        delivered.error,
+        `(attempts=${delivered.attempts})`
+      );
     }
-  } catch (err) {
-    console.error('Discord staff-assigned webhook error:', err);
+    return delivered;
   }
+
+  const delivered = await postDiscordWebhookWithRetry(webhookUrl, payload);
+  if (!delivered.ok) {
+    console.error(
+      'Discord staff-assigned webhook failed:',
+      delivered.status,
+      delivered.error,
+      `(attempts=${delivered.attempts})`
+    );
+  }
+  return delivered;
 }
 
 /** Management action notice (accept, cancel, reschedule, restore, etc.). */
