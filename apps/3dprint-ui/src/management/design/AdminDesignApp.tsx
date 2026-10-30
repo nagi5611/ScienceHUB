@@ -31,6 +31,8 @@ import {
   mapAdminAppToDesign,
   designStatusToDbStatus,
   availabilityRowsToMemberAvail,
+  memberAvailToRows,
+  mergeMonthMemberAvailability,
   resolveOperatorStaffMemberId,
   formatOperatorDisplayLabel,
   toDesignMembers,
@@ -52,7 +54,8 @@ import {
   createMember,
   deleteMember,
   fetchShifts,
-  setMemberDatesAvailability,
+  applyShiftAvailabilityDraft,
+  hasShiftDraftChanges,
   patchMemberColor,
   patchMemberDiscord,
   fetchIntegrationsStatus,
@@ -78,6 +81,8 @@ export function AdminDesignApp() {
   const [members, setMembersState] = React.useState<DesignMember[]>([]);
   const [apps, setApps] = React.useState<DesignApplication[]>([]);
   const [avail, setAvail] = React.useState<Record<string, string[]>>({});
+  const [savedAvail, setSavedAvail] = React.useState<Record<string, string[]>>({});
+  const [shiftApplying, setShiftApplying] = React.useState(false);
   const [screen, setScreen] = React.useState(() => prefs.screen || 'reserve');
   const [selected, setSelected] = React.useState(() => prefs.selected || TODAY);
   const [operatorSession, setOperatorSession] = React.useState<ManagementSession | null>(null);
@@ -116,6 +121,7 @@ export function AdminDesignApp() {
     const shiftData = await fetchShifts(d.getFullYear(), d.getMonth() + 1);
     const a = availabilityRowsToMemberAvail(shiftData.availability);
     setAvail(a);
+    setSavedAvail(a);
     syncGlobals(designMembers, a);
     try {
       setOperatorSession(await fetchManagementSession());
@@ -391,26 +397,73 @@ export function AdminDesignApp() {
     }
   };
 
-  const paintAvail = async (mId: string, dates: string[], on: boolean) => {
+  const paintAvail = (mId: string, dates: string[], on: boolean) => {
+    setAvail((prev) => {
+      const cur = new Set(prev[mId] || []);
+      dates.forEach((ds) => (on ? cur.add(ds) : cur.delete(ds)));
+      const next = { ...prev, [mId]: [...cur].sort() };
+      setAvailability(next);
+      return next;
+    });
+  };
+
+  const shiftDraftPending = hasShiftDraftChanges(
+    memberAvailToRows(savedAvail),
+    memberAvailToRows(avail),
+    [],
+    []
+  );
+
+  const discardShiftDraft = () => {
+    const next: Record<string, string[]> = {};
+    for (const [id, dates] of Object.entries(savedAvail)) next[id] = [...dates];
+    setAvail(next);
+    setAvailability(next);
+  };
+
+  const confirmShiftDraft = async () => {
+    if (!shiftDraftPending || shiftApplying) return;
+    setShiftApplying(true);
     try {
-      await setMemberDatesAvailability(mId, dates, on);
-      setAvail((prev) => {
-        const cur = new Set(prev[mId] || []);
-        dates.forEach((ds) => (on ? cur.add(ds) : cur.delete(ds)));
-        const next = { ...prev, [mId]: [...cur].sort() };
-        setAvailability(next);
+      await applyShiftAvailabilityDraft(
+        memberAvailToRows(savedAvail),
+        memberAvailToRows(avail),
+        [],
+        []
+      );
+      setSavedAvail(() => {
+        const next: Record<string, string[]> = {};
+        for (const [id, dates] of Object.entries(avail)) next[id] = [...dates];
         return next;
       });
-      pushLog('shift', `${memberName(mId)} のシフトを${on ? '追加' : '削除'}（${dates.length}日）`, null);
-      showToast(`${dates.length}日のシフトを${on ? '追加' : '削除'}しました`, memberName(mId) ?? '');
+      pushLog('shift', 'シフト表を一括保存', null);
+      showToast('シフトを保存しました', '確定');
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'シフト更新に失敗しました', 'エラー');
+      showToast(e instanceof Error ? e.message : 'シフト保存に失敗しました', 'エラー');
+      await refreshAll();
+    } finally {
+      setShiftApplying(false);
     }
   };
 
-  const setOneAvail = async (mId: string, ds: string, on: boolean) => {
-    await paintAvail(mId, [ds], on);
-  };
+  const loadSettingsShiftMonth = React.useCallback(
+    async (year: number, month: number) => {
+      try {
+        const shiftData = await fetchShifts(year, month);
+        const merge = (prev: Record<string, string[]>) =>
+          mergeMonthMemberAvailability(prev, shiftData.availability, year, month);
+        setSavedAvail((prev) => merge(prev));
+        setAvail((prev) => {
+          const next = merge(prev);
+          setAvailability(next);
+          return next;
+        });
+      } catch (e) {
+        showToastRef.current(e instanceof Error ? e.message : 'シフト読込に失敗しました', 'エラー');
+      }
+    },
+    []
+  );
 
   const testDiscord = async () => {
     showToast('Discordへテスト送信しています…');
@@ -496,16 +549,6 @@ export function AdminDesignApp() {
                   : '運用（プリンター・履歴）'}
             </h1>
           </div>
-          {screen === 'reserve' && (
-            <div className="head-right">
-              <button type="button" className="btn btn-secondary" onClick={() => setScreen('settings')}>
-                シフト・設定
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setScreen('ops')}>
-                運用
-              </button>
-            </div>
-          )}
         </div>
 
         {screen === 'reserve' ? (
@@ -539,8 +582,12 @@ export function AdminDesignApp() {
             onAddMember={(d) => void addMember(d)}
             onUpdateMember={(id, d) => void updateMember(id, d)}
             onRemoveMember={(id) => void removeMember(id)}
-            onSetAvail={(id, ds, on) => void setOneAvail(id, ds, on)}
-            onPaintAvail={(id, dates, on) => void paintAvail(id, dates, on)}
+            onPaintAvail={paintAvail}
+            shiftDraftPending={shiftDraftPending}
+            shiftApplying={shiftApplying}
+            onConfirmShiftDraft={() => void confirmShiftDraft()}
+            onDiscardShiftDraft={discardShiftDraft}
+            onLoadShiftMonth={loadSettingsShiftMonth}
             integrations={integrations}
             setIntegrations={setIntegrations}
             onTestDiscord={() => void testDiscord()}

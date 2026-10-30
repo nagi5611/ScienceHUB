@@ -96,6 +96,29 @@ export function memberAvailToRows(avail: Record<string, string[]>): ShiftAvailab
   return rows;
 }
 
+export function isAvailabilityDateInMonth(ds: string, year: number, month: number): boolean {
+  const d = parseYmd(ds);
+  return d.getFullYear() === year && d.getMonth() + 1 === month;
+}
+
+/** Replace one calendar month in local availability maps with server rows. */
+export function mergeMonthMemberAvailability(
+  prev: Record<string, string[]>,
+  monthRows: ShiftAvailabilityRow[],
+  year: number,
+  month: number
+): Record<string, string[]> {
+  const fromRows = availabilityRowsToMemberAvail(monthRows);
+  const ids = new Set([...Object.keys(prev), ...Object.keys(fromRows)]);
+  const next: Record<string, string[]> = {};
+  for (const id of ids) {
+    const kept = (prev[id] || []).filter((ds) => !isAvailabilityDateInMonth(ds, year, month));
+    const added = fromRows[id] || [];
+    next[id] = [...new Set([...kept, ...added])].sort();
+  }
+  return next;
+}
+
 export function shiftMapForCalendar(
   members: AdminMember[],
   availability: ShiftAvailabilityRow[],

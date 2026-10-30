@@ -8,46 +8,12 @@ import {
   type IntegrationsState, type AdminLogItem,
 } from '../admin-domain';
 import { KIND, STATUS, MACHINE_MAP } from '@shared/domain';
-import { deletePrintVideo, printVideoDownloadUrl, stlAdminUrl, uploadPrintVideo } from '../admin-api';
+import { deletePrintVideo, printVideoDownloadUrl, uploadPrintVideo } from '../admin-api';
+import { StlBlock } from './StlBlock';
 import {
   LOGO, machineColor, MDot, KindBadge, KIND_TONE, Tag, Chip, agoLabel, logTime,
   Header, DayStrip, CalAdmin, Drawer, Toast, SettingsDialog,
 } from './AdminUi';
-
-function StlBlock({ app }) {
-  const name = app.file || 'データなし（予約のみ）';
-  const size = app.fileSize ? (app.fileSize / 1048576).toFixed(2) + ' MB' : null;
-  return (
-    <div className="stl">
-      <div className="stl-canvas" style={{
-        backgroundImage: 'linear-gradient(var(--hair) 1px, transparent 1px), linear-gradient(90deg, var(--hair) 1px, transparent 1px)',
-        backgroundSize: '14px 14px, 14px 14px',
-        display: 'grid', placeItems: 'center',
-      }}>
-        <div style={{ textAlign: 'center', display: 'grid', gap: 3, justifyItems: 'center' }}>
-          <span style={{
-            fontSize: 9, fontWeight: 700, letterSpacing: '.1em', color: 'var(--faint)',
-            border: '1px dashed var(--border-strong)', borderRadius: 4, padding: '2px 7px', background: 'rgba(255,255,255,.85)',
-          }}>{app.kind === 'request' ? 'STL' : 'RESERVE'}</span>
-          <span style={{ fontSize: 9.5, color: 'var(--faint)', background: 'rgba(255,255,255,.85)', padding: '0 4px' }}>
-            {app.kind === 'request' ? 'サムネイル未生成 — ブラウザで開いて確認' : 'データ提出なし'}
-          </span>
-        </div>
-      </div>
-      <div className="stl-meta">
-        <span className="stl-ext">{app.file ? app.file.split('.').pop().toUpperCase() : '—'}</span>
-        <span className="stl-name">
-          <b className="num">{name}</b>
-          <span>{size ? `${size} ・ 更新 ${agoLabel(app.createdAt)}` : '予約枠のみの申請'}</span>
-        </span>
-        <span className="stl-actions">
-          <a className="mini" href={stlAdminUrl(app.id)} download={app.file || undefined} style={{ textDecoration: 'none' }} aria-disabled={!app.file}>DL</a>
-          <a className="mini" href={stlAdminUrl(app.id)} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', pointerEvents: app.file ? 'auto' : 'none', opacity: app.file ? 1 : 0.45 }}>開く</a>
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function Kv({ rows }) {
   return (
@@ -292,4 +258,4 @@ function ReviewSheet({
   );
 }
 
-export { StlBlock, Kv, AppLog, ReviewActions, ReviewSheet };
+export { Kv, AppLog, ReviewActions, ReviewSheet };
