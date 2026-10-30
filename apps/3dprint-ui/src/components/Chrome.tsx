@@ -15,7 +15,7 @@ function SiteHeader({ mineCount, onOpenMine, onNew }) {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <a href="#" className="site-title" onClick={e => e.preventDefault()}>
+        <a href="/" className="site-title">
           <img src={LOGO} alt="" />
           ScienceHUB <span>3Dプリントの依頼・予約</span>
         </a>

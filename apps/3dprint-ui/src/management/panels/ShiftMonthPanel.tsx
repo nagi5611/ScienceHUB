@@ -2,13 +2,13 @@ import React from 'react';
 import { buildCalendarMonthGridDays, todayJst } from '../admin-calendar';
 import {
   AdminApiError,
+  applyShiftAvailabilityDraft,
   fetchShiftsFull,
+  hasShiftDraftChanges,
   patchMemberColor,
   rescheduleReservation,
-  setMemberDatesAvailability,
-  setPrinterDatesAvailability,
-  toggleMemberShift,
-  togglePrinterShift,
+  type PrinterAvailabilityRow,
+  type ShiftAvailabilityRow,
 } from '../admin-api';
 
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
@@ -21,6 +21,43 @@ type Block = {
   reservations: { id: string; title?: string; desired_date?: string }[];
 };
 
+type ShiftsData = Awaited<ReturnType<typeof fetchShiftsFull>>;
+
+function cloneMemberAvailability(rows: ShiftAvailabilityRow[]): ShiftAvailabilityRow[] {
+  return rows.map((r) => ({ member_id: r.member_id, date: r.date }));
+}
+
+function clonePrinterAvailability(rows: PrinterAvailabilityRow[]): PrinterAvailabilityRow[] {
+  return rows.map((r) => ({ printer_id: r.printer_id, date: r.date }));
+}
+
+function memberHasDate(rows: ShiftAvailabilityRow[], memberId: string, date: string): boolean {
+  return rows.some((r) => r.member_id === memberId && r.date === date);
+}
+
+function printerHasDate(rows: PrinterAvailabilityRow[], printerId: string, date: string): boolean {
+  return rows.some((r) => r.printer_id === printerId && r.date === date);
+}
+
+function setMemberDate(rows: ShiftAvailabilityRow[], memberId: string, date: string, on: boolean): ShiftAvailabilityRow[] {
+  const has = memberHasDate(rows, memberId, date);
+  if (on && !has) return [...rows, { member_id: memberId, date }];
+  if (!on && has) return rows.filter((r) => !(r.member_id === memberId && r.date === date));
+  return rows;
+}
+
+function setPrinterDate(
+  rows: PrinterAvailabilityRow[],
+  printerId: string,
+  date: string,
+  on: boolean
+): PrinterAvailabilityRow[] {
+  const has = printerHasDate(rows, printerId, date);
+  if (on && !has) return [...rows, { printer_id: printerId, date }];
+  if (!on && has) return rows.filter((r) => !(r.printer_id === printerId && r.date === date));
+  return rows;
+}
+
 export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
   const now = new Date();
   const [year, setYear] = React.useState(now.getFullYear());
@@ -28,15 +65,42 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
   const [mode, setMode] = React.useState<'member' | 'printer'>('member');
   const [selectedMember, setSelectedMember] = React.useState<string | null>(null);
   const [selectedPrinter, setSelectedPrinter] = React.useState<string | null>(null);
-  const [data, setData] = React.useState<Awaited<ReturnType<typeof fetchShiftsFull>> | null>(null);
+  const [data, setData] = React.useState<ShiftsData | null>(null);
+  const [savedMemberAvailability, setSavedMemberAvailability] = React.useState<ShiftAvailabilityRow[]>([]);
+  const [savedPrinterAvailability, setSavedPrinterAvailability] = React.useState<PrinterAvailabilityRow[]>([]);
+  const [draftMemberAvailability, setDraftMemberAvailability] = React.useState<ShiftAvailabilityRow[]>([]);
+  const [draftPrinterAvailability, setDraftPrinterAvailability] = React.useState<PrinterAvailabilityRow[]>([]);
   const [painting, setPainting] = React.useState<string[]>([]);
   const [block, setBlock] = React.useState<Block | null>(null);
   const [dates, setDates] = React.useState<Record<string, string>>({});
-  const drag = React.useRef<{ on: boolean; dates: Set<string> }>({ on: false, dates: new Set() });
+  const [applying, setApplying] = React.useState(false);
+  const drag = React.useRef<{ on: boolean; dates: Set<string>; start: string | null }>({
+    on: false,
+    dates: new Set(),
+    start: null,
+  });
+
+  const pending = hasShiftDraftChanges(
+    savedMemberAvailability,
+    draftMemberAvailability,
+    savedPrinterAvailability,
+    draftPrinterAvailability
+  );
+
+  const resetDraftFromSaved = React.useCallback(() => {
+    setDraftMemberAvailability(cloneMemberAvailability(savedMemberAvailability));
+    setDraftPrinterAvailability(clonePrinterAvailability(savedPrinterAvailability));
+  }, [savedMemberAvailability, savedPrinterAvailability]);
 
   const load = React.useCallback(async () => {
     const d = await fetchShiftsFull(year, month);
     setData(d);
+    const members = cloneMemberAvailability(d.availability);
+    const printers = clonePrinterAvailability(d.printer_availability);
+    setSavedMemberAvailability(members);
+    setSavedPrinterAvailability(printers);
+    setDraftMemberAvailability(members);
+    setDraftPrinterAvailability(printers);
     setSelectedMember((cur) => cur ?? d.members[0]?.id ?? null);
     setSelectedPrinter((cur) => cur ?? d.printers[0]?.id ?? null);
   }, [year, month]);
@@ -55,28 +119,41 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
     return true;
   };
 
-  const commit = React.useCallback(
-    async (touched: string[]) => {
+  const applyLocalEdit = React.useCallback(
+    (touched: string[]) => {
       if (!touched.length) return;
-      try {
-        if (mode === 'printer' && selectedPrinter) {
-          if (touched.length === 1) await togglePrinterShift(selectedPrinter, touched[0]);
-          else await setPrinterDatesAvailability(selectedPrinter, touched, true);
-        } else if (selectedMember) {
-          if (touched.length === 1) await toggleMemberShift(selectedMember, touched[0]);
-          else await setMemberDatesAvailability(selectedMember, touched, true);
-        }
-        await load();
-      } catch (e) {
-        const id = mode === 'printer' ? selectedPrinter : selectedMember;
-        if (id && openBlock(e, mode, id)) return;
-        onToast(e instanceof Error ? e.message : 'シフト更新失敗');
-        await load();
-      } finally {
-        setPainting([]);
+      if (mode === 'printer' && selectedPrinter) {
+        setDraftPrinterAvailability((prev) => {
+          let next = prev;
+          if (touched.length === 1) {
+            const date = touched[0];
+            const on = !printerHasDate(prev, selectedPrinter, date);
+            next = setPrinterDate(prev, selectedPrinter, date, on);
+          } else {
+            for (const date of touched) {
+              next = setPrinterDate(next, selectedPrinter, date, true);
+            }
+          }
+          return next;
+        });
+      } else if (selectedMember) {
+        setDraftMemberAvailability((prev) => {
+          let next = prev;
+          if (touched.length === 1) {
+            const date = touched[0];
+            const on = !memberHasDate(prev, selectedMember, date);
+            next = setMemberDate(prev, selectedMember, date, on);
+          } else {
+            for (const date of touched) {
+              next = setMemberDate(next, selectedMember, date, true);
+            }
+          }
+          return next;
+        });
       }
+      setPainting([]);
     },
-    [load, mode, onToast, selectedMember, selectedPrinter]
+    [mode, selectedMember, selectedPrinter]
   );
 
   React.useEffect(() => {
@@ -85,22 +162,72 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
       drag.current.on = false;
       const touched = [...drag.current.dates];
       drag.current.dates = new Set();
-      void commit(touched);
+      drag.current.start = null;
+      applyLocalEdit(touched);
     };
     window.addEventListener('pointerup', up);
     return () => window.removeEventListener('pointerup', up);
-  }, [commit]);
+  }, [applyLocalEdit]);
+
+  const confirmApply = async () => {
+    if (!pending || applying) return;
+    setApplying(true);
+    try {
+      await applyShiftAvailabilityDraft(
+        savedMemberAvailability,
+        draftMemberAvailability,
+        savedPrinterAvailability,
+        draftPrinterAvailability
+      );
+      await load();
+      onToast('シフトを保存しました');
+    } catch (e) {
+      const kind = mode === 'printer' ? 'printer' : 'member';
+      const id = (mode === 'printer' ? selectedPrinter : selectedMember) ?? '';
+      if (id && openBlock(e, kind, id)) return;
+      onToast(e instanceof Error ? e.message : 'シフト保存失敗');
+      await load();
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const changeMonth = (nextYear: number, nextMonth: number) => {
+    if (pending && !window.confirm('未保存のシフト変更があります。破棄して月を移動しますか？')) return;
+    setYear(nextYear);
+    setMonth(nextMonth);
+  };
+
+  const saveReschedule = async () => {
+    if (!block) return;
+    try {
+      for (const r of block.reservations) {
+        const desired = dates[r.id];
+        if (!desired) throw new Error('すべての予約に新しい日付を入力してください');
+        await rescheduleReservation(r.id, desired);
+      }
+      if (block.kind === 'member') {
+        setDraftMemberAvailability((prev) => setMemberDate(prev, block.id, block.date, false));
+      } else {
+        setDraftPrinterAvailability((prev) => setPrinterDate(prev, block.id, block.date, false));
+      }
+      setBlock(null);
+      onToast('予約の日付を変更しました。シフトの変更は「変更を確定」で保存してください');
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : 'リスケ失敗');
+    }
+  };
 
   if (!data) return <p className="hint">読み込み中…</p>;
 
   const memberByDate: Record<string, typeof data.members> = {};
-  for (const row of data.availability) {
+  for (const row of draftMemberAvailability) {
     const m = data.members.find((x) => x.id === row.member_id);
     if (!m) continue;
     (memberByDate[row.date] ??= []).push(m);
   }
   const printerByDate: Record<string, typeof data.printers> = {};
-  for (const row of data.printer_availability) {
+  for (const row of draftPrinterAvailability) {
     const p = data.printers.find((x) => x.id === row.printer_id);
     if (!p) continue;
     (printerByDate[row.date] ??= []).push(p);
@@ -112,7 +239,7 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
   const startDrag = (date: string, e: React.PointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    drag.current = { on: true, dates: new Set([date]) };
+    drag.current = { on: true, dates: new Set([date]), start: date };
     setPainting([date]);
   };
 
@@ -122,24 +249,6 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
     setPainting([...drag.current.dates]);
   };
 
-  const saveReschedule = async () => {
-    if (!block) return;
-    try {
-      for (const r of block.reservations) {
-        const desired = dates[r.id];
-        if (!desired) throw new Error('すべての予約に新しい日付を入力してください');
-        await rescheduleReservation(r.id, desired);
-      }
-      if (block.kind === 'member') await toggleMemberShift(block.id, block.date);
-      else await togglePrinterShift(block.id, block.date);
-      setBlock(null);
-      await load();
-      onToast('日付を変更してシフトを更新しました');
-    } catch (e) {
-      onToast(e instanceof Error ? e.message : 'リスケ失敗');
-    }
-  };
-
   return (
     <div className="card legacy-panel">
       <div className="legacy-month-head">
@@ -147,19 +256,32 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
           {year}年 {month}月 — シフト
         </h2>
         <div className="cal-nav">
-          <button type="button" onClick={() => setMonth((m) => (m === 1 ? (setYear((y) => y - 1), 12) : m - 1))}>
+          <button
+            type="button"
+            onClick={() => {
+              if (month === 1) changeMonth(year - 1, 12);
+              else changeMonth(year, month - 1);
+            }}
+          >
             ‹
           </button>
           <button
             type="button"
             onClick={() => {
+              if (pending && !window.confirm('未保存のシフト変更があります。破棄して今月へ移動しますか？')) return;
               setYear(now.getFullYear());
               setMonth(now.getMonth() + 1);
             }}
           >
             今日
           </button>
-          <button type="button" onClick={() => setMonth((m) => (m === 12 ? (setYear((y) => y + 1), 1) : m + 1))}>
+          <button
+            type="button"
+            onClick={() => {
+              if (month === 12) changeMonth(year + 1, 1);
+              else changeMonth(year, month + 1);
+            }}
+          >
             ›
           </button>
         </div>
@@ -172,6 +294,20 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
           </button>
         </div>
       </div>
+
+      {pending && (
+        <div className="shift-confirm-bar" role="status">
+          <span className="shift-confirm-bar-text">未保存のシフト変更があります</span>
+          <div className="shift-confirm-bar-actions">
+            <button type="button" className="btn btn-secondary btn-sm" disabled={applying} onClick={resetDraftFromSaved}>
+              変更を破棄
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" disabled={applying} onClick={() => void confirmApply()}>
+              {applying ? '保存中…' : '変更を確定'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {mode === 'member' ? (
         <div className="shift-member-toolbar-track">
@@ -211,7 +347,9 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
         </div>
       )}
 
-      <p className="hint">日付をクリックで切替、ドラッグで複数日を稼働にします。予約がある日は日付変更後に外せます。</p>
+      <p className="hint">
+        日付をクリックで切替、ドラッグで複数日を稼働にします。編集後は「変更を確定」でまとめて保存します。予約がある日は日付変更後に外せます。
+      </p>
 
       <div className="calendar-weekdays-row">
         {WD.map((w) => (
@@ -282,7 +420,7 @@ export function ShiftMonthPanel({ onToast }: { onToast: (m: string) => void }) {
                 キャンセル
               </button>
               <button type="button" className="btn btn-primary" onClick={() => void saveReschedule()}>
-                変更して外す
+                予約日を変更
               </button>
             </div>
           </div>

@@ -53,7 +53,7 @@ function Header({ actor, setActor, members, pendingCount, onOpenSettings, onCsv,
   return (
     <header className="ad-header">
       <div className="ad-header-in">
-        <a className="brand" href="#" onClick={e => e.preventDefault()}>
+        <a className="brand" href="/">
           <img src={LOGO} alt="" />
           ScienceHUB
           <span className="sep" />

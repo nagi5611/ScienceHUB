@@ -387,6 +387,10 @@ a{color:var(--color-primary)}
 .set-tabs button:hover{color:var(--color-text)}
 .set-tabs button.on{background:var(--color-primary-soft);color:var(--color-primary-dark);box-shadow:var(--shadow-seg)}
 
+.shift-confirm-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;padding:10px 12px;border:1px solid var(--color-warn-line);border-radius:var(--radius-md);background:var(--color-warn-bg)}
+.shift-confirm-bar-text{font-size:12.5px;font-weight:600;color:var(--color-warn-text)}
+.shift-confirm-bar-actions{display:flex;flex-wrap:wrap;gap:8px}
+
 .shifttab{display:grid;gap:14px}
 .memberpick{padding:12px 16px 14px}
 .mp-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
