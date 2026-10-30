@@ -242,7 +242,7 @@ function DetailSheet({ open, onClose, app, onCancel, onRestore }) {
   const d = parseYmd(app.date);
   const st = app.status;
   return (
-    <Sheet open={open} onClose={onClose} title={app.title}
+    <Sheet front open={open} onClose={onClose} title={app.title}
       sub={`${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}（${WD[d.getDay()]}）`}
       footer={
         <>

@@ -86,7 +86,7 @@ function Toast({ toast }) {
 }
 
 /* 右ドロワー（デスクトップは右から、モバイルは下から） */
-function Sheet({ open, title, sub, onClose, children, footer, labelledBy }) {
+function Sheet({ open, title, sub, onClose, children, footer, labelledBy, front }) {
   React.useEffect(() => {
     if (!open) return;
     const onKey = e => { if (e.key === 'Escape') onClose(); };
@@ -96,8 +96,8 @@ function Sheet({ open, title, sub, onClose, children, footer, labelledBy }) {
 
   return (
     <>
-      <div className={'scrim' + (open ? ' on' : '')} onClick={onClose} aria-hidden="true" />
-      <aside className={'sheet' + (open ? ' on' : '')} role="dialog" aria-modal="true"
+      <div className={'scrim' + (front ? ' sheet-front' : '') + (open ? ' on' : '')} onClick={onClose} aria-hidden="true" />
+      <aside className={'sheet' + (front ? ' sheet-front' : '') + (open ? ' on' : '')} role="dialog" aria-modal="true"
         aria-label={title} aria-hidden={!open}>
         <div className="sheet-h">
           <div>

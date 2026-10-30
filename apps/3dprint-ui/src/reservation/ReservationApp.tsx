@@ -396,19 +396,19 @@ export function ReservationApp() {
         </div>
       </div>
       <SiteFooter />
-      <DetailSheet
-        open={!!detail}
-        app={detail}
-        onClose={() => setDetail(null)}
-        onCancel={cancelApp}
-        onRestore={restoreApp}
-      />
       <MineSheet open={mineOpen} apps={apps} onClose={() => setMineOpen(false)} onOpenApp={(app) => setDetail(app)} />
       <CancelledSheet
         open={cancelledOpen}
         apps={cancelledApps}
         onClose={() => setCancelledOpen(false)}
         onOpenApp={(app) => setDetail(app)}
+        onRestore={restoreApp}
+      />
+      <DetailSheet
+        open={!!detail}
+        app={detail}
+        onClose={() => setDetail(null)}
+        onCancel={cancelApp}
         onRestore={restoreApp}
       />
       <Toast toast={toast} />
