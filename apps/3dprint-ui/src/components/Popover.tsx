@@ -182,7 +182,13 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
 
   const rangeBlocked = isReserve ? blocked.slice(startIdx, endIdx).some(Boolean) : blocked.slice(SHIFT_SLOT_START, SHIFT_SLOT_END).some(Boolean);
   const dateErr = !hasShift(date);
-  const nameErr = !name.trim() || !isValidHR(hr) || !/^\d{1,2}$/.test(String(num).trim());
+  const numInt = Number.parseInt(String(num).trim(), 10);
+  const nameErr =
+    !name.trim() ||
+    !isValidHR(hr) ||
+    !Number.isInteger(numInt) ||
+    numInt < 1 ||
+    numInt > 99;
   const titleErr = !title.trim();
   const fileErr = !file || !file.ok;
   const lenErr = isReserve && endIdx <= startIdx;
@@ -336,7 +342,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
           </div>
 
           <div className="field">
-            <span className="flabel">申請者<span className="req">必須</span>{profile.name && <span className="flabel-auto">前回の入力から復元</span>}</span>
+            <span className="flabel">プロフィール（HR・番号・名前）<span className="req">必須</span>{profile.name && <span className="flabel-auto">アカウント／前回の入力から復元</span>}</span>
             <div className="who-row">
               <select className="input" value={isValidHR(hr) ? hr : ''}
                 onChange={e => setHr(e.target.value)} aria-label="HR（学年・組）">
@@ -361,7 +367,7 @@ function ApplicationPopover({ open, draft, apps, profile, setProfile, onClose, o
             <div><dt>機種</dt><dd>{MACHINE_MAP[machine].name}</dd></div>
             <div><dt>時間</dt><dd className="num">{isReserve ? `${minsLabel(startMin)}〜${minsLabel(endMin)}` : '16:30〜20:00'}</dd></div>
             <div><dt>担当</dt><dd>{info.shift ? info.staff : '—'}</dd></div>
-            <div><dt>申請者</dt><dd>{whoLabel({ name: name || '—', hr, num }, true)}</dd></div>
+            <div><dt>プロフィール</dt><dd>{whoLabel({ name: name || '—', hr, num }, true)}</dd></div>
           </dl>
 
           {touched && !canSubmit && (

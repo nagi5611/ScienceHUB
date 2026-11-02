@@ -83,12 +83,56 @@ export async function checkAppAccess(): Promise<{ allowed: boolean }> {
   return { allowed: true };
 }
 
-export async function fetchAuthProfile(): Promise<{
-  homeroom?: string;
-  student_number?: number;
-  student_name?: string;
-}> {
-  const res = await fetch('/api/auth/profile', { credentials: 'include' });
-  if (!res.ok) return {};
-  return res.json();
+export type PrintAuthProfile = {
+  homeroom: string | null;
+  student_number: number | null;
+  student_name: string | null;
+  print_profile_complete: boolean;
+};
+
+async function authProfileRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const res = await fetch(`/api/auth/profile${path}`, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) },
+    ...options,
+  });
+  const data = (await res.json().catch(() => ({}))) as { error?: string; user?: PrintAuthProfile };
+  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
+  return data as T;
+}
+
+/** ScienceHUB アカウントの3D印刷プロフィール（HR・番号・名前） */
+export async function fetchAuthProfile(): Promise<PrintAuthProfile | null> {
+  try {
+    const data = await authProfileRequest<{ user: PrintAuthProfile }>('');
+    return data.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function whoToPrintProfileInput(who: {
+  hr: string;
+  num: string;
+  name: string;
+}): { homeroom: string; student_number: number; student_name: string } {
+  const homeroom = String(who.hr ?? '').trim();
+  const student_name = String(who.name ?? '').trim();
+  const student_number = Number.parseInt(String(who.num ?? '').trim(), 10);
+  return { homeroom, student_number, student_name };
+}
+
+/** 申請者欄の内容を users テーブルの3D印刷プロフィールとして保存 */
+export async function savePrintAuthProfile(who: {
+  hr: string;
+  num: string;
+  name: string;
+}): Promise<PrintAuthProfile> {
+  const { homeroom, student_number, student_name } = whoToPrintProfileInput(who);
+  const data = await authProfileRequest<{ user: PrintAuthProfile }>('', {
+    method: 'PATCH',
+    body: JSON.stringify({ homeroom, student_number, student_name }),
+  });
+  if (!data.user) throw new ApiError('プロフィールの保存に失敗しました', 500);
+  return data.user;
 }
