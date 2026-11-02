@@ -29,6 +29,7 @@ import {
   createTimeSlotReservation,
   cancelReservation,
   fetchAuthProfile,
+  savePrintAuthProfile,
 } from '@shared/api';
 import { uploadPrintFiles } from '@shared/upload';
 import { SiteHeader, SiteFooter, Toast } from '@components/Chrome';
@@ -140,10 +141,10 @@ export function ReservationApp() {
     void (async () => {
       try {
         const auth = await fetchAuthProfile();
-        if (auth.homeroom && auth.student_name) {
+        if (auth?.homeroom && auth.student_name) {
           setProfileState({
             hr: auth.homeroom,
-            num: auth.student_number ? String(auth.student_number) : '',
+            num: auth.student_number != null ? String(auth.student_number) : '',
             name: auth.student_name,
           });
         }
@@ -306,6 +307,7 @@ export function ReservationApp() {
     setSubmitting(true);
     try {
       saveProfile(payload.who);
+      await savePrintAuthProfile(payload.who);
       const uploaded = await uploadPrintFiles(rawFiles);
       const primary = uploaded[0]!;
       const created = await createTimeSlotReservation(
