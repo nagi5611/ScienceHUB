@@ -23,3 +23,8 @@ public/apps/image-converter/vendor/ffmpeg/ffmpeg-core.wasm
 public/apps/3dprintmanual/videoes/*.mp4
 .worktrees/
 .local-assets/
+# local debug artifacts
+.admin-cookie.txt
+*cookie*.txt
+.backfill-test-out.txt
+
